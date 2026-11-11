@@ -86,6 +86,7 @@ wire! {
         pub model: Option<String>,
         pub policy: Policy,
         pub status: Status,
+        pub error: Option<String>,
         pub activity: String,
         pub usage: Usage,
         pub changes: Changes,

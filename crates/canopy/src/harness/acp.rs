@@ -15,13 +15,20 @@ pub async fn run(program: String, args: Vec<String>, spec: SpawnSpec, mut out: O
         Ok(c) => c,
         Err(e) => return out.ev(Ev::Exited { error: Some(format!("cannot start {program}: {e}")) }).await,
     };
+    let tail = super::stderr(&mut child);
     let pid = child.id();
     let error = match session(&mut child, pid, spec, &mut out, cmds).await {
         Ok(()) => None,
         Err(e) => Some(format!("{e:#}")),
     };
     kill_group(pid);
-    let _ = child.wait().await;
+    let error = if error.is_some() {
+        super::exit_error(&program, &mut child, tail, error).await
+    } else {
+        let _ = child.wait().await;
+        let _ = tail.await;
+        None
+    };
     out.ev(Ev::Exited { error }).await;
 }
 
@@ -94,7 +101,7 @@ async fn session(
     loop {
         tokio::select! {
             msg = incoming.recv() => {
-                let Some(msg) = msg else { return Ok(()) };
+                let Some(msg) = msg else { return Err(anyhow!("agent output closed")) };
                 match msg {
                     Incoming::Notification { method, params } if method == "session/update" => {
                         update(out, &mut text, &mut tools, params.get("update").unwrap_or(&Value::Null)).await;

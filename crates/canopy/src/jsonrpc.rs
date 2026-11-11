@@ -5,7 +5,7 @@
 use anyhow::{Result, anyhow};
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
@@ -23,6 +23,7 @@ pub struct Peer {
     out: mpsc::UnboundedSender<String>,
     // The pending map is RPC bookkeeping, not session state, so a short-held Mutex is fine.
     pending: Pending,
+    closed: Arc<AtomicBool>,
     next_id: Arc<AtomicU64>,
     /// Codex omits the `jsonrpc` field; ACP and MCP require it.
     v2: bool,
@@ -47,6 +48,8 @@ impl Peer {
                 }
             }
         });
+        let closed = Arc::new(AtomicBool::new(false));
+        let reader_closed = closed.clone();
         let p = pending.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(reader).lines();
@@ -55,11 +58,18 @@ impl Peer {
                 route(v, &p, &in_tx);
             }
             // Fail every in-flight request so no caller waits forever on a dead peer.
-            for (_, tx) in p.lock().map(|mut m| std::mem::take(&mut *m)).unwrap_or_default() {
+            let waiting = p
+                .lock()
+                .map(|mut m| {
+                    reader_closed.store(true, Ordering::Release);
+                    std::mem::take(&mut *m)
+                })
+                .unwrap_or_default();
+            for (_, tx) in waiting {
                 let _ = tx.send(Err(anyhow!("peer closed")));
             }
         });
-        (Peer { out, pending, next_id: Arc::default(), v2 }, in_rx)
+        (Peer { out, pending, closed, next_id: Arc::default(), v2 }, in_rx)
     }
 
     fn write(&self, mut v: Value) {
@@ -72,7 +82,11 @@ impl Peer {
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().map_err(|_| anyhow!("poisoned"))?.insert(id, tx);
+        {
+            let mut pending = self.pending.lock().map_err(|_| anyhow!("poisoned"))?;
+            anyhow::ensure!(!self.closed.load(Ordering::Acquire), "peer closed");
+            pending.insert(id, tx);
+        }
         self.write(json!({"id": id, "method": method, "params": params}));
         rx.await.map_err(|_| anyhow!("peer closed"))?
     }
@@ -120,6 +134,16 @@ fn route(mut v: Value, pending: &Pending, in_tx: &mpsc::UnboundedSender<Incoming
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn request_after_eof_fails_without_waiting() {
+        let (local, remote) = tokio::io::duplex(4096);
+        let (r, w) = tokio::io::split(local);
+        let (peer, mut incoming) = Peer::spawn(r, w, false);
+        drop(remote);
+        assert!(incoming.recv().await.is_none());
+        assert!(peer.request("thread/start", json!({})).await.is_err());
+    }
 
     #[tokio::test]
     async fn request_round_trip_both_directions() {

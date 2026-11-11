@@ -10,6 +10,7 @@
 //!   ask <title>         request permission, then say "allowed" or "denied"
 //!   edit <path>         report a file edit (a diff tool call) of one line
 //!   usage <n>           report n tokens used
+//!   crash <message>     write to stderr and exit with status 1
 //!   fail <message>      end the turn with a JSON-RPC error
 //! Any other line is said verbatim, so parent notices are echoed back.
 
@@ -173,6 +174,10 @@ async fn script(
                 );
             }
             "usage" => update(json!({"sessionUpdate": "usage_update", "used": arg.parse::<u64>().unwrap_or(0), "size": 200000})),
+            "crash" => {
+                eprintln!("{arg}");
+                std::process::exit(1);
+            }
             "fail" => return Err(anyhow!("{arg}")),
             _ => update(json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": format!("{line}\n")}})),
         }

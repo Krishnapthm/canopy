@@ -1,6 +1,9 @@
-//! End to end: a real daemon in a temp CANOPY_HOME, driven through the CLI as a user would,
+//! End to end: a real daemon in a temp CANOPY_HOME, driven through the CLI and unix socket,
 //! with `canopy fake-agent` registered as two ACP harnesses ("fake" and "fake2").
 
+use serde_json::{Value, json};
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -92,6 +95,104 @@ fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
     while !f() {
         assert!(Instant::now() < deadline, "timed out waiting for {what}");
         std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// Replies can be interleaved with tree batches; only the matching request completes a call.
+fn socket(d: &Daemon) -> impl FnMut(Value) -> Value {
+    let stream = UnixStream::connect(d.home.join("sock")).unwrap();
+    stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+    let mut reader = BufReader::new(stream);
+    let mut next = 0u64;
+    move |mut op| {
+        next += 1;
+        op["id"] = json!(next);
+        writeln!(reader.get_mut(), "{op}").unwrap();
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0, "daemon closed socket before reply {next}");
+            let msg: Value = serde_json::from_str(&line).unwrap();
+            if msg["id"] == next {
+                assert!(msg["t"] == "res" || msg["t"] == "err", "unexpected reply: {msg}");
+                return msg;
+            }
+            assert_eq!(msg["t"], "batch", "unexpected socket message: {msg}");
+        }
+    }
+}
+
+#[test]
+fn spawn_reports_a_missing_harness_binary_before_starting() {
+    let d = Daemon::start("missing-bin", &[]);
+    let mut call = socket(&d);
+    let reply = call(json!({"op":"spawn","harness":"claude","prompt":"hi","cwd":d.home,"policy":"ask"}));
+    assert_eq!(reply["t"], "err", "missing claude binary must be rejected before starting; got {reply}");
+    let error = reply["error"].as_str().unwrap();
+    assert!(error.contains("claude") && error.contains("not found") && error.contains("PATH"), "{error}");
+}
+
+#[test]
+fn spawn_rejects_a_missing_working_directory() {
+    let d = Daemon::start("missing-cwd", &[]);
+    let mut call = socket(&d);
+    let cwd = d.home.join("does-not-exist");
+    let reply = call(json!({"op":"spawn","harness":"fake","prompt":"hi","cwd":cwd,"policy":"ask"}));
+    assert_eq!(reply["t"], "err", "missing working directory must be rejected before starting; got {reply}");
+    assert!(reply["error"].as_str().unwrap().contains(cwd.to_str().unwrap()), "{reply}");
+}
+
+#[test]
+fn failed_agent_shows_its_stderr_reason_in_the_tree() {
+    let d = Daemon::start("stderr-tree", &[]);
+    let mut call = socket(&d);
+    assert_eq!(call(json!({"op":"sub_tree"}))["t"], "res");
+    let reply = call(json!({"op":"spawn","harness":"fake","prompt":"crash quota exceeded for this account","cwd":d.home,"policy":"ask"}));
+    assert_eq!(reply["t"], "res", "{reply}");
+    let id = &reply["result"]["session"];
+    let mut node = Value::Null;
+    wait_until("crashed agent reaches a terminal state", || {
+        let tree = call(json!({"op":"sub_tree"}));
+        assert_eq!(tree["t"], "res", "{tree}");
+        node = tree["result"]["nodes"].as_array().unwrap().iter().find(|n| n["id"] == *id).unwrap().clone();
+        matches!(node["status"]["state"].as_str(), Some("failed" | "done"))
+    });
+    assert_eq!(
+        node["status"]["state"], "failed",
+        "crashed agent must fail with quota exceeded in tree; status={}, error={}",
+        node["status"], node["error"]
+    );
+    assert!(
+        node["error"].as_str().is_some_and(|e| e.contains("quota exceeded")),
+        "failed tree node must carry stderr reason containing quota exceeded; error={}",
+        node["error"]
+    );
+}
+
+#[test]
+fn codex_spawns_fail_visibly_after_its_server_dies() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = Daemon::start("dead-codex", &[]);
+    let binary = d.home.join("codex");
+    // Answers `initialize` (request id 0), then dies: the server started fine and was lost later.
+    std::fs::write(&binary, "#!/bin/sh\nread line\necho '{\"id\":0,\"result\":{}}'\nexit 1\n").unwrap();
+    std::fs::set_permissions(binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut call = socket(&d);
+    for attempt in 1..=2 {
+        let reply = call(json!({"op":"spawn","harness":"codex","prompt":"hi","cwd":d.home,"policy":"ask"}));
+        assert_eq!(reply["t"], "res", "{reply}");
+        let id = &reply["result"]["session"];
+        let mut last = Value::Null;
+        wait_until(&format!("codex spawn {attempt} reaches failed after server exit"), || {
+            let tree = call(json!({"op":"sub_tree"}));
+            assert_eq!(tree["t"], "res", "{tree}");
+            let node = tree["result"]["nodes"].as_array().unwrap().iter().find(|n| n["id"] == *id).unwrap();
+            if node["status"] != last {
+                last = node["status"].clone();
+                eprintln!("codex spawn {attempt}: status={last}");
+            }
+            last["state"] == "failed"
+        });
     }
 }
 
@@ -298,7 +399,7 @@ fn detection_is_fresh_and_does_not_block_the_hub() {
     let home = std::env::temp_dir().join(format!("canopy-detect-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
     let binary = home.join("codex");
-    std::fs::write(&binary, "#!/bin/sh\nif [ \"$1\" = --version ]; then\n touch_marker=$CANOPY_HOME/probed\n echo started > \"$touch_marker\"\n /bin/sleep 0.3\n echo fixture-version\n exit 0\nfi\n[ -f \"$CANOPY_HOME/logged-in\" ]\n").unwrap();
+    std::fs::write(&binary, "#!/bin/sh\nif [ \"$1\" = --version ]; then\n touch_marker=$CANOPY_HOME/probed\n echo started > \"$touch_marker\"\n while [ ! -f \"$CANOPY_HOME/release\" ]; do /bin/sleep 0.01; done\n echo fixture-version\n exit 0\nfi\n[ -f \"$CANOPY_HOME/logged-in\" ]\n").unwrap();
     std::fs::set_permissions(binary, std::fs::Permissions::from_mode(0o755)).unwrap();
     let child = Command::new(EXE)
         .args(["daemon", "--foreground"])
@@ -329,10 +430,11 @@ fn detection_is_fresh_and_does_not_block_the_hub() {
     writeln!(detector.get_mut(), "{{\"id\":2,\"op\":\"detect\"}}").unwrap();
     wait_until("probe running", || d.home.join("probed").exists());
     writeln!(other.get_mut(), "{{\"id\":3,\"op\":\"sub_tree\"}}").unwrap();
-    let start = Instant::now();
     assert_eq!(read(&mut other)["id"], 3);
-    assert!(start.elapsed() < Duration::from_millis(150), "detection blocked the hub");
-    assert_eq!(read(&mut detector)["result"]["harnesses"][1]["logged_in"], false);
+    std::fs::write(d.home.join("release"), "").unwrap();
+    let detected = read(&mut detector);
+    assert_eq!(detected["result"]["harnesses"][1]["version"], "fixture-version");
+    assert_eq!(detected["result"]["harnesses"][1]["logged_in"], false);
     std::fs::write(d.home.join("logged-in"), "").unwrap();
     writeln!(detector.get_mut(), "{{\"id\":4,\"op\":\"detect\"}}").unwrap();
     assert_eq!(read(&mut detector)["result"]["harnesses"][1]["logged_in"], true);

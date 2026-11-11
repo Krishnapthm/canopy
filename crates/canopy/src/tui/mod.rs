@@ -413,6 +413,7 @@ pub async fn run() -> Result<()> {
     terminal.draw(|f| draw(f, &app))?;
     let mut client = Client::connect(&crate::paths::home()?).await?;
     client.call(Op::Hello { version: protocol::VERSION }).await?;
+    app.message = client.warning.clone().unwrap_or_default();
     app.harnesses = "Checking installed CLIs...".into();
     // Probes take up to a second: run them on their own connection so keys and paint never wait.
     let (detect_tx, mut detect_rx) = tokio::sync::mpsc::channel(1);
@@ -488,7 +489,7 @@ pub async fn run() -> Result<()> {
 #[allow(dead_code)]
 pub async fn scripted_test(home: &std::path::Path) -> Result<()> {
     use ratatui::backend::TestBackend;
-    let mut client = Client::connect(home).await?;
+    let mut client = Client::attach(home).await?;
     let mut app = App::default();
     let mut terminal = ratatui::Terminal::new(TestBackend::new(100, 30))?;
     terminal.draw(|f| draw(f, &app))?;
@@ -525,7 +526,7 @@ pub async fn scripted_test(home: &std::path::Path) -> Result<()> {
     app.key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), &mut client).await?;
     assert!(app.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), &mut client).await?);
     drop(client);
-    let mut client = Client::connect(home).await?;
+    let mut client = Client::attach(home).await?;
     let tree = client.call(Op::SubTree).await?;
     assert!(tree["nodes"].as_array().context("nodes")?.iter().any(|n| n["id"] == session));
     let mut app = App::default();

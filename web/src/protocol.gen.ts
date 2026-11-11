@@ -24,7 +24,7 @@ export type Node = { id: string, parent: string | null, root: string, origin: Or
 /**
  * The parent's tool call that created this node.
  */
-spawn_call: string | null, harness: string, vendor_session: string | null, title: string, cwd: string, model: string | null, policy: Policy, status: Status, activity: string, usage: Usage, changes: Changes, subtree: Rollup, created: number, updated: number, ended: number | null, };
+spawn_call: string | null, harness: string, vendor_session: string | null, title: string, cwd: string, model: string | null, policy: Policy, status: Status, error: string | null, activity: string, usage: Usage, changes: Changes, subtree: Rollup, created: number, updated: number, ended: number | null, };
 
 export type ItemKind = "user_message" | "agent_message" | "reasoning" | "tool_call" | "file_change" | "permission" | "error" | "notice";
 

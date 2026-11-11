@@ -194,7 +194,7 @@ pub fn start(kind: &Kind, spec: SpawnSpec, tx: mpsc::Sender<Msg>, codex: &mut Op
             tokio::spawn(claude::run(spec, out, cmd_rx));
         }
         Kind::Codex => {
-            let server = codex.get_or_insert_with(codex::Server::start);
+            let server = codex.get_or_insert_with(|| codex::Server::start(tx));
             server.attach(spec, out, cmd_rx);
         }
         Kind::Acp { command, args } => {
@@ -219,7 +219,7 @@ pub fn command(program: &str, args: &[String], cwd: &std::path::Path) -> tokio::
         .current_dir(cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::piped())
         .process_group(0)
         .kill_on_drop(true);
     c
@@ -338,4 +338,40 @@ pub async fn detect() -> Vec<protocol::HarnessDetection> {
         }
     }
     rows
+}
+
+/// Drain stderr while the child runs, retaining only a bounded diagnostic tail.
+pub fn stderr(child: &mut tokio::process::Child) -> tokio::task::JoinHandle<String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let stderr = child.stderr.take();
+    tokio::spawn(async move {
+        let mut tail = std::collections::VecDeque::new();
+        if let Some(stderr) = stderr {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                eprintln!("{line}");
+                if tail.len() == 20 {
+                    tail.pop_front();
+                }
+                tail.push_back(line);
+            }
+        }
+        tail.into_iter().collect::<Vec<_>>().join("\n")
+    })
+}
+
+pub async fn exit_error(
+    program: &str,
+    child: &mut tokio::process::Child,
+    tail: tokio::task::JoinHandle<String>,
+    error: Option<String>,
+) -> Option<String> {
+    let status = child.wait().await;
+    let error = error.or_else(|| match status {
+        Ok(s) if s.success() => None,
+        Ok(s) => Some(format!("{program} exited with {s}")),
+        Err(e) => Some(format!("cannot wait for {program}: {e}")),
+    });
+    let tail = tail.await.unwrap_or_default();
+    error.map(|e| if tail.is_empty() { e } else { format!("{e}\n{tail}") })
 }

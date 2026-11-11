@@ -26,11 +26,17 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn start() -> Server {
+    pub fn start(tx: mpsc::Sender<crate::daemon::hub::Msg>) -> Server {
         let (ctl, rx) = mpsc::unbounded_channel();
         let child = super::command("codex", &["app-server".to_owned()], &std::env::temp_dir()).spawn();
         let pid = child.as_ref().ok().and_then(|c| c.id());
-        tokio::spawn(serve(child, rx, ctl.clone()));
+        let me = ctl.clone();
+        let (reason_tx, reason_rx) = tokio::sync::watch::channel(None);
+        tokio::spawn(async move {
+            let error = serve(child, rx, me, reason_rx).await;
+            let _ = reason_tx.send(Some(error.clone()));
+            let _ = tx.send(crate::daemon::hub::Msg::CodexExited(error)).await;
+        });
         Server { ctl, pid }
     }
 
@@ -39,22 +45,44 @@ impl Server {
     }
 
     pub fn attach(&self, spec: SpawnSpec, out: Out, cmds: mpsc::Receiver<Command>) {
-        let _ = self.ctl.send(Ctl::Attach(Box::new(spec), out, cmds));
+        if let Err(e) = self.ctl.send(Ctl::Attach(Box::new(spec), out, cmds))
+            && let Ctl::Attach(_, mut out, _) = e.0
+        {
+            tokio::spawn(async move {
+                out.ev(Ev::Exited { error: Some("codex app-server exited".into()) }).await;
+            });
+        }
     }
 }
 
 /// Owns the process and routes every incoming message to its thread's session task.
-async fn serve(child: std::io::Result<tokio::process::Child>, mut ctl: mpsc::UnboundedReceiver<Ctl>, me: mpsc::UnboundedSender<Ctl>) {
+async fn serve(
+    child: std::io::Result<tokio::process::Child>,
+    mut ctl: mpsc::UnboundedReceiver<Ctl>,
+    me: mpsc::UnboundedSender<Ctl>,
+    reason: tokio::sync::watch::Receiver<Option<String>>,
+) -> String {
     let mut child = match child {
         Ok(c) => c,
-        Err(e) => return fail(ctl, format!("cannot start codex app-server: {e}")).await,
+        Err(e) => return format!("cannot start codex app-server: {e}"),
     };
+    let tail = super::stderr(&mut child);
     let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        return fail(ctl, "codex app-server has no stdio".into()).await;
+        return "codex app-server has no stdio".into();
     };
     let (peer, mut incoming) = Peer::spawn(stdout, stdin, false);
-    if let Err(e) = peer.request("initialize", json!({"clientInfo": {"name": "canopy", "version": env!("CARGO_PKG_VERSION")}})).await {
-        return fail(ctl, format!("codex app-server initialize failed: {e:#}")).await;
+    let init = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        peer.request("initialize", json!({"clientInfo": {"name": "canopy", "version": env!("CARGO_PKG_VERSION")}})),
+    )
+    .await;
+    if !matches!(init, Ok(Ok(_))) {
+        let reason = match init {
+            Ok(Err(e)) => format!("codex app-server initialize failed: {e:#}"),
+            _ => "codex app-server initialize timed out".into(),
+        };
+        let _ = child.kill().await;
+        return super::exit_error("codex app-server", &mut child, tail, Some(reason.clone())).await.unwrap_or(reason);
     }
     peer.notify("initialized", json!({}));
     let mut routes: HashMap<String, Route> = HashMap::new();
@@ -72,7 +100,7 @@ async fn serve(child: std::io::Result<tokio::process::Child>, mut ctl: mpsc::Unb
             }
             c = ctl.recv() => match c {
                 Some(Ctl::Attach(spec, out, cmds)) => {
-                    tokio::spawn(session(peer.clone(), *spec, out, cmds, me.clone()));
+                    tokio::spawn(session(peer.clone(), *spec, out, cmds, me.clone(), reason.clone()));
                 }
                 Some(Ctl::Route(t, r)) => { routes.insert(t, r); }
                 Some(Ctl::Unroute(t)) => { routes.remove(&t); }
@@ -83,15 +111,9 @@ async fn serve(child: std::io::Result<tokio::process::Child>, mut ctl: mpsc::Unb
     // Dropping the routes closes every session's channel, so each reports it exited.
     drop(routes);
     let _ = child.kill().await;
-}
-
-/// Every session attached now or later learns the server is unusable.
-async fn fail(mut ctl: mpsc::UnboundedReceiver<Ctl>, e: String) {
-    while let Some(c) = ctl.recv().await {
-        if let Ctl::Attach(_, mut out, _) = c {
-            out.ev(Ev::Exited { error: Some(e.clone()) }).await;
-        }
-    }
+    super::exit_error("codex app-server", &mut child, tail, Some("codex app-server exited".into()))
+        .await
+        .unwrap_or_else(|| "codex app-server exited".into())
 }
 
 fn policy(p: Policy) -> (&'static str, &'static str) {
@@ -102,7 +124,14 @@ fn policy(p: Policy) -> (&'static str, &'static str) {
     }
 }
 
-async fn session(peer: Peer, spec: SpawnSpec, mut out: Out, mut cmds: mpsc::Receiver<Command>, ctl: mpsc::UnboundedSender<Ctl>) {
+async fn session(
+    peer: Peer,
+    spec: SpawnSpec,
+    mut out: Out,
+    mut cmds: mpsc::Receiver<Command>,
+    ctl: mpsc::UnboundedSender<Ctl>,
+    mut reason: tokio::sync::watch::Receiver<Option<String>>,
+) {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let r = async {
         let (approval, sandbox) = policy(spec.policy);
@@ -137,7 +166,11 @@ async fn session(peer: Peer, spec: SpawnSpec, mut out: Out, mut cmds: mpsc::Rece
     if let Some(t) = &r.as_ref().ok().and_then(|t| t.clone()) {
         let _ = ctl.send(Ctl::Unroute(t.clone()));
     }
-    let error = r.err().map(|e| format!("{e:#}"));
+    let mut error = r.err().map(|e| format!("{e:#}"));
+    if error.as_ref().is_some_and(|e| e.contains("peer closed") || e.contains("app-server exited")) {
+        let _ = reason.wait_for(|r| r.is_some()).await;
+        error = reason.borrow().clone().or(error);
+    }
     out.ev(Ev::Exited { error }).await;
 }
 

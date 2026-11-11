@@ -27,6 +27,7 @@ pub type Reply = oneshot::Sender<Result<Value, String>>;
 
 pub enum Msg {
     Harness(HarnessEvent),
+    CodexExited(String),
     Connect {
         conn: u64,
         tx: mpsc::Sender<String>,
@@ -117,6 +118,7 @@ pub struct Hub {
     idle_gen: u64,
     idle_armed: bool,
     codex: Option<codex::Server>,
+    exe_mtime: Option<u64>,
 }
 
 pub fn now() -> u64 {
@@ -138,6 +140,7 @@ impl Hub {
             idle_gen: 0,
             idle_armed: false,
             codex: None,
+            exe_mtime: crate::client::exe_mtime(),
         };
         for (mut node, seq) in restored {
             // Every process died with the previous daemon.
@@ -163,6 +166,18 @@ impl Hub {
         self.check_idle();
         while let Some(msg) = rx.recv().await {
             match msg {
+                Msg::CodexExited(error) => {
+                    self.codex = None;
+                    let ids: Vec<_> = self
+                        .sessions
+                        .values()
+                        .filter(|s| s.cmd.is_some() && s.node.harness == "codex")
+                        .map(|s| s.node.id.clone())
+                        .collect();
+                    for id in ids {
+                        self.exited(&id, Some(error.clone()));
+                    }
+                }
                 Msg::Harness(e) => self.harness(e),
                 Msg::Connect { conn, tx } => {
                     self.clients.insert(conn, Client { tx, tree: false, subs: HashSet::new(), pending: Vec::new() });
@@ -291,7 +306,9 @@ impl Hub {
             Op::Hello { .. } => {
                 let mut names: Vec<_> = self.cfg.harnesses.keys().cloned().collect();
                 names.sort();
-                Ok(json!({"daemon_version": env!("CARGO_PKG_VERSION"), "harnesses": names}))
+                Ok(
+                    json!({"daemon_version": env!("CARGO_PKG_VERSION"), "harnesses": names, "exe": std::env::current_exe().ok(), "mtime": self.exe_mtime, "pid": std::process::id(), "live_agents": self.sessions.values().filter(|s| s.cmd.is_some()).count()}),
+                )
             }
             Op::Detect => {
                 if let Some(client) = self.clients.get(&conn) {
@@ -299,7 +316,7 @@ impl Hub {
                     tokio::spawn(async move {
                         let rows = harness::detect().await;
                         let msg = ServerMsg::Res { id, result: json!({"harnesses": rows}) };
-                        let _ = tx.try_send(serde_json::to_string(&msg).unwrap_or_default());
+                        let _ = tx.send(serde_json::to_string(&msg).unwrap_or_default()).await;
                     });
                 }
                 return;
@@ -312,7 +329,7 @@ impl Hub {
                             Ok(result) => ServerMsg::Res { id, result },
                             Err(e) => ServerMsg::Err { id, error: e.to_string() },
                         };
-                        let _ = tx.try_send(serde_json::to_string(&msg).unwrap_or_default());
+                        let _ = tx.send(serde_json::to_string(&msg).unwrap_or_default()).await;
                     });
                 }
                 return;
@@ -343,7 +360,7 @@ impl Hub {
                             Err(_) => ServerMsg::Err { id, error: "the session ended before the message was delivered".into() },
                         };
                         if let Some(tx) = tx {
-                            let _ = tx.try_send(serde_json::to_string(&msg).unwrap_or_default());
+                            let _ = tx.send(serde_json::to_string(&msg).unwrap_or_default()).await;
                         }
                     });
                     return;
@@ -440,6 +457,7 @@ impl Hub {
         s.reported = false;
         s.node.status = Status::Starting;
         s.node.ended = None;
+        s.node.error = None;
         self.touch(&id);
         Ok(json!({"session":id}))
     }
@@ -507,12 +525,32 @@ impl Hub {
         d
     }
 
-    fn spawn(&mut self, req: SpawnReq, origin: Origin) -> Result<SessionId, String> {
+    fn spawn(&mut self, mut req: SpawnReq, origin: Origin) -> Result<SessionId, String> {
+        req.harness = canonical_harness(&req.harness, &self.cfg.harnesses);
         let kind = self.cfg.harnesses.get(&req.harness).cloned().ok_or_else(|| {
             let mut names: Vec<_> = self.cfg.harnesses.keys().cloned().collect();
             names.sort();
             format!("unknown harness {:?}; available: {}", req.harness, names.join(", "))
         })?;
+        if !std::path::Path::new(&req.cwd).is_dir() {
+            return Err(format!("working directory is missing or is not a directory: {}", req.cwd));
+        }
+        let binary = match &kind {
+            Kind::Claude => "claude",
+            Kind::Codex => "codex",
+            Kind::Acp { command, .. } => command,
+        };
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let executable = |p: PathBuf| p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
+        let found = if binary.contains('/') {
+            executable(PathBuf::from(&req.cwd).join(binary))
+        } else {
+            std::env::split_paths(&path).any(|p| executable(p.join(binary)))
+        };
+        if !found {
+            return Err(format!("{binary} not found on the daemon's PATH (PATH={})", path.to_string_lossy()));
+        }
         let parent = match &req.parent {
             Some(p) => Some(self.resolve(p).ok_or(format!("no parent session {p}"))?),
             None => None,
@@ -568,6 +606,7 @@ impl Hub {
             model: req.model.clone(),
             policy,
             status: Status::Starting,
+            error: None,
             activity: String::new(),
             usage: Usage::default(),
             changes: Changes::default(),
@@ -827,6 +866,7 @@ impl Hub {
             model: None,
             policy: p.node.policy,
             status: Status::Running,
+            error: None,
             activity: String::new(),
             usage: Usage::default(),
             changes: Changes::default(),
@@ -886,6 +926,9 @@ impl Hub {
             return;
         }
         let was_settled = s.node.status.is_settled();
+        if status == Status::Failed && s.node.error.is_none() {
+            s.node.error = Some("agent reported failure".into());
+        }
         s.node.status = status;
         if s.node.status.is_terminal() {
             s.node.ended = Some(now());
@@ -913,6 +956,10 @@ impl Hub {
 
     fn exited(&mut self, id: &str, error: Option<String>) {
         let Some(s) = self.sessions.get_mut(id) else { return };
+        if s.cmd.is_none() {
+            return;
+        }
+        s.node.error = if s.stop_requested { None } else { error.clone() };
         s.cmd = None;
         s.pid = None;
         let natives: Vec<_> = s.natives.values().cloned().collect();
@@ -999,4 +1046,21 @@ pub fn first_line(s: &str, max: usize) -> String {
 
 pub fn mcp_args(sock: &std::path::Path, session: &str) -> Vec<String> {
     vec!["mcp-stdio".into(), "--sock".into(), sock.to_string_lossy().into_owned(), "--session".into(), session.into()]
+}
+
+fn canonical_harness(name: &str, harnesses: &HashMap<String, Kind>) -> String {
+    let name = if name.eq_ignore_ascii_case("Claude Code") { "claude" } else { name };
+    harnesses.keys().find(|key| key.eq_ignore_ascii_case(name)).cloned().unwrap_or_else(|| name.to_owned())
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+    #[test]
+    fn display_names_and_case_are_accepted() {
+        let names = HashMap::from([("claude".into(), Kind::Claude), ("codex".into(), Kind::Codex)]);
+        for (name, expected) in [("Claude Code", "claude"), ("CLAUDE", "claude"), ("Codex", "codex")] {
+            assert_eq!(canonical_harness(name, &names), expected);
+        }
+    }
 }
