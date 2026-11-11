@@ -79,6 +79,10 @@ async fn script(
     server: Option<Value>,
     mcp: &mut Option<Mcp>,
 ) -> Result<&'static str> {
+    // Demo scripts are inherited by fake children; ordinary test prompts remain scripts.
+    let scripts: Value = std::env::var("CANOPY_FAKE_SCRIPTS").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+    let task = text.lines().filter(|line| !line.starts_with("Spawned by Canopy agent ")).collect::<Vec<_>>().join("\n");
+    let text = scripts.get(task.trim()).and_then(Value::as_str).unwrap_or(text);
     let update = |u: Value| peer.notify("session/update", json!({"sessionId": sid, "update": u}));
     let mut results: Vec<Value> = Vec::new();
     for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
@@ -139,8 +143,11 @@ async fn script(
                               "content": [{"type": "content", "content": {"type": "text", "text": out}}]}),
                 );
                 results.push(serde_json::from_str(&out).unwrap_or(json!({"text": out})));
-                let shown = if failed { format!("tool error: {out}") } else { out };
-                update(json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": format!("{shown}\n")}}));
+                if failed {
+                    update(
+                        json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": format!("tool error: {out}\n")}}),
+                    );
+                }
             }
             "ask" => {
                 let r = peer

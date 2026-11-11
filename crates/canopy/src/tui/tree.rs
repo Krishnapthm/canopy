@@ -22,23 +22,34 @@ pub fn widget(app: &App) -> List<'static> {
             .into_iter()
             .map(|(n, depth)| {
                 let glyph = match n.status {
-                    Status::Running | Status::Starting => "▷",
+                    Status::Running => "▷",
+                    Status::Starting => "◌",
                     Status::AwaitingPermission => "!",
                     Status::Failed => "×",
                     Status::RateLimited { .. } => "∥",
                     Status::Done => "✓",
-                    _ => "○",
+                    Status::Idle => "○",
+                    Status::Cancelled => "⊘",
+                    Status::Interrupted => "■",
                 };
                 let cost = n.usage.reported_cost_usd.map(|v| format!(" ${v:.2}")).unwrap_or_default();
-                ListItem::new(format!(
-                    "{}{}{} [{}] {} {}\n{}{}  {}t{} +{}/-{} {}",
+                let collapse = if app.nodes.iter().any(|child| child.parent.as_ref() == Some(&n.id)) {
+                    if app.collapsed.contains(&n.id) { "▸ " } else { "▾ " }
+                } else {
+                    ""
+                };
+                let prefix = format!(
+                    "{}{}{} [{}] {}",
                     if app.selected.as_deref() == Some(n.id.as_str()) { "›" } else { " " },
                     "  ".repeat(depth),
                     glyph,
                     n.harness,
+                    collapse
+                );
+                ListItem::new(format!(
+                    "{prefix}{}\n{}{}  {}t{} +{}/-{} {}",
                     n.title,
-                    if app.collapsed.contains(&n.id) { "+" } else { "−" },
-                    "  ".repeat(depth),
+                    " ".repeat(ratatui::text::Line::from(prefix.as_str()).width()),
                     &n.id[n.id.len().saturating_sub(8)..],
                     n.subtree.tokens,
                     cost,
@@ -49,4 +60,36 @@ pub fn widget(app: &App) -> List<'static> {
             })
             .collect::<Vec<_>>(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn details_align_with_titles_and_only_parents_have_chevrons() {
+        let mut app = App::default();
+        for (id, parent, title) in [("root12345678", None, "Root"), ("child87654321", Some("root12345678"), "Child")] {
+            app.nodes.push(serde_json::from_value(serde_json::json!({
+                "id":id,"parent":parent,"root":"root12345678","origin":"user","spawn_call":null,
+                "harness":"demo","vendor_session":null,"title":title,"cwd":"/tmp","model":null,
+                "policy":"ask","status":{"state":"idle"},"activity":"","usage":{"input":0,"output":0,"cache_read":0,"cache_write":0,"reported_cost_usd":null},
+                "changes":{"files":[],"added":0,"removed":0},"subtree":{"tokens":0,"active":0},"created":0,"updated":0,"ended":null
+            })).unwrap());
+        }
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 6)).unwrap();
+        terminal.draw(|f| f.render_widget(widget(&app), f.area())).unwrap();
+        let lines: Vec<String> = terminal.backend().buffer().content.chunks(80).map(|r| r.iter().map(|c| c.symbol()).collect()).collect();
+        assert_eq!(lines[0].split("Root").next().unwrap().chars().count(), lines[1].find("12345678").unwrap());
+        assert_eq!(lines[2].split("Child").next().unwrap().chars().count(), lines[3].find("87654321").unwrap());
+        assert!(lines[0].contains("▾ Root"));
+        assert!(!lines[2].contains('▾'));
+        assert!(!lines[2].contains('−'));
+    }
+    #[test]
+    fn scope_fallback_has_one_cell() {
+        assert_eq!(ratatui::text::Line::from("⊕").width(), 1);
+        for globe in ["\u{1f30d}", "\u{1f30e}", "\u{1f30f}"] {
+            assert_eq!(ratatui::text::Line::from(globe).width(), 2);
+        }
+    }
 }

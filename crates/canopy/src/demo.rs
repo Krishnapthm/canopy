@@ -27,6 +27,11 @@ pub fn run() -> Result<()> {
     let child = Command::new(&exe)
         .args(["daemon", "--foreground", "--acp", &format!("demo={} fake-agent", exe.display())])
         .env("CANOPY_HOME", &home)
+        .env("CANOPY_FAKE_SCRIPTS", serde_json::json!({
+            "Plan a small change to the parser": "say Planning a small change\ntool spawn_agent {\"harness\":\"demo\",\"title\":\"Implement the change\",\"prompt\":\"Implement the change\"}\ntool spawn_agent {\"harness\":\"demo\",\"title\":\"Review the change\",\"prompt\":\"Review the change\"}\ntool wait_agent {\"ids\":[\"$1\",\"$2\"],\"timeout_s\":5}\nsay Demo tasks finished",
+            "Implement the change": "say Implemented the parser change",
+            "Review the change": "say Reviewed the parser change"
+        }).to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -50,12 +55,7 @@ pub fn run() -> Result<()> {
         ensure!(out.status.success(), "demo command failed: {}", String::from_utf8_lossy(&out.stderr));
         Ok(String::from_utf8(out.stdout)?)
     };
-    let script = r#"say Planning a small change
- tool spawn_agent {"harness":"demo","title":"Implement","prompt":"say Working without spending tokens\nsay Finished"}
- tool spawn_agent {"harness":"demo","title":"Review","prompt":"say Reviewing without spending tokens\nsay Finished"}
- tool wait_agent {"ids":["$1","$2"],"timeout_s":5}
- say Demo tasks finished"#;
-    cli(&["run", "demo", "--title", "Plan a change", script])?;
+    cli(&["run", "demo", "--title", "Plan a small change to the parser", "Plan a small change to the parser"])?;
     let status = Command::new(&exe).env("CANOPY_HOME", &demo.home).status()?;
     ensure!(status.success(), "demo TUI exited with {status}");
     Ok(())
