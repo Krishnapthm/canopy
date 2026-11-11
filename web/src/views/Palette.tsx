@@ -1,8 +1,15 @@
-import { For, createSignal } from "solid-js";
 import { commands } from "../keys";
-import { set } from "../store";
-import { Icon } from "../icons";
+import { useStore, set } from "../store";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
+import { Kbd } from "@/components/ui/kbd";
+import { Terminal } from "lucide-react";
 export default function Palette() {
-  const [query,search]=createSignal("");
-  return <div class="overlay"><section role="dialog" aria-modal="true" aria-label="Commands"><input autofocus aria-label="Find command" placeholder="Find a command…" onInput={e=>search(e.currentTarget.value)}/><For each={commands.filter(c=>c.title.toLowerCase().includes(query().toLowerCase()))}>{c=><button onClick={()=>{set("palette",false);c.run();}}><Icon/>{c.title}<kbd>{c.key}</kbd></button>}</For><button onClick={()=>set("palette",false)}>Close</button></section></div>;
+  const state = useStore();
+  return <Dialog open={state.palette} onOpenChange={open=>set("palette",open)}><DialogContent>
+    <DialogHeader><DialogTitle>Commands and keyboard help</DialogTitle><DialogDescription>Find an action or its keyboard shortcut.</DialogDescription></DialogHeader>
+    <Command><CommandInput placeholder="Find command…"/><CommandList><CommandEmpty>No matching commands.</CommandEmpty><CommandGroup>
+      {commands.map(c=><CommandItem key={c.id} onSelect={()=>{set("palette",false);c.run();}}><Terminal/>{c.title}<Kbd>{c.id === "palette" ? "⌘K / :" : c.key}</Kbd></CommandItem>)}
+    </CommandGroup></CommandList></Command>
+  </DialogContent></Dialog>;
 }

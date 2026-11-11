@@ -1,21 +1,55 @@
-import { For, Show } from "solid-js";
-import { state, items, text } from "../store";
+import { useEffect, useState } from "react";
+import { useStore, state as current, items, text } from "../store";
 import { attempt, subscribe } from "../conn";
 import Markdown from "../md";
 import Composer from "./Composer";
 import { permission } from "../keys";
-import { Icon } from "../icons";
+import { statusIcons, harnessIcon } from "../icons";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { MessageScrollerProvider, MessageScroller, MessageScrollerViewport, MessageScrollerContent, MessageScrollerItem } from "@/components/ui/message-scroller";
+import { Message, MessageContent } from "@/components/ui/message";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Marker } from "@/components/ui/marker";
+import { Check, X, ShieldCheck, History, RefreshCw, Wrench, ChevronDown } from "lucide-react";
 export default function Session() {
-  const node = () => state.nodes[state.selected];
-  const transcript = () => state.sessions[state.selected]?.items ?? [];
-  return <section class="session" aria-label="Session"><Show when={node()} fallback={<div class="empty"><Icon name="tree"/><h2>Your agents, together.</h2><p>Start an agent to follow its work here.</p></div>}>{n => <>
-    <header><h2>{n().title || n().id.slice(-8)}</h2><p>{n().harness} · {n().cwd} · {n().status.state}</p><details><summary>Session details</summary><p>{n().model || "Default model"} · {n().policy} · {n().origin}</p><For each={n().changes.files}>{f=><div>{f}</div>}</For></details></header>
-    <Show when={n().status.state==="awaiting_permission"}><aside role="alert">Permission requested <button onClick={()=>permission("allow")}><Icon name="status"/>Allow</button><button onClick={()=>permission("deny")}><Icon name="stop"/>Deny</button></aside></Show>
-    <div class="transcript"><button onClick={async()=>{
-      const result=await attempt({op:"history",session:state.selected,before_seq:transcript()[0]?.seq ?? Number.MAX_SAFE_INTEGER,limit:300});
-      if(result) items(state.selected,result.items,true);
-    }}><Icon/>Earlier messages</button><button onClick={()=>void subscribe(state.selected)}><Icon/>Latest messages</button>
-    <For each={transcript()}>{item=><article><small><Icon/>{item.kind.replaceAll("_"," ")}</small><Show when={item.state!=="streaming"} fallback={<div class="stream">{text(item)}</div>}><Markdown text={text(item)}/></Show></article>}</For></div>
+  const state = useStore(), node = state.nodes[state.selected];
+  const transcript = state.sessions[state.selected]?.items ?? [];
+  const first = transcript[0]?.seq;
+  const [hasEarlier, earlier] = useState(false);
+  useEffect(() => {
+    let active = true;
+    earlier(false);
+    if (state.connected && first && first > 1) {
+      void attempt({op:"history",session:state.selected,before_seq:first,limit:1}).then(result => {
+        if (active && result) earlier(result.items.length > 0);
+      });
+    }
+    return () => { active = false; };
+  }, [state.selected, state.connected, first]);
+  if (!node) return <Empty><EmptyHeader><EmptyTitle>Select an agent</EmptyTitle></EmptyHeader></Empty>;
+  const Status = statusIcons[node.status.state], Harness = harnessIcon(node.harness);
+  return <section className="flex h-full min-h-0 flex-col" aria-label="Session">
+    <header className="flex flex-wrap items-center gap-3 p-4"><h1>{node.title || node.id.slice(-8)}</h1><Badge variant="outline"><Status/>{node.status.state.replaceAll("_"," ")}</Badge><Badge variant="secondary"><Harness/>{node.harness}</Badge>
+      <Collapsible><CollapsibleTrigger render={<Button variant="ghost"/>}>Session details<ChevronDown data-icon="inline-end"/></CollapsibleTrigger><CollapsibleContent>{node.cwd} · {node.model || "Default model"} · {node.policy} · {node.origin}{node.changes.files.map(f=><p key={f}>{f}</p>)}</CollapsibleContent></Collapsible>
+    </header>
+    {node.status.state==="awaiting_permission" && <Alert><ShieldCheck/><AlertTitle>Permission requested</AlertTitle><AlertDescription>{transcript.filter(i=>i.kind==="permission" && i.state==="streaming").slice(-1).map(i=>text(i))}<div className="flex gap-2"><Button onClick={()=>permission("allow")}><Check data-icon="inline-start"/>Allow</Button><Button variant="outline" onClick={()=>permission("deny")}><X data-icon="inline-start"/>Deny</Button><Button variant="outline" onClick={()=>permission("allow_always")}><ShieldCheck data-icon="inline-start"/>Always allow</Button></div></AlertDescription></Alert>}
+    <MessageScrollerProvider><MessageScroller><MessageScrollerViewport><MessageScrollerContent className="p-4">
+      {hasEarlier && <Button variant="outline" onClick={async()=>{
+        const session = state.selected;
+        const result=await attempt({op:"history",session,before_seq:transcript[0].seq,limit:300});
+        if(result && current.selected === session) items(session,result.items,true);
+      }}><History data-icon="inline-start"/>Earlier messages</Button>}
+      <Button variant="ghost" onClick={()=>void subscribe(state.selected)}><RefreshCw data-icon="inline-start"/>Latest messages</Button>
+      {transcript.map(item=><MessageScrollerItem key={item.id}>
+        {item.kind==="notice" ? <Marker>{text(item)}</Marker> :
+          item.kind==="tool_call" ? <Collapsible><CollapsibleTrigger render={<Button variant="ghost" className="max-w-full"/>}><Wrench data-icon="inline-start"/><span className="truncate">{(typeof item.body === "object" && item.body !== null && !Array.isArray(item.body) ? String(item.body.title ?? "Tool") + " " + JSON.stringify(item.body.input ?? item.body).slice(0,100) : text(item).slice(0,120))}</span><ChevronDown data-icon="inline-end"/></CollapsibleTrigger><CollapsibleContent><pre className="overflow-auto whitespace-pre-wrap">{JSON.stringify(item.body,null,2)}</pre></CollapsibleContent></Collapsible> :
+          <Message align={item.kind==="user_message"?"end":"start"}><MessageContent><Bubble variant={item.kind==="user_message"?"secondary":"ghost"}><BubbleContent>{item.state==="streaming" ? <div className="whitespace-pre-wrap">{text(item)}</div> : <Markdown text={text(item)}/>}</BubbleContent></Bubble></MessageContent></Message>}
+      </MessageScrollerItem>)}
+    </MessageScrollerContent></MessageScrollerViewport></MessageScroller></MessageScrollerProvider>
     <Composer/>
-  </>}</Show></section>;
+  </section>;
 }

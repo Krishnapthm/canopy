@@ -1,6 +1,6 @@
 # 0021 - Solid JSX build plugin
 
-Status: Accepted (2026-11)
+Status: Superseded by [0022](0022-react-shadcn-web.md) (2026-11)
 
 ## Context
 

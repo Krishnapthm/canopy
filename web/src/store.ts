@@ -1,27 +1,45 @@
-import { createStore } from "solid-js/store";
+import { useSyncExternalStore } from "react";
 import type { Node, Item, Event } from "./protocol.gen";
-export const [state, set] = createStore({
+export let state = {
   nodes: {} as Record<string, Node>,
   sessions: {} as Record<string, { items: Item[] }>,
   selected: "", view: "tree", filter: "", palette: false, newAgent: false,
   child: false, connected: false, error: "", delivery: "", harnesses: [] as string[],
   collapsed: {} as Record<string, boolean>,
-});
+};
+const listeners = new Set<() => void>();
+export const listen = (fn: () => void) => { listeners.add(fn); return () => { listeners.delete(fn); }; };
+export function useStore() { return useSyncExternalStore(listen, () => state); }
+let batching = false;
+export function batch(fn: () => void) {
+  batching = true;
+  try { fn(); } finally { batching = false; listeners.forEach(fn => fn()); }
+}
+export function set<K extends keyof typeof state>(key: K, value: (typeof state)[K]): void;
+export function set(key: "collapsed", id: string, value: boolean): void;
+export function set(key: keyof typeof state, value: unknown, nested?: boolean) {
+  state = { ...state, [key]: nested === undefined ? value : { ...state.collapsed, [String(value)]: nested } };
+  if (!batching) listeners.forEach(fn => fn());
+}
 export function items(session: string, incoming: Item[], replace = false) {
   const previous = replace ? [] : state.sessions[session]?.items ?? [];
   const merged = new Map(previous.map(i => [i.id, i]));
   for (const item of incoming) merged.set(item.id, item);
-  set("sessions", session, { items: [...merged.values()].sort((a,b) => a.seq-b.seq).slice(-300) });
+  set("sessions", { ...state.sessions, [session]: { items: [...merged.values()].sort((a,b) => a.seq-b.seq).slice(-300) } });
 }
 export function ingest(event: Event) {
-  if (event.t === "node") set("nodes", event.node.id, event.node);
+  if (event.t === "node") set("nodes", { ...state.nodes, [event.node.id]: event.node });
   else if (event.t === "item") items(event.item.session, [event.item]);
   else {
     const index = state.sessions[event.session]?.items.findIndex(i => i.id === event.item) ?? -1;
-    if (index >= 0) set("sessions", event.session, "items", index, "body", body => ({
-      ...(typeof body === "object" && !Array.isArray(body) ? body : {}),
-      text: String((body as Record<string, unknown>)?.text ?? "") + event.text,
-    }));
+    if (index >= 0) {
+      const item = state.sessions[event.session].items[index];
+      const body = item.body;
+      items(event.session, [{ ...item, body: {
+        ...(typeof body === "object" && body !== null && !Array.isArray(body) ? body : {}),
+        text: String((body as Record<string, unknown>)?.text ?? "") + event.text,
+      }}]);
+    }
   }
 }
 export function outline() {

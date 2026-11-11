@@ -206,7 +206,9 @@ MIT
 
 ## Web development
 
-Build the web app with `make web`. It checks the gzip bundle budget as well.
+Build the web app with `make web`. It checks the 120 KB initial JavaScript gzip budget.
+The web app follows your system light or dark theme. Use Outline or Graph to switch
+views, and press `?` for keyboard help or `Cmd-K` for commands.
 `make build` builds the app and embeds it in the release binary.
 
 For a development preview, use two terminals with the same temporary CANOPY_HOME.

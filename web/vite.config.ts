@@ -1,5 +1,7 @@
 import { defineConfig } from "vite";
-import solid from "vite-plugin-solid";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import path from "node:path";
 // Explicit dev target, copied from canopy web's printed URL (without fragment).
 const target = process.env.CANOPY_WEB_ORIGIN ?? "http://127.0.0.1:7331";
 const proxy = {
@@ -10,7 +12,8 @@ const proxy = {
   },
 };
 export default defineConfig({
-  plugins: [solid()],
+  plugins: [react(), tailwindcss()],
+  resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
   server: { host: "127.0.0.1", proxy: { "/ws": proxy } },
-  build: { target: "es2022" },
+  build: { manifest: true, target: "es2022" },
 });

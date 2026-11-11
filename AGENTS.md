@@ -66,14 +66,14 @@ daemon, an adapter, or the protocol. Full `make build` only when the task needs 
 Every dependency is a cost. Adding one, Rust or npm, requires an ADR that says what it
 replaces, its size, its license (MIT, Apache-2.0, BSD, ISC, or public domain only; the
 project is MIT), and why the standard library or twenty lines of our own code will not do.
-The approved list is in ADR 0001 (Rust) and ADR 0012 (web).
+The approved list is in ADR 0001 (Rust) and ADR 0022 (web).
 
 ## Conventions
 
 - Rust: errors with `anyhow` in the binary, typed errors in `crates/protocol`. No `unwrap`
   outside tests. Comments explain why, above the item, briefly.
-- Web (M5, ADR 0012): Solid signals and stores only; no component kit, router, or state
-  library; one stylesheet with custom properties.
+- Web (M5, ADR 0022): React with useSyncExternalStore and shadcn/ui; no router or state
+  library; use the generated neutral theme in web/src/index.css.
 - Every user action is a command in a registry with the same key in the TUI and the web
   (PLAN.md section 6.1). The registries land with M4 and M5.
 - UI: icons are required, never an emoji, no eyebrow labels; global scope is an earth globe
