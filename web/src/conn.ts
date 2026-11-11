@@ -1,4 +1,6 @@
-import { state, set, ingest, items, batch, listen } from "./store";
+import { toast } from "sonner";
+import { errorToast } from "./toast";
+import { state, set, ingest, items, batch, listen, newlyFailed } from "./store";
 import { PROTOCOL_VERSION, type Op, type ServerMsg, type Event, type Node, type Item } from "./protocol.gen";
 let socket: WebSocket;
 let retry = 1000;
@@ -9,7 +11,11 @@ const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) 
 const token = location.hash.slice(1) || sessionStorage.getItem("canopy-token") || "";
 if (token) sessionStorage.setItem("canopy-token", token);
 history.replaceState(null, "", location.pathname + location.search);
-export function call(op: Op): Promise<any> {
+export async function call(op: Op): Promise<any> {
+  try { return await request(op); }
+  catch (error) { errorToast(error); throw error; }
+}
+function request(op: Op): Promise<any> {
   if (socket?.readyState !== WebSocket.OPEN) return Promise.reject(new Error("Disconnected"));
   return new Promise((resolve, reject) => {
     const id = ++next;
@@ -18,7 +24,7 @@ export function call(op: Op): Promise<any> {
   });
 }
 export async function attempt(op: Op) {
-  try { return await call(op); } catch (e) { set("error", String(e)); }
+  try { return await call(op); } catch { /* call already reported the error. */ }
 }
 export async function subscribe(session: string) {
   const result = await attempt({op:"sub_session", session, after_seq:null, tail:300});
@@ -36,8 +42,8 @@ export function connect() {
       set("nodes", Object.fromEntries((tree.nodes as Node[]).map(n => [n.id,n])));
       set("connected", true);
       retry = 1000;
-      set("error", "");
-    } catch(e) { set("error", String(e)); }
+      toast.dismiss("canopy-connection");
+    } catch { /* call already reported the error. */ }
   };
   socket.onmessage = message => {
     const value: ServerMsg = JSON.parse(message.data);
@@ -46,7 +52,10 @@ export function connect() {
       if (!frame) frame = requestAnimationFrame(() => {
         frame = 0;
         const events = queued; queued = [];
-        batch(() => events.forEach(ingest));
+        batch(() => events.forEach(event => {
+          if (event.t === "node" && newlyFailed(event.node)) failed(event.node);
+          ingest(event);
+        }));
       });
     } else {
       const request = pending.get(value.id);
@@ -56,6 +65,7 @@ export function connect() {
     }
   };
   socket.onclose = () => {
+    toast.info("Reconnecting to Canopy", { id: "canopy-connection" });
     set("connected", false);
     for (const request of pending.values()) request.reject(new Error("Disconnected"));
     pending.clear(); queued = [];
@@ -79,5 +89,13 @@ export function subscriptions() {
     if (!state.selected || !state.connected) return;
     if (document.hidden) void attempt({op:"unsub_session", session:state.selected});
     else void subscribe(state.selected);
+  });
+}
+// Persistent, one per node (the id dedupes), with a way to jump to the agent.
+function failed(node: Node) {
+  errorToast(`${node.title || node.harness} failed`, {
+    id: node.id,
+    description: node.error?.split("\n").slice(0, 3).join("\n"),
+    action: { label: "Open", onClick: () => batch(() => { set("selected", node.id); set("view", "tree"); }) },
   });
 }

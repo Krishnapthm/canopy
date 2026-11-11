@@ -57,6 +57,8 @@ daemon, an adapter, or the protocol. Full `make build` only when the task needs 
 - Harness behaviour is never coded from memory. Verify against the installed CLI, write the
   fact and the CLI version into `docs/harness-notes/`, and record a fixture.
 - Agent output is untrusted. The web app never uses `innerHTML`.
+- Every error a user causes or can see reaches them as a toast, never only in daemon.log.
+  Web: sonner via `web/src/toast.ts` (ADR 0025).
 - A sub-agent inherits its parent's permission policy and cannot escalate it.
 - Plugin and skill changes go through the vendor's own command or app-server method, on an
   explicit user action, and nothing is ever auto-accepted (ADR 0020).
@@ -66,7 +68,7 @@ daemon, an adapter, or the protocol. Full `make build` only when the task needs 
 Every dependency is a cost. Adding one, Rust or npm, requires an ADR that says what it
 replaces, its size, its license (MIT, Apache-2.0, BSD, ISC, or public domain only; the
 project is MIT), and why the standard library or twenty lines of our own code will not do.
-The approved list is in ADR 0001 (Rust) and ADR 0022 (web).
+The approved list is in ADR 0001 (Rust) and ADR 0022 plus 0025 (web).
 
 ## Conventions
 

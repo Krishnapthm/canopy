@@ -4,7 +4,7 @@ export let state = {
   nodes: {} as Record<string, Node>,
   sessions: {} as Record<string, { items: Item[] }>,
   selected: "", view: "tree", filter: "", palette: false, newAgent: false,
-  child: false, connected: false, error: "", delivery: "", harnesses: [] as string[],
+  child: false, connected: false, delivery: "", harnesses: [] as string[],
   collapsed: {} as Record<string, boolean>,
 };
 const listeners = new Set<() => void>();
@@ -26,6 +26,10 @@ export function items(session: string, incoming: Item[], replace = false) {
   const merged = new Map(previous.map(i => [i.id, i]));
   for (const item of incoming) merged.set(item.id, item);
   set("sessions", { ...state.sessions, [session]: { items: [...merged.values()].sort((a,b) => a.seq-b.seq).slice(-300) } });
+}
+/** True when a tree event moves a node into failed. Only events count: the tree loaded on connect is history. */
+export function newlyFailed(node: Node) {
+  return node.status.state === "failed" && state.nodes[node.id]?.status.state !== "failed";
 }
 export function ingest(event: Event) {
   if (event.t === "node") set("nodes", { ...state.nodes, [event.node.id]: event.node });

@@ -1,49 +1,45 @@
 import { useEffect, useState } from "react";
 import type { Extension } from "../protocol.gen";
 import { useStore } from "../store";
-import { call } from "../conn";
+import { errorToast } from "../toast";
+import { attempt } from "../conn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldGroup, FieldLabel, FieldDescription } from "@/components/ui/field";
-import { Alert, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Earth, Folder, Download, RefreshCw } from "lucide-react";
 export default function Extensions() {
   const state = useStore();
   const cwd = state.nodes[state.selected]?.cwd ?? null;
   const [rows, setRows] = useState<Extension[]>([]);
-  const [errors, setErrors] = useState<string[]>([]);
-  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function refresh() {
-    setRows([]); setErrors([]);
-    const result = await call({op:"ext_list", cwd});
-    setRows(result.items); setErrors(result.errors);
+    setRows([]);
+    const result = await attempt({op:"ext_list", cwd});
+    if (result) { setRows(result.items); result.errors.forEach((error: string) => errorToast(error)); }
   }
   useEffect(() => {
     let active = true;
-    setRows([]); setErrors([]); setError(""); setBusy(true);
-    void call({op:"ext_list", cwd}).then(result => {
-      if (active) { setRows(result.items); setErrors(result.errors); }
-    }).catch(e => { if (active) setError(String(e)); }).finally(() => { if (active) setBusy(false); });
+    setRows([]); setBusy(true);
+    void attempt({op:"ext_list", cwd}).then(result => {
+      if (active && result) { setRows(result.items); result.errors.forEach((error: string) => errorToast(error)); }
+    }).finally(() => { if (active) setBusy(false); });
     return () => { active = false; };
   }, [cwd, state.connected]);
   async function change(row: Extension, adopt = false) {
-    setBusy(true); setError("");
-    try { await call({op:"ext_set", harness:row.harness, kind:adopt ? "adopt_skill" : row.kind, ext_id:row.id, scope:row.scope, enabled:adopt || !row.enabled}); }
-    catch (e) { setError(String(e)); }
+    setBusy(true);
+    try { await attempt({op:"ext_set", harness:row.harness, kind:adopt ? "adopt_skill" : row.kind, ext_id:row.id, scope:row.scope, enabled:adopt || !row.enabled}); }
     finally {
-      try { await refresh(); } catch (e) { setErrors([String(e)]); }
+      await refresh();
       setBusy(false);
     }
   }
   return <section className="flex min-h-0 flex-col gap-4 overflow-auto p-4" aria-label="Plugins and skills">
     <h1>Plugins and skills</h1>
     <p>Running agents are not affected. Applies to new sessions.</p>
-    <Button variant="outline" disabled={busy || !state.connected} onClick={() => { setBusy(true); void refresh().catch(e=>setError(String(e))).finally(()=>setBusy(false)); }}><RefreshCw data-icon="inline-start"/>Refresh</Button>
-    {[error,...errors].filter(Boolean).map((message,i)=><Alert key={i}><AlertTitle>{message}</AlertTitle></Alert>)}
+    <Button variant="outline" disabled={busy || !state.connected} onClick={() => { setBusy(true); void refresh().finally(()=>setBusy(false)); }}><RefreshCw data-icon="inline-start"/>Refresh</Button>
     {busy && ["Claude", "Codex"].map(harness => <div key={harness} role="status">{harness}<Skeleton className="h-8 w-full"/></div>)}
     {([['plugin','Plugins'],['skill','Skills'],['library_skill','Library skills']] as const).map(([kind,title]) => {
       const groups = new Map<string, Extension[]>();

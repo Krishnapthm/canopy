@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {state,items,ingest,outline,set,listen,batch,permissionSummary,toolChildId} from "./src/store.ts";
+import {state,items,ingest,outline,set,listen,batch,permissionSummary,toolChildId,newlyFailed} from "./src/store.ts";
 const item = {id:"one",session:"session",seq:1,body:{text:"a"},state:"streaming",kind:"agent_message"};
 items("session",[item]);
 ingest({t:"delta",session:"session",item:"one",text:"b"});
@@ -35,7 +35,8 @@ const callbacks = {};
 globalThis.location = {hash:"",pathname:"/",search:"",host:"localhost"};
 globalThis.sessionStorage = {getItem:()=>null};
 globalThis.history = {replaceState:()=>{}};
-globalThis.document = {hidden:false,addEventListener:(name,fn)=>callbacks[name]=fn};
+// sonner injects its stylesheet on import.
+globalThis.document = {hidden:false,addEventListener:(name,fn)=>callbacks[name]=fn,head:{appendChild(){}},createElement:()=>({appendChild(){}}),createTextNode:()=>({})};
 let ws;
 globalThis.WebSocket = class {
   static OPEN = 1;
@@ -89,3 +90,14 @@ assert.equal(toolChildId({output:'{"id":"child"}'}),'child');
 assert.equal(toolChildId({output:[{content:{text:'{"id":"acp-child"}'}}]}),'acp-child');
 assert.equal(toolChildId({text:'{"id":"demo-child"}'}),'demo-child');
 assert.equal(toolChildId({output:'normal output'}),undefined);
+
+const failedNode = {id:"agent",status:{state:"failed"}};
+set("nodes",{});
+assert.equal(newlyFailed(failedNode),true,"an agent that fails before its first event still counts");
+set("nodes",{agent:failedNode});
+assert.equal(newlyFailed(failedNode),false,"history loaded on connect is silent");
+set("nodes",{agent:{...failedNode,status:{state:"running"}}});
+assert.equal(newlyFailed(failedNode),true);
+ingest({t:"node",node:failedNode});
+assert.equal(newlyFailed(failedNode),false,"a repeated failed event is silent");
+console.log("Web store: failure transitions passed");
