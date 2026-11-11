@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useStore, set, batch } from "../store";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useStore, set, batch, frameOf } from "../store";
 import { Folder } from "lucide-react";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -23,13 +23,39 @@ export default function Canvas() {
   const [camera, move] = useState({x: 24, y: 24, z: 1});
   const container = useRef<HTMLDivElement>(null);
   const drag = useRef<{id: number; project?: string; start?: Point; x: number; y: number} | null>(null);
-  const projects = [...new Set([...Object.values(state.nodes).map(n=>n.project), ...state.outside.map(r=>r.project)])].sort();
+  const world = useRef<HTMLDivElement>(null);
+  const projects = [...new Set([...Object.values(state.nodes).map(frameOf), ...state.outside.map(r=>r.project)])].sort();
+  const placed = projects.filter(p=>positions[p]), unplaced = projects.filter(p=>!positions[p]);
+  // Unplaced frames flow in a column right of every placed frame (w-80 plus gap-8), so none can overlap.
+  const flowLeft = placed.length ? Math.max(...placed.map(p=>positions[p].x)) + 352 : 0;
   const outside = state.outside.find(r=>r.vendor_id === state.outsideSelected);
   function zoom(factor: number, x: number, y: number) {
     move(c=>{
       const z = Math.max(.25, Math.min(2, c.z * factor));
       return {x: x-(x-c.x)*z/c.z, y: y-(y-c.y)*z/c.z, z};
     });
+  }
+  // The first drag pins every frame where it is, so the rest never reflow under the moving one.
+  function grab(e: PointerEvent, project: string) {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    container.current?.focus(); container.current?.setPointerCapture(e.pointerId);
+    const origin = world.current!.getBoundingClientRect(), frozen: Record<string, Point> = {};
+    for (const el of world.current!.querySelectorAll<HTMLElement>("[data-frame]")) {
+      const r = el.getBoundingClientRect();
+      frozen[el.dataset.frame!] = {x:(r.left-origin.left)/camera.z, y:(r.top-origin.top)/camera.z};
+    }
+    place(old=>({...frozen, ...old}));
+    drag.current={id:e.pointerId,project,start:frozen[project],x:e.clientX,y:e.clientY};
+  }
+  function frame(project: string, at?: {left: number; top: number}) {
+    return <Card data-frame={project} key={project} className={at ? "absolute w-80" : "w-80"} style={at}>
+      <CardHeader className="cursor-grab touch-none" onPointerDown={e=>grab(e,project)}><Tooltip><TooltipTrigger render={<span className="flex min-w-0 items-center gap-2"/>}><Folder className="size-4 shrink-0"/><span className="truncate">{project.split("/").filter(Boolean).at(-1) || project}</span></TooltipTrigger><TooltipContent>{project}</TooltipContent></Tooltip></CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {Object.values(state.nodes).some(n=>frameOf(n)===project) && <Tree project={project}/>}
+        {state.outside.some(r=>r.project===project) && <section><h2 className="px-2 text-xs font-medium text-muted-foreground">Running here</h2><OutsideRows project={project}/></section>}
+      </CardContent>
+    </Card>;
   }
   useEffect(()=>{
     const element = container.current;
@@ -77,24 +103,9 @@ export default function Canvas() {
       }}
       onPointerUp={e=>{if(e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);}}
       onPointerCancel={()=>{drag.current=null;}}>
-      {/* Unplaced frames wrap in normal flow so they never overlap; a dragged frame becomes absolute. */}
-      <div className="relative flex w-[1024px] flex-wrap items-start gap-8" style={{transform:`translate(${camera.x}px,${camera.y}px) scale(${camera.z})`,transformOrigin:"0 0"}}>
-        {projects.map(project=>{
-          const p=positions[project];
-          return <Card data-frame key={project} className={p ? "absolute z-10 w-80" : "w-80"} style={p && {left:p.x,top:p.y}}>
-            <CardHeader className="cursor-grab touch-none" onPointerDown={e=>{
-              if(e.button !== 0) return;
-              e.stopPropagation();
-              container.current?.focus(); container.current?.setPointerCapture(e.pointerId);
-              const card=e.currentTarget.parentElement!;
-              drag.current={id:e.pointerId,project,start:{x:card.offsetLeft,y:card.offsetTop},x:e.clientX,y:e.clientY};
-            }}><Tooltip><TooltipTrigger render={<span className="flex min-w-0 items-center gap-2"/>}><Folder className="size-4 shrink-0"/><span className="truncate">{project.split("/").filter(Boolean).at(-1) || project}</span></TooltipTrigger><TooltipContent>{project}</TooltipContent></Tooltip></CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              {Object.values(state.nodes).some(n=>n.project===project) && <Tree project={project}/>}
-              {state.outside.some(r=>r.project===project) && <section><h2 className="px-2 text-xs font-medium text-muted-foreground">Running here</h2><OutsideRows project={project}/></section>}
-            </CardContent>
-          </Card>;
-        })}
+      <div ref={world} className="relative" style={{transform:`translate(${camera.x}px,${camera.y}px) scale(${camera.z})`,transformOrigin:"0 0"}}>
+        {placed.map(project=>frame(project,{left:positions[project].x,top:positions[project].y}))}
+        <div className="absolute top-0 flex w-[1024px] flex-wrap items-start gap-8" style={{left:flowLeft}}>{unplaced.map(project=>frame(project))}</div>
       </div>
     </div>
     <Sheet open={Boolean(state.selected || outside)} onOpenChange={open=>{if(!open) batch(()=>{set("selected","");set("outsideSelected","");});}}>

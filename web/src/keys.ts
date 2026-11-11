@@ -37,7 +37,8 @@ export function keys(e: KeyboardEvent) {
   if ((e.target as HTMLElement).closest("input,textarea,select,[contenteditable]")) return;
   if (e.key === "g") { prefix = true; return; }
   const key = prefix ? "g "+e.key : e.key; prefix = false;
-  const command = commands.find(c => c.key === key);
+  // Commands without a key (key "") are palette-only; an empty e.key must never run Stop.
+  const command = key ? commands.find(c => c.key === key) : undefined;
   if (command) { e.preventDefault(); command.run(); }
 }
 let prefix = false;

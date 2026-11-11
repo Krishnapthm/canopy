@@ -32,7 +32,9 @@ let previous = location.search;
 window.addEventListener("popstate",()=>{previous=location.search;restore();});
 export default function Workspace() {
   const state = useStore();
-  useEffect(()=>{if(state.view === "canvas") void refresh();},[state.view]);
+  // Discovery is scoped to every project on the canvas and to the selected cwd elsewhere.
+  const canvas = state.view === "canvas";
+  useEffect(()=>{void refresh();},[canvas]);
   const outside = state.outside.find(row=>row.vendor_id===state.outsideSelected);
   const [detected, detect] = useState<HarnessDetection[]>([]);
   useEffect(()=>{

@@ -1,4 +1,4 @@
-import { useStore, set, outline } from "../store";
+import { useStore, set, outline, frameOf } from "../store";
 import { statusIcons, harnessIcon } from "../icons";
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton } from "@/components/ui/sidebar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Folder, CircleAlert } from "lucide-react";
 export default function Tree({project}: {project?: string}) {
   const state = useStore();
-  return <SidebarMenu>{outline().filter(({node})=>project === undefined || node.project === project).map(({node, depth}) => {
+  return <SidebarMenu>{outline().filter(({node})=>project === undefined || frameOf(node) === project).map(({node, depth}) => {
     const Status = statusIcons[node.status.state], Harness = harnessIcon(node.harness);
     return <SidebarMenuItem key={node.id}>
       <SidebarMenuButton className="h-auto" style={{paddingInlineStart: 8 + depth * 16}} isActive={state.selected === node.id} onClick={() => set("selected", node.id)}>

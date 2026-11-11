@@ -48,6 +48,8 @@ export function ingest(event: Event) {
     }
   }
 }
+/** The canvas frame a node belongs to: its root agent's project, so a tree never splits across frames. */
+export const frameOf = (node: Node) => state.nodes[node.root]?.project ?? node.project;
 export function outline() {
   const rows: { node: Node; depth: number }[] = [];
   const nodes = Object.values(state.nodes);

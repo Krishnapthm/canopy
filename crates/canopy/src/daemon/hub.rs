@@ -551,6 +551,10 @@ impl Hub {
             names.sort();
             format!("unknown harness {:?}; available: {}", req.harness, names.join(", "))
         })?;
+        // A relative path would resolve against the daemon's directory, not the caller's.
+        if !std::path::Path::new(&req.cwd).is_absolute() {
+            return Err(format!("working directory must be an absolute path: {}", req.cwd));
+        }
         if !std::path::Path::new(&req.cwd).is_dir() {
             return Err(format!("working directory is missing or is not a directory: {}", req.cwd));
         }
@@ -883,7 +887,7 @@ impl Hub {
             vendor_session: None,
             title,
             cwd: p.node.cwd.clone(),
-            project: crate::paths::project_root(&p.node.cwd),
+            project: p.node.project.clone(),
             model: None,
             policy: p.node.policy,
             status: Status::Running,
