@@ -12,8 +12,9 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Kbd } from "@/components/ui/kbd";
 const GraphSession = lazy(() => import("./views/GraphSession"));
-const Tree = lazy(() => import("./views/Tree"));
-const Session = lazy(() => import("./views/Session"));
+import Tree from "./views/Tree";
+import Session from "./views/Session";
+const Extensions = lazy(() => import("./views/Extensions"));
 const Palette = lazy(() => import("./views/Palette"));
 const NewAgent = lazy(() => import("./views/NewAgent"));
 import type { HarnessDetection } from "./protocol.gen";
@@ -43,8 +44,8 @@ export default function Workspace() {
   return <Suspense fallback={<p>Loading…</p>}><SidebarProvider><Sidebar><SidebarHeader><h1 className="flex items-center gap-2"><Earth/>Canopy</h1><Button onClick={()=>commands.find(c=>c.id==="new")!.run()}><Plus data-icon="inline-start"/>New agent</Button><Input id="filter" aria-label="Filter agents" placeholder="Filter agents /" value={state.filter} onChange={e=>set("filter",e.target.value)}/></SidebarHeader><SidebarContent><SidebarGroup><Tree/></SidebarGroup></SidebarContent></Sidebar>
     <SidebarInset className="h-svh min-w-0"><header className="flex flex-wrap items-center gap-3 p-3"><SidebarTrigger/><Earth/>Local workspace <output>{state.connected?"Connected":"Reconnecting…"}</output><Button variant="outline" onClick={()=>set("palette",true)}><Terminal data-icon="inline-start"/>Commands<Kbd>⌘K</Kbd></Button><Tabs value={state.view} onValueChange={value=>set("view",String(value))}><TabsList><TabsTrigger value="tree"><ListTree/>Outline</TabsTrigger><TabsTrigger value="graph"><Network/>Graph</TabsTrigger></TabsList></Tabs></header>
     {state.error && <Alert><AlertTitle>{state.error}</AlertTitle><Button variant="ghost" onClick={()=>set("error","")}>Dismiss</Button></Alert>}
-    <main className="min-h-0 flex-1">
-    {state.view==="plugins" ? <Empty><EmptyHeader><Earth/><EmptyTitle>Plugins and skills</EmptyTitle></EmptyHeader></Empty> :
+    <main className="flex min-h-0 flex-1 flex-col">
+    {state.view==="plugins" ? <Extensions key={state.nodes[state.selected]?.cwd ?? "global"}/> :
     !Object.keys(state.nodes).length ? <Empty><EmptyHeader><EmptyTitle>No agents yet</EmptyTitle><EmptyDescription>Start an agent to follow its work here.</EmptyDescription></EmptyHeader><EmptyContent>{detected.map(h=><p key={h.name}>{h.name}: {h.version ?? "not installed"}{h.logged_in === false && " - logged out"}{(!h.version || h.logged_in === false) && " - "+h.login_command}</p>)}<Button onClick={()=>commands.find(c=>c.id==="new")!.run()}><Plus data-icon="inline-start"/>New agent</Button></EmptyContent></Empty> :
     state.view==="graph" ? <GraphSession/> : <Session/>}
     </main></SidebarInset>{state.palette && <Palette/>}{state.newAgent && <NewAgent/>}</SidebarProvider></Suspense>;

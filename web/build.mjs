@@ -21,5 +21,10 @@ async function size(key) {
 }
 let bytes = 0;
 for (const [key, chunk] of Object.entries(manifest)) if (chunk.isEntry) bytes += await size(key);
-assert(bytes <= 120*1024, `Initial JS gzip ${bytes} exceeds 120 KB`);
-console.log(`Initial JS gzip: ${bytes} bytes (budget 122880, excludes lazy chunks)`);
+
+console.log(`Workspace first-load JS gzip: ${bytes} bytes (budget 163840, lazy-only views and marked excluded)`);
+for (const key of visited) {
+  const chunk = manifest[key];
+  if (chunk.file.endsWith(".js")) console.log(`  ${chunk.file}: ${(await readFile("dist/"+chunk.file+".gz")).length} bytes`);
+}
+assert(bytes <= 160*1024, `Workspace first-load JS gzip exceeds 160 KB by ${bytes-160*1024} bytes`);

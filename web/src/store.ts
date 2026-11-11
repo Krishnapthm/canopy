@@ -59,3 +59,15 @@ export function text(item: Item) {
   return typeof item.body === "object" && item.body !== null && !Array.isArray(item.body)
     ? String(item.body.text ?? JSON.stringify(item.body)) : String(item.body ?? "");
 }
+export function permissionSummary(item: Item) {
+  const body = item.body;
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return {title:text(item), summary:""};
+  const tool = body.tool;
+  const input = body.input ?? (typeof tool === "object" && tool !== null && !Array.isArray(tool) ? tool.rawInput : undefined) ?? body.request;
+  const summary = typeof input === "string" ? input : typeof input === "object" && input !== null && !Array.isArray(input)
+    ? Object.entries(input).filter(([,value]) => typeof value === "string" || typeof value === "number" || typeof value === "boolean").map(([key,value]) => `${key}: ${value}`).join("; ") : "";
+  return {
+    title: typeof body.title === "string" ? body.title : typeof tool === "string" ? tool : "Permission requested",
+    summary: summary ? summary.replace(/\s+/g," ").slice(0,160) : typeof tool === "object" && tool !== null && !Array.isArray(tool) && typeof tool.kind === "string" ? tool.kind.replaceAll("_", " ") : "Review this action before allowing it.",
+  };
+}

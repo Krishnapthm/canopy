@@ -8,8 +8,8 @@ export default function Tree() {
   const state = useStore();
   return <SidebarMenu>{outline().map(({node, depth}) => {
     const Status = statusIcons[node.status.state], Harness = harnessIcon(node.harness);
-    return <SidebarMenuItem key={node.id} style={{paddingInlineStart: depth * 16}}>
-      <SidebarMenuButton className="h-auto" isActive={state.selected === node.id} onClick={() => set("selected", node.id)}>
+    return <SidebarMenuItem key={node.id}>
+      <SidebarMenuButton className="h-auto" style={{paddingInlineStart: 8 + depth * 16}} isActive={state.selected === node.id} onClick={() => set("selected", node.id)}>
         <Status aria-label={node.status.state}/>
         <div className="flex min-w-0 flex-col gap-1">
           <strong className="truncate">{node.title || node.id.slice(-8)}</strong>

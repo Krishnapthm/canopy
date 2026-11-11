@@ -9,7 +9,7 @@ const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) 
 const token = location.hash.slice(1) || sessionStorage.getItem("canopy-token") || "";
 if (token) sessionStorage.setItem("canopy-token", token);
 history.replaceState(null, "", location.pathname + location.search);
-function call(op: Op): Promise<any> {
+export function call(op: Op): Promise<any> {
   if (socket?.readyState !== WebSocket.OPEN) return Promise.reject(new Error("Disconnected"));
   return new Promise((resolve, reject) => {
     const id = ++next;

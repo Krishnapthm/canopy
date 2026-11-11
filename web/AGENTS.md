@@ -15,8 +15,8 @@
 - Chat uses MessageScroller, Message, Bubble and Marker. No eyebrow labels.
 - Use gap, size and cn for layout; do not modify UI components except for type fixes.
 - ADR 0022 approves the stack. No router, state library or additional dependencies.
-- Run make web for production assets and the 120 KB initial JS gzip assertion.
-- build.mjs traverses static manifest imports, excluding lazy workspace, views and Markdown.
+- Run make web for production assets and the 160 KB first-load JS gzip assertion.
+- build.mjs traverses static manifest imports, including Workspace, Tree, Session and their static dependencies.
 - Build assets before cargo install or release builds. make build does both.
 - For development, start a foreground daemon with a temporary CANOPY_HOME.
 - Copy the printed web URL origin into CANOPY_WEB_ORIGIN, then run npm exec vite.
@@ -34,5 +34,5 @@
 8. Restart the daemon in the same temp home: reconnect and resync without reload.
 9. Stop temporary processes and delete only that temporary home.
 
-Browser checks require a visible browser. The initial gzip budget excludes lazy chunks;
-it does not measure total workspace transfer, frame rate, accessibility or heap.
+Browser checks require a visible browser. The first-load gzip budget excludes lazy-only
+views and marked; it does not measure frame rate, accessibility or heap.

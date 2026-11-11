@@ -45,11 +45,11 @@ components and unused direct runtime dependencies are removed.
 
 ## Consequences
 
-The JS budget becomes 120 KB gzip for the initial entry and its static import
-closure. The workspace shell, views and Markdown load as separate lazy chunks.
-The build manifest drives measurement, so shared static chunks are counted once.
-Initial JS measures about 69 KiB gzip; this excludes the lazy workspace and must
-not be described as the total first workspace transfer. All assets receive gzip
+The JS budget is 160 KB gzip for everything the workspace needs on first load
+(entry, the workspace chunk and their static imports). Only Markdown and views not
+shown at first are lazy and excluded. Measured at adoption: about 152 KB, of which
+react-dom is about 45 KB. 120 KB was the first estimate; the user accepted 160 KB
+as the real cost of React and shadcn on a localhost page. All assets receive gzip
 sidecars for embedding.
 
 Streaming batches publish one immutable snapshot per frame. React rerenders

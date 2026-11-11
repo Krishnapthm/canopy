@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {state,items,ingest,outline,set,listen,batch} from "./src/store.ts";
+import {state,items,ingest,outline,set,listen,batch,permissionSummary} from "./src/store.ts";
 const item = {id:"one",session:"session",seq:1,body:{text:"a"},state:"streaming",kind:"agent_message"};
 items("session",[item]);
 ingest({t:"delta",session:"session",item:"one",text:"b"});
@@ -29,3 +29,39 @@ unlisten();
 set("filter", "test");
 assert.equal(notifications, 1);
 console.log("Web store: immutable snapshots, batched notifications and unsubscribe passed");
+
+// Exercise the transport snapshot path, including a selected idle session on reconnect.
+const callbacks = {};
+globalThis.location = {hash:"",pathname:"/",search:"",host:"localhost"};
+globalThis.sessionStorage = {getItem:()=>null};
+globalThis.history = {replaceState:()=>{}};
+globalThis.document = {hidden:false,addEventListener:(name,fn)=>callbacks[name]=fn};
+let ws;
+globalThis.WebSocket = class {
+  static OPEN = 1;
+  readyState = 1;
+  constructor() { ws = this; }
+  send(raw) {
+    const request = JSON.parse(raw);
+    const result = request.op === "hello" ? {harnesses:["fake"]} : request.op === "sub_tree" ? {nodes:[]} : {items:[
+      {...item,id:"user",kind:"user_message",body:{text:"plan"}},
+      {...item,id:"agent",kind:"agent_message",body:{text:"Planning a **small** change"}},
+      {...item,id:"tool",kind:"tool_call",body:{title:"spawn_agent",input:{}}},
+    ]};
+    queueMicrotask(()=>this.onmessage({data:JSON.stringify({t:"res",id:request.id,result})}));
+  }
+};
+const { registerHooks } = await import("node:module");
+registerHooks({ resolve(specifier, context, nextResolve) {
+  if (context.parentURL?.includes("/web/src/") && specifier.startsWith("./") && !specifier.endsWith(".ts")) specifier += ".ts";
+  return nextResolve(specifier, context);
+} });
+const {connect,subscriptions} = await import("./src/conn.ts");
+set("selected","idle-root");
+subscriptions(); connect(); await ws.onopen();
+await new Promise(resolve=>setTimeout(resolve,0));
+assert.deepEqual(state.sessions["idle-root"].items.map(i=>i.kind),["user_message","agent_message","tool_call"]);
+console.log("Web transport: idle root subscription snapshot passed");
+
+assert.deepEqual(permissionSummary({...item,body:{title:"Write config.toml",tool:{kind:"execute",rawInput:{secret:"hidden"}}}}),{title:"Write config.toml",summary:"secret: hidden"});
+assert.deepEqual(permissionSummary({...item,body:{title:"Bash",input:{command:"cargo test\n--offline"}}}),{title:"Bash",summary:"command: cargo test --offline"});

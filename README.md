@@ -206,7 +206,7 @@ MIT
 
 ## Web development
 
-Build the web app with `make web`. It checks the 120 KB initial JavaScript gzip budget.
+Build the web app with `make web`. It checks the 160 KB workspace first-load JavaScript gzip budget.
 The web app follows your system light or dark theme. Use Outline or Graph to switch
 views, and press `?` for keyboard help or `Cmd-K` for commands.
 `make build` builds the app and embeds it in the release binary.
@@ -217,6 +217,11 @@ From the web directory, run `CANOPY_WEB_ORIGIN=http://127.0.0.1:PORT npm exec vi
 using the printed port. Open Vite's local URL with the same #token fragment
 from the printed Canopy URL. Stop Vite and the foreground daemon
 with Ctrl-C when done. Normal use needs only `canopy web`.
+
+In the web app, press `g p` or choose Plugins and skills in the command palette.
+The list includes global items and project items for the selected agent. Use the
+harness switches to change an item or Adopt to move a vendor skill into the library.
+Opening the view or changing an item reads a fresh list.
 
 In the TUI, press `g p` to open plugins and skills for the current project. Use the
 arrow keys to select an item, Space to switch it, and `r` to read the list again.
