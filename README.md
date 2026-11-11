@@ -9,7 +9,7 @@ what each one is doing and how many tokens it has used.
 Everything runs on your machine. Canopy uses the `claude` and `codex` you already have
 installed and logged in. It never sees your API keys.
 
-> Status: early. The command line works today. A terminal UI and a web app are coming.
+> Status: early. The terminal UI and command line work today. A web app is coming.
 
 ## Before you start
 
@@ -56,7 +56,20 @@ still fails, run `source ~/.cargo/env` and try once more.
 
 ## Your first agent
 
-Go to any project folder and start an agent:
+Go to any project folder and open the control room:
+
+```bash
+canopy
+```
+
+Press `c`, type `claude explain what this project does`, then Enter. Use `j/k` to
+select agents, `i` to message, `a/d` to answer permissions, and `x` to interrupt.
+Press `:` for all commands, `?` for help, and `q` to quit. Agents keep running;
+open `canopy` again to reattach. Use Page Up and Page Down to scroll output.
+Set `CANOPY_NERD_FONT=1` to use the Nerd Font earth icon (requires a patched font).
+The default uses plain text symbols.
+
+For scripts, start an agent with:
 
 ```bash
 canopy run claude "explain what this project does"

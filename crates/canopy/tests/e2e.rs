@@ -212,3 +212,19 @@ fn unknown_harness_is_rejected_with_the_available_list() {
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("available: claude, codex, fake, fake2"));
 }
+
+#[allow(dead_code)]
+#[path = "../src/client.rs"]
+mod client;
+#[allow(dead_code)]
+#[path = "../src/paths.rs"]
+mod paths;
+#[allow(dead_code)]
+#[path = "../src/tui/mod.rs"]
+mod tui;
+
+#[test]
+fn tui_key_driven_control_and_reattach() {
+    let daemon = Daemon::start("tui", &[]);
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(tui::scripted_test(&daemon.home)).unwrap();
+}

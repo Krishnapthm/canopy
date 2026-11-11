@@ -6,8 +6,10 @@ license.workspace = true
 
 [dependencies]
 anyhow = "1.0.104"
+crossterm = "0.29.0"
 pico-args = "0.5.0"
 protocol = { version = "0.1.0", path = "../protocol" }
+ratatui = "0.30.2"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

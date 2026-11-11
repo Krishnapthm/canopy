@@ -1,0 +1,403 @@
+//! Event-driven socket client. Terminal input blocks on a dedicated reader thread.
+mod input;
+mod session;
+mod tree;
+
+use crate::client::Client;
+use anyhow::{Context, Result};
+use crossterm::{
+    event::{self, Event as TerminalEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use input::CommandId;
+use protocol::{Decision, Event, Item, ItemKind, ItemState, Node, Op, Policy, SpawnReq};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Layout},
+    widgets::{Block, Paragraph},
+};
+use std::{collections::HashSet, time::Duration};
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    #[default]
+    Tree,
+    New,
+    Compose,
+    Filter,
+    Palette,
+    Help,
+    Plugins,
+}
+
+#[derive(Default)]
+struct App {
+    nodes: Vec<Node>,
+    items: Vec<Item>,
+    selected: Option<String>,
+    collapsed: HashSet<String>,
+    text: String,
+    filter: String,
+    mode: Mode,
+    message: String,
+    harnesses: String,
+    parent: Option<String>,
+    prefix: bool,
+    scroll: u16,
+}
+
+impl App {
+    fn event(&mut self, event: Event) {
+        match event {
+            Event::Node { node } => {
+                if let Some(n) = self.nodes.iter_mut().find(|n| n.id == node.id) {
+                    *n = *node;
+                } else {
+                    self.nodes.push(*node);
+                }
+            }
+            Event::Item { item } if Some(&item.session) == self.selected.as_ref() => {
+                if let Some(i) = self.items.iter_mut().find(|i| i.id == item.id) {
+                    *i = item;
+                } else {
+                    self.items.push(item);
+                }
+            }
+            Event::Delta { session, item, text } if Some(&session) == self.selected.as_ref() => {
+                if let Some(i) = self.items.iter_mut().find(|i| i.id == item) {
+                    let mut body = i.body["text"].as_str().unwrap_or_default().to_owned();
+                    body.push_str(&text);
+                    i.body["text"] = body.into();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn select(&mut self, client: &mut Client, id: String) -> Result<()> {
+        if self.selected.as_ref() == Some(&id) {
+            return Ok(());
+        }
+        if let Some(old) = &self.selected {
+            client.call(Op::UnsubSession { session: old.clone() }).await?;
+        }
+        let response = client.call(Op::SubSession { session: id.clone(), after_seq: None, tail: Some(300) }).await?;
+        self.items = serde_json::from_value(response["items"].clone())?;
+        self.selected = Some(id);
+        self.scroll = 0;
+        Ok(())
+    }
+
+    async fn key(&mut self, key: KeyEvent, client: &mut Client) -> Result<bool> {
+        if key.kind == KeyEventKind::Release {
+            return Ok(false);
+        }
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Ok(true);
+        }
+        if key.code == KeyCode::Char('k') && key.modifiers.intersects(KeyModifiers::SUPER | KeyModifiers::CONTROL) {
+            return self.command(CommandId::Palette, client).await;
+        }
+        if self.prefix {
+            self.prefix = false;
+            if let Some(id) = input::command(key.code, true) {
+                return self.command(id, client).await;
+            }
+            return Ok(false);
+        }
+        if matches!(self.mode, Mode::Compose | Mode::New | Mode::Filter | Mode::Palette) {
+            match key.code {
+                KeyCode::Esc => {
+                    self.mode = Mode::Tree;
+                    self.text.clear();
+                }
+                KeyCode::Backspace => {
+                    self.text.pop();
+                }
+                KeyCode::Char(c) => self.text.push(c),
+                KeyCode::Enter => {
+                    let text = self.text.clone();
+                    match self.mode {
+                        Mode::New => {
+                            let (harness, prompt) = text.split_once(' ').context("enter: harness task")?;
+                            anyhow::ensure!(!prompt.trim().is_empty(), "enter a task");
+                            let r = client
+                                .call(Op::Spawn(SpawnReq {
+                                    harness: harness.into(),
+                                    prompt: prompt.into(),
+                                    cwd: std::env::current_dir()?.to_string_lossy().into_owned(),
+                                    model: None,
+                                    policy: Policy::Ask,
+                                    parent: self.parent.clone(),
+                                    title: None,
+                                }))
+                                .await?;
+                            let id = r["session"].as_str().context("missing session id")?;
+                            self.select(client, id.into()).await?;
+                        }
+                        Mode::Compose => {
+                            anyhow::ensure!(!text.trim().is_empty(), "enter a message");
+                            if let Some(session) = &self.selected {
+                                let r = client.call(Op::Send { session: session.clone(), text, interrupt: false }).await?;
+                                self.message = r["delivery"].as_str().unwrap_or_default().into();
+                            }
+                        }
+                        Mode::Filter => self.filter = text,
+                        Mode::Palette => {
+                            let id = input::COMMANDS.iter().find(|c| c.title.to_lowercase().contains(&text.to_lowercase())).map(|c| c.id);
+                            self.mode = Mode::Tree;
+                            self.text.clear();
+                            if let Some(id) = id {
+                                return self.command(id, client).await;
+                            }
+                        }
+                        _ => {}
+                    }
+                    self.mode = Mode::Tree;
+                    self.text.clear();
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+        match key.code {
+            KeyCode::Char('g') => self.prefix = true,
+            KeyCode::PageDown => self.scroll = self.scroll.saturating_add(10),
+            KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(10),
+            code => {
+                if let Some(id) = input::command(code, false) {
+                    return self.command(id, client).await;
+                }
+            }
+        }
+        Ok(false)
+    }
+
+    async fn command(&mut self, id: CommandId, client: &mut Client) -> Result<bool> {
+        match id {
+            CommandId::Quit => return Ok(true),
+            CommandId::New | CommandId::Child => {
+                self.parent = if id == CommandId::Child { self.selected.clone() } else { None };
+                self.mode = Mode::New;
+                self.text.clear();
+            }
+            CommandId::Compose | CommandId::Filter | CommandId::Palette | CommandId::Help | CommandId::Plugins => {
+                self.mode = match id {
+                    CommandId::Compose => Mode::Compose,
+                    CommandId::Filter => Mode::Filter,
+                    CommandId::Palette => Mode::Palette,
+                    CommandId::Help => Mode::Help,
+                    CommandId::Plugins => Mode::Plugins,
+                    _ => unreachable!(),
+                };
+                self.text.clear();
+            }
+            CommandId::Back | CommandId::Tree => self.mode = Mode::Tree,
+            CommandId::Collapse => {
+                if let Some(id) = &self.selected {
+                    self.collapsed.insert(id.clone());
+                }
+            }
+            CommandId::Expand => {
+                if let Some(id) = &self.selected {
+                    self.collapsed.remove(id);
+                }
+            }
+            CommandId::Down | CommandId::Up | CommandId::Open => {
+                let rows = tree::rows(self);
+                let pos = rows.iter().position(|(n, _)| Some(&n.id) == self.selected.as_ref());
+                let index = match (id, pos) {
+                    (CommandId::Down, Some(p)) => (p + 1).min(rows.len().saturating_sub(1)),
+                    (CommandId::Up, Some(p)) => p.saturating_sub(1),
+                    (_, Some(p)) => p,
+                    _ => 0,
+                };
+                if let Some((node, _)) = rows.get(index) {
+                    self.select(client, node.id.clone()).await?;
+                }
+            }
+            CommandId::Interrupt => {
+                if let Some(session) = &self.selected {
+                    client.call(Op::Interrupt { session: session.clone() }).await?;
+                }
+            }
+            CommandId::Allow | CommandId::Deny => {
+                if let Some(i) = self.items.iter().find(|i| i.kind == ItemKind::Permission && i.state == ItemState::Streaming) {
+                    client
+                        .call(Op::Permission {
+                            session: i.session.clone(),
+                            request: i.id.clone(),
+                            decision: if id == CommandId::Allow { Decision::Allow } else { Decision::Deny },
+                        })
+                        .await?;
+                }
+            }
+        }
+        Ok(false)
+    }
+}
+
+fn harness_list(value: &serde_json::Value) -> String {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| row.as_str().or_else(|| row.get("name").and_then(serde_json::Value::as_str)))
+        .map(|name| format!("◇ {name}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn draw(frame: &mut Frame, app: &App) {
+    let vertical = Layout::vertical([Constraint::Min(0), Constraint::Length(3), Constraint::Length(3)]).split(frame.area());
+    let columns = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)]).split(vertical[0]);
+    let globe = if std::env::var_os("CANOPY_NERD_FONT").is_some() { "\u{f01e7}" } else { "⊕" };
+    frame.render_widget(tree::widget(app).block(Block::bordered().title(format!("{globe} Agents"))), columns[0]);
+    let special = match app.mode {
+        Mode::Plugins => Some("◇ Plugins and skills land in M5.5".into()),
+        Mode::Help | Mode::Palette => {
+            Some(input::COMMANDS.iter().map(|c| format!("{}  {}", c.key, c.title)).collect::<Vec<_>>().join("\n"))
+        }
+        _ if app.nodes.is_empty() => {
+            Some(format!("Detected harnesses:\n{}\n\n+ New agent: press c, enter harness task, then Enter", app.harnesses))
+        }
+        _ => None,
+    };
+    if let Some(text) = special {
+        frame.render_widget(Paragraph::new(text).block(Block::bordered().title("Canopy")), columns[1]);
+    } else {
+        frame.render_widget(session::widget(app).block(Block::bordered().title("↵ Session - PgUp/PgDn")), columns[1]);
+    }
+    let permission = app.items.iter().find(|i| i.kind == ItemKind::Permission && i.state == ItemState::Streaming);
+    let bar = permission
+        .map(|i| format!("! {}  a allow / d deny", session::permission(&i.body)))
+        .unwrap_or_else(|| format!("{}  c new · i message · x interrupt · : commands · q quit", app.message));
+    frame.render_widget(Paragraph::new(bar).block(Block::bordered()), vertical[1]);
+    frame.render_widget(
+        Paragraph::new(app.text.as_str()).block(Block::bordered().title(match app.mode {
+            Mode::New => "+ New agent: harness task",
+            Mode::Filter => "⌕ Filter",
+            Mode::Palette => "≡ Command name",
+            _ => "› Message",
+        })),
+        vertical[2],
+    );
+}
+
+struct Restore;
+impl Drop for Restore {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(std::io::stdout(), LeaveAlternateScreen);
+    }
+}
+
+pub async fn run() -> Result<()> {
+    enable_raw_mode()?;
+    let _restore = Restore;
+    execute!(std::io::stdout(), EnterAlternateScreen)?;
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
+    let mut app = App::default();
+    terminal.draw(|f| draw(f, &app))?;
+    let mut client = Client::connect(&crate::paths::home()?).await?;
+    let hello = client.call(Op::Hello { version: protocol::VERSION }).await?;
+    app.harnesses = harness_list(&hello["harnesses"]);
+    let tree = client.call(Op::SubTree).await?;
+    app.nodes = serde_json::from_value(tree["nodes"].clone())?;
+    if let Some(n) = app.nodes.first() {
+        app.select(&mut client, n.id.clone()).await?;
+    }
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    std::thread::spawn(move || {
+        loop {
+            let e = event::read();
+            let failed = e.is_err();
+            if tx.blocking_send(e).is_err() || failed {
+                break;
+            }
+        }
+    });
+    let mut pending = true;
+    let mut last = tokio::time::Instant::now();
+    loop {
+        tokio::select! {
+            e = client.next_event() => { app.event(e?); pending = true; }
+            e = rx.recv() => {
+                match e.context("terminal input closed")?? {
+                    TerminalEvent::Key(k) => match app.key(k, &mut client).await { Ok(true) => break, Ok(false) => {}, Err(e) => app.message = e.to_string() },
+                    TerminalEvent::Resize(_, _) => {},
+                    _ => continue,
+                }
+                pending = true;
+            }
+            _ = tokio::time::sleep_until(last + Duration::from_millis(34)), if pending => {
+                terminal.draw(|f| draw(f, &app))?; last = tokio::time::Instant::now(); pending = false;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub async fn scripted_test(home: &std::path::Path) -> Result<()> {
+    use ratatui::backend::TestBackend;
+    let mut client = Client::connect(home).await?;
+    let mut app = App::default();
+    let mut terminal = ratatui::Terminal::new(TestBackend::new(100, 30))?;
+    terminal.draw(|f| draw(f, &app))?;
+    assert!(terminal.backend().buffer().content.iter().any(|c| c.symbol() == "+"));
+    let tree = client.call(Op::SubTree).await?;
+    assert!(tree["nodes"].as_array().is_some_and(Vec::is_empty));
+    for (key, mode) in [('p', Mode::Plugins), ('t', Mode::Tree)] {
+        app.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE), &mut client).await?;
+        app.key(KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE), &mut client).await?;
+        assert_eq!(app.mode, mode);
+    }
+    app.key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE), &mut client).await?;
+    for c in "fake ask test".chars() {
+        app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), &mut client).await?;
+    }
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &mut client).await?;
+    let session = app.selected.clone().context("launch did not select a session")?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            app.event(client.next_event().await?);
+            if app.items.iter().any(|i| i.kind == ItemKind::Permission && i.state == ItemState::Streaming) {
+                break;
+            }
+        }
+        anyhow::Ok(())
+    })
+    .await??;
+    terminal.draw(|f| draw(f, &app))?;
+    app.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE), &mut client).await?;
+    app.key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE), &mut client).await?;
+    app.text = "follow up".into();
+    app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), &mut client).await?;
+    assert!(!app.message.is_empty());
+    app.key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), &mut client).await?;
+    assert!(app.key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE), &mut client).await?);
+    drop(client);
+    let mut client = Client::connect(home).await?;
+    let tree = client.call(Op::SubTree).await?;
+    assert!(tree["nodes"].as_array().context("nodes")?.iter().any(|n| n["id"] == session));
+    let mut app = App::default();
+    app.select(&mut client, session).await?;
+    terminal.draw(|f| draw(f, &app))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn harness_names_render_as_lines_for_both_hello_shapes() {
+        assert_eq!(harness_list(&json!(["claude", "codex"])), "◇ claude\n◇ codex");
+        assert_eq!(harness_list(&json!([{"name":"claude", "logged_in":true}, {}])), "◇ claude");
+        assert_eq!(harness_list(&json!(null)), "");
+    }
+}

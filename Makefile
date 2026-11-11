@@ -4,6 +4,7 @@ CARGO ?= cargo
 .PHONY: check test e2e bench gen web build check-docs
 
 check: web/node_modules
+	@if rg -n '\p{Emoji_Presentation}|\x{FE0F}' crates/canopy/src/tui web/src; then echo "emoji code points are forbidden"; exit 1; fi
 	$(CARGO) fmt --all --check
 	$(CARGO) clippy --workspace --all-targets --all-features -- -D warnings
 	cd web && npx tsc --noEmit
