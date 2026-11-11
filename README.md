@@ -44,12 +44,17 @@ Check that it worked:
 canopy doctor
 ```
 
-You should see something like:
+The table shows installed versions beside recorded versions and each CLI's login state.
+Bare `canopy` prints the same table until the terminal UI lands. OpenCode, Copilot CLI
+and Gemini CLI are detected but not supported yet.
 
+Try a disposable agent tree without a subscription or tokens:
+
+```bash
+canopy demo
 ```
-claude   2.1.318 (Claude Code)  logged in
-codex    codex-cli 0.165.0  logged in
-```
+
+The demo starts a temporary foreground daemon and stops it before exiting.
 
 **Seeing `canopy: command not found`?** Open a new terminal window and try again. If it
 still fails, run `source ~/.cargo/env` and try once more.
@@ -168,6 +173,12 @@ make e2e      # full tests with fake agents, no real tokens spent
 
 New here? Read [AGENTS.md](AGENTS.md) for the rules of the codebase and
 [PLAN.md](PLAN.md) for the design.
+
+Agents share the parent's project folder, so helpers can edit the same files. Each harness
+loads your own plugins, hooks and MCP servers. Canopy does not change your login or read
+credentials; it drives the official CLI and uses its status command to check login.
+
+To uninstall, remove the `canopy` binary from `~/.cargo/bin` and delete `~/.canopy`.
 
 ## License
 

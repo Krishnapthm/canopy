@@ -13,6 +13,7 @@ web/node_modules: web/package.json
 	@touch $@
 
 test:
+	python3 scripts/record-fixture.py --test
 	$(CARGO) test --workspace --lib --bins
 
 e2e:

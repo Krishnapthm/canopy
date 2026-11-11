@@ -224,3 +224,118 @@ pub fn command(program: &str, args: &[String], cwd: &std::path::Path) -> tokio::
         .kill_on_drop(true);
     c
 }
+
+/// Detection facts are pinned to recordings, not inferred from auth output.
+pub struct Detection {
+    pub name: &'static str,
+    pub binary: &'static str,
+    pub version_args: &'static [&'static str],
+    pub status_args: &'static [&'static str],
+    pub login: &'static str,
+    pub recorded: &'static str,
+    pub adapter: Option<Kind>,
+}
+
+pub const DETECTION: &[Detection] = &[
+    Detection {
+        name: "Claude Code",
+        binary: "claude",
+        version_args: &["--version"],
+        status_args: &["auth", "status"],
+        login: "claude auth login",
+        recorded: "2.1.318",
+        adapter: Some(Kind::Claude),
+    },
+    Detection {
+        name: "Codex",
+        binary: "codex",
+        version_args: &["--version"],
+        status_args: &["login", "status"],
+        login: "codex login",
+        recorded: "0.165.0",
+        adapter: Some(Kind::Codex),
+    },
+    Detection {
+        name: "OpenCode",
+        binary: "opencode",
+        version_args: &["--version"],
+        status_args: &[],
+        login: "",
+        recorded: "unverified",
+        adapter: None,
+    },
+    Detection {
+        name: "Copilot CLI",
+        binary: "copilot",
+        version_args: &["--version"],
+        status_args: &[],
+        login: "",
+        recorded: "unverified",
+        adapter: None,
+    },
+    Detection {
+        name: "Gemini CLI",
+        binary: "gemini",
+        version_args: &["--version"],
+        status_args: &[],
+        login: "",
+        recorded: "on hold",
+        adapter: None,
+    },
+];
+
+pub async fn detect() -> Vec<protocol::HarnessDetection> {
+    let mut tasks = Vec::new();
+    for row in DETECTION {
+        tasks.push(tokio::spawn(async move {
+            let version = async {
+                let out = tokio::process::Command::new(row.binary)
+                    .args(row.version_args)
+                    .stdin(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .kill_on_drop(true)
+                    .output()
+                    .await
+                    .ok()?;
+                out.status
+                    .success()
+                    .then(|| String::from_utf8_lossy(&out.stdout).trim().chars().filter(|c| !c.is_control()).take(100).collect::<String>())
+            };
+            let login = async {
+                if row.status_args.is_empty() {
+                    return None;
+                }
+                tokio::process::Command::new(row.binary)
+                    .args(row.status_args)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .kill_on_drop(true)
+                    .status()
+                    .await
+                    .ok()
+                    .map(|s| s.success())
+            };
+            let (version, logged_in) = tokio::join!(
+                tokio::time::timeout(Duration::from_millis(800), version),
+                tokio::time::timeout(Duration::from_millis(800), login)
+            );
+            protocol::HarnessDetection {
+                name: row.name.into(),
+                binary: row.binary.into(),
+                version: version.ok().flatten(),
+                logged_in: logged_in.ok().flatten(),
+                recorded: row.recorded.into(),
+                supported: row.adapter.is_some(),
+                login_command: row.login.into(),
+            }
+        }));
+    }
+    let mut rows = Vec::new();
+    for task in tasks {
+        if let Ok(row) = task.await {
+            rows.push(row);
+        }
+    }
+    rows
+}

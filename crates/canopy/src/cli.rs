@@ -10,7 +10,7 @@ use std::io::Write;
 
 pub async fn run(cmd: String, mut p: pico_args::Arguments) -> Result<()> {
     if cmd == "doctor" {
-        return doctor();
+        return doctor().await;
     }
     let mut c = Client::connect(&paths::home()?).await?;
     match cmd.as_str() {
@@ -191,21 +191,20 @@ fn print_tree(nodes: &[Node]) {
 }
 
 /// Prints each built-in harness's version and login state. Runs only the CLIs' own
-/// side-effect-free status commands (see docs/harness-notes/).
-fn doctor() -> Result<()> {
-    let checks: [(&str, &[&str], &[&str]); 2] =
-        [("claude", &["--version"], &["auth", "status"]), ("codex", &["--version"], &["login", "status"])];
-    for (name, version, login) in checks {
-        let run = |args: &[&str]| std::process::Command::new(name).args(args).stdin(std::process::Stdio::null()).output();
-        match run(version) {
-            Err(_) => println!("{name:<8} not installed"),
-            Ok(v) => {
-                let ver = String::from_utf8_lossy(&v.stdout).trim().to_owned();
-                // Only the exit status is used: the output can contain account details.
-                let logged_in = run(login).map(|o| o.status.success()).unwrap_or(false);
-                println!("{name:<8} {ver}  {}", if logged_in { "logged in" } else { "NOT logged in" });
-            }
-        }
+/// status commands, discarding their output (see docs/harness-notes/).
+async fn doctor() -> Result<()> {
+    println!("HARNESS       INSTALLED                       RECORDED     STATUS");
+    for row in crate::harness::detect().await {
+        let status = if row.version.is_none() {
+            "not installed".to_owned()
+        } else if !row.supported {
+            "detected, not supported yet".to_owned()
+        } else if row.logged_in == Some(true) {
+            "logged in".to_owned()
+        } else {
+            format!("login unknown or logged out; run {}", row.login_command)
+        };
+        println!("{:<13} {:<31} {:<12} {}", row.name, row.version.as_deref().unwrap_or("-"), row.recorded, status);
     }
     Ok(())
 }

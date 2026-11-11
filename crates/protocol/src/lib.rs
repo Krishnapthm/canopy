@@ -152,9 +152,22 @@ wire! {
         pub title: Option<String>,
     }
 
+    /// One fresh CLI probe. Login state comes only from the vendor status exit code.
+    pub struct HarnessDetection {
+        pub name: String,
+        pub binary: String,
+        pub version: Option<String>,
+        pub logged_in: Option<bool>,
+        pub recorded: String,
+        pub supported: bool,
+        pub login_command: String,
+    }
+
     #[serde(tag = "op", rename_all = "snake_case")]
     pub enum Op {
         Hello { version: u32 },
+        /// Fresh probes, returned in `result.harnesses`; never blocks the hub.
+        Detect,
         SubTree,
         SubSession { session: SessionId, after_seq: Option<u64>, tail: Option<u32> },
         UnsubSession { session: SessionId },
@@ -226,6 +239,7 @@ mod gen_ts {
             Delivery::decl(&cfg),
             Decision::decl(&cfg),
             SpawnReq::decl(&cfg),
+            HarnessDetection::decl(&cfg),
             Op::decl(&cfg),
             Request::decl(&cfg),
             Event::decl(&cfg),

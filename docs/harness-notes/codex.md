@@ -229,3 +229,6 @@ and `thread/tokenUsage/updated` totals. The child wrote the file with a shell co
 - No `-32001` event was observed; queue saturation and jittered retry behavior were not tested. Nested MCP config objects and timeout defaults were not tested; dotted keys and an explicit one-second timeout were verified.
 - Login status was tested only for ChatGPT login and an empty home. Refresh behavior and startup side effects outside this restricted filesystem were not audited.
 - No Rust or adapter tests were written. `make check test` was attempted and failed with `No rule to make target check`; the checkout had no Makefile.
+
+UNVERIFIED: whether the model sees MCP initialize instructions. M3.5 retains the MCP
+instructions and adds a child prompt line without modifying harness configuration.

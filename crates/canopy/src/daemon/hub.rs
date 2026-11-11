@@ -293,6 +293,17 @@ impl Hub {
                 names.sort();
                 Ok(json!({"daemon_version": env!("CARGO_PKG_VERSION"), "harnesses": names}))
             }
+            Op::Detect => {
+                if let Some(client) = self.clients.get(&conn) {
+                    let tx = client.tx.clone();
+                    tokio::spawn(async move {
+                        let rows = harness::detect().await;
+                        let msg = ServerMsg::Res { id, result: json!({"harnesses": rows}) };
+                        let _ = tx.try_send(serde_json::to_string(&msg).unwrap_or_default());
+                    });
+                }
+                return;
+            }
             Op::SubTree => {
                 if let Some(c) = self.clients.get_mut(&conn) {
                     c.tree = true;
@@ -521,7 +532,10 @@ impl Hub {
         };
         let spec = SpawnSpec {
             session: id.clone(),
-            prompt: req.prompt.clone(),
+            prompt: parent
+                .as_ref()
+                .map(|p| format!("{}\n{}", super::mcp::child_header(p), req.prompt))
+                .unwrap_or_else(|| req.prompt.clone()),
             cwd: PathBuf::from(&req.cwd),
             model: req.model,
             policy,

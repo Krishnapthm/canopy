@@ -212,3 +212,95 @@ fn unknown_harness_is_rejected_with_the_available_list() {
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("available: claude, codex, fake, fake2"));
 }
+
+#[test]
+fn doctor_detects_zero_one_two_and_logged_out() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("canopy-doctor-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let doctor = || {
+        let start = Instant::now();
+        let out = Command::new(EXE).arg("doctor").env("PATH", &dir).env("CANOPY_HOME", &dir).output().unwrap();
+        assert!(out.status.success());
+        assert!(start.elapsed() < Duration::from_secs(1));
+        String::from_utf8(out.stdout).unwrap()
+    };
+    assert_eq!(doctor().matches("not installed").count(), 5);
+    let fake = |name: &str, exit: u8| {
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo fixture-version; exit 0; fi\necho secret-account\nexit {exit}\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    fake("claude", 0);
+    let one = doctor();
+    assert_eq!(one.matches("not installed").count(), 4);
+    assert!(one.contains("logged in"));
+    fake("codex", 1);
+    let two = doctor();
+    assert_eq!(two.matches("not installed").count(), 3);
+    assert!(two.contains("run codex login"));
+    assert!(!two.contains("secret-account"));
+    std::fs::write(dir.join("claude"), "#!/bin/sh\nexec /bin/sleep 10\n").unwrap();
+    let bounded = doctor();
+    assert!(bounded.contains("Codex"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn demo_runs_without_installed_harnesses() {
+    let out = Command::new(EXE).arg("demo").output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("Implement") && text.contains("Review") && text.contains("No tokens spent"));
+}
+
+#[test]
+fn detection_is_fresh_and_does_not_block_the_hub() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::{fs::PermissionsExt, net::UnixStream};
+    let home = std::env::temp_dir().join(format!("canopy-detect-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let binary = home.join("codex");
+    std::fs::write(&binary, "#!/bin/sh\nif [ \"$1\" = --version ]; then\n touch_marker=$CANOPY_HOME/probed\n echo started > \"$touch_marker\"\n /bin/sleep 0.3\n echo fixture-version\n exit 0\nfi\n[ -f \"$CANOPY_HOME/logged-in\" ]\n").unwrap();
+    std::fs::set_permissions(binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let child = Command::new(EXE)
+        .args(["daemon", "--foreground"])
+        .env("CANOPY_HOME", &home)
+        .env("PATH", &home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let d = Daemon { home, child: Some(child), flags: vec![] };
+    wait_until("detection test socket", || d.home.join("sock").exists());
+    let connect = || {
+        let socket = UnixStream::connect(d.home.join("sock")).unwrap();
+        socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        BufReader::new(socket)
+    };
+    let read = |r: &mut BufReader<UnixStream>| -> serde_json::Value {
+        let mut line = String::new();
+        r.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap()
+    };
+    let mut other = connect();
+    writeln!(other.get_mut(), "{{\"id\":1,\"op\":\"hello\",\"version\":{}}}", protocol::VERSION).unwrap();
+    let hello = read(&mut other);
+    assert_eq!(hello["result"]["harnesses"], serde_json::json!(["claude", "codex"]));
+    assert!(!d.home.join("probed").exists(), "startup must not probe harnesses");
+    let mut detector = connect();
+    writeln!(detector.get_mut(), "{{\"id\":2,\"op\":\"detect\"}}").unwrap();
+    wait_until("probe running", || d.home.join("probed").exists());
+    writeln!(other.get_mut(), "{{\"id\":3,\"op\":\"sub_tree\"}}").unwrap();
+    let start = Instant::now();
+    assert_eq!(read(&mut other)["id"], 3);
+    assert!(start.elapsed() < Duration::from_millis(150), "detection blocked the hub");
+    assert_eq!(read(&mut detector)["result"]["harnesses"][1]["logged_in"], false);
+    std::fs::write(d.home.join("logged-in"), "").unwrap();
+    writeln!(detector.get_mut(), "{{\"id\":4,\"op\":\"detect\"}}").unwrap();
+    assert_eq!(read(&mut detector)["result"]["harnesses"][1]["logged_in"], true);
+}

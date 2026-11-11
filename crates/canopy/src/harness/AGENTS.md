@@ -25,7 +25,8 @@ the CLI version it was verified on. Code only what a note or a fixture shows.
 - `Agent` tool sub-agents are native children keyed by `parent_tool_use_id`; their stream
   events are not forwarded, only complete `assistant` lines.
 - New behaviour starts with a fixture `fixtures/claude-<version>-<scenario>.jsonl` and a
-  replay test in `claude.rs`.
+  replay test in `claude.rs`. Pipe recordings through `scripts/record-fixture.py FILE`
+  from the repository root; it scrubs paths, identity and installed extension lists.
 
 ## Codex (`codex.rs`, notes: `docs/harness-notes/codex.md`)
 

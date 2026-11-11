@@ -78,6 +78,9 @@ async fn script(
     let update = |u: Value| peer.notify("session/update", json!({"sessionId": sid, "update": u}));
     let mut results: Vec<Value> = Vec::new();
     for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        if line.starts_with("Spawned by Canopy agent ") {
+            continue;
+        }
         if cancel.has_changed().unwrap_or(false) {
             return Ok("cancelled");
         }

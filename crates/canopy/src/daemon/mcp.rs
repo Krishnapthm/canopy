@@ -29,7 +29,7 @@ pub async fn serve(
                     id,
                     json!({"protocolVersion": version, "capabilities": {"tools": {}},
                            "serverInfo": {"name": "canopy", "version": env!("CARGO_PKG_VERSION")},
-                           "instructions": "Canopy runs coding agents from several vendors as one tree. Use spawn_agent to hand a self-contained task to another agent, possibly from another vendor, then wait_agent for its result."}),
+                           "instructions": INSTRUCTIONS}),
                 );
             }
             "tools/list" => peer.respond(id, json!({"tools": tools(&harnesses)})),
@@ -121,4 +121,16 @@ fn tools(harnesses: &[String]) -> Value {
             "inputSchema": {"type": "object", "properties": {}}
         }
     ])
+}
+
+const INSTRUCTIONS: &str = "Canopy runs coding agents from several vendors as one tree. Use spawn_agent to hand a self-contained task to another agent, possibly from another vendor, then wait_agent for its result.";
+
+pub fn child_header(parent: &str) -> String {
+    format!("Spawned by Canopy agent {parent}; your final message returns to that parent.")
+}
+
+#[test]
+fn awareness_budget() {
+    // Approximate tokens conservatively as characters / 4, rounded up.
+    assert!((INSTRUCTIONS.chars().count() + child_header("01ABCDEFGHIJKLMNOPQRSTUVWXYZ").chars().count()).div_ceil(4) <= 150);
 }

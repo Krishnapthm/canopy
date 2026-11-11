@@ -1,6 +1,7 @@
 mod cli;
 mod client;
 mod daemon;
+mod demo;
 mod fake_agent;
 mod harness;
 mod jsonrpc;
@@ -19,6 +20,7 @@ usage:
   canopy send <id> [--interrupt] <text...>             message an agent
   canopy permit <id> <request> allow|deny|always       answer a permission request
   canopy stop <id>                                     stop an agent and everything it spawned
+  canopy demo                                          try a disposable fake-agent tree
   canopy doctor                                        check installed harnesses
   canopy daemon [--foreground] [--acp NAME=CMD]... [--max-depth N] [--max-live N] [--budget TOKENS]
 
@@ -34,8 +36,7 @@ fn main() {
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = args.first().cloned() else {
-        println!("{HELP}");
-        return Ok(());
+        return block_on(cli::run("doctor".into(), pico_args::Arguments::from_vec(vec![])));
     };
     let rest = args[1..].to_vec();
     let mut p = pico_args::Arguments::from_vec(rest.iter().map(Into::into).collect());
@@ -55,6 +56,7 @@ fn run() -> Result<()> {
             let session: String = p.value_from_str("--session")?;
             block_on(mcp_stdio::run(sock, session))
         }
+        "demo" => demo::run(),
         "fake-agent" => block_on(fake_agent::run()),
         "-h" | "--help" | "help" => {
             println!("{HELP}");

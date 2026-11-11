@@ -5,8 +5,9 @@ Verified against: `claude` 2.1.318 (`/Users/krishna/.local/bin/claude`, symlink 
 `claude-haiku-5-5`), 2026-11-11. SDK type source read: `@anthropic-ai/claude-agent-sdk` 0.3.322
 (`sdk.d.ts`). Items marked (SDK) come from those types only and were not exercised live.
 Fixtures: `crates/canopy/src/harness/fixtures/claude-2.1.318-*.jsonl`. In fixtures, lines sent
-by us are wrapped as `{"canopy_stdin": <line>}`; email and org id in the initialize response
-were replaced with placeholders; everything else is verbatim.
+by us are wrapped as `{"canopy_stdin": <line>}`; machine paths, identity fields and installed extension lists are scrubbed with
+`scripts/record-fixture.py`. Record with `probe | python3 scripts/record-fixture.py FILE`;
+never write the raw stream into the repository. The scrubbed fixtures replay in `make test`.
 
 Every `claude` invocation in these probes used a timeout. The earlier note that `claude --version`
 hangs with stdin from /dev/null was not reproduced: it printed `2.1.318 (Claude Code)` instantly.
@@ -258,3 +259,6 @@ Deny (deny fixture). Sent `{"type":"control_response","response":{"subtype":"suc
 - All probes ran with the user's real settings and plugins loaded (hooks emit extra
   `system` lines); a clean `CLAUDE_CONFIG_DIR` was not used because it would require
   logging in.
+
+UNVERIFIED: whether the model sees MCP initialize instructions. Keep the MCP instructions
+and child prompt line; no live prompt was authorized for M3.5.

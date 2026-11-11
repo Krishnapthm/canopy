@@ -46,3 +46,9 @@ Notifications have no `id`.
 
 - No real ACP agent verified: `gemini --acp` vs `--experimental-acp`, and whether OpenCode
   reports `usage_update`, remain open until those CLIs are installed.
+
+## Detection (M3.5)
+
+UNVERIFIED: OpenCode, Copilot CLI and Gemini CLI version flags and login-status commands
+have no local recording. Detection only attempts `--version`, bounded to 800 ms. No auth
+probe or login command is invented for these rows. Gemini remains on hold per PLAN.md.
