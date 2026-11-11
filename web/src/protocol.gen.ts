@@ -40,9 +40,15 @@ export type SpawnReq = { harness: string, prompt: string, cwd: string, model: st
 
 export type HarnessDetection = { name: string, binary: string, version: string | null, logged_in: boolean | null, recorded: string, supported: boolean, login_command: string, };
 
-export type Op = { "op": "hello", version: number, } | { "op": "detect" } | { "op": "sub_tree" } | { "op": "sub_session", session: string, after_seq: number | null, tail: number | null, } | { "op": "unsub_session", session: string, } | { "op": "spawn" } & SpawnReq | { "op": "send", session: string, text: string, interrupt: boolean, } | { "op": "interrupt", session: string, } | { "op": "permission", session: string, request: string, decision: Decision, } | { "op": "stop", session: string, } | { "op": "history", session: string, before_seq: number, limit: number, };
+export type ExtKind = "plugin" | "skill" | "library_skill" | "adopt_skill";
 
-export type Request = { id: number, } & ({ "op": "hello", version: number, } | { "op": "detect" } | { "op": "sub_tree" } | { "op": "sub_session", session: string, after_seq: number | null, tail: number | null, } | { "op": "unsub_session", session: string, } | { "op": "spawn" } & SpawnReq | { "op": "send", session: string, text: string, interrupt: boolean, } | { "op": "interrupt", session: string, } | { "op": "permission", session: string, request: string, decision: Decision, } | { "op": "stop", session: string, } | { "op": "history", session: string, before_seq: number, limit: number, });
+export type ExtScope = { "scope": "global" } | { "scope": "project", "cwd": string };
+
+export type Extension = { harness: string, kind: ExtKind, id: string, name: string, scope: ExtScope, enabled: boolean, writable: boolean, command: string | null, };
+
+export type Op = { "op": "hello", version: number, } | { "op": "detect" } | { "op": "ext_list", cwd: string | null, } | { "op": "ext_set", harness: string, kind: ExtKind, ext_id: string, scope: ExtScope, enabled: boolean, } | { "op": "sub_tree" } | { "op": "sub_session", session: string, after_seq: number | null, tail: number | null, } | { "op": "unsub_session", session: string, } | { "op": "spawn" } & SpawnReq | { "op": "send", session: string, text: string, interrupt: boolean, } | { "op": "interrupt", session: string, } | { "op": "permission", session: string, request: string, decision: Decision, } | { "op": "stop", session: string, } | { "op": "history", session: string, before_seq: number, limit: number, };
+
+export type Request = { id: number, } & ({ "op": "hello", version: number, } | { "op": "detect" } | { "op": "ext_list", cwd: string | null, } | { "op": "ext_set", harness: string, kind: ExtKind, ext_id: string, scope: ExtScope, enabled: boolean, } | { "op": "sub_tree" } | { "op": "sub_session", session: string, after_seq: number | null, tail: number | null, } | { "op": "unsub_session", session: string, } | { "op": "spawn" } & SpawnReq | { "op": "send", session: string, text: string, interrupt: boolean, } | { "op": "interrupt", session: string, } | { "op": "permission", session: string, request: string, decision: Decision, } | { "op": "stop", session: string, } | { "op": "history", session: string, before_seq: number, limit: number, });
 
 export type Event = { "t": "node", node: Node, } | { "t": "item", item: Item, } | { "t": "delta", session: string, item: string, text: string, };
 

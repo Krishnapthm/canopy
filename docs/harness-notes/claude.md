@@ -262,3 +262,18 @@ Deny (deny fixture). Sent `{"type":"control_response","response":{"subtype":"suc
 
 UNVERIFIED: whether the model sees MCP initialize instructions. Keep the MCP instructions
 and child prompt line; no live prompt was authorized for M3.5.
+
+## Extension control (M5.5)
+
+UNVERIFIED: `claude plugin list --json` response shape and
+`claude plugin enable|disable ID --scope user|project --json` behavior on 2.1.318.
+No real CLI was run for this milestone. The conservative synthetic fixture in
+`crates/canopy/tests/ext_fake.py` models an array (or `plugins` array) containing
+`id`, `scope` (`user` or `project`), and boolean `enabled`. Unknown entries are
+ignored. Missing methods and failed commands surface as view errors. A declared
+`command` is displayed, blocks toggling, and is never run by Canopy.
+UNVERIFIED: Claude loading symlinked skill directories and one unchanged SKILL.md
+in Claude and Codex. This requires an explicitly authorized live prompt. Library
+link operations are filesystem-tested only. Non-library Claude skills are
+read-only until explicitly adopted. Adoption moves the whole vendor skill folder
+into the library and replaces it with a symlink; cross-filesystem moves fail safely.

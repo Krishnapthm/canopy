@@ -24,11 +24,18 @@ impl Daemon {
     }
 
     fn up(&mut self) {
+        if !self.home.join("kill").exists() {
+            std::os::unix::fs::symlink("/bin/kill", self.home.join("kill")).unwrap();
+        }
         let fake = format!("{EXE} fake-agent");
         let child = Command::new(EXE)
             .args(["daemon", "--foreground", "--acp", &format!("fake={fake}"), "--acp", &format!("fake2={fake}")])
             .args(&self.flags)
             .env("CANOPY_HOME", &self.home)
+            .env("PATH", &self.home)
+            .env("HOME", &self.home)
+            .env("CODEX_HOME", self.home.join("codex-home"))
+            .env("CLAUDE_CONFIG_DIR", self.home.join("claude-home"))
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -319,4 +326,111 @@ mod tui;
 fn tui_key_driven_control_and_reattach() {
     let daemon = Daemon::start("tui", &[]);
     tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(tui::scripted_test(&daemon.home)).unwrap();
+}
+
+#[test]
+fn extensions_use_vendor_commands_and_owned_skill_links() {
+    use serde_json::{Value, json};
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::{fs::PermissionsExt, net::UnixStream};
+    let home = std::env::temp_dir().join(format!("canopy-ext-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&home);
+    let project = home.join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    for name in ["claude", "codex"] {
+        let path = home.join(name);
+        std::fs::write(&path, include_str!("ext_fake.py")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let library = home.join("skills/shared");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::write(library.join("SKILL.md"), "# Shared\nA fixture skill.").unwrap();
+    let child = Command::new(EXE)
+        .args(["daemon", "--foreground"])
+        .env("CANOPY_HOME", &home)
+        .env("HOME", &home)
+        .env("CLAUDE_CONFIG_DIR", home.join("claude-home"))
+        .env("CODEX_HOME", home.join("codex-home"))
+        .env("PATH", &home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let d = Daemon { home, child: Some(child), flags: vec![] };
+    wait_until("extension test socket", || d.home.join("sock").exists());
+    let socket = UnixStream::connect(d.home.join("sock")).unwrap();
+    socket.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+    let mut stream = BufReader::new(socket);
+    let mut call = |mut op: Value| {
+        op["id"] = json!(1);
+        writeln!(stream.get_mut(), "{op}").unwrap();
+        let mut line = String::new();
+        stream.read_line(&mut line).unwrap();
+        serde_json::from_str::<Value>(&line).unwrap()
+    };
+    for harness in ["claude", "codex"] {
+        for scope in [json!({"scope":"global"}), json!({"scope":"project","cwd":project})] {
+            for enabled in [false, true] {
+                let r =
+                    call(json!({"op":"ext_set","harness":harness,"kind":"plugin","ext_id":"demo@local","scope":scope,"enabled":enabled}));
+                assert_eq!(r["t"], "res", "{r}");
+                let state: Value = serde_json::from_slice(&std::fs::read(d.home.join("ext-state.json")).unwrap()).unwrap();
+                let key = format!(
+                    "{harness}:{}",
+                    if scope["scope"] == "project" {
+                        "project"
+                    } else if harness == "claude" {
+                        "user"
+                    } else {
+                        "global"
+                    }
+                );
+                assert_eq!(state[&key], enabled);
+            }
+            for enabled in [true, false] {
+                let r = call(
+                    json!({"op":"ext_set","harness":harness,"kind":"library_skill","ext_id":"shared","scope":scope,"enabled":enabled}),
+                );
+                assert_eq!(r["t"], "res", "{r}");
+                let base = if scope["scope"] == "project" {
+                    project.join(if harness == "claude" { ".claude/skills" } else { ".agents/skills" })
+                } else if harness == "claude" {
+                    d.home.join("claude-home/skills")
+                } else {
+                    d.home.join(".agents/skills")
+                };
+                assert_eq!(std::fs::read_link(base.join("shared")).is_ok(), enabled);
+                assert!(library.join("SKILL.md").exists());
+            }
+        }
+    }
+    for harness in ["claude", "codex"] {
+        let vendor = d.home.join(if harness == "claude" { "claude-home/skills/native-claude" } else { ".agents/skills/native" });
+        std::fs::create_dir_all(&vendor).unwrap();
+        std::fs::write(vendor.join("SKILL.md"), "# Native fixture").unwrap();
+        let id = if harness == "claude" { vendor.clone() } else { vendor.join("SKILL.md") };
+        if harness == "codex" {
+            let r = call(json!({"op":"ext_set","harness":harness,"kind":"skill","ext_id":id,"scope":{"scope":"global"},"enabled":false}));
+            assert_eq!(r["t"], "res", "{r}");
+            let state: Value = serde_json::from_slice(&std::fs::read(d.home.join("ext-state.json")).unwrap()).unwrap();
+            assert_eq!(state["skill"], false);
+        }
+        let r = call(json!({"op":"ext_set","harness":harness,"kind":"adopt_skill","ext_id":id,"scope":{"scope":"global"},"enabled":true}));
+        assert_eq!(r["t"], "res", "{r}");
+        assert!(std::fs::symlink_metadata(&vendor).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(vendor.join("SKILL.md")).unwrap(), "# Native fixture");
+    }
+    let r = call(
+        json!({"op":"ext_set","harness":"claude","kind":"plugin","ext_id":"declared@local","scope":{"scope":"global"},"enabled":false}),
+    );
+    assert_eq!(r["t"], "err");
+    assert!(!d.home.join("never-run").exists());
+    // Existing vendor directories are preserved, even when their name matches a library skill.
+    let occupied = d.home.join("claude-home/skills/shared");
+    std::fs::create_dir_all(&occupied).unwrap();
+    std::fs::write(occupied.join("SKILL.md"), "keep me").unwrap();
+    let r =
+        call(json!({"op":"ext_set","harness":"claude","kind":"library_skill","ext_id":"shared","scope":{"scope":"global"},"enabled":true}));
+    assert_eq!(r["t"], "err");
+    assert_eq!(std::fs::read_to_string(occupied.join("SKILL.md")).unwrap(), "keep me");
 }

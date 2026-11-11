@@ -11,7 +11,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use input::CommandId;
-use protocol::{Decision, Event, HarnessDetection, Item, ItemKind, ItemState, Node, Op, Policy, SpawnReq};
+use protocol::{Decision, Event, ExtKind, Extension, HarnessDetection, Item, ItemKind, ItemState, Node, Op, Policy, SpawnReq};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},
@@ -42,6 +42,9 @@ struct App {
     mode: Mode,
     message: String,
     harnesses: String,
+    extensions: Vec<Extension>,
+    extension_index: usize,
+    extension_errors: String,
     parent: Option<String>,
     prefix: bool,
     scroll: u16,
@@ -103,6 +106,33 @@ impl App {
             self.prefix = false;
             if let Some(id) = input::command(key.code, true) {
                 return self.command(id, client).await;
+            }
+            return Ok(false);
+        }
+        if self.mode == Mode::Plugins {
+            match key.code {
+                KeyCode::Char('g') => self.prefix = true,
+                KeyCode::Char('q') => return Ok(true),
+                KeyCode::Esc => self.mode = Mode::Tree,
+                KeyCode::Down => self.extension_index = (self.extension_index + 1).min(self.extensions.len().saturating_sub(1)),
+                KeyCode::Up => self.extension_index = self.extension_index.saturating_sub(1),
+                KeyCode::Char('r') => self.refresh_extensions(client).await?,
+                KeyCode::Char(' ') | KeyCode::Char('a') => {
+                    if let Some(row) = self.extensions.get(self.extension_index).cloned() {
+                        let adopt = key.code == KeyCode::Char('a') && row.kind == ExtKind::Skill;
+                        client
+                            .call(Op::ExtSet {
+                                harness: row.harness,
+                                kind: if adopt { ExtKind::AdoptSkill } else { row.kind },
+                                id: row.id,
+                                scope: row.scope,
+                                enabled: adopt || !row.enabled,
+                            })
+                            .await?;
+                        self.refresh_extensions(client).await?;
+                    }
+                }
+                _ => {}
             }
             return Ok(false);
         }
@@ -174,6 +204,18 @@ impl App {
         Ok(false)
     }
 
+    async fn refresh_extensions(&mut self, client: &mut Client) -> Result<()> {
+        let cwd = std::env::current_dir()?.to_string_lossy().into_owned();
+        let value = client.call(Op::ExtList { cwd: Some(cwd) }).await?;
+        self.extensions = serde_json::from_value(value["items"].clone())?;
+        self.extension_errors = value["errors"]
+            .as_array()
+            .map(|rows| rows.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("\n"))
+            .unwrap_or_default();
+        self.extension_index = self.extension_index.min(self.extensions.len().saturating_sub(1));
+        Ok(())
+    }
+
     async fn command(&mut self, id: CommandId, client: &mut Client) -> Result<bool> {
         match id {
             CommandId::Quit => return Ok(true),
@@ -192,6 +234,9 @@ impl App {
                     _ => unreachable!(),
                 };
                 self.text.clear();
+                if self.mode == Mode::Plugins {
+                    self.refresh_extensions(client).await?;
+                }
             }
             CommandId::Back | CommandId::Tree => self.mode = Mode::Tree,
             CommandId::Collapse => {
@@ -261,7 +306,49 @@ fn draw(frame: &mut Frame, app: &App) {
     let globe = if std::env::var_os("CANOPY_NERD_FONT").is_some() { "\u{f01e7}" } else { "⊕" };
     frame.render_widget(tree::widget(app).block(Block::bordered().title(format!("{globe} Agents"))), columns[0]);
     let special = match app.mode {
-        Mode::Plugins => Some("◇ Plugins and skills land in M5.5".into()),
+        Mode::Plugins => {
+            let mut groups: Vec<Vec<(usize, &Extension)>> = Vec::new();
+            for (i, row) in app.extensions.iter().enumerate() {
+                let group = groups.iter_mut().find(|g| {
+                    row.kind == ExtKind::LibrarySkill && g[0].1.kind == row.kind && g[0].1.id == row.id && g[0].1.scope == row.scope
+                });
+                if let Some(group) = group {
+                    group.push((i, row));
+                } else {
+                    groups.push(vec![(i, row)]);
+                }
+            }
+            let rows = groups
+                .iter()
+                .map(|group| {
+                    let r = group[0].1;
+                    let scope = match &r.scope {
+                        protocol::ExtScope::Global => globe.into(),
+                        protocol::ExtScope::Project(cwd) => format!("▱ {cwd}"),
+                    };
+                    let switches = group
+                        .iter()
+                        .map(|(i, r)| {
+                            format!(
+                                "{}{} [{}]{}{}",
+                                if *i == app.extension_index { "›" } else { " " },
+                                r.harness,
+                                if r.enabled { "on" } else { "off" },
+                                if r.writable { "" } else { " read-only; a: adopt" },
+                                r.command.as_ref().map(|c| format!("\nDeclared command (execution unavailable): {c}")).unwrap_or_default()
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("  ");
+                    format!("{scope} {}  {switches}", r.name)
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            Some(format!(
+                "◇ Plugins and skills\nRunning agents are not affected.\n↑/↓ select; Space toggle; a adopt; r refresh; Esc back\n{rows}\n{}",
+                app.extension_errors
+            ))
+        }
         Mode::Help | Mode::Palette => {
             Some(input::COMMANDS.iter().map(|c| format!("{}  {}", c.key, c.title)).collect::<Vec<_>>().join("\n"))
         }
@@ -271,7 +358,20 @@ fn draw(frame: &mut Frame, app: &App) {
         _ => None,
     };
     if let Some(text) = special {
-        frame.render_widget(Paragraph::new(text).block(Block::bordered().title("Canopy")), columns[1]);
+        let area = if app.mode == Mode::Plugins { vertical[0] } else { columns[1] };
+        frame.render_widget(
+            Paragraph::new(text)
+                .scroll((
+                    if app.mode == Mode::Plugins {
+                        app.extension_index.saturating_sub(area.height.saturating_sub(7) as usize) as u16
+                    } else {
+                        0
+                    },
+                    0,
+                ))
+                .block(Block::bordered().title("Canopy")),
+            area,
+        );
     } else {
         frame.render_widget(session::widget(app).block(Block::bordered().title("↵ Session - PgUp/PgDn")), columns[1]);
     }

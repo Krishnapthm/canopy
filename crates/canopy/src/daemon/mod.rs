@@ -1,6 +1,7 @@
 //! Daemon startup: single-instance lock, socket, store, hub, and clean shutdown that takes
 //! every agent process group down with it.
 
+pub mod extensions;
 pub mod http;
 pub mod hub;
 pub mod ipc;

@@ -232,3 +232,29 @@ and `thread/tokenUsage/updated` totals. The child wrote the file with a shell co
 
 UNVERIFIED: whether the model sees MCP initialize instructions. M3.5 retains the MCP
 instructions and adds a child prompt line without modifying harness configuration.
+
+## Extension control (M5.5)
+
+Offline schema generation succeeded on 2026-11-11 with a fresh temp CODEX_HOME.
+Schema facts (0.165.0): `plugin/installed` accepts `cwds`, returns `marketplaces[]`
+with `plugins[]` (`id`, `name`, `installed`, `enabled`). `skills/list` accepts
+`cwds` and `forceReload`, returns `data[].skills[]` (`path`, `name`, `enabled`,
+`scope`). `config/value/write` accepts `keyPath`, `value`, `mergeStrategy`, and
+optional `filePath`. `skills/config/write` accepts `path` or `name`, and `enabled`.
+The synthetic executable fixture is `crates/canopy/tests/ext_fake.py`.
+
+UNVERIFIED: runtime availability of these methods, plugin id correspondence to
+`name@marketplace`, project config write behavior, and effective versus per-scope
+plugin enabled state. The plugin list reports effective vendor state; the project
+switch writes the project's `.codex/config.toml` via the vendor method. It cannot
+report whether a value is inherited. Unsupported methods surface as view errors.
+UNVERIFIED: shared SKILL.md behavior and symlink loading, which require a live turn.
+No live turns or credential access were used for this milestone.
+Codex skill config switches are user-scoped; project library links are separate.
+Marketplace commands and server approval requests are never executed or accepted.
+
+Wire integration: `Request.id` is already the numeric correlation id. `ext_set`
+therefore serializes its named item id as `ext_id` to avoid duplicate JSON keys.
+`ExtScope` is `{scope:"global"}` or `{scope:"project",cwd:"/absolute/project"}`.
+`ext_list` returns `{items: Extension[], errors: string[]}`. No extension state
+is stored in SQLite or retained between view reads.

@@ -304,6 +304,19 @@ impl Hub {
                 }
                 return;
             }
+            op @ (Op::ExtList { .. } | Op::ExtSet { .. }) => {
+                if let Some(client) = self.clients.get(&conn) {
+                    let tx = client.tx.clone();
+                    tokio::spawn(async move {
+                        let msg = match super::extensions::execute(op).await {
+                            Ok(result) => ServerMsg::Res { id, result },
+                            Err(e) => ServerMsg::Err { id, error: e.to_string() },
+                        };
+                        let _ = tx.try_send(serde_json::to_string(&msg).unwrap_or_default());
+                    });
+                }
+                return;
+            }
             Op::SubTree => {
                 if let Some(c) = self.clients.get_mut(&conn) {
                     c.tree = true;

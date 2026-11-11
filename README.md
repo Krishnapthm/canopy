@@ -215,3 +215,13 @@ From the web directory, run `CANOPY_WEB_ORIGIN=http://127.0.0.1:PORT npm exec vi
 using the printed port. Open Vite's local URL with the same #token fragment
 from the printed Canopy URL. Stop Vite and the foreground daemon
 with Ctrl-C when done. Normal use needs only `canopy web`.
+
+In the TUI, press `g p` to open plugins and skills for the current project. Use the
+arrow keys to select an item, Space to switch it, and `r` to read the list again.
+Changes apply to newly started agents. Running agents keep what they loaded.
+Place shared skills in `$CANOPY_HOME/skills/<name>/SKILL.md` (by default,
+`~/.canopy/skills/`). Switch one on to link it into a harness's skill directory.
+Press `a` on an existing vendor skill to adopt its folder into the shared library.
+Canopy never installs plugins or executes marketplace commands. Vendor extension
+interfaces and shared skill loading still need live verification; unsupported
+commands appear as errors in the view.
