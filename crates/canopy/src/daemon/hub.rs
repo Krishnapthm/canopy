@@ -334,7 +334,7 @@ impl Hub {
                 Ok(json!({}))
             }
             Op::Spawn(req) => self.spawn(req, Origin::User).map(|s| json!({"session": s})),
-            Op::Send { session, text, interrupt } => match self.send(&session, text, interrupt) {
+            Op::Send { session, text, interrupt } => match self.send(&session, text, interrupt, ItemKind::UserMessage) {
                 Ok(rx) => {
                     let tx = self.clients.get(&conn).map(|c| c.tx.clone());
                     tokio::spawn(async move {
@@ -480,7 +480,8 @@ impl Hub {
     }
 
     /// Queues `text` to a session; the receiver resolves with what the harness did with it.
-    fn send(&mut self, session: &str, text: String, interrupt: bool) -> Result<oneshot::Receiver<Delivery>, String> {
+    /// `kind` records who wrote it: `UserMessage` for a human, `Notice` for canopy or another agent.
+    fn send(&mut self, session: &str, text: String, interrupt: bool, kind: ItemKind) -> Result<oneshot::Receiver<Delivery>, String> {
         let sid = self.resolve(session).ok_or(format!("no session {session}"))?;
         let s = self.sessions.get(&sid).ok_or("gone")?;
         if s.node.origin == Origin::Native {
@@ -490,7 +491,7 @@ impl Hub {
         let (reply, rx) = oneshot::channel();
         tx.try_send(Command::Send { text: text.clone(), interrupt, reply })
             .map_err(|_| "the session is not accepting messages".to_owned())?;
-        self.add_item(&sid, harness::new_id(), ItemKind::UserMessage, ItemState::Complete, json!({"text": text}));
+        self.add_item(&sid, harness::new_id(), kind, ItemState::Complete, json!({"text": text}));
         Ok(rx)
     }
 
@@ -622,7 +623,7 @@ impl Hub {
                 if !allowed {
                     Err(format!("{id} is not your descendant or your parent"))
                 } else {
-                    match self.send(target.as_deref().unwrap_or(&id), text, false) {
+                    match self.send(target.as_deref().unwrap_or(&id), text, false, ItemKind::Notice) {
                         Ok(rx) => {
                             tokio::spawn(async move {
                                 let r = rx.await.map(|d| json!({"delivery": d})).map_err(|_| "the session ended".to_owned());
@@ -737,7 +738,7 @@ impl Hub {
         }
         if !lines.is_empty() {
             let text = lines.join("\n\n");
-            let _ = self.send(parent, text, false);
+            let _ = self.send(parent, text, false, ItemKind::Notice);
         }
     }
 

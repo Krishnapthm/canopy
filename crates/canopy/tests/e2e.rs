@@ -187,7 +187,7 @@ fn an_idle_parent_is_told_when_a_child_finishes() {
     let parent = d.run("fake", r#"tool spawn_agent {"harness":"fake2","prompt":"sleep 300\nsay the answer is 42"}"#);
     wait_until("notice delivered", || d.ok(&["tail", &parent]).contains("[canopy] agent"));
     let t = d.ok(&["tail", &parent]);
-    assert!(t.lines().any(|l| l.starts_with("user: [canopy] agent") && l.ends_with("is idle: the answer is 42")), "{t}");
+    assert!(t.lines().any(|l| l.starts_with("notice: [canopy] agent") && l.ends_with("is idle: the answer is 42")), "{t}");
 }
 
 #[test]
