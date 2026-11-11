@@ -303,4 +303,19 @@ fn detection_is_fresh_and_does_not_block_the_hub() {
     std::fs::write(d.home.join("logged-in"), "").unwrap();
     writeln!(detector.get_mut(), "{{\"id\":4,\"op\":\"detect\"}}").unwrap();
     assert_eq!(read(&mut detector)["result"]["harnesses"][1]["logged_in"], true);
+
+#[allow(dead_code)]
+#[path = "../src/client.rs"]
+mod client;
+#[allow(dead_code)]
+#[path = "../src/paths.rs"]
+mod paths;
+#[allow(dead_code)]
+#[path = "../src/tui/mod.rs"]
+mod tui;
+
+#[test]
+fn tui_key_driven_control_and_reattach() {
+    let daemon = Daemon::start("tui", &[]);
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(tui::scripted_test(&daemon.home)).unwrap();
 }

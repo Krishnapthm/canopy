@@ -7,6 +7,7 @@ mod harness;
 mod jsonrpc;
 mod mcp_stdio;
 mod paths;
+mod tui;
 
 use anyhow::Result;
 
@@ -36,7 +37,7 @@ fn main() {
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = args.first().cloned() else {
-        return block_on(cli::run("doctor".into(), pico_args::Arguments::from_vec(vec![])));
+        return block_on(tui::run());
     };
     let rest = args[1..].to_vec();
     let mut p = pico_args::Arguments::from_vec(rest.iter().map(Into::into).collect());
