@@ -31,7 +31,7 @@ export default function NewAgent() {
       <Field><FieldLabel htmlFor="model">Model</FieldLabel><Input id="model" name="model" placeholder="Harness default"/></Field>
       <Field><FieldLabel>Permissions</FieldLabel><Select value={policy} onValueChange={value=>permissions(value as Policy)}><SelectTrigger aria-label="Permissions"><SelectValue/></SelectTrigger><SelectContent><SelectGroup>{(["ask","auto_edit","yolo"] as const).map(p=><SelectItem key={p} value={p}>{p.replaceAll("_"," ")}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
       <Field><FieldLabel htmlFor="prompt">Task</FieldLabel><Textarea id="prompt" name="prompt" required autoFocus/></Field>
-      <Button disabled={!state.connected || !harness || unavailable(harness) || busy}><Plus data-icon="inline-start"/>Start agent</Button>
+      <Button type="submit" disabled={!state.connected || !harness || unavailable(harness) || busy}><Plus data-icon="inline-start"/>Start agent</Button>
     </FieldGroup></form>
   </DialogContent></Dialog>;
 }
