@@ -19,6 +19,7 @@ usage:
   canopy send <id> [--interrupt] <text...>             message an agent
   canopy permit <id> <request> allow|deny|always       answer a permission request
   canopy stop <id>                                     stop an agent and everything it spawned
+  canopy web                                           open the browser control room
   canopy doctor                                        check installed harnesses
   canopy daemon [--foreground] [--acp NAME=CMD]... [--max-depth N] [--max-live N] [--budget TOKENS]
 
@@ -55,6 +56,7 @@ fn run() -> Result<()> {
             let session: String = p.value_from_str("--session")?;
             block_on(mcp_stdio::run(sock, session))
         }
+        "web" => block_on(daemon::http::open()),
         "fake-agent" => block_on(fake_agent::run()),
         "-h" | "--help" | "help" => {
             println!("{HELP}");

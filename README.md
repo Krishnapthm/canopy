@@ -9,7 +9,7 @@ what each one is doing and how many tokens it has used.
 Everything runs on your machine. Canopy uses the `claude` and `codex` you already have
 installed and logged in. It never sees your API keys.
 
-> Status: early. The command line works today. A terminal UI and a web app are coming.
+> Status: early. The command line works today. The web app is available; a terminal UI is coming.
 
 ## Before you start
 
@@ -29,11 +29,16 @@ You need:
 
 ## Install
 
-Get the code (clone the repo), then from inside the `canopy` folder run:
+Install Node.js 24 or newer as well. From a fresh clone, run these commands
+in the repository root, in this order:
 
 ```bash
+make web
 cargo install --path crates/canopy
 ```
+
+`make web` installs the web build tools and creates the assets that Rust embeds.
+Run it before `cargo install`, including when updating.
 
 The first install takes a few minutes. It puts `canopy` in `~/.cargo/bin`, which the Rust
 installer already added to your PATH.
@@ -82,6 +87,7 @@ keeps going).
 | `canopy tail <id> -f` | Watch an agent's output live |
 | `canopy send <id> "..."` | Send a follow-up message |
 | `canopy stop <id>` | Stop an agent and every helper it started |
+| `canopy web` | Open the local web control room |
 | `canopy doctor` | Check that Claude Code and Codex are ready |
 | `canopy help` | List every command and option |
 
@@ -147,12 +153,13 @@ git pull
 ```
 
 ```bash
+make web
 cargo install --path crates/canopy
 ```
 
 ## Working on Canopy
 
-You need [Node.js](https://nodejs.org) 20 or newer as well. Then:
+You need [Node.js](https://nodejs.org) 24 or newer as well. Then:
 
 ```bash
 make check    # format and lint
@@ -172,3 +179,15 @@ New here? Read [AGENTS.md](AGENTS.md) for the rules of the codebase and
 ## License
 
 MIT
+
+## Web development
+
+Build the web app with `make web`. It checks the gzip bundle budget as well.
+`make build` builds the app and embeds it in the release binary.
+
+For a development preview, use two terminals with the same temporary CANOPY_HOME.
+Start `canopy daemon --foreground`, then `canopy web` to print the local URL.
+From the web directory, run `CANOPY_WEB_ORIGIN=http://127.0.0.1:PORT npm exec vite`,
+using the printed port. Open Vite's local URL with the same #token fragment
+from the printed Canopy URL. Stop Vite and the foreground daemon
+with Ctrl-C when done. Normal use needs only `canopy web`.
