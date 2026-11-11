@@ -128,3 +128,4 @@ check, or delete it.
 
 - Probe Codex live from the main session; sandboxed sub-agents get 401 (`docs/harness-notes/codex.md`). (2026-11)
 - `make build` does not put `canopy` on PATH; build assets with `make web`, then `cargo install --path crates/canopy`. (2026-11)
+- `make bench` reads process stats with `ps`; sandboxed agents get "Operation not permitted", so run it from the main session. (2026-11)
