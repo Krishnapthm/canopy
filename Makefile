@@ -3,7 +3,7 @@ CARGO ?= cargo
 
 .PHONY: check test e2e bench gen web build check-docs
 
-check: web/node_modules
+check: web
 	@if rg -n '\p{Emoji_Presentation}|\x{FE0F}' crates/canopy/src/tui web/src; then echo "emoji code points are forbidden"; exit 1; fi
 	$(CARGO) fmt --all --check
 	$(CARGO) clippy --workspace --all-targets --all-features -- -D warnings
@@ -13,11 +13,12 @@ web/node_modules: web/package.json
 	cd web && npm ci --silent
 	@touch $@
 
-test:
+test: web
 	python3 scripts/record-fixture.py --test
 	$(CARGO) test --workspace --lib --bins
+	cd web && node check.mjs
 
-e2e:
+e2e: web
 	$(CARGO) test -p canopy --test e2e
 
 bench:
@@ -26,10 +27,10 @@ bench:
 gen:
 	CANOPY_GEN_OUT=$(CURDIR)/web/src/protocol.gen.ts $(CARGO) test -q -p protocol --features ts-rs write_typescript
 
-web:
-	@echo "the web app lands in M5 (PLAN.md section 8)"; exit 1
+web: web/node_modules
+	cd web && npm run build
 
-build:
+build: web
 	$(CARGO) build --release
 
 check-docs:

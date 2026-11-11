@@ -303,6 +303,7 @@ fn detection_is_fresh_and_does_not_block_the_hub() {
     std::fs::write(d.home.join("logged-in"), "").unwrap();
     writeln!(detector.get_mut(), "{{\"id\":4,\"op\":\"detect\"}}").unwrap();
     assert_eq!(read(&mut detector)["result"]["harnesses"][1]["logged_in"], true);
+}
 
 #[allow(dead_code)]
 #[path = "../src/client.rs"]

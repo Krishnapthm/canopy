@@ -1,6 +1,7 @@
 //! Daemon startup: single-instance lock, socket, store, hub, and clean shutdown that takes
 //! every agent process group down with it.
 
+pub mod http;
 pub mod hub;
 pub mod ipc;
 pub mod mcp;
@@ -57,6 +58,7 @@ pub fn run(opts: Opts, raw_args: Vec<String>) -> Result<()> {
     let pids = rt.block_on(async move {
         let listener = tokio::net::UnixListener::bind(&sock)?;
         std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600))?;
+        http::start(&home).await?;
         let (tx, rx) = tokio::sync::mpsc::channel::<Msg>(4096);
         let hub = Hub::new(cfg, tx.clone(), store, restored);
         tokio::spawn(ipc::serve(listener, tx.clone(), Arc::new(names)));

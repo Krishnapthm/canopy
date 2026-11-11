@@ -11,7 +11,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use input::CommandId;
-use protocol::{Decision, Event, Item, ItemKind, ItemState, Node, Op, Policy, SpawnReq};
+use protocol::{Decision, Event, HarnessDetection, Item, ItemKind, ItemState, Node, Op, Policy, SpawnReq};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},
@@ -238,13 +238,19 @@ impl App {
     }
 }
 
-fn harness_list(value: &serde_json::Value) -> String {
-    value
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|row| row.as_str().or_else(|| row.get("name").and_then(serde_json::Value::as_str)))
-        .map(|name| format!("◇ {name}"))
+/// One line per known CLI, in the doctor's words. Login commands are shown, never run.
+fn harness_list(rows: &[HarnessDetection]) -> String {
+    rows.iter()
+        .map(|h| {
+            let state = match (&h.version, h.supported, h.logged_in) {
+                (None, _, _) => "not installed".to_owned(),
+                (Some(_), false, _) => "detected, not supported yet".to_owned(),
+                (Some(_), true, Some(true)) => "ready".to_owned(),
+                (Some(_), true, _) => format!("logged out - run {}", h.login_command),
+            };
+            let glyph = if h.supported && h.logged_in == Some(true) { "✓" } else { "○" };
+            format!("{glyph} {:<12} {state}", h.name)
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -301,8 +307,19 @@ pub async fn run() -> Result<()> {
     let mut app = App::default();
     terminal.draw(|f| draw(f, &app))?;
     let mut client = Client::connect(&crate::paths::home()?).await?;
-    let hello = client.call(Op::Hello { version: protocol::VERSION }).await?;
-    app.harnesses = harness_list(&hello["harnesses"]);
+    client.call(Op::Hello { version: protocol::VERSION }).await?;
+    app.harnesses = "Checking installed CLIs...".into();
+    // Probes take up to a second: run them on their own connection so keys and paint never wait.
+    let (detect_tx, mut detect_rx) = tokio::sync::mpsc::channel(1);
+    let home = crate::paths::home()?;
+    tokio::spawn(async move {
+        let rows = async {
+            let mut c = Client::connect(&home).await?;
+            let r = c.call(Op::Detect).await?;
+            anyhow::Ok(serde_json::from_value::<Vec<HarnessDetection>>(r["harnesses"].clone())?)
+        };
+        let _ = detect_tx.send(rows.await).await;
+    });
     let tree = client.call(Op::SubTree).await?;
     app.nodes = serde_json::from_value(tree["nodes"].clone())?;
     if let Some(n) = app.nodes.first() {
@@ -323,6 +340,10 @@ pub async fn run() -> Result<()> {
     loop {
         tokio::select! {
             e = client.next_event() => { app.event(e?); pending = true; }
+            Some(rows) = detect_rx.recv() => {
+                app.harnesses = match rows { Ok(rows) => harness_list(&rows), Err(e) => format!("Could not check CLIs: {e}") };
+                pending = true;
+            }
             e = rx.recv() => {
                 match e.context("terminal input closed")?? {
                     TerminalEvent::Key(k) => match app.key(k, &mut client).await { Ok(true) => break, Ok(false) => {}, Err(e) => app.message = e.to_string() },
@@ -392,12 +413,25 @@ pub async fn scripted_test(home: &std::path::Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     #[test]
-    fn harness_names_render_as_lines_for_both_hello_shapes() {
-        assert_eq!(harness_list(&json!(["claude", "codex"])), "◇ claude\n◇ codex");
-        assert_eq!(harness_list(&json!([{"name":"claude", "logged_in":true}, {}])), "◇ claude");
-        assert_eq!(harness_list(&json!(null)), "");
+    fn harness_rows_render_state_and_login_hint() {
+        let row = |version: Option<&str>, supported, logged_in| HarnessDetection {
+            name: "Codex".into(),
+            binary: "codex".into(),
+            version: version.map(Into::into),
+            logged_in,
+            recorded: "0.165.0".into(),
+            supported,
+            login_command: "codex login".into(),
+        };
+        let text = harness_list(&[
+            row(None, true, None),
+            row(Some("1"), true, Some(false)),
+            row(Some("1"), true, Some(true)),
+            row(Some("1"), false, None),
+        ]);
+        let lines: Vec<_> = text.lines().map(|l| l.split_whitespace().skip(2).collect::<Vec<_>>().join(" ")).collect();
+        assert_eq!(lines, ["not installed", "logged out - run codex login", "ready", "detected, not supported yet"]);
     }
 }

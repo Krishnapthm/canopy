@@ -20,7 +20,7 @@ This file is loaded into every agent session. It is capped at 150 lines and chec
 - `make e2e` - real daemon in a temp home against fake agents
 - `make bench` - load test and budget assertions
 - `make gen` - regenerate `web/src/protocol.gen.ts` from the Rust types
-- `make web` - build the web app (fails until M5)
+- `make web` - build and check the web app bundle
 - `make build` - release binary with the web app embedded
 - `make check-docs` - lint every AGENTS.md and the ADR index
 
@@ -127,4 +127,4 @@ check, or delete it.
 ## Lessons
 
 - Probe Codex live from the main session; sandboxed sub-agents get 401 (`docs/harness-notes/codex.md`). (2026-11)
-- `make build` does not put `canopy` on PATH; users install with `cargo install --path crates/canopy`. (2026-11)
+- `make build` does not put `canopy` on PATH; build assets with `make web`, then `cargo install --path crates/canopy`. (2026-11)

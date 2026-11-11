@@ -22,6 +22,7 @@ usage:
   canopy permit <id> <request> allow|deny|always       answer a permission request
   canopy stop <id>                                     stop an agent and everything it spawned
   canopy demo                                          try a disposable fake-agent tree
+  canopy web                                           open the browser control room
   canopy doctor                                        check installed harnesses
   canopy daemon [--foreground] [--acp NAME=CMD]... [--max-depth N] [--max-live N] [--budget TOKENS]
 
@@ -58,6 +59,7 @@ fn run() -> Result<()> {
             block_on(mcp_stdio::run(sock, session))
         }
         "demo" => demo::run(),
+        "web" => block_on(daemon::http::open()),
         "fake-agent" => block_on(fake_agent::run()),
         "-h" | "--help" | "help" => {
             println!("{HELP}");
