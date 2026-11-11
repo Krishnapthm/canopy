@@ -1,6 +1,6 @@
 # 0006 - Coalesce token deltas at ingestion
 
-Status: Accepted (2026-11)
+Status: Superseded by [0023](0023-25ms-coalesce-window.md) (2026-11)
 
 ## Context
 

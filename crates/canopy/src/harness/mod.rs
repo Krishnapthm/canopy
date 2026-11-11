@@ -15,7 +15,7 @@ use tokio::time::Instant;
 use crate::daemon::hub::Msg;
 
 /// How long token deltas are held before being forwarded as one delta.
-pub const COALESCE: Duration = Duration::from_millis(40);
+pub const COALESCE: Duration = Duration::from_millis(25);
 
 /// Which adapter drives a harness name.
 #[derive(Clone, Debug)]
