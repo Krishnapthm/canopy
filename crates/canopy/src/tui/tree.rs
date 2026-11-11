@@ -20,6 +20,7 @@ pub fn widget(app: &App) -> List<'static> {
     List::new(
         rows(app)
             .into_iter()
+            .skip(app.tree_offset)
             .map(|(n, depth)| {
                 let glyph = match n.status {
                     Status::Running => "▷",
@@ -46,7 +47,7 @@ pub fn widget(app: &App) -> List<'static> {
                     n.harness,
                     collapse
                 );
-                ListItem::new(format!(
+                let detail = format!(
                     "{prefix}{}\n{}{}  {}t{} +{}/-{} {}",
                     n.title,
                     " ".repeat(ratatui::text::Line::from(prefix.as_str()).width()),
@@ -56,7 +57,34 @@ pub fn widget(app: &App) -> List<'static> {
                     n.changes.added,
                     n.changes.removed,
                     n.activity
-                ))
+                );
+                let color = match n.status {
+                    Status::Failed => ratatui::style::Color::Red,
+                    Status::AwaitingPermission => ratatui::style::Color::Yellow,
+                    Status::Running => ratatui::style::Color::Green,
+                    _ => ratatui::style::Color::Reset,
+                };
+                let mut lines: Vec<ratatui::text::Line> = detail.lines().map(|s| ratatui::text::Line::from(s.to_owned())).collect();
+                if let Some(line) = lines.first_mut() {
+                    let pos = line.spans[0].content.find(glyph).unwrap_or(0);
+                    let text = line.spans[0].content.to_string();
+                    *line = ratatui::text::Line::from(vec![
+                        ratatui::text::Span::raw(text[..pos].to_owned()),
+                        ratatui::text::Span::styled(glyph, ratatui::style::Style::default().fg(color)),
+                        ratatui::text::Span::raw(text[pos + glyph.len()..].to_owned()),
+                    ]);
+                }
+                if n.status == Status::Failed
+                    && let Some(error) = &n.error
+                {
+                    // Align the reason under the row's detail line, not at the pane edge.
+                    let indent: String = detail.lines().last().unwrap_or_default().chars().take_while(|c| *c == ' ').collect();
+                    lines.push(ratatui::text::Line::styled(
+                        format!("{indent}{}", error.lines().next().unwrap_or_default()),
+                        ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::DIM),
+                    ));
+                }
+                ListItem::new(lines)
             })
             .collect::<Vec<_>>(),
     )

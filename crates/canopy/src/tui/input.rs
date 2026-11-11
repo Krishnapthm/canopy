@@ -21,6 +21,11 @@ pub enum CommandId {
     Plugins,
     Help,
     Quit,
+    ExtensionNext,
+    ExtensionPrevious,
+    ExtensionToggle,
+    ExtensionAdopt,
+    ExtensionRefresh,
 }
 
 pub struct Command {
@@ -48,6 +53,11 @@ pub const COMMANDS: &[Command] = &[
     Command { id: CommandId::Tree, title: "≡ Tree", key: "g t" },
     Command { id: CommandId::Plugins, title: "◇ Plugins and skills", key: "g p" },
     Command { id: CommandId::Help, title: "? Help", key: "?" },
+    Command { id: CommandId::ExtensionNext, title: "↓ Next extension", key: "Down" },
+    Command { id: CommandId::ExtensionPrevious, title: "↑ Previous extension", key: "Up" },
+    Command { id: CommandId::ExtensionToggle, title: "◇ Toggle extension", key: "Space" },
+    Command { id: CommandId::ExtensionAdopt, title: "+ Adopt skill", key: "a (plugins)" },
+    Command { id: CommandId::ExtensionRefresh, title: "↻ Refresh extensions", key: "r (plugins)" },
     Command { id: CommandId::Quit, title: "× Quit", key: "q" },
 ];
 
