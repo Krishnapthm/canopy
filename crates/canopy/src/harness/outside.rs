@@ -54,6 +54,7 @@ pub async fn discover(cwd: Option<String>, owned: HashSet<String>) -> Value {
             Ok(rows) => sessions.extend(rows.into_iter().filter(|r| !owned.contains(&r.session_id)).map(|r| OutsideSession {
                 harness: "claude".into(),
                 vendor_id: r.session_id,
+                project: crate::paths::project_root(&r.cwd),
                 cwd: r.cwd,
                 title: r.name,
                 kind: r.kind,

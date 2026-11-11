@@ -24,7 +24,11 @@ export type Node = { id: string, parent: string | null, root: string, origin: Or
 /**
  * The parent's tool call that created this node.
  */
-spawn_call: string | null, harness: string, vendor_session: string | null, title: string, cwd: string, model: string | null, policy: Policy, status: Status, error: string | null, activity: string, usage: Usage, changes: Changes, subtree: Rollup, created: number, updated: number, ended: number | null, };
+spawn_call: string | null, harness: string, vendor_session: string | null, title: string, cwd: string, 
+/**
+ * Git toplevel of cwd, else cwd.
+ */
+project: string, model: string | null, policy: Policy, status: Status, error: string | null, activity: string, usage: Usage, changes: Changes, subtree: Rollup, created: number, updated: number, ended: number | null, };
 
 export type ItemKind = "user_message" | "agent_message" | "reasoning" | "tool_call" | "file_change" | "permission" | "error" | "notice";
 
@@ -40,7 +44,11 @@ export type SpawnReq = { harness: string, prompt: string, cwd: string, model: st
 
 export type HarnessDetection = { name: string, binary: string, version: string | null, logged_in: boolean | null, recorded: string, supported: boolean, login_command: string, };
 
-export type OutsideSession = { harness: string, vendor_id: string, cwd: string, title: string, 
+export type OutsideSession = { harness: string, vendor_id: string, cwd: string, 
+/**
+ * Git toplevel of cwd, else cwd.
+ */
+project: string, title: string, 
 /**
  * "interactive" (in a terminal) or "background" (`claude --bg`, open with `claude attach`).
  */

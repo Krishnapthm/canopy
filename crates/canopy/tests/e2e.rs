@@ -146,6 +146,14 @@ fn spawn_rejects_a_missing_working_directory() {
 }
 
 #[test]
+fn spawn_rejects_a_relative_working_directory() {
+    let d = Daemon::start("relative-cwd", &[]);
+    let mut call = support::socket(&d.home);
+    let reply = call(json!({"op":"spawn","harness":"fake","prompt":"hi","cwd":".","policy":"ask"}));
+    assert_eq!(reply["t"], "err", "a relative cwd resolves against the daemon, not the user; got {reply}");
+}
+
+#[test]
 fn failed_agent_shows_its_stderr_reason_in_the_tree() {
     let d = Daemon::start("stderr-tree", &[]);
     let mut call = support::socket(&d.home);

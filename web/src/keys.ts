@@ -22,7 +22,7 @@ export const commands = [
   {id:"filter", title:"Filter agents", key:"/", run:() => document.querySelector<HTMLInputElement>("#filter")?.focus()},
   {id:"palette", title:"Command palette", key:":", run:() => set("palette",true)},
   {id:"tree", title:"Tree view", key:"g t", run:() => set("view","tree")},
-  {id:"graph", title:"Graph view", key:"g g", run:() => set("view","graph")},
+  {id:"canvas", title:"Canvas view", key:"g c", run:() => set("view","canvas")},
   {id:"plugins", title:"Plugins and skills", key:"g p", run:() => set("view","plugins")},
   {id:"help", title:"Keyboard help", key:"?", run:() => set("palette",true)},
   {id:"stop", title:"Stop agent and children", key:"", run:() => {if (!state.outsideSelected) void attempt({op:"stop",session:state.selected});}},
@@ -37,7 +37,8 @@ export function keys(e: KeyboardEvent) {
   if ((e.target as HTMLElement).closest("input,textarea,select,[contenteditable]")) return;
   if (e.key === "g") { prefix = true; return; }
   const key = prefix ? "g "+e.key : e.key; prefix = false;
-  const command = commands.find(c => c.key === key);
+  // Commands without a key (key "") are palette-only; an empty e.key must never run Stop.
+  const command = key ? commands.find(c => c.key === key) : undefined;
   if (command) { e.preventDefault(); command.run(); }
 }
 let prefix = false;

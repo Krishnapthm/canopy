@@ -1,6 +1,6 @@
 # 0022 - React and shadcn/ui web app
 
-Status: Accepted (2026-11)
+Status: Superseded in part by [0029](0029-161kb-first-load-budget.md) (2026-11)
 
 ## Context
 

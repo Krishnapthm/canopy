@@ -243,7 +243,7 @@ yet` so the user sees it was noticed.
 | D9 | **Three adapters**: `claude` (stream-json), `codex` (app-server), `acp` (Gemini, OpenCode, and the long tail) | Native where the native protocol is strictly richer and avoids a Node shim per session; ACP for everything else so "and others" costs zero new code | ACP for all four: adds a Node adapter process per Claude/Codex session and loses steering, cost, and sub-agent attribution. Four bespoke adapters: OpenCode's HTTP API buys little over ACP in v1 |
 | D10 | **Cross-vendor spawn via an MCP server in the daemon**, reached through a stdio pipe shim | MCP is the only extension point all harnesses share, and ACP mandates stdio MCP support. The shim is a dumb pipe (same binary, ~1-2 MB RSS); the daemon implements the tools once | HTTP MCP: zero extra processes but needs streamable-HTTP semantics and is an optional capability in ACP. Wrapping each vendor's native sub-agent tool: impossible across vendors |
 | D11 | **Hand-rolled line-delimited JSON-RPC peer** (~200 lines), shared by Codex, ACP, and MCP | All three are the same framing. One module, no SDK dependencies, tolerant `serde` structs for only the fields we use | `rmcp` + ACP crate + Codex SDK: three dependency trees to track for a subset we can write in an afternoon |
-| D12 | **React + shadcn/ui + Tailwind + Vite** | User decision, ADR 0022 supersedes the Solid stack. External store, neutral theme, lazy Markdown. First-load JS budget 160 KB gzip | Custom controls duplicate installed accessible primitives |
+| D12 | **React + shadcn/ui + Tailwind + Vite** | User decision, ADR 0022 supersedes the Solid stack. External store, neutral theme, lazy Markdown. First-load JS budget 161 KB gzip (ADR 0029) | Custom controls duplicate installed accessible primitives |
 | D13 | **Browser-native virtualization**: `content-visibility: auto` + a 300-item window with paging | Zero JS, zero dependency, handles variable heights that hand-written virtualizers get wrong | A virtual-list library |
 | D14 | **`hyper` + `fastwebsockets` + `rust-embed`**, no web framework | Two routes (static assets, WS upgrade) do not justify a router stack. Assets are embedded and pre-compressed so the release is one file | `axum`: fine but unneeded. A separate static server: second process |
 | D15 | **Types flow one way**: Rust `protocol` crate is the source of truth, `ts-rs` generates `web/src/protocol.gen.ts` | A protocol change that breaks the web fails `tsc`. No hand-synced types | JSON Schema round trip, or hand-written TS types |
@@ -795,7 +795,7 @@ Budgets, asserted in `tests/bench.rs` (targets to validate at M1 and M5, then en
 | TUI first paint | <= 50 ms |
 | 50 fake agents x 100 deltas/s: daemon CPU | <= 15% of one core |
 | Same load: event to client latency p99 | <= 50 ms |
-| Web JS (gzip, first load) | <= 160 KB |
+| Web JS (gzip, first load) | <= 161 KB |
 | Web: frame rate under the same load | 60 fps, no long tasks > 50 ms |
 | Web heap with 50 sessions | <= 60 MB |
 

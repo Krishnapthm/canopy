@@ -101,14 +101,19 @@ function failed(node: Node) {
   });
 }
 
-export async function refresh() {
-  if (!state.connected || state.discovering) return;
+let again = false;
+// A refresh asked for mid-flight reruns once afterwards: its scope (canvas or one cwd) may differ.
+export async function refresh(): Promise<void> {
+  if (!state.connected) return;
+  if (state.discovering) { again = true; return; }
   set("discovering", true);
+  again = false;
   try {
-    const result = await attempt({op:"discover", cwd:state.nodes[state.selected]?.cwd ?? null});
+    const result = await attempt({op:"discover", cwd:state.view === "canvas" ? null : state.nodes[state.selected]?.cwd ?? null});
     if (result) {
       set("outside", result.sessions);
       for (const error of result.errors) errorToast(error);
     }
   } finally { set("discovering", false); }
+  if (again) return refresh();
 }

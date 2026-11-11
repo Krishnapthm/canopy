@@ -672,7 +672,7 @@ pub async fn scripted_test(home: &std::path::Path) -> Result<()> {
     app.mouse(click(rect.x, rect.y), &mut client).await?;
     assert_eq!(app.selected.as_ref(), Some(&session));
     app.discovered(serde_json::json!({"sessions":[{
-        "harness":"claude", "vendor_id":"outside12345678", "cwd":"/tmp/project",
+        "harness":"claude", "vendor_id":"outside12345678", "cwd":"/tmp/project", "project":"/tmp/project",
         "title":"Outside fixture", "kind":"interactive", "started":0, "status":"busy", "pid":123
     }], "errors":[]}))?;
     terminal.draw(|f| draw(f, &mut app))?;

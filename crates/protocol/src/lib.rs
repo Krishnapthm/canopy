@@ -83,6 +83,9 @@ wire! {
         pub vendor_session: Option<String>,
         pub title: String,
         pub cwd: String,
+        /// Git toplevel of cwd, else cwd.
+        #[serde(default)]
+        pub project: String,
         pub model: Option<String>,
         pub policy: Policy,
         pub status: Status,
@@ -158,6 +161,8 @@ wire! {
         pub harness: String,
         pub vendor_id: String,
         pub cwd: String,
+        /// Git toplevel of cwd, else cwd.
+        pub project: String,
         pub title: String,
         /// "interactive" (in a terminal) or "background" (`claude --bg`, open with `claude attach`).
         pub kind: String,
