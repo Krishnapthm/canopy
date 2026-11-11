@@ -83,9 +83,13 @@ wire! {
         pub vendor_session: Option<String>,
         pub title: String,
         pub cwd: String,
+        /// Git toplevel of cwd, else cwd.
+        #[serde(default)]
+        pub project: String,
         pub model: Option<String>,
         pub policy: Policy,
         pub status: Status,
+        pub error: Option<String>,
         pub activity: String,
         pub usage: Usage,
         pub changes: Changes,
@@ -152,9 +156,58 @@ wire! {
         pub title: Option<String>,
     }
 
+    /// One fresh CLI probe. Login state comes only from the vendor status exit code.
+    pub struct OutsideSession {
+        pub harness: String,
+        pub vendor_id: String,
+        pub cwd: String,
+        /// Git toplevel of cwd, else cwd.
+        pub project: String,
+        pub title: String,
+        /// "interactive" (in a terminal) or "background" (`claude --bg`, open with `claude attach`).
+        pub kind: String,
+        pub started: u64,
+        /// The vendor's own word: "idle", "busy" or "blocked" (waiting for the user).
+        pub status: String,
+        pub pid: Option<u32>,
+    }
+
+    pub struct HarnessDetection {
+        pub name: String,
+        pub binary: String,
+        pub version: Option<String>,
+        pub logged_in: Option<bool>,
+        pub recorded: String,
+        pub supported: bool,
+        pub login_command: String,
+    }
+
+    #[derive(Copy, Eq)]
+    #[serde(rename_all = "snake_case")]
+    pub enum ExtKind { Plugin, Skill, LibrarySkill, AdoptSkill }
+
+    #[serde(tag = "scope", content = "cwd", rename_all = "snake_case")]
+    pub enum ExtScope { Global, Project(String) }
+
+    pub struct Extension {
+        pub harness: String,
+        pub kind: ExtKind,
+        pub id: String,
+        pub name: String,
+        pub scope: ExtScope,
+        pub enabled: bool,
+        pub writable: bool,
+        pub command: Option<String>,
+    }
+
     #[serde(tag = "op", rename_all = "snake_case")]
     pub enum Op {
         Hello { version: u32 },
+        /// Fresh probes, returned in `result.harnesses`; never blocks the hub.
+        Detect,
+        Discover { cwd: Option<String> },
+        ExtList { cwd: Option<String> },
+        ExtSet { harness: String, kind: ExtKind, #[serde(rename = "ext_id")] id: String, scope: ExtScope, enabled: bool },
         SubTree,
         SubSession { session: SessionId, after_seq: Option<u64>, tail: Option<u32> },
         UnsubSession { session: SessionId },
@@ -163,6 +216,7 @@ wire! {
         Interrupt { session: SessionId },
         Permission { session: SessionId, request: String, decision: Decision },
         Stop { session: SessionId },
+        Resume { session: SessionId },
         History { session: SessionId, before_seq: u64, limit: u32 },
     }
 
@@ -226,6 +280,11 @@ mod gen_ts {
             Delivery::decl(&cfg),
             Decision::decl(&cfg),
             SpawnReq::decl(&cfg),
+            HarnessDetection::decl(&cfg),
+            OutsideSession::decl(&cfg),
+            ExtKind::decl(&cfg),
+            ExtScope::decl(&cfg),
+            Extension::decl(&cfg),
             Op::decl(&cfg),
             Request::decl(&cfg),
             Event::decl(&cfg),
@@ -250,6 +309,24 @@ mod tests {
     fn request_wire_shape() {
         let r: Request = serde_json::from_str(r#"{"id":3,"op":"send","session":"s","text":"hi","interrupt":false}"#).unwrap();
         assert_eq!(r.op, Op::Send { session: "s".into(), text: "hi".into(), interrupt: false });
+    }
+
+    #[test]
+    fn extension_id_does_not_collide_with_request_id() {
+        let request = Request {
+            id: 7,
+            op: Op::ExtSet {
+                harness: "claude".into(),
+                kind: ExtKind::Plugin,
+                id: "demo@local".into(),
+                scope: ExtScope::Global,
+                enabled: false,
+            },
+        };
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(value["id"], 7);
+        assert_eq!(value["ext_id"], "demo@local");
+        assert_eq!(serde_json::from_value::<Request>(value).unwrap(), request);
     }
 
     #[test]

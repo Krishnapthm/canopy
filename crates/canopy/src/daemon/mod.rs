@@ -1,6 +1,7 @@
 //! Daemon startup: single-instance lock, socket, store, hub, and clean shutdown that takes
 //! every agent process group down with it.
 
+pub mod extensions;
 pub mod hub;
 pub mod ipc;
 pub mod mcp;
@@ -37,7 +38,8 @@ pub fn run(opts: Opts, raw_args: Vec<String>) -> Result<()> {
     let sock = home.join("sock");
     let _ = std::fs::remove_file(&sock);
 
-    let mut harnesses = HashMap::from([("claude".to_owned(), Kind::Claude), ("codex".to_owned(), Kind::Codex)]);
+    let mut harnesses: HashMap<String, Kind> =
+        crate::harness::DETECTION.iter().filter_map(|r| r.adapter.clone().map(|k| (r.binary.to_owned(), k))).collect();
     for spec in &opts.acp {
         let (name, cmd) = spec.split_once('=').context("--acp takes name=command")?;
         // shortcut: whitespace split, no shell quoting; upgrade if a command needs quoted args.

@@ -4,6 +4,7 @@
 pub mod acp;
 pub mod claude;
 pub mod codex;
+pub mod outside;
 
 use protocol::{Decision, Delivery, ItemKind, ItemState, Policy, SessionId, Status, Usage};
 use serde_json::{Value, json};
@@ -15,7 +16,7 @@ use tokio::time::Instant;
 use crate::daemon::hub::Msg;
 
 /// How long token deltas are held before being forwarded as one delta.
-pub const COALESCE: Duration = Duration::from_millis(40);
+pub const COALESCE: Duration = Duration::from_millis(25);
 
 /// Which adapter drives a harness name.
 #[derive(Clone, Debug)]
@@ -194,7 +195,7 @@ pub fn start(kind: &Kind, spec: SpawnSpec, tx: mpsc::Sender<Msg>, codex: &mut Op
             tokio::spawn(claude::run(spec, out, cmd_rx));
         }
         Kind::Codex => {
-            let server = codex.get_or_insert_with(codex::Server::start);
+            let server = codex.get_or_insert_with(|| codex::Server::start(tx));
             server.attach(spec, out, cmd_rx);
         }
         Kind::Acp { command, args } => {
@@ -208,7 +209,9 @@ pub fn start(kind: &Kind, spec: SpawnSpec, tx: mpsc::Sender<Msg>, codex: &mut Op
 pub fn kill_group(pid: Option<u32>) {
     if let Some(pid) = pid {
         // shortcut: shells out to kill(1) instead of adding libc; fine at human stop rates.
-        let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
+        // The "--" is required: procps kill (Linux) reads "-5104" as options and signals
+        // group -5, or every process (-1) when the pid starts with 1.
+        let _ = std::process::Command::new("kill").args(["-s", "TERM", "--", &format!("-{pid}")]).status();
     }
 }
 
@@ -219,8 +222,162 @@ pub fn command(program: &str, args: &[String], cwd: &std::path::Path) -> tokio::
         .current_dir(cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::piped())
         .process_group(0)
         .kill_on_drop(true);
     c
+}
+
+/// Detection facts are pinned to recordings, not inferred from auth output.
+pub struct Detection {
+    pub name: &'static str,
+    pub binary: &'static str,
+    pub version_args: &'static [&'static str],
+    pub status_args: &'static [&'static str],
+    pub login: &'static str,
+    pub recorded: &'static str,
+    pub adapter: Option<Kind>,
+}
+
+pub const DETECTION: &[Detection] = &[
+    Detection {
+        name: "Claude Code",
+        binary: "claude",
+        version_args: &["--version"],
+        status_args: &["auth", "status"],
+        login: "claude auth login",
+        recorded: "2.1.318",
+        adapter: Some(Kind::Claude),
+    },
+    Detection {
+        name: "Codex",
+        binary: "codex",
+        version_args: &["--version"],
+        status_args: &["login", "status"],
+        login: "codex login",
+        recorded: "0.165.0",
+        adapter: Some(Kind::Codex),
+    },
+    Detection {
+        name: "OpenCode",
+        binary: "opencode",
+        version_args: &["--version"],
+        status_args: &[],
+        login: "",
+        recorded: "unverified",
+        adapter: None,
+    },
+    Detection {
+        name: "Copilot CLI",
+        binary: "copilot",
+        version_args: &["--version"],
+        status_args: &[],
+        login: "",
+        recorded: "unverified",
+        adapter: None,
+    },
+    Detection {
+        name: "Gemini CLI",
+        binary: "gemini",
+        version_args: &["--version"],
+        status_args: &[],
+        login: "",
+        recorded: "on hold",
+        adapter: None,
+    },
+];
+
+/// Installed CLIs only: a CLI that is not on PATH is never listed, so new vendors need no UI work.
+pub async fn detect() -> Vec<protocol::HarnessDetection> {
+    let mut tasks = Vec::new();
+    for row in DETECTION {
+        tasks.push(tokio::spawn(async move {
+            let version = async {
+                let out = tokio::process::Command::new(row.binary)
+                    .args(row.version_args)
+                    .stdin(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .kill_on_drop(true)
+                    .output()
+                    .await
+                    .ok()?;
+                out.status
+                    .success()
+                    .then(|| String::from_utf8_lossy(&out.stdout).trim().chars().filter(|c| !c.is_control()).take(100).collect::<String>())
+            };
+            let login = async {
+                if row.status_args.is_empty() {
+                    return None;
+                }
+                tokio::process::Command::new(row.binary)
+                    .args(row.status_args)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .kill_on_drop(true)
+                    .status()
+                    .await
+                    .ok()
+                    .map(|s| s.success())
+            };
+            let (version, logged_in) = tokio::join!(
+                tokio::time::timeout(Duration::from_millis(800), version),
+                tokio::time::timeout(Duration::from_millis(800), login)
+            );
+            protocol::HarnessDetection {
+                name: row.name.into(),
+                binary: row.binary.into(),
+                version: version.ok().flatten(),
+                logged_in: logged_in.ok().flatten(),
+                recorded: row.recorded.into(),
+                supported: row.adapter.is_some(),
+                login_command: row.login.into(),
+            }
+        }));
+    }
+    let mut rows = Vec::new();
+    for task in tasks {
+        if let Ok(row) = task.await
+            && row.version.is_some()
+        {
+            rows.push(row);
+        }
+    }
+    rows
+}
+
+/// Drain stderr while the child runs, retaining only a bounded diagnostic tail.
+pub fn stderr(child: &mut tokio::process::Child) -> tokio::task::JoinHandle<String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    let stderr = child.stderr.take();
+    tokio::spawn(async move {
+        let mut tail = std::collections::VecDeque::new();
+        if let Some(stderr) = stderr {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                eprintln!("{line}");
+                if tail.len() == 20 {
+                    tail.pop_front();
+                }
+                tail.push_back(line);
+            }
+        }
+        tail.into_iter().collect::<Vec<_>>().join("\n")
+    })
+}
+
+pub async fn exit_error(
+    program: &str,
+    child: &mut tokio::process::Child,
+    tail: tokio::task::JoinHandle<String>,
+    error: Option<String>,
+) -> Option<String> {
+    let status = child.wait().await;
+    let error = error.or_else(|| match status {
+        Ok(s) if s.success() => None,
+        Ok(s) => Some(format!("{program} exited with {s}")),
+        Err(e) => Some(format!("cannot wait for {program}: {e}")),
+    });
+    let tail = tail.await.unwrap_or_default();
+    error.map(|e| if tail.is_empty() { e } else { format!("{e}\n{tail}") })
 }

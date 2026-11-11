@@ -1,0 +1,119 @@
+import { toast } from "sonner";
+import { errorToast } from "./toast";
+import { state, set, ingest, items, batch, listen, newlyFailed } from "./store";
+import { PROTOCOL_VERSION, type Op, type ServerMsg, type Event, type Node, type Item } from "./protocol.gen";
+let socket: WebSocket;
+let retry = 1000;
+let next = 0;
+let frame = 0;
+let queued: Event[] = [];
+const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+const token = location.hash.slice(1) || sessionStorage.getItem("canopy-token") || "";
+if (token) sessionStorage.setItem("canopy-token", token);
+history.replaceState(null, "", location.pathname + location.search);
+export async function call(op: Op): Promise<any> {
+  try { return await request(op); }
+  catch (error) { errorToast(error); throw error; }
+}
+function request(op: Op): Promise<any> {
+  if (socket?.readyState !== WebSocket.OPEN) return Promise.reject(new Error("Disconnected"));
+  return new Promise((resolve, reject) => {
+    const id = ++next;
+    pending.set(id, {resolve, reject});
+    socket.send(JSON.stringify({id, ...op}));
+  });
+}
+export async function attempt(op: Op) {
+  try { return await call(op); } catch { /* call already reported the error. */ }
+}
+export async function subscribe(session: string) {
+  const result = await attempt({op:"sub_session", session, after_seq:null, tail:300});
+  if (result && state.selected === session && !document.hidden) items(session, result.items as Item[], true);
+}
+export function connect() {
+  socket = new WebSocket(`ws://${location.host}/ws`);
+  socket.onopen = async () => {
+    try {
+      // Token belongs to the transport hello, not the shared Unix protocol.
+      const request = {op:"hello" as const, version:PROTOCOL_VERSION, token};
+      const hello = await call(request);
+      set("harnesses", hello.harnesses);
+      const tree = await call({op:"sub_tree"});
+      set("nodes", Object.fromEntries((tree.nodes as Node[]).map(n => [n.id,n])));
+      set("connected", true);
+      void refresh();
+      retry = 1000;
+      toast.dismiss("canopy-connection");
+    } catch { /* call already reported the error. */ }
+  };
+  socket.onmessage = message => {
+    const value: ServerMsg = JSON.parse(message.data);
+    if (value.t === "batch") {
+      queued.push(...value.events);
+      if (!frame) frame = requestAnimationFrame(() => {
+        frame = 0;
+        const events = queued; queued = [];
+        batch(() => events.forEach(event => {
+          if (event.t === "node" && newlyFailed(event.node)) failed(event.node);
+          ingest(event);
+        }));
+      });
+    } else {
+      const request = pending.get(value.id);
+      pending.delete(value.id);
+      if (value.t === "err") request?.reject(new Error(value.error));
+      else request?.resolve(value.result);
+    }
+  };
+  socket.onclose = () => {
+    toast.info("Reconnecting to Canopy", { id: "canopy-connection" });
+    set("connected", false);
+    for (const request of pending.values()) request.reject(new Error("Disconnected"));
+    pending.clear(); queued = [];
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    setTimeout(connect, retry);
+    retry = Math.min(retry * 2, 30000);
+  };
+}
+export function subscriptions() {
+  let previous = "";
+  listen(() => {
+    const selected = state.selected;
+    if (!state.connected) { previous = ""; return; }
+    if (previous === selected) return;
+    if (previous) void attempt({op:"unsub_session", session:previous});
+    previous = selected;
+    if (selected && !document.hidden) void subscribe(selected);
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!state.selected || !state.connected) return;
+    if (document.hidden) void attempt({op:"unsub_session", session:state.selected});
+    else void subscribe(state.selected);
+  });
+}
+// Persistent, one per node (the id dedupes), with a way to jump to the agent.
+function failed(node: Node) {
+  errorToast(`${node.title || node.harness} failed`, {
+    id: node.id,
+    description: node.error?.split("\n").slice(0, 3).join("\n"),
+    action: { label: "Open", onClick: () => batch(() => { set("selected", node.id); set("view", "tree"); }) },
+  });
+}
+
+let again = false;
+// A refresh asked for mid-flight reruns once afterwards: its scope (canvas or one cwd) may differ.
+export async function refresh(): Promise<void> {
+  if (!state.connected) return;
+  if (state.discovering) { again = true; return; }
+  set("discovering", true);
+  again = false;
+  try {
+    const result = await attempt({op:"discover", cwd:state.view === "canvas" ? null : state.nodes[state.selected]?.cwd ?? null});
+    if (result) {
+      set("outside", result.sessions);
+      for (const error of result.errors) errorToast(error);
+    }
+  } finally { set("discovering", false); }
+  if (again) return refresh();
+}

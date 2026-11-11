@@ -3,7 +3,10 @@
 One core, two front ends (TUI + web), for launching and orchestrating coding agents from
 different vendors as a single live tree. `canopy` is a working name; rename freely.
 
-Status: plan only. Nothing here is built or measured yet. Every performance number is a
+Status (2026-11-11): the daemon, the CLI, the Claude and Codex adapters and the cross-vendor
+spawn tree are built (M1-M3 for those two harnesses). No TUI, no web app, no release yet.
+Next are M3.5 (detection and awareness) and then M4, the TUI that bare `canopy` opens
+(section 8); the release pipeline follows the TUI. Every performance number is a
 budget to enforce, not a result. Items marked **VERIFY** are harness facts taken from
 secondary sources that must be confirmed against the installed CLI before coding against them.
 
@@ -25,6 +28,13 @@ vendor, and that child appears under it in the tree. For every node you can see 
 doing right now, whether it is waiting on you, how many tokens it has used, and which
 files it touched. You can type a message to any of them at any time, from the terminal or
 from the browser, and approve or stop them from the same place.
+
+You start it the way you start an agent today. Typing `claude` or `codex` opens that
+agent's interactive terminal UI; typing `canopy` opens the control room: the tree of every
+agent on the left, the selected agent's live transcript on the right, a composer at the
+bottom. From there you assign a task to a new agent, watch what each one is doing and how,
+and message, approve or stop any of them. The subcommands (`canopy run`, `ls`, `send`, ...)
+are for scripts; the web app is the same control room in a browser.
 
 It is not another agent and it is not a model. It does no thinking of its own. It is the
 control room for the agents you already have, using the subscriptions you already pay for,
@@ -67,8 +77,10 @@ Added:
   harness. It reuses `spawn`, so it is a few lines. Automatic failover is later.
 - **`canopy doctor` checks login state** per installed CLI, in addition to version. Canopy
   reports "not logged in" and stops; it never drives a login.
-- **OSS release work**: `LICENSE`, install instructions, prebuilt binaries for macOS and
-  Linux on tagged releases. Lands in M6.
+- **A product from day zero.** Install is one command, the first run detects every agent
+  CLI on the machine, and there is nothing to configure. Release work is not an M6 chore:
+  it starts at M3.5, the pipeline lands at M4.5 right after the TUI, and every later
+  milestone ships through it (section 0.2).
 
 Unchanged, and worth saying why: the WebSocket token and `Origin` check stay. They are not
 about remote access. They stop a web page open in the user's own browser from driving
@@ -76,6 +88,102 @@ local agents through `127.0.0.1`.
 
 Net: simpler. One module and one concept (estimated cost) deleted, a class of future
 features ruled out, one status and one small command added.
+
+### 0.1 Build versus reuse
+
+The rule: **canopy owns the space between agents and nothing inside one.** If a harness
+already does it, we drive it through a thin adapter. We build only what needs the tree.
+
+| Reuse from the harness (thin adapter) | Build in canopy (needs the tree) |
+|---|---|
+| The agent loop, tools, sandbox, model choice, compaction | The tree: nodes, edges, status, rollups |
+| Login and credentials (never touched) | One protocol for CLI, TUI and web |
+| Permission prompts (we relay the harness's own request) | Policy inheritance: a child cannot escalate |
+| Session storage and resume (vendor session id) | Limits: depth, live count, token budget |
+| Native sub-agents (shown as observed `native` nodes) | Four MCP tools for cross-vendor spawn (section 5.3) |
+| The user's own hooks and MCP servers | Detection and first run (section 0.2) |
+| Plugin and skill storage, loading and install commands | One place to see and switch plugins and skills (section 5.6) |
+
+No prompt stack. Canopy ships no system prompt, no agent personas and no orchestration
+prompts. What the model reads from us is one `instructions` string and four tool
+descriptions (section 5.3).
+
+**Why not the vendors' own cross-agent plugins.** OpenAI ships a Codex plugin for Claude
+Code (`openai/codex-plugin-cc`). Its delegate command is one Bash call to a Node script
+that returns the result when the job ends. There is no stream, no steering, no approval
+relay, no usage and no nesting, and no official plugin exists in the other direction.
+Spawning through it would put a blind spot in the tree: a child we cannot show, message,
+approve, stop or count against a limit. That breaks priority 1 (correct control). So the
+canopy MCP tools stay the only spawn path. If the user has such a plugin installed it
+still works; its run shows up as an ordinary tool call in the parent's transcript.
+
+**What would change this.** If a harness exposes a native cross-vendor spawn that streams
+and can be steered, map it to observed nodes the way Claude Task sub-agents are mapped.
+Do not build a second control path for it.
+
+### 0.2 The product path: install, detect, ready
+
+Target: from a fresh machine to a running agent in under a minute, with no file edited.
+
+1. **Install.** One line, no Rust needed: a shell installer and a Homebrew tap, both fed by
+   prebuilt binaries on GitHub Releases, generated by `dist` in CI (a build tool, not a
+   dependency). `cargo install` stays for Rust users. **VERIFY** on a clean macOS account
+   that a curl-installed binary runs without a Gatekeeper prompt before promising it.
+2. **Detect.** Bare `canopy` opens the control room (the TUI, section 6.2), exactly as
+   bare `claude` or `codex` opens theirs. On start it checks every known agent CLI at
+   once: on PATH, version, logged in. It uses only each CLI's own status command and reads
+   the exit code, never the output and never a credential file. All probes run in parallel
+   with a timeout and never block first paint: the TUI draws at once and fills the
+   harness list in as probes return. `canopy doctor` prints the same result as a table
+   and exits, for scripts and bug reports. Budget: all probes done in under 1 s.
+3. **Ready.** There is no pairing step. Installed and logged in means usable. With no
+   agents yet, the control room shows the detected harnesses and the new-agent prompt, so
+   the first thing a user does is assign a task. A CLI that is installed but logged out
+   is listed with the vendor's own login command next to it; canopy never runs it.
+4. **Try without spending tokens.** `canopy demo` starts a small tree of fake agents so a
+   new user sees the product before using any quota. It reuses `fake-agent`.
+5. **Leave cleanly.** Canopy writes only to `~/.canopy` and its own binary. Uninstall is
+   deleting those two things, and the README says so.
+
+Detection is one table in `harness/mod.rs`: name, binary, version args, login-status args,
+adapter. A row is `supported` only after its facts are in `docs/harness-notes/` with a
+fixture. A CLI that is found but not yet verified is listed as `detected, not supported
+yet` so the user sees it was noticed.
+
+| CLI | Today | Blocker |
+|---|---|---|
+| Claude Code | supported | - |
+| Codex | supported | - |
+| OpenCode | detect only | not installed on the dev machine; ACP adapter exists, needs a live probe |
+| Copilot CLI | detect only | same; docs list `copilot --acp` and no login-status command |
+| Gemini CLI | detect only, **on hold** | policy, see below |
+
+### 0.3 Launch risks to close before posting publicly
+
+- **Subscription terms.** Anthropic's docs allow a user to sign in to the unmodified Claude
+  Code binary and forbid third parties from offering claude.ai login or routing requests
+  through plan credentials. Canopy does neither, which is the closest permitted pattern,
+  but no primary source says "a third-party tool may drive `claude -p` on a subscription".
+  Google's Gemini CLI terms go further and call third-party software using its OAuth
+  access a violation that can end the account, and its docs say the consumer CLI was
+  replaced in June 2026. So: Gemini stays detect-only until this is read first hand, the
+  README states plainly what canopy does and does not do with logins, and the user gets a
+  first-hand read of each vendor's current terms before launch. This is the one risk that
+  can kill the product, so it is checked before each release, not once.
+- **The name.** `canopy` is taken on crates.io (a TUI framework) and npm (a parser
+  compiler). Pick the final name, and check crates.io, npm, Homebrew and GitHub, before
+  the first public tag. Renaming after launch costs every install command ever posted.
+- **Fixtures leak the recorder's setup.** The recorded Claude fixtures contain the home
+  directory path and the full list of installed plugins and MCP servers. Scrub them and
+  add the scrub to the recording step before the first push to a public remote.
+- **Shared checkout.** Children inherit the parent's cwd, so two agents can edit the same
+  file. Worktree isolation stays "later", but the README must say this on day one.
+- **The user's harness config comes along.** A canopy-launched agent loads the user's own
+  plugins, hooks and MCP servers. That is intended (it is their agent), and it costs
+  context and start time in every child. Document it; canopy never strips it silently.
+  The user switches plugins and skills off themselves in the control room (section 5.6).
+- **CLI drift.** The vendor CLIs ship weekly. `canopy doctor` prints the versions canopy was
+  recorded against next to the installed ones, so a mismatch is visible before a bug report.
 
 ---
 
@@ -93,7 +201,8 @@ features ruled out, one status and one small command added.
    binary size and lose on every library we need. I pick the fastest option *that removes a
    real cost*, and say so each time.
 3. **Cross-vendor sub-agents cannot be truly native.** Every harness's built-in sub-agent
-   tool spawns only itself. The one seam all of them share is MCP, so cross-vendor spawning
+   tool spawns only itself, and the vendor cross-agent plugins that exist are opaque shell
+   calls (section 0.1). The one seam all of them share is MCP, so cross-vendor spawning
    is an MCP tool the model chooses to call. It will feel native in the UI (one tree, one
    inbox), but the model has to be told the tool exists. That is a ceiling, not a bug.
 4. **"Message any running session" has three different meanings.** Codex can steer a turn in
@@ -134,7 +243,7 @@ features ruled out, one status and one small command added.
 | D9 | **Three adapters**: `claude` (stream-json), `codex` (app-server), `acp` (Gemini, OpenCode, and the long tail) | Native where the native protocol is strictly richer and avoids a Node shim per session; ACP for everything else so "and others" costs zero new code | ACP for all four: adds a Node adapter process per Claude/Codex session and loses steering, cost, and sub-agent attribution. Four bespoke adapters: OpenCode's HTTP API buys little over ACP in v1 |
 | D10 | **Cross-vendor spawn via an MCP server in the daemon**, reached through a stdio pipe shim | MCP is the only extension point all harnesses share, and ACP mandates stdio MCP support. The shim is a dumb pipe (same binary, ~1-2 MB RSS); the daemon implements the tools once | HTTP MCP: zero extra processes but needs streamable-HTTP semantics and is an optional capability in ACP. Wrapping each vendor's native sub-agent tool: impossible across vendors |
 | D11 | **Hand-rolled line-delimited JSON-RPC peer** (~200 lines), shared by Codex, ACP, and MCP | All three are the same framing. One module, no SDK dependencies, tolerant `serde` structs for only the fields we use | `rmcp` + ACP crate + Codex SDK: three dependency trees to track for a subset we can write in an afternoon |
-| D12 | **SolidJS + TypeScript + Vite + plain CSS** | Fine-grained reactivity: a token delta updates one text node, not a component subtree. ~7 KB runtime, no virtual DOM diff. Stores give the MobX-like model Linear uses. Only runtime deps: `solid-js` and `marked` (lexer only) | **React**: VDOM re-render pressure under streaming, 45 KB+. **Svelte 5**: same performance class, weaker TS checking in templates. **WASM (Leptos)**: larger payload, DOM calls cross a JS bridge. **Canvas/WebGL**: fastest for 10k nodes, but loses text selection and accessibility and triples the code; we have hundreds of nodes |
+| D12 | **React + shadcn/ui + Tailwind + Vite** | User decision, ADR 0022 supersedes the Solid stack. External store, neutral theme, lazy Markdown. First-load JS budget 161 KB gzip (ADR 0029) | Custom controls duplicate installed accessible primitives |
 | D13 | **Browser-native virtualization**: `content-visibility: auto` + a 300-item window with paging | Zero JS, zero dependency, handles variable heights that hand-written virtualizers get wrong | A virtual-list library |
 | D14 | **`hyper` + `fastwebsockets` + `rust-embed`**, no web framework | Two routes (static assets, WS upgrade) do not justify a router stack. Assets are embedded and pre-compressed so the release is one file | `axum`: fine but unneeded. A separate static server: second process |
 | D15 | **Types flow one way**: Rust `protocol` crate is the source of truth, `ts-rs` generates `web/src/protocol.gen.ts` | A protocol change that breaks the web fails `tsc`. No hand-synced types | JSON Schema round trip, or hand-written TS types |
@@ -319,6 +428,21 @@ parent edge is recorded. Tools:
 When a child finishes while its parent is idle, the hub delivers a notice to the parent as an
 ordinary message ("agent 01HX finished: ..."). Parents do not have to poll.
 
+**How an agent knows it is in canopy.** Three things, and nothing else:
+
+1. The MCP `instructions` string returned at initialize (one or two sentences, already in
+   `daemon/mcp.rs`). It says what canopy is and when to spawn.
+2. The four tool descriptions, which include the harnesses that are usable right now.
+3. For a spawned child only, one line at the top of its prompt: who spawned it and that
+   its final message is returned to that parent.
+
+Budget: at most 150 tokens of standing text beyond the tool schemas, asserted by a test on
+the strings. Awareness writes nothing to the user's harness config: no hook or plugin is
+installed and no system prompt is replaced. (Plugin and skill switches are a separate,
+user-driven path, section 5.6.) **VERIFY** per harness that the model
+actually sees `instructions` (OpenCode documents that it does; Claude and Codex are
+unconfirmed). Where it does not, the same sentence goes at the top of the first prompt.
+
 Limits (`daemon/limits.rs`), all enforced at `spawn_agent` and returned as tool errors the
 model can read: max depth 3, max 16 live agents, optional per-root token budget. Defaults
 are daemon flags. A spawn onto a rate-limited harness fails with the reset time, so the
@@ -361,6 +485,44 @@ CREATE INDEX items_session ON items(session, seq);
 Node stored as one JSON column: the struct will change often during development and nothing
 queries its inner fields in v1. Promote fields to columns when a query needs them.
 
+### 5.6 Plugins and skills (ADR 0020)
+
+One view, in the TUI and the web, that lists every plugin and skill across the supported
+harnesses and lets the user switch each one on or off. Canopy is the place they are
+managed; the vendors still store and load them.
+
+- **Scopes**: global and per project. Never per agent: an agent gets whatever its harness
+  and project have switched on.
+- **One switch per harness**: a row shows the item and a switch for each harness that has
+  it, so a plugin can be on for Codex and off for Claude.
+- **How a switch is applied**: through the vendor's own interface, never by hand-editing
+  its files.
+
+  | | Claude Code | Codex |
+  |---|---|---|
+  | List | `claude plugin list --json` | app-server `plugin/installed`, `skills/list` |
+  | Plugin on/off | `claude plugin enable\|disable --scope user\|project --json` | app-server `config/value/write` on `plugins."name@marketplace".enabled` |
+  | Skill on/off | no vendor switch: only library skills can be switched (below) | app-server `skills/config/write` |
+
+- **One shared skill library**: `~/.canopy/skills/<name>/SKILL.md`. Both vendors read the
+  same format. A library skill reaches a harness through a symlink in that harness's
+  skill directory (`~/.claude/skills/`, `~/.agents/skills/`, or the project equivalents);
+  off for that harness means the link is removed. A skill already sitting in a vendor
+  directory is listed, and can be adopted into the library by an explicit action.
+  **VERIFY** that Claude Code follows a symlinked skill folder (Codex documents that it
+  does), and that one `SKILL.md` loads unchanged in both.
+- **Plugins are not shared**: the two plugin formats differ, so plugins are listed per
+  harness. Canopy does not translate one into the other.
+- **Never auto-accept**: every change is one explicit user action on one named item. A
+  command declared by a marketplace is shown in full and needs a yes each time. The first
+  version does not install plugins; it shows the vendor's install command.
+- **Running agents are not affected**: a change applies to sessions started after it, and
+  the view says so next to the switch.
+- **No cache, no polling**: the view reads the vendor's current answer when it opens and
+  after each change. Nothing is stored in SQLite.
+- **Protocol**: two requests, `ext_list {cwd?}` and `ext_set {harness, kind, id, scope,
+  enabled}`. Tests run them against fake CLIs in a temp home, never the real configs.
+
 ---
 
 ## 6. Front ends
@@ -372,35 +534,58 @@ read it. Keys are identical in TUI and web:
 
 `j/k` move - `h/l` collapse/expand - `Enter` open session - `c` new agent - `s` spawn child
 of selection - `i` focus composer - `Esc` back - `x` interrupt - `a/d` allow/deny permission
-- `/` filter - `Cmd-K` or `:` palette - `g t` tree - `g g` graph (web) - `?` help.
+- `/` filter - `Cmd-K` or `:` palette - `g t` tree - `g g` graph (web) - `g p` plugins and
+skills - `?` help.
+
+Visual rules, the same in both front ends. Attention to detail is a requirement here, not
+polish:
+
+- **Icons are required** for every status, harness, scope and action. A row never relies
+  on a word or a colour alone.
+- **Never an emoji**, in the UI, in agent-facing text, or in docs.
+- **No eyebrow labels**: the small uppercase tag above a heading that generated UIs lean
+  on. A heading stands on its own.
+- **Global scope is an earth globe**: a world with continents, not the wireframe "www"
+  grid globe. Project scope is a folder.
+- **Web**: lucide icons with `currentColor`; status is conveyed by shape.
+- **TUI**: terminals have no images, so an icon is a single-cell glyph. Nerd Font glyphs
+  (a free font patched with icons, which has an earth globe) when the user turns them on;
+  otherwise plain Unicode symbols in text presentation. **VERIFY** before M4 which glyphs
+  render at one cell width in Terminal.app, iTerm2, Ghostty and tmux, and whether a
+  Nerd Font can be detected or must be a setting. The default must look right with no
+  setup.
+- Enforced, not remembered: `make check` greps `tui/` and `web/src/` for emoji code points.
 
 ### 6.2 TUI (`crates/canopy/src/tui/`)
 
-`ratatui` + `crossterm`, a client of the Unix socket like any other. Left: outline tree with
+This is what bare `canopy` opens, and the main way the product is used (section 0.2).
+`ratatui` + `crossterm`, a client of the Unix socket like any other. It auto-starts the
+daemon, so there is nothing to run first; quitting the TUI leaves the agents running and
+`canopy` reattaches to them. Left: outline tree with
 status glyph, harness tag, title, activity, tokens/cost, +/- lines. Right: transcript of the
 selected session. Bottom: composer with delivery state. Draws only when an event or key
 arrives, capped at 30 fps. No tick loop, so an idle TUI uses no CPU.
 
 ### 6.3 Web (`web/`)
 
-- **State**: one Solid store `{nodes: Record<id, Node>, sessions: Record<id, {items, live}>}`
+- **State**: one external React store `{nodes: Record<id, Node>, sessions: Record<id, {items, live}>}`
   mirrored from the daemon. Navigation, selection, filter, and palette never touch the
   network. That is the Linear trick.
 - **Ingest**: `conn.ts` receives a batch, queues it, and applies all queued batches inside one
-  `batch()` in `requestAnimationFrame`: at most one DOM commit per frame however fast events
+  store batch in `requestAnimationFrame`: at most one DOM commit per frame however fast events
   arrive. A hidden tab drops its session subscriptions (keeps the tree) and resyncs on focus.
-- **Streaming text**: a delta appends to one signal bound to one text node. Streaming items
+- **Streaming text**: a delta appends to the selected session snapshot. Streaming items
   render as plain pre-wrapped text. Markdown is lexed once when the item completes, never per
   delta. `marked` is loaded lazily.
 - **Views**: Outline tree (primary; rows as above). Graph (SVG: x = depth, y = outline row,
-  elbow edges, status-coloured nodes, live activity; layout is derived from the outline order
+  elbow edges, status icons on nodes, live activity; layout is derived from the outline order
   in ~30 lines, no layout library). Session (transcript + composer + permission bar + node
   details). Palette. New-agent dialog.
 - **Rendering cost controls**: `content-visibility: auto` on transcript rows, a 300-item
   window with `history` paging, CSS transitions only on `transform`/`opacity`, no layout
   thrash in the streaming path.
-- **No**: router library (a 30-line history wrapper), state library, component kit, CSS
-  framework, icon package (inline SVG sprites).
+- **Stack (ADR 0022)**: React, shadcn/ui on Base UI, Tailwind, lucide icons. No router
+  or state library. The neutral theme follows the system.
 - **Dev**: `vite` dev server proxying `/ws` to the daemon. Release: `vite build` output is
   embedded into the binary.
 
@@ -493,27 +678,51 @@ mapping, completion notices. Exit: e2e where a fake agent spawns two children of
 "harnesses", waits, and the rollup is correct; depth and budget limits return tool errors.
 Live: Claude spawns a Codex child that edits a file.
 
-**M4 - TUI.** Exit: scripted key-driven test against the fake agent covering launch, message,
-approve, interrupt; idle CPU budget holds with the TUI open.
+**M3.5 - Product path (next).** In this order, each step usable on its own:
+1. Scrub the recorded fixtures and make the recording step scrub (section 0.3).
+2. The detection table, parallel `doctor`, `canopy demo`.
+3. Awareness: the child prompt line and the 150-token test (section 5.3).
+Exit: e2e covers `doctor` with zero, one and two CLIs found (fake binaries on a temp
+PATH) and with one logged out.
 
-**M5 - Web.** `http.rs`, auth, the Solid app. Exit: in a real browser with 50 fake agents
+**M4 - TUI, the control room.** Bare `canopy` opens it (sections 0.2 and 6.2). Until this
+lands, bare `canopy` prints the `doctor` table. Exit: scripted key-driven test against the
+fake agent covering first run with no agents, launch, message, approve, interrupt, quit
+and reattach; idle CPU budget holds with the TUI open.
+
+**M4.5 - Release pipeline.** After the TUI, so the first public install opens the control
+room. `dist` config, a tagged pre-release, shell installer and Homebrew tap, README
+install section rewritten around them and re-run from a clean shell. Exit: the install
+line works on a machine without Rust. Needs two things from the user first: the final
+name and a public GitHub repository.
+
+**M5 - Web.** `http.rs`, auth, the React + shadcn/ui app. Exit: in a real browser with 50 fake agents
 streaming, the tree stays at 60 fps, the bundle and heap budgets hold, a killed and restarted
 daemon resyncs the page without reload, and a cross-origin WS attempt is rejected.
 
+**M5.5 - Plugins and skills (section 5.6, ADR 0020).** Resolve the two **VERIFY** items
+first. Then, in order: the list view (read-only) in both front ends; plugin switches;
+Codex skill switches; the shared skill library with adopt and per-harness links. Exit: e2e
+against fake CLIs in a temp home toggles a plugin per harness and per scope, links and
+unlinks a library skill, and proves a declared command is never run without a yes.
+
 **M6 - Hardening and release.** Resume interrupted sessions, reconnect paths, budgets
-enforced in CI, README complete, prebuilt macOS and Linux binaries on tagged releases,
-delete PLAN.md.
+enforced in CI, README complete, first non-pre-release tag, delete PLAN.md.
 
 ### v1 vs later
 
 | v1 | Later |
 |---|---|
 | Launch, message, interrupt, approve, stop from CLI, TUI, web | Attaching to sessions started outside canopy (hook install) |
-| Claude, Codex, Gemini, OpenCode, any ACP agent | OpenCode native HTTP adapter if ACP proves too thin |
+| Claude, Codex; OpenCode, Copilot and other ACP agents as each is verified | Gemini (on hold, section 0.3); OpenCode native HTTP adapter if ACP proves too thin |
+| One-line install, detection, zero-config first run, `canopy demo` | An opt-in `canopy connect` that registers the canopy tools in hand-started sessions through each CLI's own `mcp add` command |
 | Cross-vendor spawn tree with limits and rollups | Declarative workflows (DAGs, templates, retries) |
 | Outline + graph views, transcripts, tokens/cost, files touched | Timeline/swimlane view, full diff review, search, syntax highlighting |
 | SQLite history, resume | Git worktree isolation per agent with merge UI |
 | Rate-limit state per node, one-command respawn on another harness | Automatic failover and quota-aware routing across subscriptions |
+| One view to list and switch plugins and skills per harness, global and per project; one shared skill library | Installing plugins from canopy (command shown, confirmed every time, never auto-accepted) |
+| Icons everywhere, no emoji, no eyebrow labels | Agent modes (plan, auto, manual) shown and switched per node |
+| - | Feasibility check only: canopy managing plugins and skills natively, writing into `~/.claude` and `~/.codex` itself with no vendor command. Answer: which files, how stable across CLI releases, what the vendors' terms say, and what it would buy over section 5.6 |
 | macOS, Linux | Windows, desktop notifications |
 
 Permanent non-goals: server or hosted deployment, remote daemons, multi-user, accounts,
@@ -586,7 +795,7 @@ Budgets, asserted in `tests/bench.rs` (targets to validate at M1 and M5, then en
 | TUI first paint | <= 50 ms |
 | 50 fake agents x 100 deltas/s: daemon CPU | <= 15% of one core |
 | Same load: event to client latency p99 | <= 50 ms |
-| Web JS (gzip, initial) | <= 50 KB |
+| Web JS (gzip, first load) | <= 161 KB |
 | Web: frame rate under the same load | 60 fps, no long tasks > 50 ms |
 | Web heap with 50 sessions | <= 60 MB |
 
@@ -613,4 +822,10 @@ How to test end to end:
 | ACP: current usage-reporting update and which agents send it | agentclientprotocol.com spec, probe each agent |
 | OpenCode: does `opencode acp` report token usage; if not, is the HTTP API worth an adapter | Probe, compare with `opencode serve` events |
 | Every harness: what a plan rate limit looks like on the wire, and whether a reset time is given | Find the event in each protocol schema; record a fixture when one occurs |
-| Every harness: a side-effect-free way to tell "installed but not logged in" for `canopy doctor` | Each CLI's status or auth subcommand |
+| Every harness: a side-effect-free way to tell "installed but not logged in" for `canopy doctor` | Each CLI's status or auth subcommand. Done for Claude and Codex; Copilot documents none |
+| Every harness: does the model see the MCP `instructions` string | One live prompt per harness asking what it knows about canopy; needs the user's go-ahead, it spends tokens |
+| Claude: does it load a skill whose folder is a symlink; does one `SKILL.md` load unchanged in Claude and Codex | A throwaway skill in a temp project, linked into both; needs the user's go-ahead, it spends tokens |
+| Codex: are `config/value/write`, `skills/config/write` and `plugin/installed` usable on the installed app-server (upstream marks plugin methods under development) | Call them against a temp `CODEX_HOME`; record a fixture |
+| TUI: which icon glyphs render one cell wide in common terminals; can a Nerd Font be detected | Print a test card in Terminal.app, iTerm2, Ghostty and tmux |
+| macOS: does a curl-installed binary run without a Gatekeeper prompt | Install the pre-release on a clean user account |
+| Each vendor's current terms on a third-party tool driving its CLI on a subscription | Read the primary pages first hand before each release (section 0.3) |

@@ -46,3 +46,11 @@ Notifications have no `id`.
 
 - No real ACP agent verified: `gemini --acp` vs `--experimental-acp`, and whether OpenCode
   reports `usage_update`, remain open until those CLIs are installed.
+
+## Detection (M3.5)
+
+UNVERIFIED: OpenCode, Copilot CLI and Gemini CLI version flags and login-status commands
+have no local recording. Detection only attempts `--version`, bounded to 800 ms. No auth
+probe or login command is invented for these rows. Gemini remains on hold per PLAN.md.
+
+The fake agent advertises loadSession and accepts session/load for M6 restart tests. It preserves the requested id; no vendor history is simulated. UNVERIFIED: real ACP agent resume after a process restart. Unsupported agents fail explicitly.

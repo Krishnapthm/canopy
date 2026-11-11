@@ -1,0 +1,1 @@
+[{"pid":12345,"cwd":"/workspace/project","kind":"interactive","startedAt":1794375374709,"sessionId":"outside-claude","name":"Fixture task","status":"busy","futureField":true},{"id":"outside-background","cwd":"/workspace/project","kind":"background","startedAt":1794375374710,"sessionId":"outside-background","name":"Background task","state":"blocked"},{"kind":"unreadable"}]

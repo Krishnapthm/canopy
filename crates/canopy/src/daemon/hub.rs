@@ -27,6 +27,7 @@ pub type Reply = oneshot::Sender<Result<Value, String>>;
 
 pub enum Msg {
     Harness(HarnessEvent),
+    CodexExited(String),
     Connect {
         conn: u64,
         tx: mpsc::Sender<String>,
@@ -117,6 +118,7 @@ pub struct Hub {
     idle_gen: u64,
     idle_armed: bool,
     codex: Option<codex::Server>,
+    exe_mtime: Option<u64>,
 }
 
 pub fn now() -> u64 {
@@ -138,6 +140,7 @@ impl Hub {
             idle_gen: 0,
             idle_armed: false,
             codex: None,
+            exe_mtime: crate::client::exe_mtime(),
         };
         for (mut node, seq) in restored {
             // Every process died with the previous daemon.
@@ -163,6 +166,18 @@ impl Hub {
         self.check_idle();
         while let Some(msg) = rx.recv().await {
             match msg {
+                Msg::CodexExited(error) => {
+                    self.codex = None;
+                    let ids: Vec<_> = self
+                        .sessions
+                        .values()
+                        .filter(|s| s.cmd.is_some() && s.node.harness == "codex")
+                        .map(|s| s.node.id.clone())
+                        .collect();
+                    for id in ids {
+                        self.exited(&id, Some(error.clone()));
+                    }
+                }
                 Msg::Harness(e) => self.harness(e),
                 Msg::Connect { conn, tx } => {
                     self.clients.insert(conn, Client { tx, tree: false, subs: HashSet::new(), pending: Vec::new() });
@@ -289,9 +304,54 @@ impl Hub {
                 Err(format!("protocol version {version} does not match daemon version {}", protocol::VERSION))
             }
             Op::Hello { .. } => {
-                let mut names: Vec<_> = self.cfg.harnesses.keys().cloned().collect();
+                // Built-in CLIs that are not on PATH are left out; --acp harnesses are always listed.
+                let mut names: Vec<_> = self
+                    .cfg
+                    .harnesses
+                    .keys()
+                    .filter(|name| !harness::DETECTION.iter().any(|d| d.binary == name.as_str()) || harness::outside::available(name))
+                    .cloned()
+                    .collect();
                 names.sort();
-                Ok(json!({"daemon_version": env!("CARGO_PKG_VERSION"), "harnesses": names}))
+                Ok(
+                    json!({"daemon_version": env!("CARGO_PKG_VERSION"), "harnesses": names, "exe": std::env::current_exe().ok(), "mtime": self.exe_mtime, "pid": std::process::id(), "live_agents": self.sessions.values().filter(|s| s.cmd.is_some()).count()}),
+                )
+            }
+            Op::Discover { cwd } => {
+                let owned: HashSet<String> = self.sessions.values().filter_map(|s| s.node.vendor_session.clone()).collect();
+                if let Some(client) = self.clients.get(&conn) {
+                    let tx = client.tx.clone();
+                    tokio::spawn(async move {
+                        let result = harness::outside::discover(cwd, owned).await;
+                        let msg = ServerMsg::Res { id, result };
+                        let _ = tx.send(serde_json::to_string(&msg).unwrap_or_default()).await;
+                    });
+                }
+                return;
+            }
+            Op::Detect => {
+                if let Some(client) = self.clients.get(&conn) {
+                    let tx = client.tx.clone();
+                    tokio::spawn(async move {
+                        let rows = harness::detect().await;
+                        let msg = ServerMsg::Res { id, result: json!({"harnesses": rows}) };
+                        let _ = tx.send(serde_json::to_string(&msg).unwrap_or_default()).await;
+                    });
+                }
+                return;
+            }
+            op @ (Op::ExtList { .. } | Op::ExtSet { .. }) => {
+                if let Some(client) = self.clients.get(&conn) {
+                    let tx = client.tx.clone();
+                    tokio::spawn(async move {
+                        let msg = match super::extensions::execute(op).await {
+                            Ok(result) => ServerMsg::Res { id, result },
+                            Err(e) => ServerMsg::Err { id, error: e.to_string() },
+                        };
+                        let _ = tx.send(serde_json::to_string(&msg).unwrap_or_default()).await;
+                    });
+                }
+                return;
             }
             Op::SubTree => {
                 if let Some(c) = self.clients.get_mut(&conn) {
@@ -310,7 +370,7 @@ impl Hub {
                 Ok(json!({}))
             }
             Op::Spawn(req) => self.spawn(req, Origin::User).map(|s| json!({"session": s})),
-            Op::Send { session, text, interrupt } => match self.send(&session, text, interrupt) {
+            Op::Send { session, text, interrupt } => match self.send(&session, text, interrupt, ItemKind::UserMessage) {
                 Ok(rx) => {
                     let tx = self.clients.get(&conn).map(|c| c.tx.clone());
                     tokio::spawn(async move {
@@ -319,7 +379,7 @@ impl Hub {
                             Err(_) => ServerMsg::Err { id, error: "the session ended before the message was delivered".into() },
                         };
                         if let Some(tx) = tx {
-                            let _ = tx.try_send(serde_json::to_string(&msg).unwrap_or_default());
+                            let _ = tx.send(serde_json::to_string(&msg).unwrap_or_default()).await;
                         }
                     });
                     return;
@@ -329,6 +389,7 @@ impl Hub {
             Op::Interrupt { session } => self.command(&session, Command::Interrupt),
             Op::Permission { session, request, decision } => self.permission(&session, request, decision),
             Op::Stop { session } => self.stop(&session),
+            Op::Resume { session } => self.resume(&session),
             Op::History { session, before_seq, limit } => match self.resolve(&session) {
                 Some(s) => {
                     if let Some(c) = self.clients.get(&conn) {
@@ -388,6 +449,38 @@ impl Hub {
         }
     }
 
+    fn resume(&mut self, session: &str) -> Result<Value, String> {
+        let id = self.resolve(session).ok_or(format!("no session {session}"))?;
+        let s = &self.sessions[&id];
+        if s.cmd.is_some() || s.node.status != Status::Interrupted || s.node.origin == Origin::Native {
+            return Err("only interrupted sessions without a running process can be resumed".into());
+        }
+        let vendor = s.node.vendor_session.clone().ok_or("no vendor session id was saved")?;
+        let kind = self.cfg.harnesses.get(&s.node.harness).ok_or("harness is unavailable")?.clone();
+        if self.sessions.values().filter(|s| s.cmd.is_some()).count() >= self.cfg.max_live {
+            return Err("live agent limit reached".into());
+        }
+        let spec = SpawnSpec {
+            session: id.clone(),
+            prompt: String::new(),
+            cwd: PathBuf::from(&s.node.cwd),
+            model: s.node.model.clone(),
+            policy: s.node.policy,
+            resume: Some(vendor),
+            mcp: (self.cfg.exe.clone(), mcp_args(&self.cfg.sock, &id)),
+        };
+        let cmd = harness::start(&kind, spec, self.tx.clone(), &mut self.codex);
+        let s = self.sessions.get_mut(&id).ok_or("session disappeared")?;
+        s.cmd = Some(cmd);
+        s.stop_requested = false;
+        s.reported = false;
+        s.node.status = Status::Starting;
+        s.node.ended = None;
+        s.node.error = None;
+        self.touch(&id);
+        Ok(json!({"session":id}))
+    }
+
     fn command(&mut self, session: &str, cmd: Command) -> Result<Value, String> {
         let s = self.resolve(session).and_then(|id| self.sessions.get(&id)).ok_or(format!("no session {session}"))?;
         let tx = s.cmd.as_ref().ok_or("the session is not running")?;
@@ -424,7 +517,8 @@ impl Hub {
     }
 
     /// Queues `text` to a session; the receiver resolves with what the harness did with it.
-    fn send(&mut self, session: &str, text: String, interrupt: bool) -> Result<oneshot::Receiver<Delivery>, String> {
+    /// `kind` records who wrote it: `UserMessage` for a human, `Notice` for canopy or another agent.
+    fn send(&mut self, session: &str, text: String, interrupt: bool, kind: ItemKind) -> Result<oneshot::Receiver<Delivery>, String> {
         let sid = self.resolve(session).ok_or(format!("no session {session}"))?;
         let s = self.sessions.get(&sid).ok_or("gone")?;
         if s.node.origin == Origin::Native {
@@ -434,7 +528,7 @@ impl Hub {
         let (reply, rx) = oneshot::channel();
         tx.try_send(Command::Send { text: text.clone(), interrupt, reply })
             .map_err(|_| "the session is not accepting messages".to_owned())?;
-        self.add_item(&sid, harness::new_id(), ItemKind::UserMessage, ItemState::Complete, json!({"text": text}));
+        self.add_item(&sid, harness::new_id(), kind, ItemState::Complete, json!({"text": text}));
         Ok(rx)
     }
 
@@ -450,12 +544,36 @@ impl Hub {
         d
     }
 
-    fn spawn(&mut self, req: SpawnReq, origin: Origin) -> Result<SessionId, String> {
+    fn spawn(&mut self, mut req: SpawnReq, origin: Origin) -> Result<SessionId, String> {
+        req.harness = canonical_harness(&req.harness, &self.cfg.harnesses);
         let kind = self.cfg.harnesses.get(&req.harness).cloned().ok_or_else(|| {
             let mut names: Vec<_> = self.cfg.harnesses.keys().cloned().collect();
             names.sort();
             format!("unknown harness {:?}; available: {}", req.harness, names.join(", "))
         })?;
+        // A relative path would resolve against the daemon's directory, not the caller's.
+        if !std::path::Path::new(&req.cwd).is_absolute() {
+            return Err(format!("working directory must be an absolute path: {}", req.cwd));
+        }
+        if !std::path::Path::new(&req.cwd).is_dir() {
+            return Err(format!("working directory is missing or is not a directory: {}", req.cwd));
+        }
+        let binary = match &kind {
+            Kind::Claude => "claude",
+            Kind::Codex => "codex",
+            Kind::Acp { command, .. } => command,
+        };
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let executable = |p: PathBuf| p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0);
+        let found = if binary.contains('/') {
+            executable(PathBuf::from(&req.cwd).join(binary))
+        } else {
+            std::env::split_paths(&path).any(|p| executable(p.join(binary)))
+        };
+        if !found {
+            return Err(format!("{binary} not found on the daemon's PATH (PATH={})", path.to_string_lossy()));
+        }
         let parent = match &req.parent {
             Some(p) => Some(self.resolve(p).ok_or(format!("no parent session {p}"))?),
             None => None,
@@ -508,9 +626,11 @@ impl Hub {
             vendor_session: None,
             title,
             cwd: req.cwd.clone(),
+            project: crate::paths::project_root(&req.cwd),
             model: req.model.clone(),
             policy,
             status: Status::Starting,
+            error: None,
             activity: String::new(),
             usage: Usage::default(),
             changes: Changes::default(),
@@ -521,7 +641,10 @@ impl Hub {
         };
         let spec = SpawnSpec {
             session: id.clone(),
-            prompt: req.prompt.clone(),
+            prompt: parent
+                .as_ref()
+                .map(|p| format!("{}\n{}", super::mcp::child_header(p), req.prompt))
+                .unwrap_or_else(|| req.prompt.clone()),
             cwd: PathBuf::from(&req.cwd),
             model: req.model,
             policy,
@@ -563,7 +686,7 @@ impl Hub {
                 if !allowed {
                     Err(format!("{id} is not your descendant or your parent"))
                 } else {
-                    match self.send(target.as_deref().unwrap_or(&id), text, false) {
+                    match self.send(target.as_deref().unwrap_or(&id), text, false, ItemKind::Notice) {
                         Ok(rx) => {
                             tokio::spawn(async move {
                                 let r = rx.await.map(|d| json!({"delivery": d})).map_err(|_| "the session ended".to_owned());
@@ -678,7 +801,7 @@ impl Hub {
         }
         if !lines.is_empty() {
             let text = lines.join("\n\n");
-            let _ = self.send(parent, text, false);
+            let _ = self.send(parent, text, false, ItemKind::Notice);
         }
     }
 
@@ -704,6 +827,9 @@ impl Hub {
                 if let Some(s) = self.sessions.get_mut(&target) {
                     s.node.vendor_session = vendor_session.or(s.node.vendor_session.take());
                     s.pid = pid.or(s.pid);
+                    if s.node.status == Status::Starting {
+                        s.node.status = Status::Idle;
+                    }
                     self.store.node(&s.node);
                 }
                 self.touch(&target);
@@ -761,9 +887,11 @@ impl Hub {
             vendor_session: None,
             title,
             cwd: p.node.cwd.clone(),
+            project: p.node.project.clone(),
             model: None,
             policy: p.node.policy,
             status: Status::Running,
+            error: None,
             activity: String::new(),
             usage: Usage::default(),
             changes: Changes::default(),
@@ -823,6 +951,9 @@ impl Hub {
             return;
         }
         let was_settled = s.node.status.is_settled();
+        if status == Status::Failed && s.node.error.is_none() {
+            s.node.error = Some("agent reported failure".into());
+        }
         s.node.status = status;
         if s.node.status.is_terminal() {
             s.node.ended = Some(now());
@@ -850,6 +981,10 @@ impl Hub {
 
     fn exited(&mut self, id: &str, error: Option<String>) {
         let Some(s) = self.sessions.get_mut(id) else { return };
+        if s.cmd.is_none() {
+            return;
+        }
+        s.node.error = if s.stop_requested { None } else { error.clone() };
         s.cmd = None;
         s.pid = None;
         let natives: Vec<_> = s.natives.values().cloned().collect();
@@ -936,4 +1071,21 @@ pub fn first_line(s: &str, max: usize) -> String {
 
 pub fn mcp_args(sock: &std::path::Path, session: &str) -> Vec<String> {
     vec!["mcp-stdio".into(), "--sock".into(), sock.to_string_lossy().into_owned(), "--session".into(), session.into()]
+}
+
+fn canonical_harness(name: &str, harnesses: &HashMap<String, Kind>) -> String {
+    let name = if name.eq_ignore_ascii_case("Claude Code") { "claude" } else { name };
+    harnesses.keys().find(|key| key.eq_ignore_ascii_case(name)).cloned().unwrap_or_else(|| name.to_owned())
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+    #[test]
+    fn display_names_and_case_are_accepted() {
+        let names = HashMap::from([("claude".into(), Kind::Claude), ("codex".into(), Kind::Codex)]);
+        for (name, expected) in [("Claude Code", "claude"), ("CLAUDE", "claude"), ("Codex", "codex")] {
+            assert_eq!(canonical_harness(name, &names), expected);
+        }
+    }
 }

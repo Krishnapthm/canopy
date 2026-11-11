@@ -2,7 +2,7 @@
 
 Canopy runs coding agents from different vendors as one live tree: a Rust daemon, a TUI, and
 a web app that share one protocol. It is for developers with two or more agent subscriptions. Read [PLAN.md](PLAN.md) for the design until it is deleted
-at M6; after that the code and `docs/decisions/` are the truth.
+by the user; after that the code and `docs/decisions/` are the truth.
 
 This file is loaded into every agent session. It is capped at 150 lines and checked by
 `make check-docs`. Keep it that way.
@@ -20,7 +20,7 @@ This file is loaded into every agent session. It is capped at 150 lines and chec
 - `make e2e` - real daemon in a temp home against fake agents
 - `make bench` - load test and budget assertions
 - `make gen` - regenerate `web/src/protocol.gen.ts` from the Rust types
-- `make web` - build the web app (fails until M5)
+- `make web` - build and check the web app bundle
 - `make build` - release binary with the web app embedded
 - `make check-docs` - lint every AGENTS.md and the ADR index
 
@@ -49,7 +49,7 @@ daemon, an adapter, or the protocol. Full `make build` only when the task needs 
   timer may exist only while output is pending (ADR 0003).
 - Types flow one way: `crates/protocol` is the source of truth, TypeScript is generated
   (ADR 0015). A protocol change means: edit Rust, `make gen`, fix what `tsc` reports.
-- Token deltas are coalesced in the adapter before they reach the hub (ADR 0006). Never
+- Token deltas are coalesced in the adapter before they reach the hub (ADR 0023). Never
   forward per-token events.
 - Clients receive transcript events only for sessions they subscribed to (ADR 0007).
 - Only completed items are written to SQLite (ADR 0008).
@@ -57,27 +57,40 @@ daemon, an adapter, or the protocol. Full `make build` only when the task needs 
 - Harness behaviour is never coded from memory. Verify against the installed CLI, write the
   fact and the CLI version into `docs/harness-notes/`, and record a fixture.
 - Agent output is untrusted. The web app never uses `innerHTML`.
+- Every error a user causes or can see reaches them as a toast, never only in daemon.log.
+  Web: sonner via `web/src/toast.ts` (ADR 0025); TUI: `crates/canopy/src/tui/toast.rs`.
 - A sub-agent inherits its parent's permission policy and cannot escalate it.
+- Plugin and skill changes go through the vendor's own command or app-server method, on an
+  explicit user action, and nothing is ever auto-accepted (ADR 0020).
 
 ## Dependencies
 
 Every dependency is a cost. Adding one, Rust or npm, requires an ADR that says what it
 replaces, its size, its license (MIT, Apache-2.0, BSD, ISC, or public domain only; the
 project is MIT), and why the standard library or twenty lines of our own code will not do.
-The approved list is in ADR 0001 (Rust) and ADR 0012 (web).
+The approved list is in ADR 0001 (Rust) and ADR 0022, ADR 0025 and ADR 0027 (web).
 
 ## Conventions
 
 - Rust: errors with `anyhow` in the binary, typed errors in `crates/protocol`. No `unwrap`
   outside tests. Comments explain why, above the item, briefly.
-- Web (M5, ADR 0012): Solid signals and stores only; no component kit, router, or state
-  library; one stylesheet with custom properties.
+- Web (M5, ADR 0022): React with useSyncExternalStore and shadcn/ui; no router or state
+  library; use the generated neutral theme in web/src/index.css.
 - Every user action is a command in a registry with the same key in the TUI and the web
   (PLAN.md section 6.1). The registries land with M4 and M5.
+- UI: icons are required, never an emoji, no eyebrow labels; global scope is an earth globe
+  (PLAN.md section 6.1). Third-party apps and services (vendors, CLIs, models) use
+  @lobehub/icons Mono icons, imported per brand (ADR 0027).
+- UIs and `canopy doctor` list only installed agent CLIs and never name a missing one; there
+  will always be more vendors than we list. The filter is `harness::detect()` plus the hello
+  `harnesses` list in `crates/canopy/src/daemon/hub.rs`; the e2e doctor test enforces it.
 - UIs show the last 8 characters of a session id; the daemon resolves a unique suffix (ADR 0018).
 - Tests are focused: one behaviour each, through the real daemon where possible. No snapshot
   dumps, no tests for deleted features.
 - Bug fixes start with an `e2e` reproduction.
+- `README.md` is for users who know Claude Code or Codex but not Rust: plain words, short
+  sentences, copy-paste commands that work from a fresh clone, no internals. Contributor
+  detail goes here, in `docs/`, or in a nested AGENTS.md. Re-run its steps when you change them.
 
 ## Where things live
 
@@ -120,3 +133,5 @@ check, or delete it.
 ## Lessons
 
 - Probe Codex live from the main session; sandboxed sub-agents get 401 (`docs/harness-notes/codex.md`). (2026-11)
+- `make build` does not put `canopy` on PATH; build assets with `make web`, then `cargo install --path crates/canopy`. (2026-11)
+- `make bench` reads process stats with `ps`; sandboxed agents get "Operation not permitted", so run it from the main session. (2026-11)

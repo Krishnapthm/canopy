@@ -15,13 +15,24 @@ pub async fn run(program: String, args: Vec<String>, spec: SpawnSpec, mut out: O
         Ok(c) => c,
         Err(e) => return out.ev(Ev::Exited { error: Some(format!("cannot start {program}: {e}")) }).await,
     };
+    let tail = super::stderr(&mut child);
     let pid = child.id();
-    let error = match session(&mut child, pid, spec, &mut out, cmds).await {
-        Ok(()) => None,
-        Err(e) => Some(format!("{e:#}")),
-    };
+    let r = session(&mut child, pid, spec, &mut out, cmds).await;
+    // An agent that closed its output is exiting by itself: its exit status is the verdict.
+    if matches!(r, Ok(true)) {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await;
+    }
     kill_group(pid);
-    let _ = child.wait().await;
+    let name = std::path::Path::new(&program).file_name().map_or(program.clone(), |n| n.to_string_lossy().into_owned());
+    let error = match r {
+        Ok(false) => {
+            let _ = child.wait().await;
+            let _ = tail.await;
+            None
+        }
+        Ok(true) => super::exit_error(&name, &mut child, tail, None).await,
+        Err(e) => super::exit_error(&name, &mut child, tail, Some(format!("{e:#}"))).await,
+    };
     out.ev(Ev::Exited { error }).await;
 }
 
@@ -47,7 +58,7 @@ async fn session(
     spec: SpawnSpec,
     out: &mut Out,
     mut cmds: mpsc::Receiver<Command>,
-) -> Result<()> {
+) -> Result<bool> {
     let stdin = child.stdin.take().context("no stdin")?;
     let stdout = child.stdout.take().context("no stdout")?;
     let (peer, mut incoming) = Peer::spawn(stdout, stdin, true);
@@ -63,7 +74,8 @@ async fn session(
     let mcp = json!([{"name": "canopy", "command": spec.mcp.0, "args": spec.mcp.1, "env": []}]);
     let cwd = spec.cwd.to_string_lossy();
     let can_load = init.pointer("/agentCapabilities/loadSession").and_then(Value::as_bool).unwrap_or(false);
-    let session_id = match spec.resume.filter(|_| can_load) {
+    anyhow::ensure!(spec.resume.is_none() || can_load, "agent does not support session resume");
+    let session_id = match spec.resume {
         Some(id) => {
             peer.request("session/load", json!({"sessionId": id, "cwd": cwd, "mcpServers": mcp})).await.context("session/load")?;
             id
@@ -93,7 +105,7 @@ async fn session(
     loop {
         tokio::select! {
             msg = incoming.recv() => {
-                let Some(msg) = msg else { return Ok(()) };
+                let Some(msg) = msg else { return Ok(true) };
                 match msg {
                     Incoming::Notification { method, params } if method == "session/update" => {
                         update(out, &mut text, &mut tools, params.get("update").unwrap_or(&Value::Null)).await;
@@ -121,7 +133,8 @@ async fn session(
                 text.close(out, None).await;
                 cancel_perms(&peer, out, &mut perms).await;
                 match r {
-                    Some(Err(e)) => out.ev(Ev::Item { id: new_id(), kind: ItemKind::Error, state: ItemState::Complete,
+                    // A dead agent fails every pending turn; its exit reason says why, once.
+                    Some(Err(e)) if !peer.is_closed() => out.ev(Ev::Item { id: new_id(), kind: ItemKind::Error, state: ItemState::Complete,
                                                       body: json!({"text": format!("{e:#}")}) }).await,
                     Some(Ok(v)) if v.get("stopReason").and_then(Value::as_str) == Some("refusal") => {
                         out.ev(Ev::Item { id: new_id(), kind: ItemKind::Notice, state: ItemState::Complete,
@@ -167,7 +180,7 @@ async fn session(
                             }
                         }
                     }
-                    Some(Command::Stop) | None => return Ok(()),
+                    Some(Command::Stop) | None => return Ok(false),
                 }
             }
             _ = out.due() => out.flush().await,

@@ -53,14 +53,17 @@ pub async fn run(spec: SpawnSpec, mut out: Out, mut cmds: mpsc::Receiver<Command
         Ok(c) => c,
         Err(e) => return out.ev(Ev::Exited { error: Some(format!("cannot start claude: {e}")) }).await,
     };
+    let tail = super::stderr(&mut child);
     let pid = child.id();
     let r = session(&mut child, pid, spec, &mut out, &mut cmds).await;
     kill_group(pid);
-    let status = child.wait().await.ok();
     let error = match r {
-        Err(e) => Some(format!("{e:#}")),
-        Ok(true) => None,
-        Ok(false) => status.filter(|s| !s.success()).map(|s| format!("claude exited with {s}")),
+        Ok(true) => {
+            let _ = child.wait().await;
+            let _ = tail.await;
+            None
+        }
+        r => super::exit_error("claude", &mut child, tail, r.err().map(|e| format!("{e:#}"))).await,
     };
     out.ev(Ev::Exited { error }).await;
 }

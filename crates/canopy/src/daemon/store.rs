@@ -40,7 +40,10 @@ pub fn open(path: &Path) -> Result<(Store, Vec<(Node, u64)>)> {
         for row in rows {
             let (node, seq) = row?;
             // Tolerant: a node from an older build that no longer parses is skipped, not fatal.
-            if let Ok(n) = serde_json::from_str::<Node>(&node) {
+            if let Ok(mut n) = serde_json::from_str::<Node>(&node) {
+                if n.project.is_empty() {
+                    n.project = crate::paths::project_root(&n.cwd);
+                }
                 restored.push((n, seq as u64));
             }
         }

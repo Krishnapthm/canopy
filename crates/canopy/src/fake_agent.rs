@@ -10,6 +10,7 @@
 //!   ask <title>         request permission, then say "allowed" or "denied"
 //!   edit <path>         report a file edit (a diff tool call) of one line
 //!   usage <n>           report n tokens used
+//!   crash <message>     write to stderr and exit with status 1
 //!   fail <message>      end the turn with a JSON-RPC error
 //! Any other line is said verbatim, so parent notices are echoed back.
 
@@ -36,7 +37,11 @@ pub async fn run() -> Result<()> {
         match msg {
             Incoming::Request { id, method, params } => match method.as_str() {
                 "initialize" => {
-                    peer.respond(id, json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": false}, "authMethods": []}))
+                    peer.respond(id, json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}, "authMethods": []}))
+                }
+                "session/load" => {
+                    servers = params.get("mcpServers").and_then(Value::as_array).cloned().unwrap_or_default();
+                    peer.respond(id, json!({}));
                 }
                 "session/new" => {
                     servers = params.get("mcpServers").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -75,9 +80,16 @@ async fn script(
     server: Option<Value>,
     mcp: &mut Option<Mcp>,
 ) -> Result<&'static str> {
+    // Demo scripts are inherited by fake children; ordinary test prompts remain scripts.
+    let scripts: Value = std::env::var("CANOPY_FAKE_SCRIPTS").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
+    let task = text.lines().filter(|line| !line.starts_with("Spawned by Canopy agent ")).collect::<Vec<_>>().join("\n");
+    let text = scripts.get(task.trim()).and_then(Value::as_str).unwrap_or(text);
     let update = |u: Value| peer.notify("session/update", json!({"sessionId": sid, "update": u}));
     let mut results: Vec<Value> = Vec::new();
     for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        if line.starts_with("Spawned by Canopy agent ") {
+            continue;
+        }
         if cancel.has_changed().unwrap_or(false) {
             return Ok("cancelled");
         }
@@ -89,6 +101,18 @@ async fn script(
                     update(json!({"sessionUpdate": kind, "content": {"type": "text", "text": w}}));
                 }
                 update(json!({"sessionUpdate": kind, "content": {"type": "text", "text": "\n"}}));
+            }
+            "load" => {
+                let count: u32 = arg.parse().context("load takes a pulse count")?;
+                let start = tokio::time::Instant::now();
+                for pulse in 0..count {
+                    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
+                    update(json!({"sessionUpdate":"agent_message_chunk", "content":{"type":"text","text":format!("{stamp}\n")}}));
+                    tokio::select! {
+                        _ = tokio::time::sleep_until(start + Duration::from_millis(u64::from(pulse + 1) * 10)) => {},
+                        _ = cancel.changed() => return Ok("cancelled"),
+                    }
+                }
             }
             "sleep" => {
                 let ms: u64 = arg.parse().context("sleep takes milliseconds")?;
@@ -120,8 +144,11 @@ async fn script(
                               "content": [{"type": "content", "content": {"type": "text", "text": out}}]}),
                 );
                 results.push(serde_json::from_str(&out).unwrap_or(json!({"text": out})));
-                let shown = if failed { format!("tool error: {out}") } else { out };
-                update(json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": format!("{shown}\n")}}));
+                if failed {
+                    update(
+                        json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": format!("tool error: {out}\n")}}),
+                    );
+                }
             }
             "ask" => {
                 let r = peer
@@ -147,6 +174,10 @@ async fn script(
                 );
             }
             "usage" => update(json!({"sessionUpdate": "usage_update", "used": arg.parse::<u64>().unwrap_or(0), "size": 200000})),
+            "crash" => {
+                eprintln!("{arg}");
+                std::process::exit(1);
+            }
             "fail" => return Err(anyhow!("{arg}")),
             _ => update(json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": format!("{line}\n")}})),
         }

@@ -24,7 +24,11 @@ export type Node = { id: string, parent: string | null, root: string, origin: Or
 /**
  * The parent's tool call that created this node.
  */
-spawn_call: string | null, harness: string, vendor_session: string | null, title: string, cwd: string, model: string | null, policy: Policy, status: Status, activity: string, usage: Usage, changes: Changes, subtree: Rollup, created: number, updated: number, ended: number | null, };
+spawn_call: string | null, harness: string, vendor_session: string | null, title: string, cwd: string, 
+/**
+ * Git toplevel of cwd, else cwd.
+ */
+project: string, model: string | null, policy: Policy, status: Status, error: string | null, activity: string, usage: Usage, changes: Changes, subtree: Rollup, created: number, updated: number, ended: number | null, };
 
 export type ItemKind = "user_message" | "agent_message" | "reasoning" | "tool_call" | "file_change" | "permission" | "error" | "notice";
 
@@ -38,9 +42,31 @@ export type Decision = "allow" | "deny" | "allow_always";
 
 export type SpawnReq = { harness: string, prompt: string, cwd: string, model: string | null, policy: Policy, parent: string | null, title: string | null, };
 
-export type Op = { "op": "hello", version: number, } | { "op": "sub_tree" } | { "op": "sub_session", session: string, after_seq: number | null, tail: number | null, } | { "op": "unsub_session", session: string, } | { "op": "spawn" } & SpawnReq | { "op": "send", session: string, text: string, interrupt: boolean, } | { "op": "interrupt", session: string, } | { "op": "permission", session: string, request: string, decision: Decision, } | { "op": "stop", session: string, } | { "op": "history", session: string, before_seq: number, limit: number, };
+export type HarnessDetection = { name: string, binary: string, version: string | null, logged_in: boolean | null, recorded: string, supported: boolean, login_command: string, };
 
-export type Request = { id: number, } & ({ "op": "hello", version: number, } | { "op": "sub_tree" } | { "op": "sub_session", session: string, after_seq: number | null, tail: number | null, } | { "op": "unsub_session", session: string, } | { "op": "spawn" } & SpawnReq | { "op": "send", session: string, text: string, interrupt: boolean, } | { "op": "interrupt", session: string, } | { "op": "permission", session: string, request: string, decision: Decision, } | { "op": "stop", session: string, } | { "op": "history", session: string, before_seq: number, limit: number, });
+export type OutsideSession = { harness: string, vendor_id: string, cwd: string, 
+/**
+ * Git toplevel of cwd, else cwd.
+ */
+project: string, title: string, 
+/**
+ * "interactive" (in a terminal) or "background" (`claude --bg`, open with `claude attach`).
+ */
+kind: string, started: number, 
+/**
+ * The vendor's own word: "idle", "busy" or "blocked" (waiting for the user).
+ */
+status: string, pid: number | null, };
+
+export type ExtKind = "plugin" | "skill" | "library_skill" | "adopt_skill";
+
+export type ExtScope = { "scope": "global" } | { "scope": "project", "cwd": string };
+
+export type Extension = { harness: string, kind: ExtKind, id: string, name: string, scope: ExtScope, enabled: boolean, writable: boolean, command: string | null, };
+
+export type Op = { "op": "hello", version: number, } | { "op": "detect" } | { "op": "discover", cwd: string | null, } | { "op": "ext_list", cwd: string | null, } | { "op": "ext_set", harness: string, kind: ExtKind, ext_id: string, scope: ExtScope, enabled: boolean, } | { "op": "sub_tree" } | { "op": "sub_session", session: string, after_seq: number | null, tail: number | null, } | { "op": "unsub_session", session: string, } | { "op": "spawn" } & SpawnReq | { "op": "send", session: string, text: string, interrupt: boolean, } | { "op": "interrupt", session: string, } | { "op": "permission", session: string, request: string, decision: Decision, } | { "op": "stop", session: string, } | { "op": "resume", session: string, } | { "op": "history", session: string, before_seq: number, limit: number, };
+
+export type Request = { id: number, } & ({ "op": "hello", version: number, } | { "op": "detect" } | { "op": "discover", cwd: string | null, } | { "op": "ext_list", cwd: string | null, } | { "op": "ext_set", harness: string, kind: ExtKind, ext_id: string, scope: ExtScope, enabled: boolean, } | { "op": "sub_tree" } | { "op": "sub_session", session: string, after_seq: number | null, tail: number | null, } | { "op": "unsub_session", session: string, } | { "op": "spawn" } & SpawnReq | { "op": "send", session: string, text: string, interrupt: boolean, } | { "op": "interrupt", session: string, } | { "op": "permission", session: string, request: string, decision: Decision, } | { "op": "stop", session: string, } | { "op": "resume", session: string, } | { "op": "history", session: string, before_seq: number, limit: number, });
 
 export type Event = { "t": "node", node: Node, } | { "t": "item", item: Item, } | { "t": "delta", session: string, item: string, text: string, };
 

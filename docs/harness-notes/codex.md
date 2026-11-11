@@ -212,7 +212,7 @@ Each server stdout line is retained verbatim. Sent lines are represented as `{"c
 
 ## Live check through canopy (0.165.0, 2026-11-11)
 
-One live run of `canopy run --policy auto_edit claude` whose Claude parent spawned a Codex
+One live run of `canopy run --policy auto_edit claude` (a command removed by ADR 0024) whose Claude parent spawned a Codex
 child (`gpt-6-luna`) through `spawn_agent`. Observed working end to end through `codex.rs`:
 `initialize`, `thread/start` with `approvalPolicy:"on-request"`, `sandbox:"workspace-write"`
 and the dotted `mcp_servers.canopy.*` config, `turn/start`, `item/agentMessage/delta`,
@@ -229,3 +229,44 @@ and `thread/tokenUsage/updated` totals. The child wrote the file with a shell co
 - No `-32001` event was observed; queue saturation and jittered retry behavior were not tested. Nested MCP config objects and timeout defaults were not tested; dotted keys and an explicit one-second timeout were verified.
 - Login status was tested only for ChatGPT login and an empty home. Refresh behavior and startup side effects outside this restricted filesystem were not audited.
 - No Rust or adapter tests were written. `make check test` was attempted and failed with `No rule to make target check`; the checkout had no Makefile.
+
+UNVERIFIED: whether the model sees MCP initialize instructions. M3.5 retains the MCP
+instructions and adds a child prompt line without modifying harness configuration.
+
+## Extension control (M5.5)
+
+Offline schema generation succeeded on 2026-11-11 with a fresh temp CODEX_HOME.
+Schema facts (0.165.0): `plugin/installed` accepts `cwds`, returns `marketplaces[]`
+with `plugins[]` (`id`, `name`, `installed`, `enabled`). `skills/list` accepts
+`cwds` and `forceReload`, returns `data[].skills[]` (`path`, `name`, `enabled`,
+`scope`). `config/value/write` accepts `keyPath`, `value`, `mergeStrategy`, and
+optional `filePath`. `skills/config/write` accepts `path` or `name`, and `enabled`.
+The synthetic executable fixture is `crates/canopy/tests/ext_fake.py`.
+
+UNVERIFIED: runtime availability of these methods, plugin id correspondence to
+`name@marketplace`, project config write behavior, and effective versus per-scope
+plugin enabled state. The plugin list reports effective vendor state; the project
+switch writes the project's `.codex/config.toml` via the vendor method. It cannot
+report whether a value is inherited. Unsupported methods surface as view errors.
+UNVERIFIED: shared SKILL.md behavior and symlink loading, which require a live turn.
+No live turns or credential access were used for this milestone.
+Codex skill config switches are user-scoped; project library links are separate.
+Marketplace commands and server approval requests are never executed or accepted.
+
+Wire integration: `Request.id` is already the numeric correlation id. `ext_set`
+therefore serializes its named item id as `ext_id` to avoid duplicate JSON keys.
+`ExtScope` is `{scope:"global"}` or `{scope:"project",cwd:"/absolute/project"}`.
+`ext_list` returns `{items: Extension[], errors: string[]}`. No extension state
+is stored in SQLite or retained between view reads.
+
+UNVERIFIED (M6): real extension probe timings were not measured because the task excludes the real harness configs. Extension operations log elapsed time for Claude plugins, Codex plugins and Codex skills separately; probes run concurrently. Resume uses the documented thread/resume request above.
+
+## Outside sessions (2026-11-11, Codex CLI 0.167.1)
+
+Orchestrator-verified schema: thread/list accepts cwd (string or array, exact cwd
+match), limit, sortKey (updated_at), archived, cursor, and returns {data,
+nextCursor}. Thread status describes only the responding app-server's view: a
+thread open in another Codex process shows notLoaded. So Canopy cannot tell which
+Codex threads are running elsewhere and does not list them (ADR 0026).
+Measured read-only: initialize 0.18 s; thread/list with a cwd filter 1.5-2.5 s,
+without one 0.23 s.

@@ -5,8 +5,9 @@ Verified against: `claude` 2.1.318 (`/Users/krishna/.local/bin/claude`, symlink 
 `claude-haiku-5-5`), 2026-11-11. SDK type source read: `@anthropic-ai/claude-agent-sdk` 0.3.322
 (`sdk.d.ts`). Items marked (SDK) come from those types only and were not exercised live.
 Fixtures: `crates/canopy/src/harness/fixtures/claude-2.1.318-*.jsonl`. In fixtures, lines sent
-by us are wrapped as `{"canopy_stdin": <line>}`; email and org id in the initialize response
-were replaced with placeholders; everything else is verbatim.
+by us are wrapped as `{"canopy_stdin": <line>}`; machine paths, identity fields and installed extension lists are scrubbed with
+`scripts/record-fixture.py`. Record with `probe | python3 scripts/record-fixture.py FILE`;
+never write the raw stream into the repository. The scrubbed fixtures replay in `make test`.
 
 Every `claude` invocation in these probes used a timeout. The earlier note that `claude --version`
 hangs with stdin from /dev/null was not reproduced: it printed `2.1.318 (Claude Code)` instantly.
@@ -258,3 +259,42 @@ Deny (deny fixture). Sent `{"type":"control_response","response":{"subtype":"suc
 - All probes ran with the user's real settings and plugins loaded (hooks emit extra
   `system` lines); a clean `CLAUDE_CONFIG_DIR` was not used because it would require
   logging in.
+
+UNVERIFIED: whether the model sees MCP initialize instructions. Keep the MCP instructions
+and child prompt line; no live prompt was authorized for M3.5.
+
+## Extension control (M5.5)
+
+UNVERIFIED: `claude plugin list --json` response shape and
+`claude plugin enable|disable ID --scope user|project --json` behavior on 2.1.318.
+No real CLI was run for this milestone. The conservative synthetic fixture in
+`crates/canopy/tests/ext_fake.py` models an array (or `plugins` array) containing
+`id`, `scope` (`user` or `project`), and boolean `enabled`. Unknown entries are
+ignored. Missing methods and failed commands surface as view errors. A declared
+`command` is displayed, blocks toggling, and is never run by Canopy.
+UNVERIFIED: Claude loading symlinked skill directories and one unchanged SKILL.md
+in Claude and Codex. This requires an explicitly authorized live prompt. Library
+link operations are filesystem-tested only. Non-library Claude skills are
+read-only until explicitly adopted. Adoption moves the whole vendor skill folder
+into the library and replaces it with a symlink; cross-filesystem moves fail safely.
+
+UNVERIFIED (M6): --resume is documented by CLI help; interactive resume after a daemon crash has not been live tested. Canopy passes only the saved session id and waits for a new user message.
+
+## Outside sessions (2026-11-11, Claude Code 2.1.318)
+
+Orchestrator-verified: `claude agents --json [--cwd <path>]` exits with a JSON
+array of active interactive and background sessions, without a TTY, in about
+0.2-0.4 seconds. `--all` also includes completed background sessions and is not used.
+Rows contain pid, cwd, kind, startedAt (milliseconds), sessionId, name, and
+status (idle or busy). Without `--cwd` it also lists background (`--bg`) sessions,
+whose rows have id but no pid and `state` (observed: blocked) instead of status.
+Their `id` is the first 8 characters of sessionId and is what `claude attach` takes. The scrubbed shape is recorded
+in `fixtures/claude-2.1.318-agents.json`.
+
+Discovery uses a three second timeout and is read-only (ADR 0026).
+
+Attaching, verified from `claude --help` (2.1.318): `claude attach <id|name>` opens
+a background session (started with `--bg`) as a TUI in a terminal; there is no
+way for another program to drive an interactive session. `--bg --resume <id>` on a
+running session "starts a copy and says so". `--fork-session` resumes under a new id.
+No transcript or credential files are read.

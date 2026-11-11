@@ -1,26 +1,26 @@
 mod cli;
 mod client;
 mod daemon;
+mod demo;
 mod fake_agent;
 mod harness;
 mod jsonrpc;
 mod mcp_stdio;
 mod paths;
+mod tui;
+mod web;
 
 use anyhow::Result;
 
 const HELP: &str = "canopy - run coding agents from different vendors as one live tree
 
 usage:
-  canopy run <harness> [--cwd DIR] [--model M] [--policy ask|auto_edit|yolo]
-             [--title T] [--parent ID] <prompt...>     start an agent, print its id
-  canopy ls                                            show the tree
-  canopy tail <id> [-f]                                print a transcript (-f: follow until it settles)
-  canopy send <id> [--interrupt] <text...>             message an agent
-  canopy permit <id> <request> allow|deny|always       answer a permission request
-  canopy stop <id>                                     stop an agent and everything it spawned
-  canopy doctor                                        check installed harnesses
-  canopy daemon [--foreground] [--acp NAME=CMD]... [--max-depth N] [--max-live N] [--budget TOKENS]
+  canopy                 open the TUI control room
+  canopy web             serve the browser control room until Ctrl+C
+  canopy doctor          check installed harnesses
+  canopy demo            try a disposable fake-agent tree
+  canopy help            show this help (-h, --help)
+  canopy --version       show the version
 
 env: CANOPY_HOME (default ~/.canopy)";
 
@@ -34,8 +34,7 @@ fn main() {
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = args.first().cloned() else {
-        println!("{HELP}");
-        return Ok(());
+        return block_on(tui::run());
     };
     let rest = args[1..].to_vec();
     let mut p = pico_args::Arguments::from_vec(rest.iter().map(Into::into).collect());
@@ -55,12 +54,19 @@ fn run() -> Result<()> {
             let session: String = p.value_from_str("--session")?;
             block_on(mcp_stdio::run(sock, session))
         }
+        "demo" => demo::run(),
+        "web" => block_on(web::run()),
         "fake-agent" => block_on(fake_agent::run()),
         "-h" | "--help" | "help" => {
             println!("{HELP}");
             Ok(())
         }
-        _ => block_on(cli::run(cmd, p)),
+        "doctor" => block_on(cli::doctor()),
+        "--version" => {
+            println!("canopy {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
+        _ => anyhow::bail!("unknown command {cmd}; try canopy help"),
     }
 }
 

@@ -65,7 +65,8 @@ while IFS= read -r f; do
     adr=$(ls docs/decisions/"$num"-*.md 2>/dev/null | head -n 1 || true)
     if [ -z "$adr" ]; then
       fail "$f: ADR $num has no file in docs/decisions/"
-    elif sed -n 's/^Status: *//p' "$adr" | head -n 1 | grep -q 'Superseded'; then
+    # "Superseded in part" ADRs still govern the rest, so citing them stays valid.
+    elif sed -n 's/^Status: *//p' "$adr" | head -n 1 | grep -q '^Superseded by'; then
       fail "$f: references ADR $num, which is superseded"
     fi
   done <<< "$({ grep -o 'ADR [0-9]\{4\}' "$f" || true; } | sed 's/ADR //' | sort -u)"
