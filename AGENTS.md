@@ -68,7 +68,7 @@ daemon, an adapter, or the protocol. Full `make build` only when the task needs 
 Every dependency is a cost. Adding one, Rust or npm, requires an ADR that says what it
 replaces, its size, its license (MIT, Apache-2.0, BSD, ISC, or public domain only; the
 project is MIT), and why the standard library or twenty lines of our own code will not do.
-The approved list is in ADR 0001 (Rust) and ADR 0022 plus 0025 (web).
+The approved list is in ADR 0001 (Rust) and ADR 0022, ADR 0025 and ADR 0027 (web).
 
 ## Conventions
 
@@ -79,7 +79,8 @@ The approved list is in ADR 0001 (Rust) and ADR 0022 plus 0025 (web).
 - Every user action is a command in a registry with the same key in the TUI and the web
   (PLAN.md section 6.1). The registries land with M4 and M5.
 - UI: icons are required, never an emoji, no eyebrow labels; global scope is an earth globe
-  (PLAN.md section 6.1).
+  (PLAN.md section 6.1). Third-party apps and services (vendors, CLIs, models) use
+  @lobehub/icons Mono icons, imported per brand (ADR 0027).
 - UIs show the last 8 characters of a session id; the daemon resolves a unique suffix (ADR 0018).
 - Tests are focused: one behaviour each, through the real daemon where possible. No snapshot
   dumps, no tests for deleted features.

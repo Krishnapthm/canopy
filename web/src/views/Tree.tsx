@@ -13,7 +13,7 @@ export default function Tree() {
         <Status aria-label={node.status.state}/>
         <div className="flex min-w-0 flex-col gap-1">
           <strong className="truncate">{node.title || node.id.slice(-8)}</strong>
-          <span className="flex items-center gap-2"><Harness/>{node.harness} <Badge variant="outline">{node.id.slice(-8)}</Badge></span>
+          <span className="flex items-center gap-2"><Harness className="size-4" aria-hidden="true"/>{node.harness} <Badge variant="outline">{node.id.slice(-8)}</Badge></span>
           <span>{node.subtree.tokens.toLocaleString()} tokens · +{node.changes.added} / -{node.changes.removed}</span>
           {node.usage.reported_cost_usd !== null && <span>${node.usage.reported_cost_usd}</span>}
           {node.cwd !== state.nodes[node.parent ?? ""]?.cwd && <Tooltip><TooltipTrigger render={<span className="flex items-center gap-2 truncate"/>}><Folder/>{node.cwd.split("/").filter(Boolean).slice(-2).join("/")}</TooltipTrigger><TooltipContent>{node.cwd}</TooltipContent></Tooltip>}

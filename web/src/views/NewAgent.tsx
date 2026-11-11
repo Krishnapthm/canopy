@@ -8,6 +8,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectI
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { harnessIcon } from "../icons";
 import { Plus } from "lucide-react";
 export default function NewAgent() {
   const state = useStore();
@@ -24,7 +25,7 @@ export default function NewAgent() {
       const result=await attempt({op:"spawn",harness,prompt:String(data.get("prompt")),cwd:String(data.get("cwd")),model:String(data.get("model"))||null,policy,parent:state.child?state.selected||null:null,title:null});
       pending(false); if(result){set("selected",result.session);set("newAgent",false);}
     }}><FieldGroup>
-      <Field><FieldLabel>Harness</FieldLabel><Select value={harness} onValueChange={value=>choose(value ?? "")}><SelectTrigger aria-label="Harness"><SelectValue/></SelectTrigger><SelectContent><SelectGroup>{options.map(h=>{const info = detected.find(row=>row.name===h); return <SelectItem key={h} value={h} disabled={unavailable(h)}>{h}{info && (!info.version || info.logged_in === false) ? " - "+(!info.version ? "not installed" : "logged out")+" - "+info.login_command : ""}</SelectItem>;})}</SelectGroup></SelectContent></Select>
+      <Field><FieldLabel>Harness</FieldLabel><Select value={harness} onValueChange={value=>choose(value ?? "")}><SelectTrigger aria-label="Harness"><SelectValue/></SelectTrigger><SelectContent><SelectGroup>{options.map(h=>{const info = detected.find(row=>row.name===h), Harness = harnessIcon(info?.binary ?? h); return <SelectItem key={h} value={h} disabled={unavailable(h)}><Harness className="size-4" aria-hidden="true"/>{h}{info && (!info.version || info.logged_in === false) ? " - "+(!info.version ? "not installed" : "logged out")+" - "+info.login_command : ""}</SelectItem>;})}</SelectGroup></SelectContent></Select>
       {detected.map(h=><p key={h.name}>{h.name}: {!h.version ? "not installed" : h.logged_in === false ? "logged out" : h.version}{(!h.version || h.logged_in === false) && ` - ${h.login_command}`}</p>)}</Field>
       <Field><FieldLabel htmlFor="cwd">Working directory</FieldLabel><Input id="cwd" name="cwd" required placeholder="/path/to/project" defaultValue={state.nodes[state.selected]?.cwd ?? ""}/></Field>
       <Field><FieldLabel htmlFor="model">Model</FieldLabel><Input id="model" name="model" placeholder="Harness default"/></Field>
