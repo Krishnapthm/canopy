@@ -212,7 +212,7 @@ Each server stdout line is retained verbatim. Sent lines are represented as `{"c
 
 ## Live check through canopy (0.165.0, 2026-11-11)
 
-One live run of `canopy run --policy auto_edit claude` whose Claude parent spawned a Codex
+One live run of `canopy run --policy auto_edit claude` (a command removed by ADR 0024) whose Claude parent spawned a Codex
 child (`gpt-6-luna`) through `spawn_agent`. Observed working end to end through `codex.rs`:
 `initialize`, `thread/start` with `approvalPolicy:"on-request"`, `sandbox:"workspace-write"`
 and the dotted `mcp_servers.canopy.*` config, `turn/start`, `item/agentMessage/delta`,

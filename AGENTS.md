@@ -58,7 +58,7 @@ daemon, an adapter, or the protocol. Full `make build` only when the task needs 
   fact and the CLI version into `docs/harness-notes/`, and record a fixture.
 - Agent output is untrusted. The web app never uses `innerHTML`.
 - Every error a user causes or can see reaches them as a toast, never only in daemon.log.
-  Web: sonner via `web/src/toast.ts` (ADR 0025).
+  Web: sonner via `web/src/toast.ts` (ADR 0025); TUI: `crates/canopy/src/tui/toast.rs`.
 - A sub-agent inherits its parent's permission policy and cannot escalate it.
 - Plugin and skill changes go through the vendor's own command or app-server method, on an
   explicit user action, and nothing is ever auto-accepted (ADR 0020).
