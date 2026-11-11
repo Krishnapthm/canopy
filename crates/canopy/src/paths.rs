@@ -24,3 +24,28 @@ pub fn validate_socket(home: &std::path::Path) -> Result<()> {
     );
     Ok(())
 }
+
+/// Git toplevel of cwd, else cwd.
+pub fn project_root(cwd: &str) -> String {
+    std::path::Path::new(cwd)
+        .ancestors()
+        .find(|dir| dir.join(".git").exists())
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_else(|| cwd.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn project_roots() {
+        let temp = std::env::temp_dir().join(format!("canopy-project-roots-{}", std::process::id()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let repo = temp.join("repo");
+        let nested = repo.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(repo.join(".git"), "gitdir: elsewhere").unwrap();
+        assert_eq!(super::project_root(nested.to_str().unwrap()), repo.to_str().unwrap());
+        assert_eq!(super::project_root(temp.to_str().unwrap()), temp.to_str().unwrap());
+        std::fs::remove_dir_all(temp).unwrap();
+    }
+}

@@ -105,7 +105,7 @@ export async function refresh() {
   if (!state.connected || state.discovering) return;
   set("discovering", true);
   try {
-    const result = await attempt({op:"discover", cwd:state.nodes[state.selected]?.cwd ?? null});
+    const result = await attempt({op:"discover", cwd:state.view === "canvas" ? null : state.nodes[state.selected]?.cwd ?? null});
     if (result) {
       set("outside", result.sessions);
       for (const error of result.errors) errorToast(error);

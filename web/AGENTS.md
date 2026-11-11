@@ -30,7 +30,7 @@
 3. Launch 50 fake agents with repeated say and sleep 10 commands for 30 seconds.
 4. Open canopy web, select a streaming session and record Chrome Performance.
 5. Require 60 fps, no main-thread task above 50 ms and JS heap at most 60 MB.
-6. Repeat outline and graph, light and dark, narrow and wide windows.
+6. Repeat outline and canvas, light and dark, narrow and wide windows.
 7. Hide the tab: transcript subscriptions stop. Focus: snapshot resyncs.
 8. Restart the daemon in the same temp home: reconnect and resync without reload.
 9. Stop temporary processes and delete only that temporary home.
