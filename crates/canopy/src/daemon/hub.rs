@@ -310,6 +310,18 @@ impl Hub {
                     json!({"daemon_version": env!("CARGO_PKG_VERSION"), "harnesses": names, "exe": std::env::current_exe().ok(), "mtime": self.exe_mtime, "pid": std::process::id(), "live_agents": self.sessions.values().filter(|s| s.cmd.is_some()).count()}),
                 )
             }
+            Op::Discover { cwd } => {
+                let owned: HashSet<String> = self.sessions.values().filter_map(|s| s.node.vendor_session.clone()).collect();
+                if let Some(client) = self.clients.get(&conn) {
+                    let tx = client.tx.clone();
+                    tokio::spawn(async move {
+                        let result = harness::outside::discover(cwd, owned).await;
+                        let msg = ServerMsg::Res { id, result };
+                        let _ = tx.send(serde_json::to_string(&msg).unwrap_or_default()).await;
+                    });
+                }
+                return;
+            }
             Op::Detect => {
                 if let Some(client) = self.clients.get(&conn) {
                     let tx = client.tx.clone();

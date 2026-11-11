@@ -4,6 +4,7 @@
 pub mod acp;
 pub mod claude;
 pub mod codex;
+pub mod outside;
 
 use protocol::{Decision, Delivery, ItemKind, ItemState, Policy, SessionId, Status, Usage};
 use serde_json::{Value, json};

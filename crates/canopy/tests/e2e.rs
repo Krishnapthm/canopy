@@ -710,3 +710,37 @@ fn help_lists_only_public_commands() {
     let commands: Vec<_> = help.lines().filter(|l| l.starts_with("  canopy")).map(|l| l.split_whitespace().nth(1).unwrap()).collect();
     assert_eq!(commands, ["open", "web", "doctor", "demo", "help", "--version"]);
 }
+
+fn outside_binary(d: &Daemon, name: &str, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = d.home.join(name);
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn discovers_outside_claude_without_blocking_hub() {
+    let d = Daemon::start("outside-claude", &[]);
+    std::fs::write(d.home.join("rows"), include_str!("../src/harness/fixtures/claude-2.1.318-agents.json")).unwrap();
+    outside_binary(
+        &d,
+        "claude",
+        "#!/bin/sh\necho started > \"$CANOPY_HOME/probed\"\nwhile [ ! -f \"$CANOPY_HOME/release\" ]; do /bin/sleep 0.01; done\n/bin/cat \"$CANOPY_HOME/rows\"\n",
+    );
+    let socket = UnixStream::connect(d.home.join("sock")).unwrap();
+    socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut detector = BufReader::new(socket);
+    writeln!(detector.get_mut(), "{{\"id\":1,\"op\":\"discover\",\"cwd\":\"/workspace/project\"}}").unwrap();
+    wait_until("discovery running", || d.home.join("probed").exists());
+    assert_eq!(d.call(json!({"op":"sub_tree"}))["t"], "res");
+    std::fs::write(d.home.join("release"), "").unwrap();
+    let mut line = String::new();
+    detector.read_line(&mut line).unwrap();
+    let result: Value = serde_json::from_str(&line).unwrap();
+    let row = &result["result"]["sessions"][0];
+    assert_eq!(row["vendor_id"], "outside-claude");
+    assert_eq!(row["started"], 1794375374709_u64);
+    assert_eq!(row["busy"], true);
+    assert_eq!(row["pid"], 12345);
+    assert_eq!(result["result"]["errors"], json!([]));
+}

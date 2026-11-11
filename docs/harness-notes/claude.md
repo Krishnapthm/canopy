@@ -279,3 +279,20 @@ read-only until explicitly adopted. Adoption moves the whole vendor skill folder
 into the library and replaces it with a symlink; cross-filesystem moves fail safely.
 
 UNVERIFIED (M6): --resume is documented by CLI help; interactive resume after a daemon crash has not been live tested. Canopy passes only the saved session id and waits for a new user message.
+
+## Outside sessions (2026-11-11, Claude Code 2.1.318)
+
+Orchestrator-verified: `claude agents --json [--cwd <path>]` exits with a JSON
+array of active interactive and background sessions, without a TTY, in about
+0.2-0.4 seconds. `--all` also includes completed background sessions and is not used.
+Rows contain pid, cwd, kind, startedAt (milliseconds), sessionId, name, and
+status (idle or busy). Observed kind: interactive. The scrubbed shape is recorded
+in `fixtures/claude-2.1.318-agents.json`.
+
+Discovery uses a three second timeout and is read-only (ADR 0026).
+
+Attaching, verified from `claude --help` (2.1.318): `claude attach <id|name>` opens
+a background session (started with `--bg`) as a TUI in a terminal; there is no
+way for another program to drive an interactive session. `--bg --resume <id>` on a
+running session "starts a copy and says so". `--fork-session` resumes under a new id.
+No transcript or credential files are read.

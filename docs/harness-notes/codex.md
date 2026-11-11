@@ -260,3 +260,13 @@ therefore serializes its named item id as `ext_id` to avoid duplicate JSON keys.
 is stored in SQLite or retained between view reads.
 
 UNVERIFIED (M6): real extension probe timings were not measured because the task excludes the real harness configs. Extension operations log elapsed time for Claude plugins, Codex plugins and Codex skills separately; probes run concurrently. Resume uses the documented thread/resume request above.
+
+## Outside sessions (2026-11-11, Codex CLI 0.167.1)
+
+Orchestrator-verified schema: thread/list accepts cwd (string or array, exact cwd
+match), limit, sortKey (updated_at), archived, cursor, and returns {data,
+nextCursor}. Thread status describes only the responding app-server's view: a
+thread open in another Codex process shows notLoaded. So Canopy cannot tell which
+Codex threads are running elsewhere and does not list them (ADR 0026).
+Measured read-only: initialize 0.18 s; thread/list with a cwd filter 1.5-2.5 s,
+without one 0.23 s.

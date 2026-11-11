@@ -154,6 +154,16 @@ wire! {
     }
 
     /// One fresh CLI probe. Login state comes only from the vendor status exit code.
+    pub struct OutsideSession {
+        pub harness: String,
+        pub vendor_id: String,
+        pub cwd: String,
+        pub title: String,
+        pub started: u64,
+        pub busy: bool,
+        pub pid: u32,
+    }
+
     pub struct HarnessDetection {
         pub name: String,
         pub binary: String,
@@ -187,6 +197,7 @@ wire! {
         Hello { version: u32 },
         /// Fresh probes, returned in `result.harnesses`; never blocks the hub.
         Detect,
+        Discover { cwd: Option<String> },
         ExtList { cwd: Option<String> },
         ExtSet { harness: String, kind: ExtKind, #[serde(rename = "ext_id")] id: String, scope: ExtScope, enabled: bool },
         SubTree,
@@ -262,6 +273,7 @@ mod gen_ts {
             Decision::decl(&cfg),
             SpawnReq::decl(&cfg),
             HarnessDetection::decl(&cfg),
+            OutsideSession::decl(&cfg),
             ExtKind::decl(&cfg),
             ExtScope::decl(&cfg),
             Extension::decl(&cfg),
