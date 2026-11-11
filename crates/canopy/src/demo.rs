@@ -50,12 +50,21 @@ pub fn run() -> Result<()> {
         ensure!(Instant::now() < deadline, "demo daemon startup timed out");
         std::thread::sleep(Duration::from_millis(10));
     }
-    let cli = |args: &[&str]| -> Result<String> {
-        let out = Command::new(&exe).args(args).env("CANOPY_HOME", &demo.home).output()?;
-        ensure!(out.status.success(), "demo command failed: {}", String::from_utf8_lossy(&out.stderr));
-        Ok(String::from_utf8(out.stdout)?)
-    };
-    cli(&["run", "demo", "--title", "Plan a small change to the parser", "Plan a small change to the parser"])?;
+    tokio::runtime::Builder::new_current_thread().enable_all().build()?.block_on(async {
+        let mut client = crate::client::Client::attach(&demo.home).await?;
+        client
+            .call(protocol::Op::Spawn(protocol::SpawnReq {
+                harness: "demo".into(),
+                prompt: "Plan a small change to the parser".into(),
+                title: Some("Plan a small change to the parser".into()),
+                cwd: std::env::current_dir()?.to_string_lossy().into_owned(),
+                policy: protocol::Policy::Ask,
+                parent: None,
+                model: None,
+            }))
+            .await?;
+        anyhow::Ok(())
+    })?;
     let status = Command::new(&exe).env("CANOPY_HOME", &demo.home).status()?;
     ensure!(status.success(), "demo TUI exited with {status}");
     Ok(())

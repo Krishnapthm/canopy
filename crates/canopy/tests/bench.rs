@@ -1,6 +1,9 @@
 //! Performance budgets (PLAN.md section 10). Run with `make bench` (release build). A change
 //! that breaks a budget is a bug. Browser frame rate and heap require a visible browser.
 
+#[allow(dead_code)]
+mod support;
+
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -57,18 +60,19 @@ fn daemon_start_to_socket_ready_within_20ms() {
 }
 
 #[test]
-fn cli_ls_round_trip_within_10ms() {
+fn client_tree_round_trip_within_10ms() {
     let (d, _) = Daemon::start("ls");
     let runs: Vec<Duration> = (0..20)
         .map(|_| {
             let t = Instant::now();
-            let o = Command::new(EXE).arg("ls").env("CANOPY_HOME", &d.home).output().unwrap();
-            assert!(o.status.success());
+            let mut call = support::socket(&d.home);
+            assert_eq!(call(serde_json::json!({"op":"hello","version":protocol::VERSION}))["t"], "res");
+            assert_eq!(call(serde_json::json!({"op":"sub_tree"}))["t"], "res");
             t.elapsed()
         })
         .collect();
     let m = median(runs);
-    println!("canopy ls round trip: {m:?} (budget 10ms)");
+    println!("client tree round trip: {m:?} (budget 10ms)");
     assert!(m <= Duration::from_millis(10));
 }
 

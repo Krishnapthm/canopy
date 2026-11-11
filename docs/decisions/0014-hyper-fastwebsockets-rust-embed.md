@@ -1,6 +1,6 @@
 # 0014 - hyper, fastwebsockets, rust-embed, no web framework
 
-Status: Accepted (2026-11)
+Status: Superseded in part by [0024](0024-product-surface-foreground-web.md) (2026-11)
 
 ## Context
 

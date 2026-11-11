@@ -11,13 +11,13 @@ use hyper_util::rt::TokioIo;
 use std::{
     convert::Infallible,
     io::Read,
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{TcpListener, UnixStream},
+    net::TcpListener,
 };
 
 #[derive(rust_embed::RustEmbed)]
@@ -29,40 +29,21 @@ struct Assets;
 struct State {
     origin: String,
     token: String,
-    sock: PathBuf,
+    home: PathBuf,
 }
 
 pub async fn start(home: &Path) -> Result<()> {
-    // Keep both the origin and private token stable so open pages survive daemon restarts.
-    let previous: Option<serde_json::Value> = match std::fs::read_to_string(home.join("web.json")) {
-        Ok(text) => Some(serde_json::from_str(&text).context("invalid web.json")?),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e.into()),
-    };
-    let previous_port = match &previous {
-        Some(info) => u16::try_from(info["port"].as_u64().context("invalid web port")?)?,
-        None => 0,
-    };
-    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, previous_port)).await?;
+    let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await?;
     let port = listener.local_addr()?.port();
-    let token = match &previous {
-        Some(info) => info["url"]
-            .as_str()
-            .and_then(|url| url.split_once('#'))
-            .map(|(_, token)| token.to_owned())
-            .filter(|token| token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit()))
-            .context("invalid web token")?,
-        None => {
-            let mut random = [0u8; 32];
-            std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
-            random.iter().map(|b| format!("{b:02x}")).collect()
-        }
-    };
+    let mut random = [0u8; 32];
+    std::fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
+    let token: String = random.iter().map(|b| format!("{b:02x}")).collect();
     let origin = format!("http://127.0.0.1:{port}");
-    let info = serde_json::json!({"port":port,"url":format!("{origin}/#{token}")});
+    let info = serde_json::json!({"port":port,"pid":std::process::id(),"url":format!("{origin}/#{token}")});
     let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(home.join("web.json"))?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     std::io::Write::write_all(&mut file, info.to_string().as_bytes())?;
-    let state = Arc::new(State { origin, token, sock: home.join("sock") });
+    let state = Arc::new(State { origin, token, home: home.to_owned() });
     tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
             let state = state.clone();
@@ -165,7 +146,7 @@ async fn bridge(fut: upgrade::UpgradeFut, state: Arc<State>) -> Result<()> {
     if !matches!(req.op, protocol::Op::Hello { .. }) {
         bail!("hello required");
     }
-    let stream = UnixStream::connect(&state.sock).await?;
+    let stream = crate::client::connect_or_autostart(&state.home).await?;
     let (r, mut w) = stream.into_split();
     w.write_all(format!("{}\n", serde_json::to_string(&req)?).as_bytes()).await?;
     // Reads are not cancellation safe: give each direction its own future for its lifetime.
@@ -208,14 +189,35 @@ async fn bridge(fut: upgrade::UpgradeFut, state: Arc<State>) -> Result<()> {
     tokio::select! { result = incoming => result, result = outgoing => result }
 }
 
-pub async fn open() -> Result<()> {
+struct Registration(PathBuf);
+impl Drop for Registration {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+pub async fn run() -> Result<()> {
     let home = crate::paths::home()?;
+    let lock = std::fs::File::create(home.join("web.lock"))?;
+    if lock.try_lock().is_err() {
+        let info: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join("web.json"))?)?;
+        bail!(
+            "canopy web is already running at {} (pid {}). Stop it with Ctrl+C in that terminal.",
+            info["url"].as_str().unwrap_or("unknown URL"),
+            info["pid"]
+        );
+    }
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut int = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     let _client = crate::client::Client::connect(&home).await?;
+    let _registration = Registration(home.join("web.json"));
+    start(&home).await?;
     let info: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join("web.json"))?)?;
     let url = info["url"].as_str().context("missing web URL")?;
     println!("{url}");
     let command = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
     let _ = std::process::Command::new(command).arg(url).status();
+    tokio::select! { _ = term.recv() => {}, _ = int.recv() => {} }
     Ok(())
 }
 
@@ -237,26 +239,6 @@ mod tests {
         (tcp, String::from_utf8(header).unwrap())
     }
 
-    #[test]
-    fn web_identity_survives_daemon_restart() {
-        use std::os::unix::fs::PermissionsExt;
-        let home = std::env::temp_dir().join(format!("canopy-http-{}", ulid::Ulid::generate()));
-        std::fs::create_dir(&home).unwrap();
-        let mut previous = None;
-        for _ in 0..2 {
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-            rt.block_on(start(&home)).unwrap();
-            let info = std::fs::read_to_string(home.join("web.json")).unwrap();
-            if let Some(previous) = previous {
-                assert_eq!(info, previous);
-            }
-            previous = Some(info);
-            assert_eq!(std::fs::metadata(home.join("web.json")).unwrap().permissions().mode() & 0o777, 0o600);
-            drop(rt);
-        }
-        std::fs::remove_dir_all(home).unwrap();
-    }
-
     #[tokio::test]
     async fn http_does_not_disclose_token_without_authentication() {
         let home = std::env::temp_dir().join(format!("canopy-http-{}", ulid::Ulid::generate()));
@@ -275,6 +257,11 @@ mod tests {
             let mut response = String::new();
             tcp.read_to_string(&mut response).await.unwrap();
             assert!(response.starts_with(&format!("HTTP/1.1 {status}")), "{method} {path}: {response}");
+            if path == "/" {
+                assert!(response.contains("content-security-policy:"));
+                assert!(response.contains("connect-src 'self'"));
+                assert!(response.contains("frame-ancestors 'none'"));
+            }
             assert!(!response.contains(token), "{method} {path} disclosed token");
         }
         std::fs::remove_dir_all(home).unwrap();

@@ -20,23 +20,8 @@ pub struct Client {
 
 impl Client {
     pub async fn connect(home: &Path) -> Result<Client> {
-        crate::paths::validate_socket(home)?;
         let sock = home.join("sock");
-        let stream = match UnixStream::connect(&sock).await {
-            Ok(s) => s,
-            Err(_) => {
-                autostart().with_context(|| format!("could not start the daemon\n{}", log_tail(home)))?;
-                let mut tries = 0;
-                loop {
-                    tokio::time::sleep(Duration::from_millis(20)).await;
-                    match UnixStream::connect(&sock).await {
-                        Ok(s) => break s,
-                        Err(e) if tries > 150 => return Err(e).with_context(|| format!("the daemon did not start\n{}", log_tail(home))),
-                        Err(_) => tries += 1,
-                    }
-                }
-            }
-        };
+        let stream = connect_or_autostart(home).await?;
         let (r, w) = stream.into_split();
         let mut c = Client { lines: BufReader::new(r).lines(), w, next: 0, events: VecDeque::new(), warning: None };
         let hello = c.call(Op::Hello { version: protocol::VERSION }).await?;
@@ -106,6 +91,27 @@ impl Client {
         let line = self.lines.next_line().await?.context("the daemon closed the connection")?;
         Ok(serde_json::from_str(&line)?)
     }
+}
+
+pub async fn connect_or_autostart(home: &Path) -> Result<UnixStream> {
+    crate::paths::validate_socket(home)?;
+    let sock = home.join("sock");
+    let stream = match UnixStream::connect(&sock).await {
+        Ok(s) => s,
+        Err(_) => {
+            autostart().with_context(|| format!("could not start the daemon\n{}", log_tail(home)))?;
+            let mut tries = 0;
+            loop {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                match UnixStream::connect(&sock).await {
+                    Ok(s) => break s,
+                    Err(e) if tries > 150 => return Err(e).with_context(|| format!("the daemon did not start\n{}", log_tail(home))),
+                    Err(_) => tries += 1,
+                }
+            }
+        }
+    };
+    Ok(stream)
 }
 
 fn autostart() -> Result<()> {
