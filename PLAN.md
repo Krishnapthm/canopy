@@ -243,7 +243,7 @@ yet` so the user sees it was noticed.
 | D9 | **Three adapters**: `claude` (stream-json), `codex` (app-server), `acp` (Gemini, OpenCode, and the long tail) | Native where the native protocol is strictly richer and avoids a Node shim per session; ACP for everything else so "and others" costs zero new code | ACP for all four: adds a Node adapter process per Claude/Codex session and loses steering, cost, and sub-agent attribution. Four bespoke adapters: OpenCode's HTTP API buys little over ACP in v1 |
 | D10 | **Cross-vendor spawn via an MCP server in the daemon**, reached through a stdio pipe shim | MCP is the only extension point all harnesses share, and ACP mandates stdio MCP support. The shim is a dumb pipe (same binary, ~1-2 MB RSS); the daemon implements the tools once | HTTP MCP: zero extra processes but needs streamable-HTTP semantics and is an optional capability in ACP. Wrapping each vendor's native sub-agent tool: impossible across vendors |
 | D11 | **Hand-rolled line-delimited JSON-RPC peer** (~200 lines), shared by Codex, ACP, and MCP | All three are the same framing. One module, no SDK dependencies, tolerant `serde` structs for only the fields we use | `rmcp` + ACP crate + Codex SDK: three dependency trees to track for a subset we can write in an afternoon |
-| D12 | **SolidJS + TypeScript + Vite + plain CSS** | Fine-grained reactivity: a token delta updates one text node, not a component subtree. ~7 KB runtime, no virtual DOM diff. Stores give the MobX-like model Linear uses. Only runtime deps: `solid-js` and `marked` (lexer only) | **React**: VDOM re-render pressure under streaming, 45 KB+. **Svelte 5**: same performance class, weaker TS checking in templates. **WASM (Leptos)**: larger payload, DOM calls cross a JS bridge. **Canvas/WebGL**: fastest for 10k nodes, but loses text selection and accessibility and triples the code; we have hundreds of nodes |
+| D12 | **React + shadcn/ui + Tailwind + Vite** | User decision, ADR 0022 supersedes the Solid stack. External store, neutral theme, lazy Markdown. Initial JS budget 120 KB gzip | Custom controls duplicate installed accessible primitives |
 | D13 | **Browser-native virtualization**: `content-visibility: auto` + a 300-item window with paging | Zero JS, zero dependency, handles variable heights that hand-written virtualizers get wrong | A virtual-list library |
 | D14 | **`hyper` + `fastwebsockets` + `rust-embed`**, no web framework | Two routes (static assets, WS upgrade) do not justify a router stack. Assets are embedded and pre-compressed so the release is one file | `axum`: fine but unneeded. A separate static server: second process |
 | D15 | **Types flow one way**: Rust `protocol` crate is the source of truth, `ts-rs` generates `web/src/protocol.gen.ts` | A protocol change that breaks the web fails `tsc`. No hand-synced types | JSON Schema round trip, or hand-written TS types |
@@ -547,7 +547,7 @@ polish:
   on. A heading stands on its own.
 - **Global scope is an earth globe**: a world with continents, not the wireframe "www"
   grid globe. Project scope is a folder.
-- **Web**: one inline SVG sprite, drawn for this product, 16 px grid, `currentColor`.
+- **Web**: lucide icons with `currentColor`; status is conveyed by shape.
 - **TUI**: terminals have no images, so an icon is a single-cell glyph. Nerd Font glyphs
   (a free font patched with icons, which has an earth globe) when the user turns them on;
   otherwise plain Unicode symbols in text presentation. **VERIFY** before M4 which glyphs
@@ -568,24 +568,24 @@ arrives, capped at 30 fps. No tick loop, so an idle TUI uses no CPU.
 
 ### 6.3 Web (`web/`)
 
-- **State**: one Solid store `{nodes: Record<id, Node>, sessions: Record<id, {items, live}>}`
+- **State**: one external React store `{nodes: Record<id, Node>, sessions: Record<id, {items, live}>}`
   mirrored from the daemon. Navigation, selection, filter, and palette never touch the
   network. That is the Linear trick.
 - **Ingest**: `conn.ts` receives a batch, queues it, and applies all queued batches inside one
-  `batch()` in `requestAnimationFrame`: at most one DOM commit per frame however fast events
+  store batch in `requestAnimationFrame`: at most one DOM commit per frame however fast events
   arrive. A hidden tab drops its session subscriptions (keeps the tree) and resyncs on focus.
-- **Streaming text**: a delta appends to one signal bound to one text node. Streaming items
+- **Streaming text**: a delta appends to the selected session snapshot. Streaming items
   render as plain pre-wrapped text. Markdown is lexed once when the item completes, never per
   delta. `marked` is loaded lazily.
 - **Views**: Outline tree (primary; rows as above). Graph (SVG: x = depth, y = outline row,
-  elbow edges, status-coloured nodes, live activity; layout is derived from the outline order
+  elbow edges, status icons on nodes, live activity; layout is derived from the outline order
   in ~30 lines, no layout library). Session (transcript + composer + permission bar + node
   details). Palette. New-agent dialog.
 - **Rendering cost controls**: `content-visibility: auto` on transcript rows, a 300-item
   window with `history` paging, CSS transitions only on `transform`/`opacity`, no layout
   thrash in the streaming path.
-- **No**: router library (a 30-line history wrapper), state library, component kit, CSS
-  framework, icon package (inline SVG sprites).
+- **Stack (ADR 0022)**: React, shadcn/ui on Base UI, Tailwind, lucide icons. No router
+  or state library. The neutral theme follows the system.
 - **Dev**: `vite` dev server proxying `/ws` to the daemon. Release: `vite build` output is
   embedded into the binary.
 
@@ -696,7 +696,7 @@ install section rewritten around them and re-run from a clean shell. Exit: the i
 line works on a machine without Rust. Needs two things from the user first: the final
 name and a public GitHub repository.
 
-**M5 - Web.** `http.rs`, auth, the Solid app. Exit: in a real browser with 50 fake agents
+**M5 - Web.** `http.rs`, auth, the React + shadcn/ui app. Exit: in a real browser with 50 fake agents
 streaming, the tree stays at 60 fps, the bundle and heap budgets hold, a killed and restarted
 daemon resyncs the page without reload, and a cross-origin WS attempt is rejected.
 
@@ -795,7 +795,7 @@ Budgets, asserted in `tests/bench.rs` (targets to validate at M1 and M5, then en
 | TUI first paint | <= 50 ms |
 | 50 fake agents x 100 deltas/s: daemon CPU | <= 15% of one core |
 | Same load: event to client latency p99 | <= 50 ms |
-| Web JS (gzip, initial) | <= 50 KB |
+| Web JS (gzip, initial) | <= 120 KB |
 | Web: frame rate under the same load | 60 fps, no long tasks > 50 ms |
 | Web heap with 50 sessions | <= 60 MB |
 

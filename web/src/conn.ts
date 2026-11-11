@@ -1,8 +1,7 @@
-import { batch, createEffect } from "solid-js";
-import { reconcile } from "solid-js/store";
-import { state, set, ingest, items } from "./store";
+import { state, set, ingest, items, batch, listen } from "./store";
 import { PROTOCOL_VERSION, type Op, type ServerMsg, type Event, type Node, type Item } from "./protocol.gen";
 let socket: WebSocket;
+let retry = 1000;
 let next = 0;
 let frame = 0;
 let queued: Event[] = [];
@@ -23,7 +22,7 @@ export async function attempt(op: Op) {
 }
 export async function subscribe(session: string) {
   const result = await attempt({op:"sub_session", session, after_seq:null, tail:300});
-  if (result && state.selected === session) items(session, result.items as Item[], true);
+  if (result && state.selected === session && !document.hidden) items(session, result.items as Item[], true);
 }
 export function connect() {
   socket = new WebSocket(`ws://${location.host}/ws`);
@@ -34,8 +33,10 @@ export function connect() {
       const hello = await call(request);
       set("harnesses", hello.harnesses);
       const tree = await call({op:"sub_tree"});
-      set("nodes", reconcile(Object.fromEntries((tree.nodes as Node[]).map(n => [n.id,n]))));
+      set("nodes", Object.fromEntries((tree.nodes as Node[]).map(n => [n.id,n])));
       set("connected", true);
+      retry = 1000;
+      set("error", "");
     } catch(e) { set("error", String(e)); }
   };
   socket.onmessage = message => {
@@ -58,14 +59,18 @@ export function connect() {
     set("connected", false);
     for (const request of pending.values()) request.reject(new Error("Disconnected"));
     pending.clear(); queued = [];
-    setTimeout(connect, 1000);
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+    setTimeout(connect, retry);
+    retry = Math.min(retry * 2, 30000);
   };
 }
 export function subscriptions() {
   let previous = "";
-  createEffect(() => {
+  listen(() => {
     const selected = state.selected;
     if (!state.connected) { previous = ""; return; }
+    if (previous === selected) return;
     if (previous) void attempt({op:"unsub_session", session:previous});
     previous = selected;
     if (selected && !document.hidden) void subscribe(selected);

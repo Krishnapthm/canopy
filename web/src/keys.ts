@@ -1,6 +1,6 @@
 import { state, set, outline } from "./store";
 import { attempt } from "./conn";
-export function permission(decision: "allow" | "deny") {
+export function permission(decision: "allow" | "deny" | "allow_always") {
   const item = [...(state.sessions[state.selected]?.items ?? [])].reverse().find(i => i.kind === "permission" && i.state === "streaming");
   if (item) void attempt({op:"permission", session:state.selected, request:item.id, decision});
 }

@@ -1,13 +1,25 @@
-import { For } from "solid-js";
-import { state, set, outline } from "../store";
-import { Icon } from "../icons";
+import { useStore, set, outline } from "../store";
+import { statusIcons, harnessIcon } from "../icons";
+import { SidebarMenu, SidebarMenuItem, SidebarMenuButton } from "@/components/ui/sidebar";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
+import { Folder } from "lucide-react";
 export default function Tree() {
-  return <nav aria-label="Agents"><For each={outline()}>{({node,depth}) =>
-    <button class="agent" classList={{selected:state.selected===node.id}} style={{"padding-left":(12+depth*16)+"px"}} onClick={() => set("selected",node.id)}>
-      <span><Icon name="status"/><strong>{node.title || node.id.slice(-8)}</strong></span>
-      <span><Icon/>{node.harness} · {node.id.slice(-8)} · {node.status.state}</span>
-      <small>{node.activity || node.cwd}</small>
-      <small>{node.subtree.tokens.toLocaleString()} tokens · +{node.changes.added} / -{node.changes.removed}{node.usage.reported_cost_usd !== null ? " · $"+node.usage.reported_cost_usd : ""}</small>
-    </button>
-  }</For></nav>;
+  const state = useStore();
+  return <SidebarMenu>{outline().map(({node, depth}) => {
+    const Status = statusIcons[node.status.state], Harness = harnessIcon(node.harness);
+    return <SidebarMenuItem key={node.id} style={{paddingInlineStart: depth * 16}}>
+      <SidebarMenuButton className="h-auto" isActive={state.selected === node.id} onClick={() => set("selected", node.id)}>
+        <Status aria-label={node.status.state}/>
+        <div className="flex min-w-0 flex-col gap-1">
+          <strong className="truncate">{node.title || node.id.slice(-8)}</strong>
+          <span className="flex items-center gap-2"><Harness/>{node.harness} <Badge variant="outline">{node.id.slice(-8)}</Badge></span>
+          <span>{node.subtree.tokens.toLocaleString()} tokens · +{node.changes.added} / -{node.changes.removed}</span>
+          {node.usage.reported_cost_usd !== null && <span>${node.usage.reported_cost_usd}</span>}
+          {node.cwd !== state.nodes[node.parent ?? ""]?.cwd && <Tooltip><TooltipTrigger render={<span className="flex items-center gap-2 truncate"/>}><Folder/>{node.cwd.split("/").filter(Boolean).slice(-2).join("/")}</TooltipTrigger><TooltipContent>{node.cwd}</TooltipContent></Tooltip>}
+          <span className="truncate">{node.activity}</span>
+        </div>
+      </SidebarMenuButton>
+    </SidebarMenuItem>;
+  })}</SidebarMenu>;
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {state,items,ingest,outline,set} from "./src/store.ts";
+import {state,items,ingest,outline,set,listen,batch} from "./src/store.ts";
 const item = {id:"one",session:"session",seq:1,body:{text:"a"},state:"streaming",kind:"agent_message"};
 items("session",[item]);
 ingest({t:"delta",session:"session",item:"one",text:"b"});
@@ -17,3 +17,15 @@ assert.deepEqual(outline().map(r=>r.depth),[0,1]);
 set("collapsed","root",true);
 assert.equal(outline().length,1);
 console.log("Web store: streaming replacement, bounded snapshots, outline collapse passed");
+
+const before = state;
+let notifications = 0;
+const unlisten = listen(() => notifications++);
+batch(() => { set("filter", "root"); set("filter", ""); });
+assert.equal(notifications, 1);
+assert.notEqual(state, before);
+assert.equal(before.filter, "");
+unlisten();
+set("filter", "test");
+assert.equal(notifications, 1);
+console.log("Web store: immutable snapshots, batched notifications and unsubscribe passed");
