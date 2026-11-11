@@ -79,6 +79,11 @@ impl Peer {
         let _ = self.out.send(v.to_string());
     }
 
+    /// True once the other side's output has ended.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
     pub async fn request(&self, method: &str, params: Value) -> Result<Value> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();

@@ -40,9 +40,12 @@ pub async fn start(home: &Path) -> Result<()> {
     let token: String = random.iter().map(|b| format!("{b:02x}")).collect();
     let origin = format!("http://127.0.0.1:{port}");
     let info = serde_json::json!({"port":port,"pid":std::process::id(),"url":format!("{origin}/#{token}")});
-    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(home.join("web.json"))?;
+    // Write then rename, so a reader (a second `canopy web`) never sees a half-written file.
+    let tmp = home.join("web.json.tmp");
+    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
     file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     std::io::Write::write_all(&mut file, info.to_string().as_bytes())?;
+    std::fs::rename(&tmp, home.join("web.json"))?;
     let state = Arc::new(State { origin, token, home: home.to_owned() });
     tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
@@ -200,7 +203,9 @@ pub async fn run() -> Result<()> {
     let home = crate::paths::home()?;
     let lock = std::fs::File::create(home.join("web.lock"))?;
     if lock.try_lock().is_err() {
-        let info: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(home.join("web.json"))?)?;
+        // The running server may still be starting and not have written web.json yet.
+        let info: serde_json::Value =
+            std::fs::read_to_string(home.join("web.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         bail!(
             "canopy web is already running at {} (pid {}). Stop it with Ctrl+C in that terminal.",
             info["url"].as_str().unwrap_or("unknown URL"),

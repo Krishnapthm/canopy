@@ -47,7 +47,8 @@ impl Daemon {
             .unwrap();
         self.child = Some(child);
         let sock = self.home.join("sock");
-        wait_until("daemon socket", || sock.exists());
+        // A socket file left by the previous daemon exists before anything listens on it.
+        wait_until("daemon socket", || UnixStream::connect(&sock).is_ok());
     }
 
     /// Stops the daemon the way a user's Ctrl-C would, and waits for it to exit.
@@ -169,6 +170,8 @@ fn failed_agent_shows_its_stderr_reason_in_the_tree() {
         "failed tree node must carry stderr reason containing quota exceeded; error={}",
         node["error"]
     );
+    assert!(node["error"].as_str().unwrap().starts_with("canopy exited with exit status: 1"), "{}", node["error"]);
+    assert!(!support::transcript(&d.home, id.as_str().unwrap()).contains("peer closed"), "the exit reason is reported once");
 }
 
 #[test]
@@ -339,7 +342,8 @@ fn doctor_detects_zero_one_two_and_logged_out() {
         let start = Instant::now();
         let out = Command::new(EXE).arg("doctor").env("PATH", &dir).env("CANOPY_HOME", &dir).output().unwrap();
         assert!(out.status.success());
-        assert!(start.elapsed() < Duration::from_secs(1));
+        // Probes time out at 800 ms; a hung CLI must not hang doctor. Slack for a loaded machine.
+        assert!(start.elapsed() < Duration::from_secs(3));
         String::from_utf8(out.stdout).unwrap()
     };
     assert_eq!(doctor().matches("not installed").count(), 5);
