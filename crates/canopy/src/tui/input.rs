@@ -2,6 +2,7 @@ use crossterm::event::KeyCode;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum CommandId {
+    Refresh,
     Down,
     Up,
     Collapse,
@@ -35,6 +36,7 @@ pub struct Command {
 }
 
 pub const COMMANDS: &[Command] = &[
+    Command { id: CommandId::Refresh, title: "↻ Refresh", key: "R" },
     Command { id: CommandId::Down, title: "↓ Next", key: "j" },
     Command { id: CommandId::Up, title: "↑ Previous", key: "k" },
     Command { id: CommandId::Collapse, title: "− Collapse", key: "h" },

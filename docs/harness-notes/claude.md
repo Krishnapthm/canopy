@@ -286,7 +286,9 @@ Orchestrator-verified: `claude agents --json [--cwd <path>]` exits with a JSON
 array of active interactive and background sessions, without a TTY, in about
 0.2-0.4 seconds. `--all` also includes completed background sessions and is not used.
 Rows contain pid, cwd, kind, startedAt (milliseconds), sessionId, name, and
-status (idle or busy). Observed kind: interactive. The scrubbed shape is recorded
+status (idle or busy). Without `--cwd` it also lists background (`--bg`) sessions,
+whose rows have id but no pid and `state` (observed: blocked) instead of status.
+Their `id` is the first 8 characters of sessionId and is what `claude attach` takes. The scrubbed shape is recorded
 in `fixtures/claude-2.1.318-agents.json`.
 
 Discovery uses a three second timeout and is read-only (ADR 0026).

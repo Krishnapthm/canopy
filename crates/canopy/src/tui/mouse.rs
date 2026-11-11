@@ -4,6 +4,7 @@ use ratatui::layout::Position;
 pub(super) enum Target {
     Command(CommandId),
     Row(String),
+    Outside(String),
     Open(String),
     Dismiss(usize),
     Field(usize),
@@ -32,9 +33,9 @@ impl App {
                     return Ok(false);
                 }
                 match target {
-                    Target::TreePane | Target::Row(_) => {
+                    Target::TreePane | Target::Row(_) | Target::Outside(_) => {
                         self.tree_offset = if down {
-                            (self.tree_offset + 1).min(tree::rows(self).len().saturating_sub(1))
+                            (self.tree_offset + 1).min(tree::rows(self).len() + self.outside.len())
                         } else {
                             self.tree_offset.saturating_sub(1)
                         };
@@ -45,6 +46,15 @@ impl App {
             }
             MouseEventKind::Down(MouseButton::Left) => match target {
                 Target::Command(id) => return self.command(id, client).await,
+                Target::Outside(id) => {
+                    if let Some(old) = self.selected.take() {
+                        client.call(Op::UnsubSession { session: old }).await?;
+                    }
+                    self.items.clear();
+                    self.text.clear();
+                    self.mode = Mode::Tree;
+                    self.outside_selected = Some(id);
+                }
                 Target::Row(id) => {
                     let double = self.last_click.as_ref().is_some_and(|(old, at)| old == &id && at.elapsed() < Duration::from_millis(400));
                     self.last_click = Some((id.clone(), std::time::Instant::now()));
@@ -93,6 +103,19 @@ pub(super) fn record_panes(app: &mut App, columns: &[Rect]) {
         }
         app.hits.push((Rect::new(columns[0].x + 1, y, columns[0].width.saturating_sub(2), height), Target::Row(id)));
         y += height;
+    }
+    let own_count = tree::rows(app).len();
+    if app.tree_offset <= own_count {
+        y += 1;
+    }
+    if app.discovery.is_none() {
+        for row in app.outside.iter().skip(app.tree_offset.saturating_sub(own_count + 1)) {
+            if y >= columns[0].bottom().saturating_sub(1) {
+                break;
+            }
+            app.hits.push((Rect::new(columns[0].x + 1, y, columns[0].width.saturating_sub(2), 1), Target::Outside(row.vendor_id.clone())));
+            y += 1;
+        }
     }
 }
 pub(super) fn draw_commands(frame: &mut Frame, app: &mut App, area: Rect, permission: &str) {

@@ -12,12 +12,17 @@ pub fn available(binary: &str) -> bool {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Claude {
-    pid: u32,
+    // Background (--bg) sessions have no pid and report `state` instead of `status`.
+    #[serde(default)]
+    pid: Option<u32>,
     cwd: String,
+    #[serde(default)]
+    kind: String,
     started_at: u64,
     session_id: String,
     #[serde(default)]
     name: String,
+    #[serde(default, alias = "state")]
     status: String,
 }
 
@@ -34,7 +39,9 @@ async fn claude(cwd: Option<&str>) -> Result<Vec<Claude>, String> {
     if !output.status.success() {
         return Err(format!("claude agents exited with {}", output.status));
     }
-    serde_json::from_slice(&output.stdout).map_err(|e| format!("claude agents: {e}"))
+    // Tolerant: a row we cannot read is skipped, never fatal for the whole list.
+    let rows: Vec<Value> = serde_json::from_slice(&output.stdout).map_err(|e| format!("claude agents: {e}"))?;
+    Ok(rows.into_iter().filter_map(|r| serde_json::from_value(r).ok()).collect())
 }
 
 /// Live Claude Code sessions (optionally under `cwd`) that Canopy does not own. Read-only:
@@ -49,8 +56,9 @@ pub async fn discover(cwd: Option<String>, owned: HashSet<String>) -> Value {
                 vendor_id: r.session_id,
                 cwd: r.cwd,
                 title: r.name,
+                kind: r.kind,
                 started: r.started_at,
-                busy: r.status == "busy",
+                status: r.status,
                 pid: r.pid,
             })),
             Err(e) => errors.push(e),

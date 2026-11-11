@@ -41,6 +41,7 @@ export function connect() {
       const tree = await call({op:"sub_tree"});
       set("nodes", Object.fromEntries((tree.nodes as Node[]).map(n => [n.id,n])));
       set("connected", true);
+      void refresh();
       retry = 1000;
       toast.dismiss("canopy-connection");
     } catch { /* call already reported the error. */ }
@@ -98,4 +99,16 @@ function failed(node: Node) {
     description: node.error?.split("\n").slice(0, 3).join("\n"),
     action: { label: "Open", onClick: () => batch(() => { set("selected", node.id); set("view", "tree"); }) },
   });
+}
+
+export async function refresh() {
+  if (!state.connected || state.discovering) return;
+  set("discovering", true);
+  try {
+    const result = await attempt({op:"discover", cwd:state.nodes[state.selected]?.cwd ?? null});
+    if (result) {
+      set("outside", result.sessions);
+      for (const error of result.errors) errorToast(error);
+    }
+  } finally { set("discovering", false); }
 }

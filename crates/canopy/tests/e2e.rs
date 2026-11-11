@@ -740,7 +740,18 @@ fn discovers_outside_claude_without_blocking_hub() {
     let row = &result["result"]["sessions"][0];
     assert_eq!(row["vendor_id"], "outside-claude");
     assert_eq!(row["started"], 1794375374709_u64);
-    assert_eq!(row["busy"], true);
+    assert_eq!(row["status"], "busy");
     assert_eq!(row["pid"], 12345);
+    assert_eq!(result["result"]["sessions"][1]["kind"], "background");
+    let background = &result["result"]["sessions"][1];
+    assert_eq!((background["status"].as_str(), background["pid"].is_null()), (Some("blocked"), true));
+    assert_eq!(result["result"]["sessions"].as_array().unwrap().len(), 2, "an unreadable row is skipped");
     assert_eq!(result["result"]["errors"], json!([]));
+}
+
+#[test]
+fn extensions_without_vendor_clis_have_no_errors() {
+    let d = Daemon::start("extensions-absent", &[]);
+    let result = d.request(json!({"op":"ext_list","cwd":null}));
+    assert_eq!(result["errors"], json!([]));
 }

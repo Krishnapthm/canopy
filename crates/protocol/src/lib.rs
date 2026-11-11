@@ -159,9 +159,12 @@ wire! {
         pub vendor_id: String,
         pub cwd: String,
         pub title: String,
+        /// "interactive" (in a terminal) or "background" (`claude --bg`, open with `claude attach`).
+        pub kind: String,
         pub started: u64,
-        pub busy: bool,
-        pub pid: u32,
+        /// The vendor's own word: "idle", "busy" or "blocked" (waiting for the user).
+        pub status: String,
+        pub pid: Option<u32>,
     }
 
     pub struct HarnessDetection {

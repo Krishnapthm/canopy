@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
-import type { Node, Item, Event } from "./protocol.gen";
+import type { OutsideSession, Node, Item, Event } from "./protocol.gen";
 export let state = {
+  outside: [] as OutsideSession[],
+  discovering: false, outsideSelected: "",
   nodes: {} as Record<string, Node>,
   sessions: {} as Record<string, { items: Item[] }>,
   selected: "", view: "tree", filter: "", palette: false, newAgent: false,
@@ -18,7 +20,7 @@ export function batch(fn: () => void) {
 export function set<K extends keyof typeof state>(key: K, value: (typeof state)[K]): void;
 export function set(key: "collapsed", id: string, value: boolean): void;
 export function set(key: keyof typeof state, value: unknown, nested?: boolean) {
-  state = { ...state, [key]: nested === undefined ? value : { ...state.collapsed, [String(value)]: nested } };
+  state = { ...state, ...(key === "selected" && value ? {outsideSelected:""} : {}), [key]: nested === undefined ? value : { ...state.collapsed, [String(value)]: nested } };
   if (!batching) listeners.forEach(fn => fn());
 }
 export function items(session: string, incoming: Item[], replace = false) {

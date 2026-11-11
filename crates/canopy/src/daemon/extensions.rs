@@ -118,9 +118,27 @@ async fn list(cwd: Option<String>) -> Result<Value> {
     let mut errors = Vec::new();
     let cwds: Vec<_> = cwd.iter().collect();
     let (claude_plugins, codex_plugins, codex_skills) = tokio::join!(
-        timed("Claude plugins", claude(&["plugin", "list", "--json"], cwd.as_deref().map(Path::new))),
-        timed("Codex plugins", rpc("plugin/installed", json!({"cwds":cwds}))),
-        timed("Codex skills", rpc("skills/list", json!({"cwds":cwds,"forceReload":true}))),
+        async {
+            if crate::harness::outside::available("claude") {
+                timed("Claude plugins", claude(&["plugin", "list", "--json"], cwd.as_deref().map(Path::new))).await
+            } else {
+                Ok(Value::Null)
+            }
+        },
+        async {
+            if crate::harness::outside::available("codex") {
+                timed("Codex plugins", rpc("plugin/installed", json!({"cwds":cwds}))).await
+            } else {
+                Ok(Value::Null)
+            }
+        },
+        async {
+            if crate::harness::outside::available("codex") {
+                timed("Codex skills", rpc("skills/list", json!({"cwds":cwds,"forceReload":true}))).await
+            } else {
+                Ok(Value::Null)
+            }
+        },
     );
     match claude_plugins {
         Ok(v) => {

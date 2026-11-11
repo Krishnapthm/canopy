@@ -39,6 +39,9 @@ enum Mode {
 
 #[derive(Default)]
 struct App {
+    outside: Vec<protocol::OutsideSession>,
+    outside_selected: Option<String>,
+    discovery: Option<tokio::task::JoinHandle<Result<serde_json::Value>>>,
     nodes: Vec<Node>,
     items: Vec<Item>,
     selected: Option<String>,
@@ -63,6 +66,27 @@ struct App {
 }
 
 impl App {
+    fn refresh(&mut self) -> Result<()> {
+        if self.discovery.is_some() {
+            return Ok(());
+        }
+        let home = crate::paths::home()?;
+        let cwd = std::env::current_dir()?.to_string_lossy().into_owned();
+        self.discovery = Some(tokio::spawn(async move {
+            let mut client = Client::connect(&home).await?;
+            client.call(Op::Discover { cwd: Some(cwd) }).await
+        }));
+        Ok(())
+    }
+
+    fn discovered(&mut self, value: serde_json::Value) -> Result<()> {
+        self.outside = serde_json::from_value(value["sessions"].clone())?;
+        for error in value["errors"].as_array().into_iter().flatten().filter_map(|v| v.as_str()) {
+            self.toasts.push(toast::Toast::error("Discovery failed".into(), error.into(), None));
+        }
+        Ok(())
+    }
+
     fn event(&mut self, event: Event) {
         match event {
             Event::Node { node } => {
@@ -98,6 +122,7 @@ impl App {
     }
 
     async fn select(&mut self, client: &mut Client, id: String) -> Result<()> {
+        self.outside_selected = None;
         if self.selected.as_ref() == Some(&id) {
             return Ok(());
         }
@@ -216,7 +241,16 @@ impl App {
     }
 
     async fn command(&mut self, id: CommandId, client: &mut Client) -> Result<bool> {
+        if self.outside_selected.is_some()
+            && matches!(
+                id,
+                CommandId::Compose | CommandId::Child | CommandId::Resume | CommandId::Interrupt | CommandId::Allow | CommandId::Deny
+            )
+        {
+            return Ok(false);
+        }
         match id {
+            CommandId::Refresh => self.refresh()?,
             CommandId::ExtensionNext => self.extension_index = (self.extension_index + 1).min(self.extensions.len().saturating_sub(1)),
             CommandId::ExtensionPrevious => self.extension_index = self.extension_index.saturating_sub(1),
             CommandId::ExtensionRefresh => self.refresh_extensions(client).await?,
@@ -390,6 +424,13 @@ fn draw(frame: &mut Frame, app: &mut App) {
         Mode::Help | Mode::Palette => {
             Some(input::COMMANDS.iter().map(|c| format!("{}  {} (clickable)", c.key, c.title)).collect::<Vec<_>>().join("\n"))
         }
+        _ if app.outside_selected.is_some() => Some(
+            app.outside
+                .iter()
+                .find(|row| Some(&row.vendor_id) == app.outside_selected.as_ref())
+                .map(|row| format!("{}\n{}\n{}", row.title, row.cwd, continue_hint(row)))
+                .unwrap_or_default(),
+        ),
         _ if app.nodes.is_empty() => Some(format!("Detected harnesses:\n{}\n\n+ New agent: click below or press c", app.harnesses)),
         _ => None,
     };
@@ -486,6 +527,7 @@ pub async fn run() -> Result<()> {
         };
         let _ = detect_tx.send(rows.await).await;
     });
+    app.refresh()?;
     let tree = client.call(Op::SubTree).await?;
     app.nodes = serde_json::from_value(tree["nodes"].clone())?;
     if let Some(n) = app.nodes.first() {
@@ -506,6 +548,12 @@ pub async fn run() -> Result<()> {
     let mut last = tokio::time::Instant::now();
     loop {
         tokio::select! {
+            result = async { match app.discovery.as_mut() { Some(task) => task.await, None => std::future::pending().await } }, if app.discovery.is_some() => {
+                app.discovery = None;
+                let result = result.map_err(anyhow::Error::from).and_then(|v| v).and_then(|v| app.discovered(v));
+                if let Err(e) = result { app.toasts.push(toast::Toast::error("Discovery failed".into(), e.to_string(), None)); }
+                pending = true;
+            }
             e = client.next_event(), if connected => {
                 match e { Ok(e) => app.event(e), Err(_) => {
                     connected = false;
@@ -547,6 +595,14 @@ pub async fn run() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// How to continue a session Canopy only shows (ADR 0026). `claude attach` takes the first 8 id characters.
+fn continue_hint(row: &protocol::OutsideSession) -> String {
+    match row.kind.as_str() {
+        "background" => format!("Read-only here. Continue it with: claude attach {}", row.vendor_id.get(..8).unwrap_or(&row.vendor_id)),
+        _ => "Read-only here. Continue it in its terminal.".into(),
+    }
 }
 
 #[cfg(test)]
@@ -617,6 +673,23 @@ pub async fn scripted_test(home: &std::path::Path) -> Result<()> {
     app.selected = None;
     app.mouse(click(rect.x, rect.y), &mut client).await?;
     assert_eq!(app.selected.as_ref(), Some(&session));
+    app.discovered(serde_json::json!({"sessions":[{
+        "harness":"claude", "vendor_id":"outside12345678", "cwd":"/tmp/project",
+        "title":"Outside fixture", "kind":"interactive", "started":0, "status":"busy", "pid":123
+    }], "errors":[]}))?;
+    terminal.draw(|f| draw(f, &mut app))?;
+    let rendered: String = terminal.backend().buffer().content.iter().map(|c| c.symbol()).collect();
+    assert!(rendered.contains("Running here") && rendered.contains("Outside fixture"));
+    let rect = app.hits.iter().find(|(_, t)| matches!(t, mouse::Target::Outside(_))).context("outside row")?.0;
+    app.mouse(click(rect.x, rect.y), &mut client).await?;
+    assert!(app.selected.is_none());
+    assert_eq!(app.outside_selected.as_deref(), Some("outside12345678"));
+    app.command(CommandId::Compose, &mut client).await?;
+    app.command(CommandId::Interrupt, &mut client).await?;
+    assert_eq!(app.mode, Mode::Tree);
+    terminal.draw(|f| draw(f, &mut app))?;
+    let rendered: String = terminal.backend().buffer().content.iter().map(|c| c.symbol()).collect();
+    assert!(rendered.contains("Continue it in its terminal") && rendered.contains("/tmp/project"));
     let rect = app.hits.iter().find(|(_, t)| matches!(t, mouse::Target::Command(CommandId::New))).context("new button")?.0;
     app.mouse(click(rect.x, rect.y), &mut client).await?;
     assert_eq!(app.mode, Mode::New);

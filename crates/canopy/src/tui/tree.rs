@@ -17,77 +17,100 @@ pub fn rows(app: &App) -> Vec<(&Node, usize)> {
 }
 
 pub fn widget(app: &App) -> List<'static> {
-    List::new(
-        rows(app)
-            .into_iter()
-            .skip(app.tree_offset)
-            .map(|(n, depth)| {
-                let glyph = match n.status {
-                    Status::Running => "▷",
-                    Status::Starting => "◌",
-                    Status::AwaitingPermission => "!",
-                    Status::Failed => "×",
-                    Status::RateLimited { .. } => "∥",
-                    Status::Done => "✓",
-                    Status::Idle => "○",
-                    Status::Cancelled => "⊘",
-                    Status::Interrupted => "■",
-                };
-                let cost = n.usage.reported_cost_usd.map(|v| format!(" ${v:.2}")).unwrap_or_default();
-                let collapse = if app.nodes.iter().any(|child| child.parent.as_ref() == Some(&n.id)) {
-                    if app.collapsed.contains(&n.id) { "▸ " } else { "▾ " }
-                } else {
-                    ""
-                };
-                let prefix = format!(
-                    "{}{}{} [{}] {}",
-                    if app.selected.as_deref() == Some(n.id.as_str()) { "›" } else { " " },
-                    "  ".repeat(depth),
-                    glyph,
-                    n.harness,
-                    collapse
-                );
-                let detail = format!(
-                    "{prefix}{}\n{}{}  {}t{} +{}/-{} {}",
-                    n.title,
-                    " ".repeat(ratatui::text::Line::from(prefix.as_str()).width()),
-                    &n.id[n.id.len().saturating_sub(8)..],
-                    n.subtree.tokens,
-                    cost,
-                    n.changes.added,
-                    n.changes.removed,
-                    n.activity
-                );
-                let color = match n.status {
-                    Status::Failed => ratatui::style::Color::Red,
-                    Status::AwaitingPermission => ratatui::style::Color::Yellow,
-                    Status::Running => ratatui::style::Color::Green,
-                    _ => ratatui::style::Color::Reset,
-                };
-                let mut lines: Vec<ratatui::text::Line> = detail.lines().map(|s| ratatui::text::Line::from(s.to_owned())).collect();
-                if let Some(line) = lines.first_mut() {
-                    let pos = line.spans[0].content.find(glyph).unwrap_or(0);
-                    let text = line.spans[0].content.to_string();
-                    *line = ratatui::text::Line::from(vec![
-                        ratatui::text::Span::raw(text[..pos].to_owned()),
-                        ratatui::text::Span::styled(glyph, ratatui::style::Style::default().fg(color)),
-                        ratatui::text::Span::raw(text[pos + glyph.len()..].to_owned()),
-                    ]);
-                }
-                if n.status == Status::Failed
-                    && let Some(error) = &n.error
-                {
-                    // Align the reason under the row's detail line, not at the pane edge.
-                    let indent: String = detail.lines().last().unwrap_or_default().chars().take_while(|c| *c == ' ').collect();
-                    lines.push(ratatui::text::Line::styled(
-                        format!("{indent}{}", error.lines().next().unwrap_or_default()),
-                        ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::DIM),
-                    ));
-                }
-                ListItem::new(lines)
-            })
-            .collect::<Vec<_>>(),
-    )
+    let mut items = rows(app)
+        .into_iter()
+        .map(|(n, depth)| {
+            let glyph = match n.status {
+                Status::Running => "▷",
+                Status::Starting => "◌",
+                Status::AwaitingPermission => "!",
+                Status::Failed => "×",
+                Status::RateLimited { .. } => "∥",
+                Status::Done => "✓",
+                Status::Idle => "○",
+                Status::Cancelled => "⊘",
+                Status::Interrupted => "■",
+            };
+            let cost = n.usage.reported_cost_usd.map(|v| format!(" ${v:.2}")).unwrap_or_default();
+            let collapse = if app.nodes.iter().any(|child| child.parent.as_ref() == Some(&n.id)) {
+                if app.collapsed.contains(&n.id) { "▸ " } else { "▾ " }
+            } else {
+                ""
+            };
+            let prefix = format!(
+                "{}{}{} [{}] {}",
+                if app.selected.as_deref() == Some(n.id.as_str()) { "›" } else { " " },
+                "  ".repeat(depth),
+                glyph,
+                n.harness,
+                collapse
+            );
+            let detail = format!(
+                "{prefix}{}\n{}{}  {}t{} +{}/-{} {}",
+                n.title,
+                " ".repeat(ratatui::text::Line::from(prefix.as_str()).width()),
+                &n.id[n.id.len().saturating_sub(8)..],
+                n.subtree.tokens,
+                cost,
+                n.changes.added,
+                n.changes.removed,
+                n.activity
+            );
+            let color = match n.status {
+                Status::Failed => ratatui::style::Color::Red,
+                Status::AwaitingPermission => ratatui::style::Color::Yellow,
+                Status::Running => ratatui::style::Color::Green,
+                _ => ratatui::style::Color::Reset,
+            };
+            let mut lines: Vec<ratatui::text::Line> = detail.lines().map(|s| ratatui::text::Line::from(s.to_owned())).collect();
+            if let Some(line) = lines.first_mut() {
+                let pos = line.spans[0].content.find(glyph).unwrap_or(0);
+                let text = line.spans[0].content.to_string();
+                *line = ratatui::text::Line::from(vec![
+                    ratatui::text::Span::raw(text[..pos].to_owned()),
+                    ratatui::text::Span::styled(glyph, ratatui::style::Style::default().fg(color)),
+                    ratatui::text::Span::raw(text[pos + glyph.len()..].to_owned()),
+                ]);
+            }
+            if n.status == Status::Failed
+                && let Some(error) = &n.error
+            {
+                // Align the reason under the row's detail line, not at the pane edge.
+                let indent: String = detail.lines().last().unwrap_or_default().chars().take_while(|c| *c == ' ').collect();
+                lines.push(ratatui::text::Line::styled(
+                    format!("{indent}{}", error.lines().next().unwrap_or_default()),
+                    ratatui::style::Style::default().add_modifier(ratatui::style::Modifier::DIM),
+                ));
+            }
+            ListItem::new(lines)
+        })
+        .collect::<Vec<_>>();
+    items.push(ListItem::new("Running here (outside Canopy)"));
+    if app.discovery.is_some() {
+        items.push(ListItem::new("Looking for sessions..."));
+    } else {
+        for row in &app.outside {
+            let suffix: String = row.vendor_id.chars().rev().take(8).collect::<Vec<_>>().into_iter().rev().collect();
+            items.push(ListItem::new(ratatui::text::Line::from(vec![
+                ratatui::text::Span::raw(format!(
+                    "{} ◇ [{}] {} {} ",
+                    if app.outside_selected.as_ref() == Some(&row.vendor_id) { "›" } else { " " },
+                    row.harness,
+                    row.title,
+                    suffix
+                )),
+                ratatui::text::Span::styled(
+                    row.status.clone(),
+                    ratatui::style::Style::default().fg(match row.status.as_str() {
+                        "busy" => ratatui::style::Color::Green,
+                        "blocked" => ratatui::style::Color::Yellow,
+                        _ => ratatui::style::Color::Reset,
+                    }),
+                ),
+            ])));
+        }
+    }
+    List::new(items.into_iter().skip(app.tree_offset).collect::<Vec<_>>())
 }
 
 #[cfg(test)]
