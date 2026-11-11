@@ -341,19 +341,17 @@ impl App {
     }
 }
 
-/// One line per known CLI, in the doctor's words. Login commands are shown, never run.
+/// One line per installed CLI, in the doctor's words. Login commands are shown, never run.
 fn harness_list(rows: &[HarnessDetection]) -> String {
+    if rows.is_empty() {
+        return "No coding agent CLI found on your PATH.".into();
+    }
     rows.iter()
         .map(|h| {
-            let state = match (&h.version, h.supported, h.logged_in) {
-                (None, _, _) => match h.binary.as_str() {
-                    "claude" => "not installed - run npm install -g @anthropic-ai/claude-code".into(),
-                    "codex" => "not installed - run npm install -g @openai/codex".into(),
-                    _ => format!("not installed - install {}", h.binary),
-                },
-                (Some(_), false, _) => "detected, not supported yet".to_owned(),
-                (Some(_), true, Some(true)) => "ready".to_owned(),
-                (Some(_), true, _) => format!("logged out - run {}", h.login_command),
+            let state = match (h.supported, h.logged_in) {
+                (false, _) => "detected, not supported yet".to_owned(),
+                (true, Some(true)) => "ready".to_owned(),
+                (true, _) => format!("logged out - run {}", h.login_command),
             };
             let glyph = if h.supported && h.logged_in == Some(true) { "✓" } else { "○" };
             format!("{glyph} {:<12} {state}", h.name)
@@ -727,16 +725,8 @@ mod tests {
             supported,
             login_command: "codex login".into(),
         };
-        let text = harness_list(&[
-            row(None, true, None),
-            row(Some("1"), true, Some(false)),
-            row(Some("1"), true, Some(true)),
-            row(Some("1"), false, None),
-        ]);
+        let text = harness_list(&[row(Some("1"), true, Some(false)), row(Some("1"), true, Some(true)), row(Some("1"), false, None)]);
         let lines: Vec<_> = text.lines().map(|l| l.split_whitespace().skip(2).collect::<Vec<_>>().join(" ")).collect();
-        assert_eq!(
-            lines,
-            ["not installed - run npm install -g @openai/codex", "logged out - run codex login", "ready", "detected, not supported yet"]
-        );
+        assert_eq!(lines, ["logged out - run codex login", "ready", "detected, not supported yet"]);
     }
 }

@@ -346,7 +346,8 @@ fn doctor_detects_zero_one_two_and_logged_out() {
         assert!(start.elapsed() < Duration::from_secs(3));
         String::from_utf8(out.stdout).unwrap()
     };
-    assert_eq!(doctor().matches("not installed").count(), 5);
+    // Only installed CLIs are listed; a missing one is never named.
+    assert_eq!(doctor().trim(), "No coding agent CLI found on your PATH.");
     let fake = |name: &str, exit: u8| {
         let path = dir.join(name);
         std::fs::write(
@@ -358,11 +359,9 @@ fn doctor_detects_zero_one_two_and_logged_out() {
     };
     fake("claude", 0);
     let one = doctor();
-    assert_eq!(one.matches("not installed").count(), 4);
-    assert!(one.contains("logged in"));
+    assert!(one.contains("Claude Code") && one.contains("logged in") && !one.contains("Codex"));
     fake("codex", 1);
     let two = doctor();
-    assert_eq!(two.matches("not installed").count(), 3);
     assert!(two.contains("run codex login"));
     assert!(!two.contains("secret-account"));
     std::fs::write(dir.join("claude"), "#!/bin/sh\nexec /bin/sleep 10\n").unwrap();
@@ -437,7 +436,7 @@ fn detection_is_fresh_and_does_not_block_the_hub() {
     let mut other = connect();
     writeln!(other.get_mut(), "{{\"id\":1,\"op\":\"hello\",\"version\":{}}}", protocol::VERSION).unwrap();
     let hello = read(&mut other);
-    assert_eq!(hello["result"]["harnesses"], serde_json::json!(["claude", "codex"]));
+    assert_eq!(hello["result"]["harnesses"], serde_json::json!(["codex"]));
     assert!(!d.home.join("probed").exists(), "startup must not probe harnesses");
     let mut detector = connect();
     writeln!(detector.get_mut(), "{{\"id\":2,\"op\":\"detect\"}}").unwrap();
@@ -446,11 +445,11 @@ fn detection_is_fresh_and_does_not_block_the_hub() {
     assert_eq!(read(&mut other)["id"], 3);
     std::fs::write(d.home.join("release"), "").unwrap();
     let detected = read(&mut detector);
-    assert_eq!(detected["result"]["harnesses"][1]["version"], "fixture-version");
-    assert_eq!(detected["result"]["harnesses"][1]["logged_in"], false);
+    assert_eq!(detected["result"]["harnesses"][0]["version"], "fixture-version");
+    assert_eq!(detected["result"]["harnesses"][0]["logged_in"], false);
     std::fs::write(d.home.join("logged-in"), "").unwrap();
     writeln!(detector.get_mut(), "{{\"id\":4,\"op\":\"detect\"}}").unwrap();
-    assert_eq!(read(&mut detector)["result"]["harnesses"][1]["logged_in"], true);
+    assert_eq!(read(&mut detector)["result"]["harnesses"][0]["logged_in"], true);
 }
 
 #[allow(dead_code)]

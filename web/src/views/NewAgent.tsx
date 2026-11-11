@@ -17,16 +17,17 @@ export default function NewAgent() {
   const [policy, permissions] = useState<Policy>("ask");
   const [busy, pending] = useState(false);
   useEffect(()=>{void attempt({op:"detect"}).then(result=>{if(result) detect(result.harnesses);});},[]);
-  const options = [...new Set([...state.harnesses, ...detected.map(h=>h.name)])];
-  const unavailable = (name: string) => !state.harnesses.includes(name) || detected.some(h=>h.name === name && h.logged_in === false);
+  // The daemon lists only installed harnesses; detection rows match by binary and add labels and login state.
+  const options = state.harnesses;
+  const unavailable = (name: string) => !state.harnesses.includes(name) || detected.some(h=>h.binary === name && h.logged_in === false);
   return <Dialog open onOpenChange={open=>set("newAgent",open)}><DialogContent><DialogHeader><DialogTitle>{state.child?"Spawn child":"New agent"}</DialogTitle><DialogDescription>Launch an installed harness in a working directory.</DialogDescription></DialogHeader>
     <form onSubmit={async e=>{
       e.preventDefault(); if (busy) return; const data=new FormData(e.currentTarget); pending(true);
       const result=await attempt({op:"spawn",harness,prompt:String(data.get("prompt")),cwd:String(data.get("cwd")),model:String(data.get("model"))||null,policy,parent:state.child?state.selected||null:null,title:null});
       pending(false); if(result){set("selected",result.session);set("newAgent",false);}
     }}><FieldGroup>
-      <Field><FieldLabel>Harness</FieldLabel><Select value={harness} onValueChange={value=>choose(value ?? "")}><SelectTrigger aria-label="Harness"><SelectValue/></SelectTrigger><SelectContent><SelectGroup>{options.map(h=>{const info = detected.find(row=>row.name===h), Harness = harnessIcon(info?.binary ?? h); return <SelectItem key={h} value={h} disabled={unavailable(h)}><Harness className="size-4" aria-hidden="true"/>{h}{info && (!info.version || info.logged_in === false) ? " - "+(!info.version ? "not installed" : "logged out")+(info.login_command ? " - "+info.login_command : "") : ""}</SelectItem>;})}</SelectGroup></SelectContent></Select>
-      {detected.map(h=><p key={h.name}>{h.name}: {!h.version ? "not installed" : h.logged_in === false ? "logged out" : h.version}{(!h.version || h.logged_in === false) && h.login_command && ` - ${h.login_command}`}</p>)}</Field>
+      <Field><FieldLabel>Harness</FieldLabel><Select items={Object.fromEntries(options.map(h=>[h, detected.find(row=>row.binary===h)?.name ?? h]))} value={harness} onValueChange={value=>choose(value ?? "")}><SelectTrigger aria-label="Harness"><SelectValue/></SelectTrigger><SelectContent><SelectGroup>{options.map(h=>{const info = detected.find(row=>row.binary===h), Harness = harnessIcon(h); return <SelectItem key={h} value={h} disabled={unavailable(h)}><Harness className="size-4" aria-hidden="true"/>{info?.name ?? h}{info?.logged_in === false ? " - logged out - "+info.login_command : ""}</SelectItem>;})}</SelectGroup></SelectContent></Select>
+      {!options.length && <p>No coding agent CLI found on your PATH.</p>}</Field>
       <Field><FieldLabel htmlFor="cwd">Working directory</FieldLabel><Input id="cwd" name="cwd" required placeholder="/path/to/project" defaultValue={state.nodes[state.selected]?.cwd ?? ""}/></Field>
       <Field><FieldLabel htmlFor="model">Model</FieldLabel><Input id="model" name="model" placeholder="Harness default"/></Field>
       <Field><FieldLabel>Permissions</FieldLabel><Select value={policy} onValueChange={value=>permissions(value as Policy)}><SelectTrigger aria-label="Permissions"><SelectValue/></SelectTrigger><SelectContent><SelectGroup>{(["ask","auto_edit","yolo"] as const).map(p=><SelectItem key={p} value={p}>{p.replaceAll("_"," ")}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>

@@ -304,7 +304,14 @@ impl Hub {
                 Err(format!("protocol version {version} does not match daemon version {}", protocol::VERSION))
             }
             Op::Hello { .. } => {
-                let mut names: Vec<_> = self.cfg.harnesses.keys().cloned().collect();
+                // Built-in CLIs that are not on PATH are left out; --acp harnesses are always listed.
+                let mut names: Vec<_> = self
+                    .cfg
+                    .harnesses
+                    .keys()
+                    .filter(|name| !harness::DETECTION.iter().any(|d| d.binary == name.as_str()) || harness::outside::available(name))
+                    .cloned()
+                    .collect();
                 names.sort();
                 Ok(
                     json!({"daemon_version": env!("CARGO_PKG_VERSION"), "harnesses": names, "exe": std::env::current_exe().ok(), "mtime": self.exe_mtime, "pid": std::process::id(), "live_agents": self.sessions.values().filter(|s| s.cmd.is_some()).count()}),

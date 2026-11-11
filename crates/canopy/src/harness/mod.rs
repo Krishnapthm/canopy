@@ -285,6 +285,7 @@ pub const DETECTION: &[Detection] = &[
     },
 ];
 
+/// Installed CLIs only: a CLI that is not on PATH is never listed, so new vendors need no UI work.
 pub async fn detect() -> Vec<protocol::HarnessDetection> {
     let mut tasks = Vec::new();
     for row in DETECTION {
@@ -334,7 +335,9 @@ pub async fn detect() -> Vec<protocol::HarnessDetection> {
     }
     let mut rows = Vec::new();
     for task in tasks {
-        if let Ok(row) = task.await {
+        if let Ok(row) = task.await
+            && row.version.is_some()
+        {
             rows.push(row);
         }
     }

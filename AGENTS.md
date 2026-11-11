@@ -81,6 +81,9 @@ The approved list is in ADR 0001 (Rust) and ADR 0022, ADR 0025 and ADR 0027 (web
 - UI: icons are required, never an emoji, no eyebrow labels; global scope is an earth globe
   (PLAN.md section 6.1). Third-party apps and services (vendors, CLIs, models) use
   @lobehub/icons Mono icons, imported per brand (ADR 0027).
+- UIs and `canopy doctor` list only installed agent CLIs and never name a missing one; there
+  will always be more vendors than we list. The filter is `harness::detect()` plus the hello
+  `harnesses` list in `crates/canopy/src/daemon/hub.rs`; the e2e doctor test enforces it.
 - UIs show the last 8 characters of a session id; the daemon resolves a unique suffix (ADR 0018).
 - Tests are focused: one behaviour each, through the real daemon where possible. No snapshot
   dumps, no tests for deleted features.

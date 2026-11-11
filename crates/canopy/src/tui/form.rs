@@ -88,13 +88,16 @@ pub(super) fn draw(frame: &mut Frame, app: &mut App) {
         Constraint::Length(3),
     ])
     .split(inner);
-    let text = app
-        .detections
-        .iter()
-        .enumerate()
-        .map(|(i, h)| format!("{} {}", if app.form.harness == Some(i) { "›" } else { " " }, harness_list(std::slice::from_ref(h))))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let text = if app.detections.is_empty() {
+        harness_list(&[])
+    } else {
+        app.detections
+            .iter()
+            .enumerate()
+            .map(|(i, h)| format!("{} {}", if app.form.harness == Some(i) { "›" } else { " " }, harness_list(std::slice::from_ref(h))))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     for (i, h) in app.detections.iter().enumerate() {
         if ready(h) && (i as u16) < parts[0].height.saturating_sub(2) {
             app.hits.push((
