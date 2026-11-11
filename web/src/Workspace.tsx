@@ -10,6 +10,7 @@ import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from "
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Kbd } from "@/components/ui/kbd";
+import { Skeleton } from "@/components/ui/skeleton";
 const GraphSession = lazy(() => import("./views/GraphSession"));
 import Outside, { outsideStatus } from "./views/Outside";
 import Tree from "./views/Tree";
@@ -43,12 +44,12 @@ export default function Workspace() {
     const search = params.size ? "?"+params.toString() : "";
     if (search !== previous) {history.pushState(null,"",location.pathname+search);previous=search;}
   },[state.selected,state.view]);
-  return <Suspense fallback={<p>Loading…</p>}><SidebarProvider><Sidebar><SidebarHeader><h1 className="flex items-center gap-2"><Earth/>Canopy</h1><Button onClick={()=>commands.find(c=>c.id==="new")!.run()}><Plus data-icon="inline-start"/>New agent</Button><Input id="filter" aria-label="Filter agents" placeholder="Filter agents /" value={state.filter} onChange={e=>set("filter",e.target.value)}/></SidebarHeader><SidebarContent><SidebarGroup><Tree/></SidebarGroup><Outside/></SidebarContent></Sidebar>
+  return <SidebarProvider><Sidebar><SidebarHeader><h1 className="flex items-center gap-2"><Earth/>Canopy</h1><Button onClick={()=>commands.find(c=>c.id==="new")!.run()}><Plus data-icon="inline-start"/>New agent</Button><Input id="filter" aria-label="Filter agents" placeholder="Filter agents /" value={state.filter} onChange={e=>set("filter",e.target.value)}/></SidebarHeader><SidebarContent><SidebarGroup><Tree/></SidebarGroup><Outside/></SidebarContent></Sidebar>
     <SidebarInset className="h-svh min-w-0"><header className="flex flex-wrap items-center gap-3 p-3"><SidebarTrigger/><Earth/>Local workspace <output>{state.connected?"Connected":"Reconnecting…"}</output><Button variant="outline" onClick={()=>set("palette",true)}><Terminal data-icon="inline-start"/>Commands<Kbd>⌘K</Kbd></Button><Tabs value={state.view} onValueChange={value=>set("view",String(value))}><TabsList><TabsTrigger value="tree"><ListTree/>Outline</TabsTrigger><TabsTrigger value="graph"><Network/>Graph</TabsTrigger></TabsList></Tabs></header>
-    <main className="flex min-h-0 flex-1 flex-col">
+    <main className="flex min-h-0 flex-1 flex-col"><Suspense fallback={<Skeleton className="m-4 h-24"/>}>
     {state.view==="plugins" ? <Extensions key={state.nodes[state.selected]?.cwd ?? "global"}/> :
     outside ? <Empty><EmptyHeader><EmptyTitle>{outside.title || outside.vendor_id.slice(-8)}</EmptyTitle><EmptyDescription>{outsideStatus(outside).label}, in {outside.cwd}. Canopy shows it read-only. {outside.kind === "background" ? <>Continue it with <code>claude attach {outside.vendor_id.slice(0, 8)}</code>.</> : "Continue it in its terminal."}</EmptyDescription></EmptyHeader></Empty> :
     !Object.keys(state.nodes).length ? <Empty><EmptyHeader><EmptyTitle>No agents yet</EmptyTitle><EmptyDescription>Start an agent to follow its work here.</EmptyDescription></EmptyHeader><EmptyContent>{detected.map(h=>{const Harness = harnessIcon(h.binary); return <p className="flex items-center gap-2" key={h.name}><Harness className="size-4" aria-hidden="true"/>{h.name}: {h.version ?? "not installed"}{h.logged_in === false && " - logged out"}{(!h.version || h.logged_in === false) && h.login_command && " - "+h.login_command}</p>;})}<Button onClick={()=>commands.find(c=>c.id==="new")!.run()}><Plus data-icon="inline-start"/>New agent</Button></EmptyContent></Empty> :
     state.view==="graph" ? <GraphSession/> : <Session/>}
-    </main></SidebarInset>{state.palette && <Palette/>}{state.newAgent && <NewAgent/>}</SidebarProvider></Suspense>;
+    </Suspense></main></SidebarInset>{/* Overlays load on demand; only they wait, never the whole app. */}<Suspense fallback={null}>{state.palette && <Palette/>}{state.newAgent && <NewAgent/>}</Suspense></SidebarProvider>;
 }

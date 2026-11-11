@@ -5,6 +5,7 @@ CARGO ?= cargo
 
 check: web
 	@if rg -n '\p{Emoji_Presentation}|\x{FE0F}' crates/canopy/src/tui web/src; then echo "emoji code points are forbidden"; exit 1; fi
+	@if rg -n 'from "cn"' web/src --glob '!lib/utils.ts'; then echo 'import cn from @/lib/utils, not the "cn" package (web/AGENTS.md)'; exit 1; fi
 	@if rg -n --pcre2 "@lobehub/icons(?!/es/[A-Za-z0-9]+/components/Mono[.]js[\"'])" web/src; then echo "use per-brand @lobehub/icons Mono.js imports (ADR 0027)"; exit 1; fi
 	$(CARGO) fmt --all --check
 	$(CARGO) clippy --workspace --all-targets --all-features -- -D warnings

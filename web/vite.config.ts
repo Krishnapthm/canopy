@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
+import { cn } from "cn/vite";
 // Explicit dev target, copied from canopy web's printed URL (without fragment).
 const target = process.env.CANOPY_WEB_ORIGIN ?? "http://127.0.0.1:7331";
 const proxy = {
@@ -12,7 +13,7 @@ const proxy = {
   },
 };
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [cn({ content: ["src/**/*.{ts,tsx}"], out: "src/lib/cn-tables.ts" }), react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
   server: { host: "127.0.0.1", proxy: { "/ws": proxy } },
   build: { manifest: true, target: "es2022" },
