@@ -55,9 +55,8 @@ pub fn run() -> Result<()> {
  tool spawn_agent {"harness":"demo","title":"Review","prompt":"say Reviewing without spending tokens\nsay Finished"}
  tool wait_agent {"ids":["$1","$2"],"timeout_s":5}
  say Demo tasks finished"#;
-    let root = cli(&["run", "demo", "--title", "Plan a change", script])?;
-    print!("{}", cli(&["tail", root.trim(), "-f"])?);
-    print!("{}", cli(&["ls"])?);
-    println!("Demo complete. No tokens spent; temporary sessions are removed on exit.");
+    cli(&["run", "demo", "--title", "Plan a change", script])?;
+    let status = Command::new(&exe).env("CANOPY_HOME", &demo.home).status()?;
+    ensure!(status.success(), "demo TUI exited with {status}");
     Ok(())
 }

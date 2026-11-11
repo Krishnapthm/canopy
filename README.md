@@ -50,7 +50,7 @@ canopy doctor
 ```
 
 The table shows installed versions beside recorded versions and each CLI's login state.
-Bare `canopy` prints the same table until the terminal UI lands. OpenCode, Copilot CLI
+Bare `canopy` opens the control room. OpenCode, Copilot CLI
 and Gemini CLI are detected but not supported yet.
 
 Try a disposable agent tree without a subscription or tokens:
@@ -59,7 +59,8 @@ Try a disposable agent tree without a subscription or tokens:
 canopy demo
 ```
 
-The demo starts a temporary foreground daemon and stops it before exiting.
+The demo opens the control room on a disposable fake-agent tree. Press `q` to quit;
+it stops the temporary daemon and removes its data.
 
 **Seeing `canopy: command not found`?** Open a new terminal window and try again. If it
 still fails, run `source ~/.cargo/env` and try once more.
@@ -74,7 +75,9 @@ canopy
 
 Press `c`, type `claude explain what this project does`, then Enter. Use `j/k` to
 select agents, `i` to message, `a/d` to answer permissions, and `x` to interrupt.
-Press `:` for all commands, `?` for help, and `q` to quit. Agents keep running;
+Press `r` to resume an interrupted session after a daemon restart, then `i` to send
+the next instruction. Scripts use `canopy resume <id>`. Unsupported harness resume
+returns an error. Press `:` for all commands, `?` for help, and `q` to quit. Agents keep running;
 open `canopy` again to reattach. Use Page Up and Page Down to scroll output.
 Set `CANOPY_NERD_FONT=1` to use the Nerd Font earth icon (requires a patched font).
 The default uses plain text symbols.
@@ -194,7 +197,8 @@ make e2e      # full tests with fake agents, no real tokens spent
 New here? Read [AGENTS.md](AGENTS.md) for the rules of the codebase and
 [PLAN.md](PLAN.md) for the design.
 
-Agents share the parent's project folder, so helpers can edit the same files. Each harness
+Agents share the parent's project folder. Concurrent edits can overwrite each other.
+Use separate checkouts or git worktrees when agents should edit independently. Each harness
 loads your own plugins, hooks and MCP servers. Canopy does not change your login or read
 credentials; it drives the official CLI and uses its status command to check login.
 
@@ -203,6 +207,18 @@ To uninstall, remove the `canopy` binary from `~/.cargo/bin` and delete `~/.cano
 ## License
 
 MIT
+
+## Open in a browser
+
+```bash
+canopy web
+```
+
+This opens the same local control room in your browser. It reconnects after a daemon
+restart. The URL contains a private access token; keep it to yourself. There is no remote
+server mode, account, telemetry, or vendor API client in Canopy. Log in with each vendor's
+own CLI before using it here. Your harness config, plugins, hooks and MCP servers still
+load; Canopy adds its own tools for the agent tree.
 
 ## Web development
 

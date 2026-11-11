@@ -2,7 +2,7 @@
 
 Canopy runs coding agents from different vendors as one live tree: a Rust daemon, a TUI, and
 a web app that share one protocol. It is for developers with two or more agent subscriptions. Read [PLAN.md](PLAN.md) for the design until it is deleted
-at M6; after that the code and `docs/decisions/` are the truth.
+by the user; after that the code and `docs/decisions/` are the truth.
 
 This file is loaded into every agent session. It is capped at 150 lines and checked by
 `make check-docs`. Keep it that way.
@@ -49,7 +49,7 @@ daemon, an adapter, or the protocol. Full `make build` only when the task needs 
   timer may exist only while output is pending (ADR 0003).
 - Types flow one way: `crates/protocol` is the source of truth, TypeScript is generated
   (ADR 0015). A protocol change means: edit Rust, `make gen`, fix what `tsc` reports.
-- Token deltas are coalesced in the adapter before they reach the hub (ADR 0006). Never
+- Token deltas are coalesced in the adapter before they reach the hub (ADR 0023). Never
   forward per-token events.
 - Clients receive transcript events only for sessions they subscribed to (ADR 0007).
 - Only completed items are written to SQLite (ADR 0008).

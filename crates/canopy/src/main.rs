@@ -17,6 +17,7 @@ usage:
   canopy run <harness> [--cwd DIR] [--model M] [--policy ask|auto_edit|yolo]
              [--title T] [--parent ID] <prompt...>     start an agent, print its id
   canopy ls                                            show the tree
+  canopy resume <id>                                    resume an interrupted session
   canopy tail <id> [-f]                                print a transcript (-f: follow until it settles)
   canopy send <id> [--interrupt] <text...>             message an agent
   canopy permit <id> <request> allow|deny|always       answer a permission request

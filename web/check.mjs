@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {state,items,ingest,outline,set,listen,batch,permissionSummary} from "./src/store.ts";
+import {state,items,ingest,outline,set,listen,batch,permissionSummary,toolChildId} from "./src/store.ts";
 const item = {id:"one",session:"session",seq:1,body:{text:"a"},state:"streaming",kind:"agent_message"};
 items("session",[item]);
 ingest({t:"delta",session:"session",item:"one",text:"b"});
@@ -65,3 +65,27 @@ console.log("Web transport: idle root subscription snapshot passed");
 
 assert.deepEqual(permissionSummary({...item,body:{title:"Write config.toml",tool:{kind:"execute",rawInput:{secret:"hidden"}}}}),{title:"Write config.toml",summary:"secret: hidden"});
 assert.deepEqual(permissionSummary({...item,body:{title:"Bash",input:{command:"cargo test\n--offline"}}}),{title:"Bash",summary:"command: cargo test --offline"});
+
+// Exercise the actual React token renderer, including nested inline list tokens.
+const {readFile, writeFile, unlink} = await import('node:fs/promises');
+const {transformWithOxc} = await import('vite');
+const {marked} = await import('marked');
+const {createElement} = await import('react');
+const {renderToStaticMarkup} = await import('react-dom/server');
+const rendererPath = new URL('./.markdown-check.mjs', import.meta.url);
+try {
+  const source = await readFile(new URL('./src/md.tsx', import.meta.url), 'utf8');
+  await writeFile(rendererPath, (await transformWithOxc(source + '\nexport {Tokens};', 'md.tsx', {jsx:{runtime:'automatic'}})).code);
+  const {Tokens} = await import(rendererPath.href);
+  const html = renderToStaticMarkup(createElement(Tokens,{tokens:marked.lexer('A **small** change\n\n- **one**\n- `two`\n\n<script>alert(1)</script>')}));
+  assert.ok(html.includes('<strong>small</strong>'));
+  assert.ok(html.includes('<li><strong>one</strong></li>'));
+  assert.ok(html.includes('<code>two</code>'));
+  assert.ok(!html.includes('<script>'));
+} finally { await unlink(rendererPath).catch(()=>{}); }
+console.log('Markdown: completed paragraphs, nested lists, code and escaped HTML passed');
+
+assert.equal(toolChildId({output:'{"id":"child"}'}),'child');
+assert.equal(toolChildId({output:[{content:{text:'{"id":"acp-child"}'}}]}),'acp-child');
+assert.equal(toolChildId({text:'{"id":"demo-child"}'}),'demo-child');
+assert.equal(toolChildId({output:'normal output'}),undefined);

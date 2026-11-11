@@ -353,6 +353,7 @@ impl Hub {
             Op::Interrupt { session } => self.command(&session, Command::Interrupt),
             Op::Permission { session, request, decision } => self.permission(&session, request, decision),
             Op::Stop { session } => self.stop(&session),
+            Op::Resume { session } => self.resume(&session),
             Op::History { session, before_seq, limit } => match self.resolve(&session) {
                 Some(s) => {
                     if let Some(c) = self.clients.get(&conn) {
@@ -410,6 +411,37 @@ impl Hub {
         for (conn, id, items) in replies {
             self.reply(conn, id, Ok(json!({"session": sid, "items": items})));
         }
+    }
+
+    fn resume(&mut self, session: &str) -> Result<Value, String> {
+        let id = self.resolve(session).ok_or(format!("no session {session}"))?;
+        let s = &self.sessions[&id];
+        if s.cmd.is_some() || s.node.status != Status::Interrupted || s.node.origin == Origin::Native {
+            return Err("only interrupted sessions without a running process can be resumed".into());
+        }
+        let vendor = s.node.vendor_session.clone().ok_or("no vendor session id was saved")?;
+        let kind = self.cfg.harnesses.get(&s.node.harness).ok_or("harness is unavailable")?.clone();
+        if self.sessions.values().filter(|s| s.cmd.is_some()).count() >= self.cfg.max_live {
+            return Err("live agent limit reached".into());
+        }
+        let spec = SpawnSpec {
+            session: id.clone(),
+            prompt: String::new(),
+            cwd: PathBuf::from(&s.node.cwd),
+            model: s.node.model.clone(),
+            policy: s.node.policy,
+            resume: Some(vendor),
+            mcp: (self.cfg.exe.clone(), mcp_args(&self.cfg.sock, &id)),
+        };
+        let cmd = harness::start(&kind, spec, self.tx.clone(), &mut self.codex);
+        let s = self.sessions.get_mut(&id).ok_or("session disappeared")?;
+        s.cmd = Some(cmd);
+        s.stop_requested = false;
+        s.reported = false;
+        s.node.status = Status::Starting;
+        s.node.ended = None;
+        self.touch(&id);
+        Ok(json!({"session":id}))
     }
 
     fn command(&mut self, session: &str, cmd: Command) -> Result<Value, String> {
@@ -731,6 +763,9 @@ impl Hub {
                 if let Some(s) = self.sessions.get_mut(&target) {
                     s.node.vendor_session = vendor_session.or(s.node.vendor_session.take());
                     s.pid = pid.or(s.pid);
+                    if s.node.status == Status::Starting {
+                        s.node.status = Status::Idle;
+                    }
                     self.store.node(&s.node);
                 }
                 self.touch(&target);

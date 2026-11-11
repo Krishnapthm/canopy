@@ -63,7 +63,8 @@ async fn session(
     let mcp = json!([{"name": "canopy", "command": spec.mcp.0, "args": spec.mcp.1, "env": []}]);
     let cwd = spec.cwd.to_string_lossy();
     let can_load = init.pointer("/agentCapabilities/loadSession").and_then(Value::as_bool).unwrap_or(false);
-    let session_id = match spec.resume.filter(|_| can_load) {
+    anyhow::ensure!(spec.resume.is_none() || can_load, "agent does not support session resume");
+    let session_id = match spec.resume {
         Some(id) => {
             peer.request("session/load", json!({"sessionId": id, "cwd": cwd, "mcpServers": mcp})).await.context("session/load")?;
             id

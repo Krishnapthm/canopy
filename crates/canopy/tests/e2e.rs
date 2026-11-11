@@ -258,11 +258,37 @@ fn doctor_detects_zero_one_two_and_logged_out() {
 }
 
 #[test]
-fn demo_runs_without_installed_harnesses() {
-    let out = Command::new(EXE).arg("demo").output().unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let text = String::from_utf8(out.stdout).unwrap();
-    assert!(text.contains("Implement") && text.contains("Review") && text.contains("No tokens spent"));
+fn demo_opens_tui_and_cleans_up_on_quit() {
+    let script = r#"import os, pty, select, sys, time, fcntl, termios, struct
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], [sys.argv[1], 'demo'])
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 120, 0, 0))
+end = time.monotonic() + 10
+output = b''
+sent = False
+try:
+    while time.monotonic() < end:
+        if select.select([fd], [], [], 0.1)[0]:
+            try: output += os.read(fd, 65536)
+            except OSError: break
+        if b'Implement' in output and not sent:
+            os.write(fd, b'q')
+            sent = True
+        child, status = os.waitpid(pid, os.WNOHANG)
+        if child:
+            assert os.waitstatus_to_exitcode(status) == 0, output
+            break
+    else: raise AssertionError(output)
+finally:
+    try: os.kill(pid, 9)
+    except ProcessLookupError: pass
+    try: os.waitpid(pid, 0)
+    except ChildProcessError: pass
+    os.close(fd)
+assert b'Implement' in output, output
+"#;
+    assert!(Command::new("python3").args(["-c", script, EXE]).status().unwrap().success());
 }
 
 #[test]
@@ -433,4 +459,65 @@ fn extensions_use_vendor_commands_and_owned_skill_links() {
         call(json!({"op":"ext_set","harness":"claude","kind":"library_skill","ext_id":"shared","scope":{"scope":"global"},"enabled":true}));
     assert_eq!(r["t"], "err");
     assert_eq!(std::fs::read_to_string(occupied.join("SKILL.md")).unwrap(), "keep me");
+}
+
+#[test]
+fn interrupted_session_resumes_in_place() {
+    let mut d = Daemon::start("resume", &[]);
+    let id = d.run("fake", "say before crash\nsleep 30000");
+    wait_until("running", || d.row(&id).contains("running"));
+    d.down();
+    d.up();
+    assert!(d.row(&id).contains("interrupted"));
+    d.ok(&["resume", &id]);
+    wait_until("resumed", || d.row(&id).contains("idle"));
+    d.ok(&["send", &id, "say after restart"]);
+    let output = d.ok(&["tail", &id, "-f"]);
+    assert!(output.contains("before crash"));
+    assert!(output.contains("after restart"));
+}
+
+#[test]
+fn long_socket_path_names_limit_and_fix() {
+    let home = std::env::temp_dir().join("x".repeat(110));
+    let output = Command::new(EXE).args(["daemon", "--foreground"]).env("CANOPY_HOME", home).output().unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("Unix socket paths must be shorter than"), "{error}");
+    assert!(error.contains("Set CANOPY_HOME to a shorter"));
+}
+
+#[test]
+fn websocket_reconnects_and_resubscribes_after_restart() {
+    use fastwebsockets::{Frame, Payload, Role, WebSocket};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut d = Daemon::start("ws-restart", &[]);
+    let id = d.run("fake", "say saved transcript");
+    d.ok(&["tail", &id, "-f"]);
+    tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+        let info: serde_json::Value = serde_json::from_slice(&std::fs::read(d.home.join("web.json")).unwrap()).unwrap();
+        let port = info["port"].as_u64().unwrap();
+        let url = info["url"].as_str().unwrap();
+        let (origin, token) = url.split_once('#').unwrap();
+        let origin = origin.trim_end_matches('/');
+        for restart in [false, true] {
+            if restart { d.down(); d.up(); }
+            let mut tcp = tokio::net::TcpStream::connect(format!("127.0.0.1:{port}")).await.unwrap();
+            tcp.write_all(format!("GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: {origin}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").as_bytes()).await.unwrap();
+            let mut header = Vec::new();
+            while !header.ends_with(b"\r\n\r\n") { header.push(tcp.read_u8().await.unwrap()); }
+            assert!(String::from_utf8_lossy(&header).contains("101"));
+            let mut ws = WebSocket::after_handshake(tcp, Role::Client);
+            for request in [
+                serde_json::json!({"id":1,"op":"hello","version":protocol::VERSION,"token":token}),
+                serde_json::json!({"id":2,"op":"sub_session","session":id,"tail":300}),
+            ] {
+                ws.write_frame(Frame::text(Payload::Owned(request.to_string().into_bytes()))).await.unwrap();
+                let response = ws.read_frame().await.unwrap();
+                let result: serde_json::Value = serde_json::from_slice(&response.payload).unwrap();
+                assert_eq!(result["t"], "res", "{result}");
+                if request["id"] == 2 { assert!(result.to_string().contains("saved transcript")); }
+            }
+        }
+    });
 }

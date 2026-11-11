@@ -104,13 +104,25 @@ fn array(v: &Value) -> &[Value] {
 fn row(harness: &str, kind: ExtKind, id: &str, name: &str, scope: ExtScope, enabled: bool, writable: bool) -> Extension {
     Extension { harness: harness.into(), kind, id: id.into(), name: name.into(), scope, enabled, writable, command: None }
 }
+async fn timed(name: &str, probe: impl std::future::Future<Output = Result<Value>>) -> Result<Value> {
+    let start = std::time::Instant::now();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), probe).await;
+    eprintln!("{name}: {:?}", start.elapsed());
+    result.context("vendor probe timed out")?
+}
 async fn list(cwd: Option<String>) -> Result<Value> {
     if let Some(cwd) = &cwd {
         project(&ExtScope::Project(cwd.clone()))?;
     }
     let mut items = Vec::new();
     let mut errors = Vec::new();
-    match claude(&["plugin", "list", "--json"], cwd.as_deref().map(Path::new)).await {
+    let cwds: Vec<_> = cwd.iter().collect();
+    let (claude_plugins, codex_plugins, codex_skills) = tokio::join!(
+        timed("Claude plugins", claude(&["plugin", "list", "--json"], cwd.as_deref().map(Path::new))),
+        timed("Codex plugins", rpc("plugin/installed", json!({"cwds":cwds}))),
+        timed("Codex skills", rpc("skills/list", json!({"cwds":cwds,"forceReload":true}))),
+    );
+    match claude_plugins {
         Ok(v) => {
             for p in array(v.get("plugins").unwrap_or(&v)) {
                 let (Some(id), Some(enabled)) = (p["id"].as_str(), p["enabled"].as_bool()) else { continue };
@@ -126,8 +138,7 @@ async fn list(cwd: Option<String>) -> Result<Value> {
         }
         Err(e) => errors.push(format!("Claude plugins: {e}")),
     }
-    let cwds: Vec<_> = cwd.iter().collect();
-    match rpc("plugin/installed", json!({"cwds":cwds})).await {
+    match codex_plugins {
         Ok(v) => {
             for m in array(&v["marketplaces"]) {
                 for p in array(&m["plugins"]) {
@@ -147,7 +158,7 @@ async fn list(cwd: Option<String>) -> Result<Value> {
         }
         Err(e) => errors.push(format!("Codex plugins: {e}")),
     }
-    match rpc("skills/list", json!({"cwds":cwds,"forceReload":true})).await {
+    match codex_skills {
         Ok(v) => {
             for entry in array(&v["data"]) {
                 for s in array(&entry["skills"]) {

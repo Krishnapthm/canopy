@@ -277,3 +277,5 @@ in Claude and Codex. This requires an explicitly authorized live prompt. Library
 link operations are filesystem-tested only. Non-library Claude skills are
 read-only until explicitly adopted. Adoption moves the whole vendor skill folder
 into the library and replaces it with a symlink; cross-filesystem moves fail safely.
+
+UNVERIFIED (M6): --resume is documented by CLI help; interactive resume after a daemon crash has not been live tested. Canopy passes only the saved session id and waits for a new user message.

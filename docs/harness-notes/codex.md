@@ -258,3 +258,5 @@ therefore serializes its named item id as `ext_id` to avoid duplicate JSON keys.
 `ExtScope` is `{scope:"global"}` or `{scope:"project",cwd:"/absolute/project"}`.
 `ext_list` returns `{items: Extension[], errors: string[]}`. No extension state
 is stored in SQLite or retained between view reads.
+
+UNVERIFIED (M6): real extension probe timings were not measured because the task excludes the real harness configs. Extension operations log elapsed time for Claude plugins, Codex plugins and Codex skills separately; probes run concurrently. Resume uses the documented thread/resume request above.

@@ -14,6 +14,7 @@ export const commands = [
   {id:"child", title:"Spawn child", key:"s", run:() => {set("child",true);set("newAgent",true);}},
   {id:"compose", title:"Write message", key:"i", run:() => document.querySelector<HTMLTextAreaElement>("#composer")?.focus()},
   {id:"back", title:"Back", key:"Escape", run:() => {set("palette",false);set("newAgent",false);set("view","tree");}},
+  {id:"resume", title:"Resume interrupted agent", key:"r", run:() => void attempt({op:"resume",session:state.selected})},
   {id:"interrupt", title:"Interrupt agent", key:"x", run:() => void attempt({op:"interrupt",session:state.selected})},
   {id:"allow", title:"Allow permission", key:"a", run:() => permission("allow")},
   {id:"deny", title:"Deny permission", key:"d", run:() => permission("deny")},

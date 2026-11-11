@@ -71,3 +71,13 @@ export function permissionSummary(item: Item) {
     summary: summary ? summary.replace(/\s+/g," ").slice(0,160) : typeof tool === "object" && tool !== null && !Array.isArray(tool) && typeof tool.kind === "string" ? tool.kind.replaceAll("_", " ") : "Review this action before allowing it.",
   };
 }
+
+export function toolChildId(body: unknown): string | undefined {
+  if (!body || typeof body !== "object" || !("output" in body || "text" in body)) return;
+  try {
+    const raw = "output" in body ? body.output : "text" in body ? body.text : undefined;
+    const content = Array.isArray(raw) ? raw[0]?.content?.text : raw;
+    const output = typeof content === "string" ? JSON.parse(content) : content;
+    if (output && typeof output.id === "string") return output.id;
+  } catch { /* Non-JSON tool output has no child link. */ }
+}

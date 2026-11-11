@@ -20,6 +20,7 @@ function Tokens(props: { tokens: Token[] }): ReactNode {
       case "link": return <a href={safe(t.href ?? "")} target="_blank" rel="noreferrer">{children()}</a>;
       case "br": return <br/>;
       case "space": return null;
+      case "text": return <>{children()}</>;
       default: return <span>{t.text ?? t.raw}</span>;
     }
   }).map((child, index) => <Fragment key={index}>{child}</Fragment>);

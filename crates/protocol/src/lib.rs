@@ -196,6 +196,7 @@ wire! {
         Interrupt { session: SessionId },
         Permission { session: SessionId, request: String, decision: Decision },
         Stop { session: SessionId },
+        Resume { session: SessionId },
         History { session: SessionId, before_seq: u64, limit: u32 },
     }
 

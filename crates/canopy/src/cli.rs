@@ -55,6 +55,9 @@ pub async fn run(cmd: String, mut p: pico_args::Arguments) -> Result<()> {
             let r = c.call(Op::Send { session: id.clone(), text: text.join(" "), interrupt }).await?;
             println!("{}", r["delivery"].as_str().unwrap_or_default());
         }
+        "resume" => {
+            c.call(Op::Resume { session: one(p)? }).await?;
+        }
         "stop" => {
             c.call(Op::Stop { session: one(p)? }).await?;
         }
@@ -106,7 +109,7 @@ async fn tail(c: &mut Client, id: &str, follow: bool) -> Result<()> {
         return finish(n);
     }
     loop {
-        match c.next_event().await? {
+        match c.next_event().await.context("daemon disconnected; restart it and run canopy tail <id> -f again")? {
             Event::Item { item } if item.session == sid => print_item(&mut out, &item, &mut streaming)?,
             Event::Delta { session, text, .. } if session == sid => {
                 write!(out, "{text}")?;

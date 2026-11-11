@@ -36,7 +36,11 @@ pub async fn run() -> Result<()> {
         match msg {
             Incoming::Request { id, method, params } => match method.as_str() {
                 "initialize" => {
-                    peer.respond(id, json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": false}, "authMethods": []}))
+                    peer.respond(id, json!({"protocolVersion": 1, "agentCapabilities": {"loadSession": true}, "authMethods": []}))
+                }
+                "session/load" => {
+                    servers = params.get("mcpServers").and_then(Value::as_array).cloned().unwrap_or_default();
+                    peer.respond(id, json!({}));
                 }
                 "session/new" => {
                     servers = params.get("mcpServers").and_then(Value::as_array).cloned().unwrap_or_default();
@@ -92,6 +96,18 @@ async fn script(
                     update(json!({"sessionUpdate": kind, "content": {"type": "text", "text": w}}));
                 }
                 update(json!({"sessionUpdate": kind, "content": {"type": "text", "text": "\n"}}));
+            }
+            "load" => {
+                let count: u32 = arg.parse().context("load takes a pulse count")?;
+                let start = tokio::time::Instant::now();
+                for pulse in 0..count {
+                    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
+                    update(json!({"sessionUpdate":"agent_message_chunk", "content":{"type":"text","text":format!("{stamp}\n")}}));
+                    tokio::select! {
+                        _ = tokio::time::sleep_until(start + Duration::from_millis(u64::from(pulse + 1) * 10)) => {},
+                        _ = cancel.changed() => return Ok("cancelled"),
+                    }
+                }
             }
             "sleep" => {
                 let ms: u64 = arg.parse().context("sleep takes milliseconds")?;

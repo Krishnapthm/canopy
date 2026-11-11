@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useStore, state as current, items, text, permissionSummary } from "../store";
+import { toolChildId, set, useStore, state as current, items, text, permissionSummary } from "../store";
 import { attempt, subscribe } from "../conn";
 import Markdown from "../md";
 import Composer from "./Composer";
@@ -45,10 +45,10 @@ export default function Session() {
         if(result && current.selected === session) items(session,result.items,true);
       }}><History data-icon="inline-start"/>Earlier messages</Button>}
       <Button variant="ghost" onClick={()=>void subscribe(state.selected)}><RefreshCw data-icon="inline-start"/>Latest messages</Button>
-      {transcript.map(item=><MessageScrollerItem key={item.id} messageId={item.id} scrollAnchor={item.kind==="user_message"}>
+      {transcript.map(item=><MessageScrollerItem key={item.id} className="block py-2" messageId={item.id} scrollAnchor={item.kind==="user_message"}>
         {item.kind==="notice" ? <Marker>{text(item)}</Marker> :
           item.kind==="permission" ? <Collapsible><CollapsibleTrigger render={<Button variant="ghost"/>}><ShieldCheck data-icon="inline-start"/>{permissionSummary(item).title}<ChevronDown data-icon="inline-end"/></CollapsibleTrigger><p>{permissionSummary(item).summary}</p><CollapsibleContent><pre className="overflow-auto whitespace-pre-wrap">{JSON.stringify(item.body,null,2)}</pre></CollapsibleContent></Collapsible> :
-          item.kind==="tool_call" ? <Collapsible><CollapsibleTrigger render={<Button variant="ghost" className="max-w-full"/>}><Wrench data-icon="inline-start"/><span className="truncate">{(typeof item.body === "object" && item.body !== null && !Array.isArray(item.body) ? String(item.body.title ?? "Tool") + " " + JSON.stringify(item.body.input ?? item.body).slice(0,100) : text(item).slice(0,120))}</span><ChevronDown data-icon="inline-end"/></CollapsibleTrigger><CollapsibleContent><pre className="overflow-auto whitespace-pre-wrap">{JSON.stringify(item.body,null,2)}</pre></CollapsibleContent></Collapsible> :
+          (item.kind==="tool_call" || (item.state!=="streaming" && toolChildId(item.body))) ? <Collapsible><CollapsibleTrigger render={<Button variant="ghost" className="max-w-full"/>}><Wrench data-icon="inline-start"/><span className="truncate">{(typeof item.body === "object" && item.body !== null && !Array.isArray(item.body) ? String(item.body.title ?? "Tool") + (item.state === "streaming" ? " (running)" : " (" + item.state + ")") : text(item).slice(0,120))}</span><ChevronDown data-icon="inline-end"/></CollapsibleTrigger>{toolChildId(item.body) && <Button variant="link" onClick={()=>set("selected",toolChildId(item.body)!)}><RefreshCw data-icon="inline-start"/>Child {toolChildId(item.body)!.slice(-8)}</Button>}<CollapsibleContent><pre className="overflow-auto whitespace-pre-wrap">{JSON.stringify(item.body,null,2)}</pre></CollapsibleContent></Collapsible> :
           <Message align={item.kind==="user_message"?"end":"start"}><MessageContent><Bubble variant={item.kind==="user_message"?"secondary":"ghost"}><BubbleContent>{item.state==="streaming" ? <div className="whitespace-pre-wrap">{text(item)}</div> : <Markdown text={text(item)}/>}</BubbleContent></Bubble></MessageContent></Message>}
       </MessageScrollerItem>)}
     </MessageScrollerContent></MessageScrollerViewport></MessageScroller></MessageScrollerProvider>

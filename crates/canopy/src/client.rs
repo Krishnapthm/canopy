@@ -19,6 +19,7 @@ pub struct Client {
 
 impl Client {
     pub async fn connect(home: &Path) -> Result<Client> {
+        crate::paths::validate_socket(home)?;
         let sock = home.join("sock");
         let stream = match UnixStream::connect(&sock).await {
             Ok(s) => s,
@@ -35,6 +36,14 @@ impl Client {
                 }
             }
         };
+        let (r, w) = stream.into_split();
+        let mut c = Client { lines: BufReader::new(r).lines(), w, next: 0, events: VecDeque::new() };
+        c.call(Op::Hello { version: protocol::VERSION }).await?;
+        Ok(c)
+    }
+
+    pub async fn attach(home: &Path) -> Result<Client> {
+        let stream = UnixStream::connect(home.join("sock")).await?;
         let (r, w) = stream.into_split();
         let mut c = Client { lines: BufReader::new(r).lines(), w, next: 0, events: VecDeque::new() };
         c.call(Op::Hello { version: protocol::VERSION }).await?;

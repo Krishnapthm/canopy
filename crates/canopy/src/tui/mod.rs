@@ -262,6 +262,11 @@ impl App {
                     self.select(client, node.id.clone()).await?;
                 }
             }
+            CommandId::Resume => {
+                if let Some(session) = &self.selected {
+                    client.call(Op::Resume { session: session.clone() }).await?;
+                }
+            }
             CommandId::Interrupt => {
                 if let Some(session) = &self.selected {
                     client.call(Op::Interrupt { session: session.clone() }).await?;
@@ -435,18 +440,37 @@ pub async fn run() -> Result<()> {
             }
         }
     });
+    let mut connected = true;
     let mut pending = true;
     let mut last = tokio::time::Instant::now();
     loop {
         tokio::select! {
-            e = client.next_event() => { app.event(e?); pending = true; }
+            e = client.next_event(), if connected => {
+                match e { Ok(e) => app.event(e), Err(_) => {
+                    connected = false;
+                    app.message = "Daemon disconnected. Waiting to reconnect...".into();
+                }}
+                pending = true;
+            }
+            _ = tokio::time::sleep(Duration::from_secs(1)), if !connected => {
+                if let Ok(mut c) = Client::attach(&crate::paths::home()?).await {
+                    let sync = async {
+                        let tree = c.call(Op::SubTree).await?;
+                        app.nodes = serde_json::from_value(tree["nodes"].clone())?;
+                        if let Some(id) = app.selected.take() { app.select(&mut c, id).await?; }
+                        anyhow::Ok(())
+                    }.await;
+                    if sync.is_ok() { client = c; connected = true; app.message.clear(); }
+                    pending = true;
+                }
+            }
             Some(rows) = detect_rx.recv() => {
                 app.harnesses = match rows { Ok(rows) => harness_list(&rows), Err(e) => format!("Could not check CLIs: {e}") };
                 pending = true;
             }
             e = rx.recv() => {
                 match e.context("terminal input closed")?? {
-                    TerminalEvent::Key(k) => match app.key(k, &mut client).await { Ok(true) => break, Ok(false) => {}, Err(e) => app.message = e.to_string() },
+                    TerminalEvent::Key(k) if connected || matches!(k.code, KeyCode::Char('q')) => match app.key(k, &mut client).await { Ok(true) => break, Ok(false) => {}, Err(e) => app.message = e.to_string() },
                     TerminalEvent::Resize(_, _) => {},
                     _ => continue,
                 }
