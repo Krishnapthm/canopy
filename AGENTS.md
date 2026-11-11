@@ -58,6 +58,8 @@ daemon, an adapter, or the protocol. Full `make build` only when the task needs 
   fact and the CLI version into `docs/harness-notes/`, and record a fixture.
 - Agent output is untrusted. The web app never uses `innerHTML`.
 - A sub-agent inherits its parent's permission policy and cannot escalate it.
+- Plugin and skill changes go through the vendor's own command or app-server method, on an
+  explicit user action, and nothing is ever auto-accepted (ADR 0020).
 
 ## Dependencies
 
@@ -74,10 +76,15 @@ The approved list is in ADR 0001 (Rust) and ADR 0012 (web).
   library; one stylesheet with custom properties.
 - Every user action is a command in a registry with the same key in the TUI and the web
   (PLAN.md section 6.1). The registries land with M4 and M5.
+- UI: icons are required, never an emoji, no eyebrow labels; global scope is an earth globe
+  (PLAN.md section 6.1).
 - UIs show the last 8 characters of a session id; the daemon resolves a unique suffix (ADR 0018).
 - Tests are focused: one behaviour each, through the real daemon where possible. No snapshot
   dumps, no tests for deleted features.
 - Bug fixes start with an `e2e` reproduction.
+- `README.md` is for users who know Claude Code or Codex but not Rust: plain words, short
+  sentences, copy-paste commands that work from a fresh clone, no internals. Contributor
+  detail goes here, in `docs/`, or in a nested AGENTS.md. Re-run its steps when you change them.
 
 ## Where things live
 
@@ -120,3 +127,4 @@ check, or delete it.
 ## Lessons
 
 - Probe Codex live from the main session; sandboxed sub-agents get 401 (`docs/harness-notes/codex.md`). (2026-11)
+- `make build` does not put `canopy` on PATH; users install with `cargo install --path crates/canopy`. (2026-11)
