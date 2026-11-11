@@ -209,7 +209,9 @@ pub fn start(kind: &Kind, spec: SpawnSpec, tx: mpsc::Sender<Msg>, codex: &mut Op
 pub fn kill_group(pid: Option<u32>) {
     if let Some(pid) = pid {
         // shortcut: shells out to kill(1) instead of adding libc; fine at human stop rates.
-        let _ = std::process::Command::new("kill").args(["-TERM", &format!("-{pid}")]).status();
+        // The "--" is required: procps kill (Linux) reads "-5104" as options and signals
+        // group -5, or every process (-1) when the pid starts with 1.
+        let _ = std::process::Command::new("kill").args(["-s", "TERM", "--", &format!("-{pid}")]).status();
     }
 }
 
