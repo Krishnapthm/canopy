@@ -181,10 +181,17 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let point = args
-            .get("point")
-            .and_then(|v| serde_json::from_value::<canvas::Point>(v.clone()).ok())
-            .filter(|p| p.iter().all(|v| v.is_finite()));
+        // No point (the menu bar): the world point at the middle of the view.
+        let point = match args.get("point") {
+            None => {
+                let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size);
+                let [w, h] = size.map(|s| [f32::from(s.width), f32::from(s.height)]).unwrap_or([1200., 800.]);
+                Some(self.canvas_state.doc.camera.to_world([w / 2., h / 2.]))
+            }
+            Some(v) => serde_json::from_value::<canvas::Point>(v.clone())
+                .ok()
+                .filter(|p| p.iter().all(|v| v.is_finite())),
+        };
         let Some(point) = point else {
             return self.fail("invalid canvas point");
         };

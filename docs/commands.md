@@ -17,6 +17,99 @@ Actions use the current selection unless you give an explicit target.
 Some actions close terminals; read their descriptions before running them.
 Mods can add their own actions, which are not listed here.
 
+## `canvas.zoom_in`
+
+Zoom the canvas in one step.
+
+No arguments.
+
+## `canvas.zoom_out`
+
+Zoom the canvas out one step.
+
+No arguments.
+
+## `canvas.zoom_reset`
+
+Reset canvas zoom.
+
+No arguments.
+
+## `canvas.fit`
+
+Fit all spaces and cards.
+
+No arguments.
+
+## `panel.open`
+
+Open a terminal in the canvas side panel.
+
+| Argument | Required |
+|---|---|
+| `terminal` | yes |
+
+## `panel.close`
+
+Close the canvas panel, keeping its terminal running.
+
+No arguments.
+
+## `view.agents`
+
+Show agent cards.
+
+No arguments.
+
+## `view.all`
+
+Show all cards.
+
+No arguments.
+
+## `view.terminals`
+
+Show terminal cards.
+
+No arguments.
+
+## `canvas.space_style`
+
+Set a space color or toggle its frame.
+
+| Argument | Required |
+|---|---|
+| `id` | yes |
+| `color` | no |
+
+## `canvas.create`
+
+Create a canvas terminal or space at a world point (default: the middle of the view).
+
+| Argument | Required |
+|---|---|
+| `point` | no |
+| `kind` | no |
+| `space` | no |
+| `argv` | no |
+| `name` | no |
+
+## `panel.pop_out`
+
+Pop the panel terminal into its own window.
+
+| Argument | Required |
+|---|---|
+| `terminal` | no |
+
+## `panel.bring_back`
+
+Bring a popped terminal back.
+
+| Argument | Required |
+|---|---|
+| `terminal` | yes |
+
 ## `space.new`
 
 Make a space: its name (default: none, so it's called after where its first terminal is), the folder its terminals start in (default: the focused terminal's), its first tab's name (default: none, so it's called by its number), optionally an agent (argv) and its first message (task), and the machine it lives on (`hc machine ls`; default the focused space's machine for keys and clicks, this computer for scripts; empty string: this computer; its terminals start in that machine's home unless folder).

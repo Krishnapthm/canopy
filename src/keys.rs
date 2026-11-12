@@ -270,6 +270,9 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
         KeyBinding::new(ESCAPE_HATCH, ShellAction::new("app.reset"), None),
         KeyBinding::new("escape", ShellAction::new("overlay.close"), Some("Overlay")),
     ]);
+    // Menu items show the keys bound when the menus are set.
+    #[cfg(target_os = "macos")]
+    crate::macos::set_menus(cx);
 }
 
 #[cfg(test)]
