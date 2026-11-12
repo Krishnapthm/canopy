@@ -121,6 +121,12 @@ pub fn min_size(space: Rect, cards: &[Rect]) -> Point {
         (b[1] + b[3] - space[1] + 24.).max(48.),
     ]
 }
+/// Where a space made outside the canvas goes: right of every existing space.
+pub fn new_space_rect(spaces: &[Space]) -> Rect {
+    let rects: Vec<Rect> = spaces.iter().map(|s| s.rect).collect();
+    let x = union(&rects).map_or(0., |u| u[0] + u[2] + 96.);
+    [x, 0., 960., 640.]
+}
 pub fn child_position(parent: Rect, siblings: &[Rect], size: Point) -> Rect {
     [
         parent[0] + parent[2] + 80.,
@@ -401,6 +407,14 @@ mod tests {
         assert!(Document::load(&path).unwrap().1);
         assert!(path.with_extension("json.bad").exists());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn new_space_never_lands_on_an_existing_one() {
+        let space = |x| Space { space: "s".into(), rect: [x, 0., 960., 640.], color: "blue".into(), frame: true };
+        assert_eq!(new_space_rect(&[])[0], 0.);
+        // After deleting the first of two, a count-based x would reuse 1056.
+        let r = new_space_rect(&[space(1056.)]);
+        assert!(!intersects(r, space(1056.).rect));
     }
     #[test]
     fn space_drag_moves_only_its_cards() {

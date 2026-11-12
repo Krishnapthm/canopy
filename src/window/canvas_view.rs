@@ -400,7 +400,7 @@ impl AppWindow {
             self.model
                 .spaces
                 .iter()
-                .find(|s| s.name == "Canvas" && s.folder == home() && s.machine.is_none())
+                .find(|s| root_space(s))
                 .map(|s| s.id.clone())
         });
         let result = if let Some(space) = space {
@@ -590,7 +590,7 @@ impl AppWindow {
                     self.model
                         .spaces
                         .iter()
-                        .find(|s| s.name == "Canvas" && s.folder == home() && s.machine.is_none())
+                        .find(|s| root_space(s))
                         .map(|s| s.id.clone())
                 })
                 .unwrap_or_else(|| {
@@ -677,13 +677,13 @@ impl AppWindow {
             .retain(|s| self.model.space(&s.space).is_some());
         changed |= before != state.doc.spaces.len();
         for space in &self.model.spaces {
-            if !(space.name == "Canvas" && space.folder == home() && space.machine.is_none())
+            if !root_space(space)
                 && !state.doc.spaces.iter().any(|s| s.space == space.id)
             {
-                let x = state.doc.spaces.len() as f32 * 1056.;
+                let rect = canvas::new_space_rect(&state.doc.spaces);
                 state.doc.spaces.push(canvas::Space {
                     space: space.id.clone(),
-                    rect: [x, 0., 960., 640.],
+                    rect,
                     color: "blue".into(),
                     frame: true,
                 });
@@ -1164,12 +1164,7 @@ impl AppWindow {
                 }),
             );
         for space in &state.doc.spaces {
-            if self.model.spaces.iter().any(|s| {
-                s.id == space.space
-                    && s.name == "Canvas"
-                    && s.folder == home()
-                    && s.machine.is_none()
-            }) {
+            if self.model.spaces.iter().any(|s| s.id == space.space && root_space(s)) {
                 continue;
             }
             let id = space.space.clone();
@@ -1728,6 +1723,11 @@ fn canvas_agent(rec: &Value) -> bool {
         || rec["status"]
             .as_str()
             .is_some_and(|s| matches!(s, "idle" | "working" | "blocked" | "done"))
+}
+
+/// The home "Canvas" space holds root terminals; it has no frame on the canvas.
+fn root_space(s: &model::Space) -> bool {
+    s.name == "Canvas" && s.folder == home() && s.machine.is_none()
 }
 
 fn preview_source(path: &str) -> String {
