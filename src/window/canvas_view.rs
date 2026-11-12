@@ -1979,7 +1979,8 @@ impl AppWindow {
                 })
                 .and_then(|p| state.previews.get(p))
             {
-                body = body.child(div().flex_1().min_w_0().h_full().px(px(24.)).py(px(20.)).child(gpui_base::TextView::new(view).scrollable(true)
+                // Padding sits on the TextView so its scrollbar overlay reaches the panel edge.
+                body = body.child(div().flex_1().min_w_0().h_full().child(gpui_base::TextView::new(view).scrollable(true).px(px(24.)).py(px(20.))
                     .image_source(|_| {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
                         gpui::ImageSource::Image(BLANK.clone())
@@ -2003,7 +2004,7 @@ impl AppWindow {
             if !state.doc.panel.tree_hidden {
                 body = body.child(
                     div()
-                        .w(px(220.))
+                        .w(px(275.))
                         .h_full()
                         .flex_none()
                         .border_l_1()

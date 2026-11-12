@@ -12,7 +12,15 @@ function location() {
 }
 const key = () => JSON.stringify(location());
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
-const PER_FOLDER = 500, TOTAL = 5000;
+const PER_FOLDER = 500, TOTAL = 5000, HITS = 200;
+const CODE = new Set(["c", "cc", "cpp", "cs", "css", "go", "h", "hpp", "html", "java", "js", "json", "jsonc", "jsx", "kt", "lua", "mjs", "cjs", "mts", "cts", "php", "py", "rb", "rs", "scss", "sh", "sql", "svelte", "swift", "toml", "ts", "tsx", "vue", "xml", "yaml", "yml", "zig", "zsh"]);
+
+// Lucide icon for a tree row: folders, markdown notes, code, else a plain file.
+function icon(entry) {
+  if (entry.dir) return "folder";
+  const ext = entry.name.includes(".") ? entry.name.split(".").pop().toLowerCase() : "";
+  return ext === "md" || ext === "mdx" ? "sticky-note" : CODE.has(ext) ? "code" : "file";
+}
 
 function matchesFile(entry, filter) {
   return entry.dir || !filter || entry.name.toLowerCase().includes(filter.toLowerCase());
@@ -46,7 +54,7 @@ async function directory(path, on) {
 export default class Files extends View {
   init(_props, cx) {
     this.filter = "";
-    this.input = InputState.new({ placeholder: "Filter files" });
+    this.input = InputState.new({ placeholder: "Search files" });
     this.input.on("change", (_e, cx) => { this.filter = this.input.value(); cx.notify(); });
     if (props()?.canvas === "tree") cx.spawn(async cx => {
       while (true) {
@@ -89,7 +97,7 @@ export default class Files extends View {
       if (this.context) this.saved.set(this.context.key, { folders: this.folders, file: this.file });
       const saved = this.saved.get(next);
       this.context = { key: next, cwd, on }; this.root = cwd; this.on = on; this.entries = new Map(); this.folders = new Set(saved?.folders);
-      this.pending = new Set(); this.marks = {}; this.show(null); this.watched = null; this.error = null; this.limited = false;
+      this.pending = new Set(); this.marks = {}; this.all = null; this.show(null); this.watched = null; this.error = null; this.limited = false;
       this.loading = false;
       if (props()?.file || saved?.file) this.show(props()?.file || saved.file, cx);
     }
@@ -113,7 +121,10 @@ export default class Files extends View {
             marks[`${top.stdout.trim()}/${entry.slice(3)}`] = xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
           }
         }
+        // Search covers every file, not just loaded folders; git lists them fast and honors .gitignore.
+        const listed = top?.code === 0 ? await exec("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd, on }).catch(() => null) : null;
         if (!this.current(context)) return;
+        this.all = listed?.code === 0 ? listed.stdout.split("\0").filter(Boolean) : null;
         this.marks = marks; this.error = null; this.watch(cwd, cx);
 
       } catch (e) { if (this.current(context)) this.error = String(e); }
@@ -164,19 +175,39 @@ export default class Files extends View {
 
   rows(prefix, depth, out, t) {
     if (out.length >= TOTAL || depth > 40) return out;
+    if (this.filter && this.all && !depth) {
+      // shortcut: substring match on the relative path, outside git the tree filter below applies; add fuzzy ranking if lists get noisy.
+      const q = this.filter.toLowerCase();
+      for (const path of this.all) {
+        if (!path.toLowerCase().includes(q)) continue;
+        // Rows are built every render, so a short query stays fast.
+        if (out.length >= HITS) { out.push(div().p(8).text_size(11).text_color(t.dim).child(`First ${HITS} matches; type more to narrow`)); break; }
+        const cut = path.lastIndexOf("/");
+        out.push(this.row(path, { name: path.slice(cut + 1), dir: false }, 0, t, cut > 0 ? path.slice(0, cut) : ""));
+      }
+      return out;
+    }
     for (const entry of this.entries.get(prefix) ?? []) {
       if (out.length >= TOTAL) break;
       if (!matchesFile(entry, this.filter)) continue;
-      const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
-      out.push(h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover)).when((this.file === path || this.selected === `${this.root}/${path}`), el => el.bg(t.hover))
-        .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : props()?.canvas ? (this.selected = `${this.root}/${path}`, run("preview.open", { path: `${this.root}/${path}` }), cx.notify()) : this.show(path, cx))
-        .child(entry.dir ? svg(`mods/files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
-        .child(svg(`mods/files/${entry.dir ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
-        .child(div().flex_1().min_w(0).truncate().child(entry.name))
-        .when(Boolean(mark), el => el.child(div().text_size(11).text_color(mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : t.blocked).child(mark))));
-      if (entry.dir && open) this.rows(path, depth + 1, out, t);
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+      out.push(this.row(path, entry, depth, t, ""));
+      if (entry.dir && this.folders.has(path)) this.rows(path, depth + 1, out, t);
     }
     return out;
+  }
+
+  // One tree or search row; `hint` is the dimmed folder shown beside a search hit.
+  row(path, entry, depth, t, hint) {
+    const open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
+    const tone = mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : mark ? t.blocked : null;
+    return h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover)).when((this.file === path || this.selected === `${this.root}/${path}`), el => el.bg(t.hover))
+      .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : props()?.canvas ? (this.selected = `${this.root}/${path}`, run("preview.open", { path: `${this.root}/${path}` }), cx.notify()) : this.show(path, cx))
+      .child(entry.dir ? svg(`mods/files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
+      .child(svg(`mods/files/${icon(entry)}.svg`).size(14).flex_none().text_color(t.muted))
+      .child(div().min_w(0).truncate().text_color(tone ?? t.foreground).child(entry.name))
+      .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(hint))
+      .when(Boolean(mark), el => el.child(div().text_size(11).text_color(tone).child(mark)));
   }
 
   render(cx) {
@@ -184,9 +215,12 @@ export default class Files extends View {
     const t = theme();
     if (props()?.canvas === "viewer") return v_flex().size_full().min_h(0).text_color(t.foreground)
       .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(16).text_color(t.dim).child(this.fileError || "Loading file…"));
+    const list = props()?.canvas === "tree" ? this.rows("", 0, [], t) : null;
     if (props()?.canvas === "tree") return v_flex().size_full().min_h(0).text_size(13).text_color(t.muted)
-      .child(div().p(8).flex_none().child(Input.new(this.input).w_full().h(30).px(8).rounded(6).bg(t.hover).text_size(12)))
-      .child(v_flex().id("canvas-files-tree").flex_1().min_h(0).overflow_y_scrollbar().px(6).pb(6).children(this.rows("", 0, [], t))
+      .child(div().p(8).flex_none().child(Input.new(this.input).w_full().h(30).px(10).gap(8).rounded(8).border_1().border_color(t.border).text_size(12)
+        .child(svg("mods/files/search.svg").size(14).flex_none().text_color(t.dim))))
+      .child(v_flex().id("canvas-files-tree").flex_1().min_h(0).overflow_y_scrollbar().px(6).pb(6).children(list)
+        .when(Boolean(this.filter) && !list.length && Boolean(this.entries.get("")?.length), el => el.child(div().p(8).text_size(12).text_color(t.dim).child("No matching files")))
         .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "Click a space to see its files"))))
         .when(this.limited, el => el.child(div().p(8).text_size(11).child("File list limited"))));
     return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
