@@ -180,3 +180,13 @@ and root spaces with a name and native folder picker. `canvas.create` takes an o
 Cmd+Shift+1/2/3 on macOS and Ctrl+Shift+1/2/3 elsewhere. Hidden cards lose panel focus.
 `panel.pop_out` takes an optional `terminal` (defaults to the panel); `panel.bring_back`
 takes `terminal`. Pop-outs last only for the current run and keep the terminal alive.
+
+Canvas file previews: `preview.open {path?, point?}` opens a local text file at a world
+point (default: view center). Omit path for the native file picker. Empty-canvas
+Open file..., File > Open File..., Cmd-click terminal file paths, and Finder file
+drops share this command. URLs and folders keep their system handlers. Preview
+headers drag, the bottom-right grip resizes, and the close button removes the card.
+Markdown is rendered without external images or active links. Other text has line
+numbers in monospace. Binary, unreadable, and files over 2 MB show a toast. Open
+previews persist in canvas.json, reload from file watcher events, and show File
+deleted when missing. This command reads files only, never executes their content.

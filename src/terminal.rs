@@ -68,6 +68,7 @@ enum LinkTarget {
 
 pub enum TerminalEvent {
     Peek(String),
+    Preview(std::path::PathBuf),
     TitleChanged,
     /// The program ended.
     Ended,
@@ -2250,6 +2251,7 @@ impl Render for TerminalView {
                     && let Some((target, _)) = this.link_at(ev.position)
                 {
                     match target {
+                        LinkTarget::External(links::Target::File(path)) if path.is_file() => cx.emit(TerminalEvent::Preview(path)),
                         LinkTarget::External(target) => links::open(&target),
                         LinkTarget::Terminal(address) => cx.emit(TerminalEvent::Peek(address)),
                     }

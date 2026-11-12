@@ -44,6 +44,7 @@ pub fn set_menus(cx: &mut App) {
         ]),
         Menu::new("File").items([
             run("New Terminal", "canvas.create"),
+            run("Open File...", "preview.open"),
             MenuItem::action("New Space…", new_space),
             MenuItem::separator(),
             run("Pop Out Panel", "panel.pop_out"),

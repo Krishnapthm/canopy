@@ -201,6 +201,40 @@ pub struct Panel {
     pub width: Option<f32>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Preview {
+    pub path: String,
+    pub rect: Rect,
+}
+
+pub const PREVIEW_LIMIT: u64 = 2 * 1024 * 1024;
+pub fn preview_text(bytes: Vec<u8>) -> io::Result<String> {
+    if bytes.len() as u64 > PREVIEW_LIMIT
+        || bytes
+            .iter()
+            .any(|b| *b == 0 || (*b < 32 && !matches!(*b, 9 | 10 | 13)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "not previewable text",
+        ));
+    }
+    String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+pub fn read_preview(path: &Path) -> io::Result<String> {
+    use std::io::Read;
+    if !std::fs::metadata(path)?.is_file() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a file"));
+    }
+    let file = std::fs::File::open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a file"));
+    }
+    let mut bytes = Vec::new();
+    file.take(PREVIEW_LIMIT + 1).read_to_end(&mut bytes)?;
+    preview_text(bytes)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Document {
     pub version: u32,
     pub camera: Camera,
@@ -208,6 +242,8 @@ pub struct Document {
     pub spaces: Vec<Space>,
     pub cards: Vec<Card>,
     pub panel: Panel,
+    #[serde(default)]
+    pub previews: Vec<Preview>,
 }
 impl Default for Document {
     fn default() -> Self {
@@ -218,6 +254,7 @@ impl Default for Document {
             spaces: vec![],
             cards: vec![],
             panel: Panel::default(),
+            previews: vec![],
         }
     }
 }
@@ -260,6 +297,7 @@ impl Document {
                 && doc.camera.y.is_finite()
                 && doc.camera.zoom.is_finite()
                 && doc.cards.iter().all(|c| valid_rect(c.rect))
+                && doc.previews.iter().all(|p| valid_rect(p.rect))
                 && doc.spaces.iter().all(|s| valid_rect(s.rect))
                 && doc.panel.width.is_none_or(|w| w.is_finite() && w > 0.)
             {
@@ -336,6 +374,34 @@ pub fn view_allows(view: &View, agent: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preview_rejects_binary_large_and_invalid_utf8() {
+        assert!(preview_text(b"hello\n".to_vec()).is_ok());
+        for bytes in [vec![0], vec![255], vec![b'a'; PREVIEW_LIMIT as usize + 1]] {
+            assert!(preview_text(bytes).is_err());
+        }
+    }
+    #[test]
+    fn document_loads_old_previews_and_validates_rects() {
+        let dir = std::env::temp_dir().join(format!("canopy-previews-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("canvas.json");
+        let mut value = serde_json::to_value(Document::default()).unwrap();
+        value.as_object_mut().unwrap().remove("previews");
+        std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(Document::load(&path).unwrap().0.previews.is_empty());
+        value["previews"] = serde_json::json!([{"path":"/missing.md", "rect":[1,2,400,300]}]);
+        std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(
+            Document::load(&path).unwrap().0.previews[0].path,
+            "/missing.md"
+        );
+        value["previews"][0]["rect"][2] = serde_json::json!(-1);
+        std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(Document::load(&path).unwrap().1);
+        assert!(path.with_extension("json.bad").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn space_drag_moves_only_its_cards() {
         let mut space = Space {

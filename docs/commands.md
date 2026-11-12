@@ -82,6 +82,15 @@ Set a space color or toggle its frame.
 | `id` | yes |
 | `color` | no |
 
+## `preview.open`
+
+Open a local file preview, or choose a file; point defaults to the view center.
+
+| Argument | Required |
+|---|---|
+| `path` | no |
+| `point` | no |
+
 ## `canvas.create`
 
 Create a canvas terminal or space at a world point (default: the middle of the view).

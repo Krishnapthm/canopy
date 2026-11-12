@@ -1964,6 +1964,10 @@ impl AppWindow {
         self.tell_term(view, address, cx);
         let (block, addr) = (block.to_owned(), address.to_owned());
         cx.subscribe_in(view, window, move |this, _, ev: &TerminalEvent, window, cx| match ev {
+            TerminalEvent::Preview(path) => {
+                if this.has_canvas() { this.open_preview(json!({"path":path}), window, cx); }
+                else { crate::links::open(&crate::links::Target::File(path.clone())); }
+            }
             TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
             TerminalEvent::TitleChanged => this.publish(cx),
             TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
@@ -2864,6 +2868,7 @@ impl AppWindow {
                     self.pop_canvas(addr, name == "panel.bring_back", window, cx);
                 }
             }
+            "preview.open" => self.open_preview(a.clone(), window, cx),
             "canvas.create" => {
                 self.create_canvas(a.clone(), window, cx);
             }

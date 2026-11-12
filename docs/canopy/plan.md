@@ -679,3 +679,5 @@ Write here when the code disproves something above (date, what, new decision).
 - 2026-11-12: Krishna asked for a native macOS menu bar (Canopy, File, Edit, View, Window, Help). Items run existing app commands, so they show bound keys; `canvas.create` without `point` uses the middle of the view for File > New Terminal / New Space.
 - 2026-11-12: Krishna dropped hold-H panning after trying it; empty-canvas drag, Space+drag and middle drag remain. Panel and space resize handles now show resize cursors and highlight.
 - 2026-11-12: phase 2 accepted live by Krishna (7.9 items 1-9 and 11, plus mouse pan, resize handles and the menu bar). Item 10 (window mode) is deferred.
+
+- 2026-11-12: 8.2 stores previews in a serde-defaulted `previews` list alongside terminal cards. gpui-kit syntect is private to its editor module, so previews use plain numbered monospace. TextView images require an authoritative inert image override and links are disabled to keep untrusted previews offline.

@@ -30,6 +30,7 @@ function items(p, git) {
   switch (p.tab) {
     case "canvas-empty": return [
       ["New terminal", "canvas.create", at],
+      ["Open file...", "preview.open", { point: tg.point }],
       ["New agent >", "canvas-agents", tg],
       ...(!tg.space ? [["New space here", "canvas.create", { ...at, kind: "space" }]] : []),
     ];

@@ -5,6 +5,8 @@ use gpui::AnimationExt as _;
 
 pub(super) struct State {
     pub doc: Document,
+    previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
+    preview_drag: Option<(String, bool, Point<Pixels>)>,
     pub panel: Option<String>,
     pub popped: HashMap<String, WindowHandle<PopOut>>,
     save: canvas::SaveSchedule,
@@ -35,6 +37,8 @@ impl State {
         };
         Self {
             doc,
+            previews: HashMap::new(),
+            preview_drag: None,
             panel: None,
             popped: HashMap::new(),
             save: canvas::SaveSchedule::default(),
@@ -52,6 +56,7 @@ impl State {
     }
     /// Ends any pan, card, space or panel-resize drag.
     pub(super) fn end_drag(&mut self) {
+        self.preview_drag = None;
         self.drag = None;
         self.space_drag = None;
         self.resizing = false;
@@ -88,6 +93,132 @@ impl Render for PopOut {
     }
 }
 impl AppWindow {
+    pub(super) fn open_preview(
+        &mut self,
+        args: Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let point = match args.get("point") {
+            Some(p) => match serde_json::from_value::<canvas::Point>(p.clone()) {
+                Ok(p) if p.iter().all(|v| v.is_finite()) => p,
+                _ => return self.fail("invalid canvas point"),
+            },
+            None => {
+                let size = self
+                    .bounds
+                    .borrow()
+                    .get("canopy-canvas")
+                    .map(|b| b.size)
+                    .unwrap_or(window.viewport_size());
+                self.canvas_state
+                    .doc
+                    .camera
+                    .to_world([f32::from(size.width) / 2., f32::from(size.height) / 2.])
+            }
+        };
+        let Some(path) = args["path"].as_str() else {
+            let paths = cx.prompt_for_paths(PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: false,
+                prompt: Some("Open file".into()),
+            });
+            cx.spawn_in(window, async move |this, cx| {
+                if let Ok(Ok(Some(paths))) = paths.await {
+                    if let Some(path) = paths.first() {
+                        let _ = this.update_in(cx, |this, window, cx| {
+                            this.open_preview(json!({"path":path,"point":point}), window, cx)
+                        });
+                    }
+                }
+            })
+            .detach();
+            return;
+        };
+        let path = std::path::Path::new(path);
+        if canvas::read_preview(path).is_err() {
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            self.open_overlay(
+                mods::new_overlay_id(),
+                json!({"kind":"toast","notification":{"title":format!("Can't preview {name}")}}),
+                window,
+                cx,
+            );
+            return;
+        }
+        let Ok(path) = path.canonicalize() else {
+            return;
+        };
+        let path = path.to_string_lossy().into_owned();
+        if let Some(card) = self
+            .canvas_state
+            .doc
+            .previews
+            .iter_mut()
+            .find(|p| p.path == path)
+        {
+            card.rect[0] = point[0];
+            card.rect[1] = point[1];
+        } else {
+            self.canvas_state.doc.previews.push(canvas::Preview {
+                path,
+                rect: [point[0], point[1], 560., 420.],
+            });
+        }
+        self.load_previews(cx);
+        self.canvas_changed(cx);
+        cx.notify();
+    }
+    fn load_previews(&mut self, cx: &mut Context<Self>) {
+        for card in self.canvas_state.doc.previews.clone() {
+            if self.canvas_state.previews.contains_key(&card.path) {
+                continue;
+            }
+            let text = preview_source(&card.path);
+            let view = cx.new(|cx| gpui_base::TextViewState::markdown(&text, cx));
+            let path = card.path.clone();
+            let folder = std::path::Path::new(&path)
+                .parent()
+                .unwrap_or(std::path::Path::new("/"))
+                .to_string_lossy()
+                .into_owned();
+            let task = cx.spawn(async move |this, cx| {
+                loop {
+                    let watch = folder.clone();
+                    let result = cx
+                        .background_executor()
+                        .spawn(async move { crate::files::next_change(watch).await })
+                        .await;
+                    let Ok(changed) = result else { break };
+                    if !changed
+                        .iter()
+                        .any(|p| p == &path || std::path::Path::new(&path).starts_with(p))
+                    {
+                        continue;
+                    }
+                    let read = path.clone();
+                    let text = cx
+                        .background_executor()
+                        .spawn(async move { preview_source(&read) })
+                        .await;
+                    if this
+                        .update(cx, |this, cx| {
+                            if let Some((view, _)) = this.canvas_state.previews.get(&path) {
+                                view.update(cx, |view, cx| view.set_text(&text, cx));
+                            }
+                            cx.notify();
+                        })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+            self.canvas_state.previews.insert(card.path, (view, task));
+        }
+    }
+
     pub(super) fn close_pop_outs(&mut self, cx: &mut Context<Self>) {
         for (_, handle) in self.canvas_state.popped.drain() {
             let _ = handle.update(cx, |_, window, _| window.remove_window());
@@ -146,13 +277,19 @@ impl AppWindow {
                 terminal.read(cx).focus_handle().clone().focus(window, cx);
                 cx.on_release(|this: &mut PopOut, cx| this.terminal.read(cx).detach())
                     .detach();
-                PopOut { terminal, _sub: None }
+                PopOut {
+                    terminal,
+                    _sub: None,
+                }
             })
         });
         match result {
             Ok(handle) => {
                 let terminal = handle.read(cx).unwrap().terminal.clone();
-                let block = self.model.pane_of(&addr).unwrap_or_else(|| "canvas-panel".into());
+                let block = self
+                    .model
+                    .pane_of(&addr)
+                    .unwrap_or_else(|| "canvas-panel".into());
                 let sub = self.setup_term(&terminal, &block, &addr, window, cx);
                 let _ = handle.update(cx, |pop, _, _| pop._sub = Some(sub));
                 self.canvas_state.popped.insert(addr, handle);
@@ -173,7 +310,9 @@ impl AppWindow {
         let point = match args.get("point") {
             None => {
                 let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size);
-                let [w, h] = size.map(|s| [f32::from(s.width), f32::from(s.height)]).unwrap_or([1200., 800.]);
+                let [w, h] = size
+                    .map(|s| [f32::from(s.width), f32::from(s.height)])
+                    .unwrap_or([1200., 800.]);
                 Some(self.canvas_state.doc.camera.to_world([w / 2., h / 2.]))
             }
             Some(v) => serde_json::from_value::<canvas::Point>(v.clone())
@@ -429,6 +568,7 @@ impl AppWindow {
         if !self.has_canvas() || !self.listed_once {
             return;
         }
+        self.load_previews(cx);
         let missing: Vec<_> = self
             .live
             .keys()
@@ -653,6 +793,7 @@ impl AppWindow {
                         .iter()
                         .map(|c| self.pill_rect(c, cx)),
                 )
+                .chain(self.canvas_state.doc.previews.iter().map(|p| p.rect))
                 .collect::<Vec<_>>()
         } else {
             vec![]
@@ -694,6 +835,49 @@ impl AppWindow {
         self.canvas_changed(cx);
         self.sync(window, cx);
         cx.notify();
+    }
+    fn preview_card(
+        &self,
+        card: &canvas::Preview,
+        view: &Entity<gpui_base::TextViewState>,
+        camera: canvas::Camera,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let p = camera.to_screen([card.rect[0], card.rect[1]]);
+        let path = std::path::Path::new(&card.path);
+        let drag = card.path.clone();
+        let close = drag.clone();
+        let resize = drag.clone();
+        (div().id(SharedString::from(format!("preview-{}", card.path))).absolute().left(px(p[0])).top(px(p[1]))
+                .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
+                .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(8.)).overflow_hidden()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(div().flex().items_center().gap(px(8.)).px(px(12.)).h(px(36. * camera.zoom)).flex_none()
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                        this.canvas_state.preview_drag = Some((drag.clone(), false, e.position)); cx.stop_propagation();
+                    }))
+                    .child(svg().path("mods/files/file.svg").size(px(16.)))
+                    .child(div().text_ellipsis().child(path.file_name().unwrap_or_default().to_string_lossy().into_owned()))
+                    .child(div().flex_1().min_w_0().text_ellipsis().text_color(c("muted-foreground")).child(path.parent().unwrap_or(path).to_string_lossy().into_owned()))
+                    .child(panel_button("preview-close", "mods/pane/close.svg", c("muted-foreground"), c("hover"))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.canvas_state.doc.previews.retain(|p| p.path != close);
+                            this.canvas_state.previews.remove(&close);
+                            this.canvas_changed(cx); cx.notify();
+                        }))))
+                .child(div().flex_1().min_h_0().overflow_hidden().child(gpui_base::TextView::new(view).scrollable(true)
+                    .image_source(|_| {
+                        static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
+                        gpui::ImageSource::Image(BLANK.clone())
+                    })
+                    .on_link_click(|_, _, _, _| {})))
+                .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(8.))
+                    .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
+                    .hover(|d| d.border_color(c("foreground")))
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                        this.canvas_state.preview_drag = Some((resize.clone(), true, e.position)); cx.stop_propagation();
+                    })))).into_any_element()
     }
     pub(super) fn render_canvas(&self, cx: &mut Context<Self>) -> AnyElement {
         let state = &self.canvas_state;
@@ -743,6 +927,23 @@ impl AppWindow {
                 .absolute()
                 .size_full(),
             )
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                let origin = this
+                    .bounds
+                    .borrow()
+                    .get("canopy-canvas")
+                    .map(|b| b.origin)
+                    .unwrap_or_default();
+                let p = window.mouse_position() - origin;
+                let point = this
+                    .canvas_state
+                    .doc
+                    .camera
+                    .to_world([f32::from(p.x), f32::from(p.y)]);
+                for path in paths.paths() {
+                    this.open_preview(json!({"path":path,"point":point}), window, cx);
+                }
+            }))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| {
                 let d = e.delta.pixel_delta(px(20.));
                 if d.x == px(0.) && d.y == px(0.) {
@@ -845,6 +1046,36 @@ impl AppWindow {
                     && (this.canvas_state.drag.is_some() || this.canvas_state.space_drag.is_some())
                 {
                     this.canvas_state.end_drag();
+                    cx.notify();
+                    return;
+                }
+                if let Some((path, resize, previous)) = this.canvas_state.preview_drag.clone() {
+                    if e.pressed_button.is_none() {
+                        this.canvas_state.end_drag();
+                        return;
+                    }
+                    let z = this.canvas_state.doc.camera.zoom;
+                    let d = [
+                        f32::from(e.position.x - previous.x) / z,
+                        f32::from(e.position.y - previous.y) / z,
+                    ];
+                    if let Some(card) = this
+                        .canvas_state
+                        .doc
+                        .previews
+                        .iter_mut()
+                        .find(|p| p.path == path)
+                    {
+                        if resize {
+                            card.rect[2] = (card.rect[2] + d[0]).max(240.);
+                            card.rect[3] = (card.rect[3] + d[1]).max(120.);
+                        } else {
+                            card.rect[0] += d[0];
+                            card.rect[1] += d[1];
+                        }
+                    }
+                    this.canvas_state.preview_drag = Some((path, resize, e.position));
+                    this.canvas_changed(cx);
                     cx.notify();
                     return;
                 }
@@ -1023,6 +1254,13 @@ impl AppWindow {
                         }),
                 );
         }
+        for card in &state.doc.previews {
+            if canvas::visible(camera, card.rect, viewport) {
+                if let Some((view, _)) = state.previews.get(&card.path) {
+                    area = area.child(self.preview_card(card, view, camera, cx));
+                }
+            }
+        }
         let cards: HashMap<_, _> = state
             .doc
             .cards
@@ -1155,9 +1393,7 @@ impl AppWindow {
             } {
                 pill = pill.child(
                     svg()
-                        .path(SharedString::from(
-                            icon.to_string(),
-                        ))
+                        .path(SharedString::from(icon.to_string()))
                         .size(px(16. * z))
                         .text_color(c("foreground")),
                 );
@@ -1414,49 +1650,56 @@ impl AppWindow {
             } else {
                 "icons/shell.svg"
             };
-            panel =
-                panel.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .px(px(12.))
-                        .h(px(36.))
-                        .flex_none()
-                        .border_b_1()
-                        .border_color(c("border"))
-                        .child(
-                            svg()
-                                .path(SharedString::from(
-                                    icon.to_string(),
-                                ))
-                                .size(px(16.))
-                                .text_color(c("foreground")),
+            panel = panel.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .px(px(12.))
+                    .h(px(36.))
+                    .flex_none()
+                    .border_b_1()
+                    .border_color(c("border"))
+                    .child(
+                        svg()
+                            .path(SharedString::from(icon.to_string()))
+                            .size(px(16.))
+                            .text_color(c("foreground")),
+                    )
+                    .child(kind.to_owned())
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_ellipsis()
+                            .text_color(c("muted-foreground"))
+                            .child(name.to_owned()),
+                    )
+                    .child(
+                        panel_button(
+                            "canvas-panel-pop",
+                            "icons/external-link.svg",
+                            c("muted-foreground"),
+                            c("hover"),
                         )
-                        .child(kind.to_owned())
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .text_ellipsis()
-                                .text_color(c("muted-foreground"))
-                                .child(name.to_owned()),
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if let Some(addr) = this.canvas_state.panel.clone() {
+                                this.pop_canvas(addr, false, window, cx);
+                            }
+                        })),
+                    )
+                    .child(
+                        panel_button(
+                            "canvas-panel-close",
+                            "mods/pane/close.svg",
+                            c("muted-foreground"),
+                            c("hover"),
                         )
-                        .child(
-                            panel_button("canvas-panel-pop", "icons/external-link.svg", c("muted-foreground"), c("hover"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    if let Some(addr) = this.canvas_state.panel.clone() {
-                                        this.pop_canvas(addr, false, window, cx);
-                                    }
-                                })),
-                        )
-                        .child(
-                            panel_button("canvas-panel-close", "mods/pane/close.svg", c("muted-foreground"), c("hover"))
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.canvas_command("panel.close", window, cx)
-                                })),
-                        ),
-                );
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.canvas_command("panel.close", window, cx)
+                        })),
+                    ),
+            );
             if let Some(t) = self.terms.get("canvas-panel") {
                 panel = panel.child(div().flex_1().min_h_0().child(shown_terminal(&t.view, cx)));
             }
@@ -1485,4 +1728,39 @@ fn canvas_agent(rec: &Value) -> bool {
         || rec["status"]
             .as_str()
             .is_some_and(|s| matches!(s, "idle" | "working" | "blocked" | "done"))
+}
+
+fn preview_source(path: &str) -> String {
+    match canvas::read_preview(std::path::Path::new(path)) {
+        Ok(text)
+            if std::path::Path::new(path)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("md")) =>
+        {
+            text
+        }
+        Ok(text) => numbered_code(&text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => "File deleted".into(),
+        Err(_) => "Can't preview file".into(),
+    }
+}
+
+fn numbered_code(text: &str) -> String {
+    text.lines()
+        .enumerate()
+        .map(|(i, line)| format!("    {:>4}  {line}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[cfg(test)]
+mod preview_tests {
+    #[test]
+    fn numbered_code_keeps_markdown_literal() {
+        assert_eq!(
+            super::numbered_code("```\n![image](https://example.com)\n\nend"),
+            "       1  ```\n       2  ![image](https://example.com)\n       3  \n       4  end"
+        );
+        assert_eq!(super::numbered_code(""), "");
+    }
 }
