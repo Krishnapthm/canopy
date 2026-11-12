@@ -33,6 +33,8 @@ export default class Settings extends View {
     this.filter = "";
     this.fontInput = InputState.new({ placeholder: "Type to search fonts" });
     this.fontInput.on("change", (_e, cx) => { this.filter = this.fontInput.value(); cx.notify(); });
+    this.canvasColorInput = InputState.new({ placeholder: "#1E1E1E" });
+    this.canvasColorInput.on("change", (_e, cx) => { const color = this.canvasColorInput.value(); if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) this.change((q) => { q.canvas_color = color; }, cx); });
     this.renameInput = InputState.new();
     this.renameInput.on("focus", (_e, cx) => { this.renameFocused = true; cx.notify(); });
     this.renameInput.on("blur", (_e, cx) => { this.renameFocused = false; cx.notify(); });
@@ -493,6 +495,7 @@ export default class Settings extends View {
       .child(div().pt(10).pb(6).text_size(12.5).font_medium().text_color(t.muted).child("Light"))
       .child(this.themePicker(t, true))
       .child(div().h(18))
+      .child(this.row(t, "Canvas color", "Hex color or theme default.", h_flex().gap(8).child(Input.new(this.canvasColorInput).w(120).h(28)).child(this.button(t, "canvas-color-default", "Default", (_e, cx) => this.change((q) => { q.canvas_color = null; }, cx)))))
       .child(this.heading(t, "Size and fonts"))
       .child(
         this.row(

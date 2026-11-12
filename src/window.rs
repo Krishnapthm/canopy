@@ -7,6 +7,7 @@
 
 use crate::hc::Core;
 mod floats;
+mod canvas_view;
 mod movable;
 mod pane_drag;
 mod pane_size;
@@ -137,6 +138,7 @@ fn launch_failure(record: &Value, output: &str) -> Option<String> {
 /// sidebar, tab bar).
 const LAYOUTS: &[(&str, &str)] = &[
     ("main", include_str!("../defaults/layouts/main.json")),
+    ("classic", include_str!("../defaults/layouts/classic.json")),
     ("terminals", include_str!("../defaults/layouts/terminals.json")),
     ("win98", include_str!("../defaults/layouts/win98.json")),
 ];
@@ -346,6 +348,7 @@ struct Watched {
 }
 
 pub struct AppWindow {
+    canvas_state: canvas_view::State,
     core: Arc<Core>,
     runtime: Option<Rc<ShellRuntime>>,
     chrome: Node,
@@ -464,6 +467,7 @@ impl AppWindow {
         mods::note_fonts(cx);
         let seen = std::fs::read_to_string(file("seen.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
         let mut w = AppWindow {
+            canvas_state: canvas_view::State::load(),
             core,
             runtime,
             chrome: default_layout("main"),
@@ -570,6 +574,7 @@ impl AppWindow {
         w.load_layout(if gone.is_empty() { name.as_deref().unwrap_or("main") } else { "main" });
         w.apply_look(window, cx);
         w.show_layout_notes(window, cx);
+        if let Some(error)=w.canvas_state.error.take() {w.layout_notice("Canvas",&error,window,cx);}
         if let (Some(n), false) = (&name, gone.is_empty()) {
             let note = json!({ "title": format!("{n} needs mods that aren't here"), "body": format!("Showing Canopy instead. Missing: {}. Your {n} layout file is still there.", gone.join(", ")), "level": "info", "timeout": 12000 });
             w.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": note }), window, cx);
@@ -1097,6 +1102,9 @@ impl AppWindow {
     /// Visible slots: terminal blocks (id → address) and mod slots (key → instance).
     fn visible(&self) -> (Vec<(String, String)>, Vec<(String, Instance)>) {
         let mut terms = Vec::new();
+        if self.has_canvas() && let Some(addr) = &self.canvas_state.panel {
+            terms.push(("canvas-panel".into(), addr.clone()));
+        }
         let mut mods = Vec::new();
         let visit = |n: &Node, terms: &mut Vec<(String, String)>, mods: &mut Vec<(String, Instance)>| match n.content() {
             Some(Content::Terminal { terminal }) => terms.push((n.id.clone(), terminal.clone())),
@@ -1325,6 +1333,7 @@ impl AppWindow {
 
     /// Creates what's visible, drops what isn't, publishes state, saves, focuses.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_canvas(window,cx);
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
         self.swapped.retain(|p, a| model.address_of(p).is_some() && live.contains_key(a));
@@ -1433,7 +1442,9 @@ impl AppWindow {
         let tab_shown = self.shows_tab();
         let revealed = tab_shown && !self.tab_shown;
         self.tab_shown = tab_shown;
-        if terminal_block(&self.chrome, focused.as_deref()).is_some() {
+        if self.has_canvas() && self.canvas_state.panel.is_some() {
+            if no_dialog && let Some(t)=self.terms.get("canvas-panel") {t.focus.focus(window,cx);}
+        } else if terminal_block(&self.chrome, focused.as_deref()).is_some() {
             if pane_changed && no_dialog && let Some(f) = focused.as_deref().and_then(|p| self.pane_focus(p, cx)) {
                 f.focus(window, cx);
             }
@@ -1515,7 +1526,9 @@ impl AppWindow {
             self.focus.focus(window, cx);
             return self.hand_keyboard();
         }
-        let shown = if terminal_block(&self.chrome, self.focused_pane.as_deref()).is_some() {
+        let shown = if self.has_canvas() {
+            self.terms.get("canvas-panel").map(|t| t.focus.clone())
+        } else if terminal_block(&self.chrome, self.focused_pane.as_deref()).is_some() {
             self.focused_pane.as_deref().and_then(|p| self.pane_focus(p, cx))
         } else if let Some(block) = self.agent_block() {
             self.shown_agent().and_then(|a| self.agent_view(&block, &a)).map(|t| t.focus.clone())
@@ -1818,6 +1831,7 @@ impl AppWindow {
 
     /// Finish the accepted edit and any newer projection before the window goes.
     pub fn drain_documents(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.canvas_state.flush();
         if self.draining { return; }
         self.save();
         self.draining = true;
@@ -1993,6 +2007,8 @@ impl AppWindow {
         // Place newly labeled terminals first: one that is blocked on its first
         // listing is ours, and must ring.
         let mut changed = self.reconcile(window, cx);
+        self.sync_canvas(window,cx);
+        if let Some(error)=self.canvas_state.error.take() { self.layout_notice("Canvas", &error, window, cx); }
         let visible: HashSet<String> = self.visible_addresses().into_iter().collect();
         let mut alerts = Vec::new();
         for (addr, rec) in &self.live {
@@ -2824,6 +2840,12 @@ impl AppWindow {
     fn dispatch(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
+            "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" => { self.canvas_command(name, window, cx); }
+            "panel.open" => {
+                let Some(addr)=Self::arg(a,"terminal").filter(|a|self.live.contains_key(*a)) else {return self.fail("no running terminal")};
+                if let Some(p)=self.model.pane_of(addr) {self.model.focus_pane(&p);}
+                self.canvas_state.panel=Some(addr.to_owned());
+            }
             // ---- spaces
             "space.new" => {
                 let name = Self::arg(a, "name").unwrap_or_default();
@@ -2879,7 +2901,7 @@ impl AppWindow {
                     Some(m) => self.new_mod_tab(Self::owned(a, "space"), name, m, a.get("props").cloned().unwrap_or(Value::Null)),
                     // A person's new tab with no space open starts one, as space.new does.
                     None if person && a.get("space").is_none() && self.model.active_space().is_none() => {
-                        self.new_space("", Self::owned(a, "folder"), Some(name), Self::argv(a), Self::arg(a, "task"), None, window)
+                        self.new_space(if self.has_canvas() {"Canvas"} else {""}, Self::owned(a, "folder"), Some(name), Self::argv(a), Self::arg(a, "task"), None, window)
                     }
                     None => self.new_tab(Self::owned(a, "space"), name, Self::owned(a, "folder"), Self::argv(a), Self::arg(a, "task"), window),
                 };
@@ -3035,7 +3057,7 @@ impl AppWindow {
                         let name = Self::owned(a, "name")
                             .or_else(|| argv.as_ref().and_then(|v| v.first()).map(|p| p.rsplit('/').next().unwrap_or(p).to_owned()))
                             .unwrap_or_else(|| "shell".into());
-                        self.new_tab(None, &name, Self::owned(a, "folder"), argv, None, window)
+                        if self.has_canvas() && self.model.active_space().is_none() {self.new_space("Canvas",Self::owned(a,"folder").or_else(||Some(home())),Some(&name),argv,None,None,window)} else {self.new_tab(None, &name, Self::owned(a, "folder"), argv, None, window)}
                     }
                 };
                 self.answer(r);
@@ -3959,6 +3981,7 @@ impl AppWindow {
             el = self.window_drag(el, cx);
         }
         let el = match &n.kind {
+            Kind::Canvas => el.child(self.render_canvas(cx)),
             Kind::Block { content } => {
                 let inner = self.render_block(n, content, focused, cx);
                 match frame.filter(|_| n.is_pane()) {
@@ -4728,6 +4751,8 @@ impl Render for AppWindow {
         let pane_drag = self.pane_drag_layer(cx);
         div()
             .id("herdr")
+            .on_key_down(cx.listener(|this,e:&KeyDownEvent,_,_| {if e.keystroke.key=="space" {this.canvas_state.space_down=true;}}))
+            .on_key_up(cx.listener(|this,e:&KeyUpEvent,_,_| {if e.keystroke.key=="space" {this.canvas_state.space_down=false;}}))
             .track_focus(&self.focus)
             // `layout:<name>` key sections apply while that layout shows.
             .key_context(format!("Canopy layout = {}", self.layout_name).as_str())
@@ -5287,7 +5312,7 @@ mod tests {
     #[gpui::test]
     fn traffic_light_dividers_start_below_the_toolbar(cx: &mut TestAppContext) {
         use std::{cell::Cell, rc::Rc};
-        let mut layout: crate::layout::Node = serde_json::from_str(include_str!("../defaults/layouts/main.json")).unwrap();
+        let mut layout: crate::layout::Node = serde_json::from_str(include_str!("../defaults/layouts/classic.json")).unwrap();
         let context = cx.add_empty_window();
         for (macos, titlebar, width, zoom, expected) in [
             (true, crate::layout::Titlebar::Layout, 44.0, 1.0, 42.0),
@@ -6022,8 +6047,11 @@ export default class SystemToast extends View {
     #[test]
     fn shipped_layouts_parse_and_show_what_they_promise() {
         let main = super::default_layout("main");
-        assert!(main.find("main").is_some() && main.find("sidebar").is_some());
-        assert!(main.walk().iter().any(|n| matches!(n.content(), Some(super::Content::Context { .. }))));
+        assert!(matches!(main.kind, super::Kind::Canvas));
+        assert!(main.find("sidebar").is_none());
+        let classic=super::default_layout("classic");
+        assert!(classic.find("sidebar").is_some());
+        assert!(classic.walk().iter().any(|n| matches!(n.content(), Some(super::Content::Context { .. }))));
         let terminals = super::default_layout("terminals");
         assert!(terminals.find("tabs").is_some());
         assert!(matches!(terminals.find("main").and_then(|n| n.content()), Some(super::Content::Context { .. })));

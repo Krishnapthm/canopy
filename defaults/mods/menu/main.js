@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // Context menus (Canopy's items). Opened as a popup with
 // props { tab: "pane" | "tab" | "space" | "global", target }.
 // ↑/↓ move, Enter runs, Esc closes. An item is [label, command, args];
@@ -25,6 +26,11 @@ function items(p, git) {
   p = p ?? {};
   const tg = p.target ?? {};
   switch (p.tab) {
+    case "canvas-card": return [
+      ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
+      ["Open in panel", "panel.open", { terminal: tg.terminal }],
+      ["Close terminal", "canvas-close", { terminal: tg.terminal }],
+    ];
     case "pane": {
       // A kept sub-agent can go back under its parent, still running.
       const all = terminals();
@@ -113,6 +119,7 @@ export default class Menu extends View {
     if (!it) return;
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
+    else if (it[1] === "canvas-close") openOverlay({ mod: "confirm", kind: "dialog", width: 380, props: { title: "Close terminal?", detail: "This ends the terminal and its running programs.", command: { name: "terminal.kill", args: it[2] } } });
     else run(it[1], it[2]);
   }
 

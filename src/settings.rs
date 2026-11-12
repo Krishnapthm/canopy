@@ -330,6 +330,9 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
         ("terminal_foreground", hex(p.foreground)),
         ("foreground", hex(fg)),
         ("surface", hex(bg)),
+        ("ring", hex(p.ansi[4])),
+        ("muted-foreground", hex(mix(bg, fg, if light { 0.66 } else { 0.6 }))),
+        ("blue", hex(p.ansi[4])),
         ("canvas", hex(canvas)),
         ("chrome", hex(chrome)),
         ("popover", popover),
@@ -369,6 +372,7 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Person {
+    pub canvas_color: Option<String>,
     /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
     pub zoom: f32,
     pub sounds: Sounds,
@@ -448,6 +452,7 @@ fn is_true(b: &bool) -> bool {
 impl Default for Person {
     fn default() -> Self {
         Person {
+            canvas_color: None,
             zoom: 1.0,
             sounds: Sounds::default(),
             core: None,

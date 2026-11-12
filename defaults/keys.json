@@ -19,10 +19,6 @@
     "alt-shift-j": "pane.swap:down",
     "alt-shift-k": "pane.swap:up",
     "alt-shift-l": "pane.swap:right",
-    "ctrl-+": "app.zoom_in",
-    "ctrl--": "app.zoom_out",
-    "ctrl-0": "app.zoom_reset",
-    "ctrl-=": "app.zoom_in",
     "ctrl-1": "tab.select:1",
     "ctrl-2": "tab.select:2",
     "ctrl-3": "tab.select:3",
@@ -58,7 +54,11 @@
     "ctrl-shift-z": "pane.zoom",
     "ctrl-shift-l": "layout.switch",
     "f2": "tab.rename",
-    "shift-f2": "space.rename"
+    "shift-f2": "space.rename",
+    "ctrl-=": "app.zoom_in",
+    "ctrl-+": "app.zoom_in",
+    "ctrl--": "app.zoom_out",
+    "ctrl-0": "app.zoom_reset"
   },
   "terminal": {
     "ctrl-backspace": "send:\u0017",
@@ -70,5 +70,12 @@
     "ctrl-v": "terminal.paste_image",
     "ctrl-insert": "terminal.copy",
     "shift-insert": "terminal.paste"
+  },
+  "layout:main": {
+    "ctrl-=": "canvas.zoom_in",
+    "ctrl-+": "canvas.zoom_in",
+    "ctrl--": "canvas.zoom_out",
+    "ctrl-0": "canvas.zoom_reset",
+    "ctrl-shift-f": "canvas.fit"
   }
 }

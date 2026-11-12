@@ -667,7 +667,10 @@ canopy commands    # every command and its arguments
 `canopy do` prints what the command made (`{ "space", "tab",
 "terminal" }`, `{ "pane", "terminal" }`) or `{ "error": "..." }` and exits 1.
 
-## The person: `settings.json`
+## The person
+
+- `canvas_color`: null follows the theme; a hex color overrides the canvas background.
+: `settings.json`
 
 What's about the user, never a look:
 
@@ -1035,3 +1038,9 @@ including a small herdr-core skill you can install with the user's permission.
 - One mod per idea. Don't edit `AGENTS.md` or the `.d.ts` files (the app
   rewrites them). Don't touch other mods unless the request
   needs it.
+
+Canvas settings: `canvas_color` is null for theme default or a hex color.
+Canvas commands: `canvas.zoom_in`, `canvas.zoom_out`, `canvas.zoom_reset`, `canvas.fit`, `panel.close`.
+Canvas keys: Cmd (Ctrl on Linux) +=, +-, +0, +Shift+F.
+
+`panel.open {terminal}` opens a canvas terminal panel.

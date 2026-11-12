@@ -157,3 +157,11 @@ Never experiment with pointer/key automation on the person's real display.
 When developing the app on Linux, its `scripts/sandbox` provides an isolated
 home, core and display: `up`, `do`, `status`, `shot`, then `down` when done.
 Never stop a server or session you didn't start.
+
+Canopy main layout is a canvas. `canvas.zoom_in`, `canvas.zoom_out`,
+`canvas.zoom_reset`, `canvas.fit` control its camera. `panel.close` hides the
+terminal panel without ending the terminal. Geometry is in app-home canvas.json;
+`canvas_color` in settings.json overrides the theme background (null resets).
+`panel.open {terminal}` selects the terminal shown in the canvas panel. The
+`classic` layout preserves the previous sidebar and tabs. Canvas zoom bindings
+apply to the `main` layout; other layouts retain app zoom.

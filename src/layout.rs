@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Layout primitives: a tree of blocks and containers.
 //! A node is a block (terminal, mod, or the active tab) or a
 //! container (row, column, stack). Pure data + tree operations, so the
@@ -278,6 +279,7 @@ pub struct PaneFrame {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Kind {
+    Canvas,
     Block {
         content: Content,
     },
@@ -442,14 +444,14 @@ impl Node {
     pub fn children(&self) -> &[Node] {
         match &self.kind {
             Kind::Row { children } | Kind::Column { children } | Kind::Stack { children, .. } => children,
-            Kind::Block { .. } => &[],
+            Kind::Canvas | Kind::Block { .. } => &[],
         }
     }
 
     pub fn children_mut(&mut self) -> Option<&mut Vec<Node>> {
         match &mut self.kind {
             Kind::Row { children } | Kind::Column { children } | Kind::Stack { children, .. } => Some(children),
-            Kind::Block { .. } => None,
+            Kind::Canvas | Kind::Block { .. } => None,
         }
     }
 
@@ -562,7 +564,7 @@ impl Node {
             return vec![];
         }
         match &self.kind {
-            Kind::Block { .. } => vec![self],
+            Kind::Canvas | Kind::Block { .. } => vec![self],
             Kind::Stack { children, active, .. } => match active_child(children, active.as_deref()) {
                 Some(c) => c.visible_blocks(),
                 None => vec![],

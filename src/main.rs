@@ -9,6 +9,7 @@ mod core_bin;
 mod files;
 mod hc;
 mod keys;
+mod canvas;
 mod layout;
 mod layout_sync;
 mod links;
