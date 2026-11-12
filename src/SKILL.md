@@ -20,6 +20,15 @@ prints the built-in command list even without an open window. Do not launch bare
 signal or restart the person's app or core. A window closing does not kill
 its terminals.
 
+## Helpers the person can see
+
+Start another agent or a long job through hc from your terminal, not straight
+from your shell: `hc run --bg --name review -- <agent> <args>`. It becomes a
+child of your terminal, drawn as a pill joined to yours on the canvas. Wait with
+`hc wait --children all` (or `any` for the next news) and read it with
+`hc read <t>`. A program started directly from your shell has no terminal, so
+the person never sees it.
+
 ## Show something when asked
 
 New spaces and tabs are shown immediately: only create them when asked.
