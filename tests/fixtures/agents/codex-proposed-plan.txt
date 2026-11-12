@@ -1,0 +1,5 @@
+<proposed_plan>
+# Synthetic plan
+
+Replace CANOPY_BEFORE with CANOPY_AFTER in a throwaway document.
+</proposed_plan>

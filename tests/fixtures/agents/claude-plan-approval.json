@@ -1,0 +1,8 @@
+{
+  "type": "plan_approval_request",
+  "from": "synthetic-agent",
+  "timestamp": "2026-11-12T00:00:00Z",
+  "planFilePath": "/tmp/canopy-synthetic/plan.md",
+  "planContent": "# Synthetic plan\nCANOPY_BEFORE\n",
+  "requestId": "synthetic-request"
+}
