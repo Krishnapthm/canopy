@@ -644,7 +644,7 @@ unsafe extern "C" fn on_title(_t: GhosttyTerminal, userdata: *mut c_void) {
 const SYNC_OUTPUT: GhosttyMode = 2026;
 /// On from the start, as in Ghostty: VS16 makes ✍️ two cells wide and in color.
 const GRAPHEME_CLUSTER: GhosttyMode = 2027;
-const BRACKETED_PASTE: GhosttyMode = 2004;
+pub(crate) const BRACKETED_PASTE: GhosttyMode = 2004;
 const MAX_HOLD: Duration = Duration::from_millis(1000);
 const SCROLLBACK_MAX_LINES: usize = 10_000;
 // Bound memory per terminal; wide or heavily styled rows may hit this first.
@@ -1280,7 +1280,7 @@ impl Vt {
         v
     }
 
-    fn mode(&self, mode: GhosttyMode) -> bool {
+    pub(crate) fn mode(&self, mode: GhosttyMode) -> bool {
         let mut cfg = GhosttyTerminalModeConfig { mode, value: false };
         unsafe { ghostty_terminal_get(self.term, GHOSTTY_TERMINAL_DATA_MODE, &mut cfg as *mut _ as *mut c_void) };
         cfg.value

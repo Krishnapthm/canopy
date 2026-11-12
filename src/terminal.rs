@@ -632,6 +632,15 @@ impl TerminalView {
         self.standalone || self.shown_in.get() == FRAME.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn paste_quote(&self, text: &str) -> bool {
+        let grid = self.grid.borrow();
+        if grid.channel.is_none() || !grid.vt.mode(crate::vt::BRACKETED_PASTE) { return false; }
+        let bytes = grid.vt.paste_bytes(text);
+        drop(grid);
+        self.send(&bytes);
+        true
+    }
+
     fn send(&self, bytes: &[u8]) {
         self.typed_at.set(Some(Instant::now()));
         let mut g = self.grid.borrow_mut();

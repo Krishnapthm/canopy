@@ -487,6 +487,21 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
         ),
     )?;
 
+    // HERDR: expose read-only source selection to preview quote menus.
+    let selection_editor = runtime.clone();
+    globals.set("__editor_selection", Func::from(move |ctx: Ctx<'_>, handle: EntityHandle| -> JsResult<String> {
+        let state = live_editor(&ctx, &selection_editor, handle)?;
+        scope::with_current_app(|cx| {
+            let state = state.read(cx);
+            let range = state.selected_range();
+            if range.is_empty() { return "null".to_owned(); }
+            let value = state.value().to_string();
+            let start = value[..range.start].bytes().filter(|b| *b == b'\n').count() + 1;
+            let end = start + value[range.clone()].strip_suffix('\n').unwrap_or(&value[range.clone()]).bytes().filter(|b| *b == b'\n').count();
+            serde_json::json!({"text":state.selected_value().to_string(),"start":start,"end":end}).to_string()
+        }).ok_or_else(|| needs_call(&ctx, "selection()"))
+    }))?;
+
     let write_editor = runtime.clone();
     globals.set(
         "__editor_set_value",

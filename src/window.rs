@@ -2798,6 +2798,18 @@ impl AppWindow {
         {
             return json!({ "error": "a terminal layout block is focused, not a pane; focus a pane or pass an explicit pane id" });
         }
+        if person && name == "space.rename" && args.get("name").is_none_or(Value::is_null) {
+            if let Some(id) = Self::owned(&args, "id").filter(|id| self.canvas_state.doc.spaces.iter().any(|s| &s.space == id)) {
+                self.rename_canvas_space(id, window, cx);
+                return json!({"asked":"name"});
+            }
+        }
+        if person && name == "space.new" && args.get("folder").is_none() && Self::arg(&args, "machine").is_none_or(str::is_empty) {
+            if !args.is_object() { args = json!({}); }
+            args["kind"] = json!("space");
+            self.create_canvas(args, window, cx);
+            return json!({"asked":"space"});
+        }
         if person && name.ends_with(".rename") && args.get("name").is_none_or(Value::is_null) {
             self.ask_name(name, args, window, cx);
             return json!({ "asked": "name" });
@@ -2864,6 +2876,7 @@ impl AppWindow {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
+            "quote.menu" | "quote.send" => self.quote_command(name, a, window, cx),
             "panel.open" => {
                 let Some(addr)=Self::arg(a,"terminal").filter(|a|self.live.contains_key(*a)) else {return self.fail("no running terminal")};
                 if self.canvas_state.popped.contains_key(addr) { self.pop_canvas(addr.to_owned(), false, window, cx); return; }
@@ -4858,7 +4871,10 @@ impl Render for AppWindow {
                     cx.stop_propagation();
                 }
             }))
-            .capture_any_mouse_down(cx.listener(|this, ev: &MouseDownEvent, _, _| this.pointer = ev.position))
+            .capture_any_mouse_down(cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+                this.pointer = ev.position;
+                if ev.button == MouseButton::Left { this.quote_press(cx); }
+            }))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
                 this.drag_window(ev, window);
                 if this.drag.is_none() {

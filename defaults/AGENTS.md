@@ -992,7 +992,7 @@ All of it is in `herdr.d.ts`. In short:
   `run`), most picked first, each `installed` or not there (asked of the
   shell agents start in; a remote Unix machine's login/interactive shell when supported);
   rejects if the check fails (failed checks are not cached); start one with `argv: agent.run`.
-  `pickFolder({ prompt })`: the system's folder picker (here only),
+  `pickFolder({ prompt })`: the system's folder picker (here only; prompt is its heading, default "Select folder", the button stays "Open"),
   resolves with the folder or null.
 - Files: `readTextFile(path, { on })` (here, or on that machine),
   `writeTextFile(path, text, expected)` (here only), and
@@ -1052,7 +1052,7 @@ Focused terminals still receive Space. Right-click keeps the canvas menus.
 Canvas space labels drag the space and its cards; bottom-right handles resize with card padding.
 Space label menus offer Rename, Color, Show frame and confirmed Delete space.
 Empty-canvas menus create terminals in the space folder or home, installed agents,
-and root spaces with a name and native folder picker. `canvas.create` takes an optional world
+and root spaces through the Choose space dialog (previously used space folders, or New space: name, optional folder, recent folders). `canvas.create` takes an optional world
 `point` (default: the middle of the view), optional `space`, `argv`, or `kind: "space"`; `canvas.space_style` takes
 `id` and optional palette `color` (without color it toggles the frame).
 `view.agents`, `view.all`, `view.terminals` select the saved canvas view, bound to
@@ -1074,3 +1074,10 @@ highlighted read-only code editor. Markdown uses the inert document renderer.
 Canvas cards retain their existing viewer, drag header and resize grip.
 Files follow folder watcher changes, show File deleted when missing, and never
 execute content or load remote images.
+
+Preview quotes: finishing a selection in a preview opens the quote popover, also opened by `quote.menu {path, start?, end?, text, point?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv}` opens an agent in the canvas panel and pastes the quote, then a blank line and the trimmed message when given, without Enter. New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.
+
+Canvas space titles rename inline on double-click or Rename. Person-invoked local
+`space.new` without a folder opens New space; explicit command arguments remain supported.
+`canvas.create {kind: "space", name, folder, point?}` creates directly when `folder`
+is present (an empty string means no folder); omitting it opens the Choose space dialog.

@@ -918,6 +918,8 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
         ("mods/menu", json!({"tab":"tab","target":{"id":"tab1","space":"s1"}})),
         ("mods/menu", json!({"tab":"space","target":{"id":"s1"}})),
         ("mods/prompt", json!({"machines":true})),
+        ("mods/space-new", json!({"args":{"kind":"space","point":[10,20]},"folders":["/tmp/project"]})),
+        ("mods/space-new", json!({"args":{"kind":"space","point":[10,20]},"folders":[]})),
         (
             "mods/confirm",
             json!({"title":"Close space?","command":{"name":"space.close","args":{"id":"s1"}}}),

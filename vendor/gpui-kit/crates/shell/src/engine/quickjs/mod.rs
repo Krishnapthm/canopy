@@ -7108,6 +7108,8 @@ globalThis.__gpui = (() => {
         return {
           __handle: handle,
           value: () => __editor_value(handle),
+          // HERDR: null or text with 1-based inclusive source lines.
+          selection: () => JSON.parse(__editor_selection(handle)),
           set_value: (value) => __editor_set_value(handle, String(value)),
           on: (event, handler) => __editor_on(handle, String(event), handler),
           release: () => __editor_release(handle),

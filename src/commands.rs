@@ -33,6 +33,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.zoom_out", &[], "Zoom the canvas out one step."),
     cmd("canvas.zoom_reset", &[], "Reset canvas zoom."),
     cmd("canvas.fit", &[], "Fit all spaces and cards."),
+    cmd("quote.menu", &[req("path"), opt("start"), opt("end"), req("text"), opt("point")], "Open the quote popover listing running agents, at point or the pointer."),
+    cmd("quote.send", &[req("path"), opt("start"), opt("end"), req("text"), opt("message"), opt("terminal"), opt("argv")], "Open an agent in the panel and paste a quote and optional message without Enter, waiting up to 30 seconds for bracketed paste."),
     cmd("panel.open", &[req("terminal")], "Open a terminal in the canvas side panel."),
     cmd("panel.close", &[], "Close the canvas panel, keeping its terminal running."),
     cmd("view.agents", &[], "Show agent cards."),
@@ -40,7 +42,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("view.terminals", &[], "Show terminal cards."),
     cmd("canvas.space_style", &[req("id"), opt("color")], "Set a space color or toggle its frame."),
     cmd("preview.open", &[opt("path"), opt("point"), opt("place")], "Open a file tab, or choose a file; place canvas or point pins a canvas card."),
-    cmd("canvas.create", &[opt("point"), opt("kind"), opt("space"), opt("argv"), opt("name")], "Create a canvas terminal or space at a world point (default: the middle of the view)."),
+    cmd("canvas.create", &[opt("point"), opt("kind"), opt("space"), opt("argv"), opt("name"), opt("folder")], "Create a canvas terminal or space at a world point (default: the middle of the view); a space with a folder (empty: the root) is made directly, without one the Choose space dialog opens."),
     cmd("panel.pop_out", &[opt("terminal")], "Pop the panel terminal into its own window."),
     cmd("panel.bring_back", &[req("terminal")], "Bring a popped terminal back."),
     // What exists.
@@ -205,6 +207,9 @@ mod tests {
         assert_eq!(validate_args(close, &json!({"space": "X", "confirmed": true})),
             Err("space.close: unknown argument(s): space; valid arguments: id, confirmed".into()));
         assert!(validate_args(close, &json!({"id": "X", "confirmed": true})).is_ok());
+        // The space dialog's call; a missing `folder` once made every Create a silent no-op.
+        let create = find("canvas.create").unwrap();
+        assert!(validate_args(create, &json!({"kind": "space", "point": [1, 2], "name": "", "folder": "/tmp"})).is_ok());
     }
 
     #[test]

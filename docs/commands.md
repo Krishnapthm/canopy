@@ -41,6 +41,32 @@ Fit all spaces and cards.
 
 No arguments.
 
+## `quote.menu`
+
+Open the quote popover listing running agents, at point or the pointer.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+| `start` | no |
+| `end` | no |
+| `text` | yes |
+| `point` | no |
+
+## `quote.send`
+
+Open an agent in the panel and paste a quote and optional message without Enter, waiting up to 30 seconds for bracketed paste.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+| `start` | no |
+| `end` | no |
+| `text` | yes |
+| `message` | no |
+| `terminal` | no |
+| `argv` | no |
+
 ## `panel.open`
 
 Open a terminal in the canvas side panel.
@@ -94,7 +120,7 @@ Open a file tab, or choose a file; place canvas or point pins a canvas card.
 
 ## `canvas.create`
 
-Create a canvas terminal or space at a world point (default: the middle of the view).
+Create a canvas terminal or space at a world point (default: the middle of the view); a space with a folder (empty: the root) is made directly, without one the Choose space dialog opens.
 
 | Argument | Required |
 |---|---|
@@ -103,6 +129,7 @@ Create a canvas terminal or space at a world point (default: the middle of the v
 | `space` | no |
 | `argv` | no |
 | `name` | no |
+| `folder` | no |
 
 ## `panel.pop_out`
 

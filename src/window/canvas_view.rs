@@ -19,13 +19,26 @@ pub(super) struct State {
     writable: bool,
     save_task: Option<Task<()>>,
     write_result: Option<std::sync::mpsc::Receiver<std::io::Result<()>>>,
-    pill_sizes: RefCell<HashMap<String, (String, String, bool, canvas::Point)>>,
+    pill_sizes: RefCell<HashMap<String, (String, String, u8, canvas::Point)>>,
     pub error: Option<String>,
     pending_points: HashMap<String, canvas::Point>,
     space_drag: Option<(String, bool, Point<Pixels>)>,
     drag: Option<(Option<String>, Point<Pixels>)>,
     /// The current left-button pan moved: its mouse-up is not a click.
     pan_moved: bool,
+    motion: Motion,
+    rename: Option<(String, Entity<gpui_base::input::InputState>, Subscription)>,
+    /// The preview text a quote popover was opened from, kept highlighted, and that popover's id.
+    quote_mark: Option<(Entity<gpui_base::TextViewState>, String)>,
+    /// The panel's terminal, file and tabs when it was closed, for the folder button to bring back.
+    closed: Option<(Option<String>, Option<String>, Vec<String>)>,
+}
+#[derive(Default)]
+struct Motion {
+    target: Option<(canvas::Camera, canvas::Camera, std::time::Instant, canvas::Point)>,
+    velocity: [f32; 2],
+    sample: Option<std::time::Instant>,
+    frame: bool,
 }
 impl State {
     pub fn load() -> Self {
@@ -62,6 +75,10 @@ impl State {
             space_drag: None,
             drag: None,
             pan_moved: false,
+            motion: Motion::default(),
+            rename: None,
+            quote_mark: None,
+            closed: None,
         }
     }
     /// Ends any pan, card, space or panel-resize drag.
@@ -154,7 +171,7 @@ impl AppWindow {
                 .extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case("md"))
             {
-                slots.push(("canvas-file".into(), Instance { name: "files".into(), props: json!({"canvas":"viewer","root":std::path::Path::new(path).parent(),"file":std::path::Path::new(path).file_name().map(|p|p.to_string_lossy())}) }));
+                slots.push(("canvas-file".into(), Instance { name: "files".into(), props: json!({"canvas":"viewer","space":self.canvas_state.doc.panel.space,"root":std::path::Path::new(path).parent(),"file":std::path::Path::new(path).file_name().map(|p|p.to_string_lossy())}) }));
             }
         }
         slots
@@ -188,7 +205,7 @@ impl AppWindow {
                 files: true,
                 directories: false,
                 multiple: false,
-                prompt: Some("Open file".into()),
+                prompt: Some("Select file".into()),
             });
             cx.spawn_in(window, async move |this, cx| {
                 if let Ok(Ok(Some(paths))) = paths.await {
@@ -398,6 +415,75 @@ impl AppWindow {
         }
     }
 
+    pub(super) fn rename_canvas_space(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(space) = self.model.space(&id) else { return };
+        let value = space.name.clone();
+        let input = cx.new(|cx| {
+            let mut input = gpui_base::input::InputState::new(window, cx);
+            input.set_value(value, window, cx);
+            input.focus(window, cx);
+            input.select_all(window, cx);
+            input
+        });
+        let sub = cx.subscribe_in(&input, window, |this, input, event, window, cx| {
+            if matches!(event, gpui_base::input::InputEvent::PressEnter { .. } | gpui_base::input::InputEvent::Blur) {
+                if let Some((id, _, _)) = this.canvas_state.rename.take() {
+                    let name = input.read(cx).value().to_string();
+                    this.dispatch("space.rename", &json!({"id":id,"name":name}), true, window, cx);
+                    cx.notify();
+                }
+            }
+        });
+        self.canvas_state.rename = Some((id, input, sub));
+        cx.notify();
+    }
+    fn animate_camera(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.canvas_state.motion.frame { return; }
+        self.canvas_state.motion.frame = true;
+        if self.canvas_state.motion.sample.is_some_and(|t| t.elapsed() > Duration::from_millis(80)) && self.canvas_state.motion.target.is_none() {
+            self.canvas_state.motion.velocity = [0.; 2];
+        }
+        let entity = cx.entity().downgrade();
+        window.on_next_frame(move |window, cx| {
+            let _ = entity.update(cx, |this, cx| {
+                let state = &mut this.canvas_state;
+                state.motion.frame = false;
+                let now = std::time::Instant::now();
+                let mut active = false;
+                if let Some((from, to, start, anchor)) = state.motion.target {
+                    let t = start.elapsed().as_secs_f32() / 0.18;
+                    let a = canvas::ease_out(t);
+                    let zoom = from.zoom + (to.zoom-from.zoom)*a;
+                    let f = from.to_world(anchor);
+                    let world = to.to_world(anchor);
+                    state.doc.camera = canvas::Camera { x: f[0]+(world[0]-f[0])*a-anchor[0]/zoom, y: f[1]+(world[1]-f[1])*a-anchor[1]/zoom, zoom };
+                    active = t < 1.;
+                    if !active { state.motion.target = None; }
+                } else if state.drag.is_none() {
+                    let dt = state.motion.sample.map(|t| now.duration_since(t).as_secs_f32()).unwrap_or(0.016).min(0.05);
+                    state.motion.sample = Some(now);
+                    let v = &mut state.motion.velocity;
+                    state.doc.camera.pan([v[0]*dt, v[1]*dt]);
+                    let decay = canvas::friction(dt);
+                    v[0] *= decay; v[1] *= decay;
+                    active = v[0].abs().max(v[1].abs()) > 5.;
+                    if !active { *v = [0.; 2]; }
+                }
+                if active { this.animate_camera(window, cx); }
+                else { this.canvas_changed(cx); }
+                cx.notify();
+            });
+        });
+        // Not window.request_animation_frame(): that is paint-only and this runs from events.
+        cx.notify();
+    }
+    fn settle_zoom(&mut self, anchor: canvas::Point, window: &mut Window, cx: &mut Context<Self>) {
+        let from = self.canvas_state.doc.camera;
+        let mut to = from;
+        to.zoom_at(from.zoom.clamp(canvas::ZOOMS[0], canvas::ZOOMS[11]), anchor);
+        self.canvas_state.motion.target = Some((from, to, std::time::Instant::now(), anchor));
+        self.animate_camera(window, cx);
+    }
     pub(super) fn create_canvas(
         &mut self,
         args: Value,
@@ -421,65 +507,32 @@ impl AppWindow {
             return self.fail("invalid canvas point");
         };
         if args["kind"] == "space" {
-            let Some(name) = args["name"].as_str() else {
-                self.open_overlay(mods::new_overlay_id(), json!({"mod":"prompt", "kind":"dialog", "width":380, "props":{"title":"New space", "command":{"name":"canvas.create", "args":args}}}), window, cx);
+            if args.get("folder").is_none() {
+                let mut folders: Vec<String> = self.model.spaces.iter().rev()
+                    .filter(|s| s.machine.is_none() && !s.folder.is_empty()).map(|s| s.folder.clone()).collect();
+                folders.extend(self.canvas_state.doc.recent_folders.clone());
+                let mut unique = std::collections::HashSet::new();
+                folders.retain(|f| unique.insert(f.clone()));
+                let mut args = args.clone(); args["point"] = json!(point);
+                self.open_overlay(mods::new_overlay_id(), json!({"mod":"space-new", "kind":"dialog", "width":440, "props":{"args":args,"folders":folders}}), window, cx);
                 return;
-            };
-            let name = name.to_owned();
-            let paths = cx.prompt_for_paths(PathPromptOptions {
-                files: false,
-                directories: true,
-                multiple: false,
-                prompt: Some("Space folder".into()),
-            });
-            let owner = window.window_handle().downcast::<AppWindow>().unwrap();
-            cx.spawn(async move |this, cx| match paths.await {
-                Ok(Ok(Some(paths))) => {
-                    if let Some(folder) = paths.first() {
-                        let folder = folder.to_string_lossy().into_owned();
-                        let _ = owner.update(cx, |this, window, cx| {
-                            if let Err(error) = this.require_document(None) {
-                                this.canvas_state.error = Some(error);
-                                return;
-                            }
-                            let id = this.model.fresh_id_on("sp", None);
-                            this.model.spaces.push(model::Space {
-                                id: id.clone(),
-                                name,
-                                folder,
-                                machine: None,
-                                tabs: vec![],
-                                active: None,
-                                rest: Default::default(),
-                            });
-                            let seed = SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .subsec_nanos() as usize;
-                            let color = canvas::unused_color(&this.canvas_state.doc.spaces, seed);
-                            this.canvas_state.doc.spaces.push(canvas::Space {
-                                space: id,
-                                rect: [point[0], point[1], 960., 640.],
-                                color: color.into(),
-                                frame: true,
-                            });
-                            this.canvas_changed(cx);
-                            this.flush_documents(false, window, cx);
-                            cx.notify();
-                        });
-                    }
-                }
-                Ok(Err(error)) => {
-                    let _ = this.update(cx, |this, cx| {
-                        this.canvas_state.error = Some(error.to_string());
-                        cx.notify();
-                    });
-                }
-                _ => {}
-            })
-            .detach();
+            }
+            let folder = args["folder"].as_str().unwrap_or_default().trim().to_owned();
+            let name = args["name"].as_str().unwrap_or_default().trim();
+            let name = if name.is_empty() { std::path::Path::new(&folder).file_name().and_then(|s| s.to_str()).unwrap_or_default() } else { name }.to_owned();
+            if name.is_empty() { return self.fail("space needs a name or folder"); }
+            if let Err(error) = self.require_document(None) { return self.fail(error); }
+            let id = self.model.fresh_id_on("sp", None);
+            self.model.spaces.push(model::Space { id: id.clone(), name, folder: folder.clone(), machine: None, tabs: vec![], active: None, rest: Default::default() });
+            canvas::remember_folder(&mut self.canvas_state.doc.recent_folders, &folder);
+            let color = canvas::unused_color(&self.canvas_state.doc.spaces, self.canvas_state.doc.spaces.len());
+            self.canvas_state.doc.spaces.push(canvas::Space { space: id, rect: [point[0], point[1], 960., 640.], color: color.into(), frame: true });
+            self.canvas_changed(cx);
+            self.flush_documents(false, window, cx);
+            cx.notify();
             return;
         }
+        if args.get("folder").is_some() { return self.fail("folder is only for kind space"); }
         let space = Self::owned(&args, "space");
         let folder = space
             .as_deref()
@@ -512,6 +565,12 @@ impl AppWindow {
                     self.canvas_state
                         .pending_points
                         .insert(addr.to_owned(), point);
+                    if let Some(quote) = args.get("quote") {
+                        let mut quote = quote.clone();
+                        quote.as_object_mut().unwrap().remove("argv");
+                        quote["terminal"] = json!(addr);
+                        self.quote_command("quote.send", &quote, window, cx);
+                    }
                     if let Err(error) = self.place_canvas_card(addr, point, cx) {
                         self.fail(error);
                     }
@@ -522,6 +581,11 @@ impl AppWindow {
     }
 
     pub(super) fn canvas_changed(&mut self, cx: &mut Context<Self>) {
+        self.canvas_state.save.dirty = true;
+        self.canvas_state.save_task = None;
+        self.canvas_state.save.pending = false;
+        // Debounced: each change restarts the 500 ms timer. Camera animation saves once from its last frame.
+        if self.canvas_state.motion.target.is_some() || self.canvas_state.motion.frame { return; }
         if !self.canvas_state.writable || !self.canvas_state.save.changed() {
             return;
         }
@@ -557,37 +621,22 @@ impl AppWindow {
             });
         }));
     }
+    /// A terminal's shown name (`pill_label`), with the name its tab was given.
+    fn pill_name(&self, addr: &str) -> String {
+        let given = self.model.pane_of(addr).and_then(|p| self.model.tab_of(&p)).map(|t| t.name.as_str());
+        pill_label(given, self.live.get(addr).unwrap_or(&Value::Null))
+    }
     fn pill_rect(&self, card: &canvas::Card, cx: &App) -> canvas::Rect {
         let rec = self.live.get(&card.terminal).unwrap_or(&Value::Null);
-        let agent = canvas_agent(rec);
-        let kind = if agent {
-            rec["program"]["key"].as_str().unwrap_or("agent")
-        } else {
-            "terminal"
-        };
-        let name = self
-            .model
-            .pane_of(&card.terminal)
-            .and_then(|p| self.model.tab_of(&p))
-            .map(|t| t.name.as_str())
-            .filter(|s| !s.is_empty() && *s != "shell" && *s != kind)
-            .or(rec["name"]
-                .as_str()
-                .filter(|s| !s.is_empty() && *s != "shell" && *s != kind))
-            .or(rec["title"].as_str().filter(|s| !s.is_empty()))
-            .or_else(|| {
-                self.cwds
-                    .get(&card.terminal)
-                    .and_then(|s| s.rsplit('/').next())
-            })
-            .unwrap_or(&card.terminal);
-        let text = format!("{kind} {}", name.replace(['\n', '\r'], " "));
+        // Room taken by the trailing status and pop-out glyphs (12 px each plus the gap).
+        let trailing = 20 * (canvas_agent(rec) as u8 + self.canvas_state.popped.contains_key(&card.terminal) as u8);
+        let text = self.pill_name(&card.terminal).replace(['\n', '\r'], " ");
         let family = settings::get().ui_font_family.to_string();
         let mut sizes = self.canvas_state.pill_sizes.borrow_mut();
-        if let Some((label, cached_font, cached_agent, size)) = sizes.get(&card.terminal)
+        if let Some((label, cached_font, cached_trailing, size)) = sizes.get(&card.terminal)
             && label == &text
             && cached_font == &family
-            && *cached_agent == agent
+            && *cached_trailing == trailing
         {
             return [card.rect[0], card.rect[1], size[0], size[1]];
         }
@@ -601,11 +650,10 @@ impl AppWindow {
             ts.shape_line(text.clone().into(), px(13.), &[run], None)
                 .width(),
         );
-        let size = [
-            (width + 24. + 16. + 16. + if agent { 20. } else { 0. }).clamp(160., 320.),
-            36.,
-        ];
-        sizes.insert(card.terminal.clone(), (text, family, agent, size));
+        // Every pill is PILL_WIDTH wide; a name that does not fit wraps to a second line.
+        let room = PILL_WIDTH - 2. - 24. - 16. - 8. - trailing as f32;
+        let size = [PILL_WIDTH, if width > room { 54. } else { 36. }];
+        sizes.insert(card.terminal.clone(), (text, family, trailing, size));
         [card.rect[0], card.rect[1], size[0], size[1]]
     }
     /// Menus can place a newly created terminal without duplicating membership or geometry rules.
@@ -860,6 +908,106 @@ impl AppWindow {
             self.canvas_changed(cx);
         }
     }
+    pub(super) fn quote_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(path), Some(text)) = (a["path"].as_str(), a["text"].as_str()) else { return self.fail("quote needs path and text"); };
+        if !std::path::Path::new(path).is_absolute() || text.is_empty() { return self.fail("quote needs an absolute path and non-empty text"); }
+        if name == "quote.menu" {
+            self.quote_menu(a, window, cx);
+            return;
+        }
+        if a.get("argv").is_some() && a.get("terminal").is_none() {
+            let mut args = json!({"argv":a["argv"],"space":self.canvas_state.doc.panel.space,"quote":a});
+            if args["space"].is_null() { args.as_object_mut().unwrap().remove("space"); }
+            self.create_canvas(args, window, cx);
+            return;
+        }
+        let Some(addr) = a["terminal"].as_str().map(str::to_owned) else { return self.fail("quote.send needs terminal or argv"); };
+        let quote = a.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let started = Instant::now();
+            let mut opened = false;
+            loop {
+                let done = this.update_in(cx, |this, window, cx| {
+                    if started.elapsed() >= Duration::from_secs(30) {
+                        this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":"Quote not sent: the agent did not get ready for a paste"}}), window, cx);
+                        return true;
+                    }
+                    let Some(rec) = this.live.get(&addr).filter(|rec| canvas_agent(rec)) else { return false };
+                    let text = format_quote(&quote, rec.pointer("/foreground/cwd").and_then(Value::as_str).or_else(|| rec["cwd"].as_str()));
+                    // Open once: the person may close the panel or pick another pill while the agent starts.
+                    if !opened {
+                        opened = true;
+                        if this.canvas_state.popped.contains_key(&addr) { this.pop_canvas(addr.clone(), true, window, cx); }
+                        this.dispatch("panel.open", &json!({"terminal":addr}), true, window, cx);
+                        this.sync(window, cx);
+                    }
+                    // Paste only into the target's own view, never whatever the panel shows now.
+                    let Some(term) = this.terms.get("canvas-panel").filter(|t| t.address == addr) else { return false };
+                    if !term.view.read(cx).paste_quote(&text) { return false; }
+                    term.focus.focus(window, cx);
+                    true
+                });
+                if !matches!(done, Ok(false)) { break; }
+                cx.background_executor().timer(Duration::from_millis(100)).await;
+            }
+        }).detach();
+    }
+
+    /// Opens the quote popover: running agents as rows, the quoted file's space first.
+    fn quote_menu(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> String {
+        let path = std::path::Path::new(a["path"].as_str().unwrap_or_default());
+        let home = self.model.spaces.iter().filter(|s| path.starts_with(&s.folder)).max_by_key(|s| s.folder.len()).map(|s| s.id.as_str());
+        let mut rows: Vec<_> = self.live.iter().filter(|(_, rec)| canvas_agent(rec)).map(|(addr, rec)| {
+            let name = self.pill_name(addr);
+            let (icon, tint) = program_icon(rec);
+            let elsewhere = self.model.pane_of(addr).and_then(|p| self.model.space_of(&p)).map(|s| s.id.as_str()) != home;
+            ((elsewhere, name.clone(), addr.clone()), json!({"terminal":addr,"name":name,"icon":icon,"tint":tint}))
+        }).collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut quote = a.clone();
+        quote.as_object_mut().unwrap().remove("point");
+        let mut spec = json!({"mod":"quote","kind":"popup","width":280,
+            "props":{"quote":quote,"agents":rows.into_iter().map(|r| r.1).collect::<Vec<_>>()}});
+        if let Some(p) = a.get("point").filter(|p| p.get("x").is_some()) { spec["at"] = p.clone(); }
+        let id = mods::new_overlay_id();
+        self.open_overlay(id.clone(), spec, window, cx);
+        id
+    }
+
+    /// A finished selection in a preview TextView opens the quote popover at the
+    /// mouse-up point. The selection becomes a highlight, since any click (one on
+    /// the popover too) clears window text selections.
+    fn quote_selection(&mut self, path: &str, view: &Entity<gpui_base::TextViewState>, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let text = view.read(cx).selected_text();
+        if text.trim().is_empty() { return; }
+        let mut quote = if std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("md")) {
+            markdown_quote(path, &preview_source(path), &text)
+        } else { code_quote(path, &text) };
+        quote["point"] = json!({"x": f32::from(position.x), "y": f32::from(position.y)});
+        let range = view.read(cx).selected_source_range().and_then(|r| view.read(cx).rendered_text().range_for_source(r));
+        let id = self.quote_menu(&quote, window, cx);
+        self.clear_quote_mark(cx);
+        let marked = range.is_some_and(|range| view.update(cx, |v, cx| {
+            let ok = v.set_range_highlights([gpui_base::RangeHighlight::new(range, c("selection"))], cx).is_ok();
+            if ok { v.clear_selection(cx); }
+            ok
+        }));
+        if marked { self.canvas_state.quote_mark = Some((view.clone(), id)); }
+    }
+
+    fn clear_quote_mark(&mut self, cx: &mut Context<Self>) {
+        if let Some((view, _)) = self.canvas_state.quote_mark.take() {
+            view.update(cx, |v, cx| v.clear_range_highlights(cx));
+        }
+    }
+
+    /// A left press anywhere drops the quote highlight, except inside its open popover.
+    pub(super) fn quote_press(&mut self, cx: &mut Context<Self>) {
+        if self.canvas_state.quote_mark.as_ref().is_some_and(|(_, id)| !self.overlays.iter().any(|o| &o.id == id)) {
+            self.clear_quote_mark(cx);
+        }
+    }
+
     pub(super) fn canvas_command(
         &mut self,
         name: &str,
@@ -894,6 +1042,7 @@ impl AppWindow {
         } else {
             vec![]
         };
+        let from = self.canvas_state.doc.camera;
         let state = &mut self.canvas_state;
         match name {
             "view.agents" | "view.all" | "view.terminals" => {
@@ -913,9 +1062,11 @@ impl AppWindow {
                 }
             }
             "panel.close" => {
+                if !state.tabs.is_empty() {
+                    state.closed = Some((state.panel.take(), state.file.take(), std::mem::take(&mut state.tabs)));
+                }
                 state.panel = None;
                 state.file = None;
-                state.tabs.clear();
                 state.files = false;
                 self.focus.focus(window, cx);
             }
@@ -931,7 +1082,12 @@ impl AppWindow {
                 .camera
                 .step(if name == "canvas.zoom_in" { 1 } else { -1 }, anchor),
         }
-        self.canvas_changed(cx);
+        if name.starts_with("canvas.") {
+            let to = state.doc.camera;
+            state.doc.camera = from;
+            state.motion.target = Some((from, to, std::time::Instant::now(), anchor));
+            self.animate_camera(window, cx);
+        } else { self.canvas_changed(cx); }
         self.sync(window, cx);
         cx.notify();
     }
@@ -947,6 +1103,8 @@ impl AppWindow {
         let drag = card.path.clone();
         let close = drag.clone();
         let resize = drag.clone();
+        let quote_path = card.path.clone();
+        let quote_view = view.clone();
         (div().id(SharedString::from(format!("preview-{}", card.path))).absolute().left(px(p[0])).top(px(p[1]))
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
                 .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(8.)).overflow_hidden()
@@ -970,7 +1128,8 @@ impl AppWindow {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
                         gpui::ImageSource::Image(BLANK.clone())
                     })
-                    .on_link_click(|_, _, _, _| {})))
+                    .on_link_click(|_, _, _, _| {}))
+                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, &quote_view, e.position, window, cx))))
                 .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(8.))
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
                     .hover(|d| d.border_color(c("foreground")))
@@ -1008,6 +1167,9 @@ impl AppWindow {
             // Capture phase, before pills and space labels: middle drag, or left drag with
             // Space held, pans from anywhere on the canvas.
             .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, cx| {
+                this.canvas_state.motion.target = None;
+                this.canvas_state.motion.velocity = [0.; 2];
+                this.canvas_state.motion.sample = Some(std::time::Instant::now());
                 if e.button == MouseButton::Middle
                     || (e.button == MouseButton::Left && this.canvas_state.space_down)
                 {
@@ -1043,7 +1205,9 @@ impl AppWindow {
                     this.open_preview(json!({"path":path,"point":point}), window, cx);
                 }
             }))
-            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| {
+            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| {
+                this.canvas_state.motion.target = None;
+                this.canvas_state.motion.velocity = [0.; 2];
                 let d = e.delta.pixel_delta(px(20.));
                 if d.x == px(0.) && d.y == px(0.) {
                     return;
@@ -1055,8 +1219,8 @@ impl AppWindow {
                 } else {
                     e.modifiers.control
                 } {
-                    this.canvas_state.doc.camera.step(
-                        if d.y > px(0.) { 1 } else { -1 },
+                    this.canvas_state.doc.camera.zoom_at(
+                        canvas::rubber_band(this.canvas_state.doc.camera.zoom * canvas::zoom_factor(f32::from(d.y)*0.005)),
                         [
                             f32::from(e.position.x - origin.x),
                             f32::from(e.position.y - origin.y),
@@ -1065,27 +1229,32 @@ impl AppWindow {
                 } else {
                     this.canvas_state.doc.camera.pan([d.x.into(), d.y.into()]);
                 }
+                if matches!(e.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                    this.settle_zoom([f32::from(e.position.x-origin.x), f32::from(e.position.y-origin.y)], window, cx);
+                }
                 this.canvas_changed(cx);
                 cx.stop_propagation();
                 cx.notify();
             }))
-            .on_pinch(cx.listener(|this, e: &PinchEvent, _, cx| {
-                if e.delta == 0. {
-                    return;
-                }
+            .on_pinch(cx.listener(|this, e: &PinchEvent, window, cx| {
+                this.canvas_state.motion.target = None;
+                this.canvas_state.motion.velocity = [0.; 2];
                 let origin = this
                     .bounds
                     .borrow()
                     .get("canopy-canvas")
                     .map(|b| b.origin)
                     .unwrap_or_default();
-                this.canvas_state.doc.camera.step(
-                    if e.delta > 0. { 1 } else { -1 },
+                this.canvas_state.doc.camera.zoom_at(
+                    canvas::rubber_band(this.canvas_state.doc.camera.zoom * canvas::zoom_factor(e.delta)),
                     [
                         (e.position.x - origin.x).into(),
                         (e.position.y - origin.y).into(),
                     ],
                 );
+                if matches!(e.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                    this.settle_zoom([(e.position.x-origin.x).into(), (e.position.y-origin.y).into()], window, cx);
+                }
                 this.canvas_changed(cx);
                 cx.notify();
             }))
@@ -1231,6 +1400,10 @@ impl AppWindow {
                         }
                     }
                 } else {
+                    let now = std::time::Instant::now();
+                    let dt = this.canvas_state.motion.sample.map(|t| now.duration_since(t).as_secs_f32()).unwrap_or(0.016).max(0.001);
+                    this.canvas_state.motion.velocity = [d[0]/dt, d[1]/dt];
+                    this.canvas_state.motion.sample = Some(now);
                     this.canvas_state.doc.camera.pan(d);
                     this.canvas_state.pan_moved = true;
                 }
@@ -1244,6 +1417,7 @@ impl AppWindow {
                     // A click that did not pan, inside a space: its files go to the panel tree.
                     let click = matches!(this.canvas_state.drag, Some((None, _))) && !this.canvas_state.pan_moved;
                     this.canvas_state.end_drag();
+                    this.animate_camera(window, cx);
                     if let Some(space) = click.then(|| this.space_at(e.position)).flatten() {
                         this.show_space_files(space, window, cx);
                     }
@@ -1252,8 +1426,9 @@ impl AppWindow {
             )
             .on_mouse_up(
                 MouseButton::Middle,
-                cx.listener(|this, _, _, cx| {
+                cx.listener(|this, _, window, cx| {
                     this.canvas_state.end_drag();
+                    this.animate_camera(window, cx);
                     cx.notify();
                 }),
             );
@@ -1286,17 +1461,34 @@ impl AppWindow {
                         .child(
                             div()
                                 .id(SharedString::from(format!("space-label-{id}")))
-                                .text_size(px(13. * camera.zoom))
+                                .absolute().top(px(-22.)).left_0().w_full().h(px(20.)).truncate()
+                                .text_size(px(12.))
                                 .flex()
-                                .gap(px(8. * camera.zoom))
-                                .text_color(c("foreground"))
-                                .child(label)
-                                .child(div().text_color(c("muted-foreground")).child(
-                                    model_space.map(|s| s.folder.clone()).unwrap_or_default(),
-                                ))
+                                .gap(px(8.))
+                                .text_color(c("muted-foreground"))
+                                .map(|d| {
+                                    if let Some((editing, input, _)) = &state.rename {
+                                        if editing == &id { return d.child(gpui_base::Input::new(input)); }
+                                    }
+                                    d.child(label)
+                                })
+                                .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                                    if e.keystroke.key == "escape" {
+                                        this.canvas_state.rename = None;
+                                        this.focus.focus(window, cx);
+                                        cx.stop_propagation(); cx.notify();
+                                    }
+                                }))
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                                        if this.canvas_state.rename.as_ref().is_some_and(|(editing, _, _)| editing == &id) {
+                                            cx.stop_propagation(); return;
+                                        }
+                                        if e.click_count == 2 {
+                                            this.rename_canvas_space(id.clone(), window, cx);
+                                            cx.stop_propagation(); return;
+                                        }
                                         this.canvas_state.space_drag =
                                             Some((id.clone(), false, e.position));
                                         this.show_space_files(id.clone(), window, cx);
@@ -1436,26 +1628,8 @@ impl AppWindow {
             let addr = card.terminal.clone();
             let drag_addr = addr.clone();
             let rec = self.live.get(&addr).unwrap_or(&Value::Null);
-            let program = &rec["program"];
             let agent = canvas_agent(rec);
-            let kind = if agent {
-                program["key"].as_str().unwrap_or("agent")
-            } else {
-                "terminal"
-            };
-            let tab_name = self
-                .model
-                .pane_of(&addr)
-                .and_then(|p| self.model.tab_of(&p))
-                .map(|t| t.name.as_str())
-                .filter(|s| !s.is_empty() && *s != "shell" && *s != kind);
-            let name = tab_name
-                .or(rec["name"]
-                    .as_str()
-                    .filter(|s| !s.is_empty() && *s != "shell" && *s != kind))
-                .or(rec["title"].as_str().filter(|s| !s.is_empty()))
-                .or_else(|| self.cwds.get(&addr).and_then(|s| s.rsplit('/').next()))
-                .unwrap_or(&addr);
+            let name = self.pill_name(&addr);
             let [x, y] = camera.to_screen([card.rect[0], card.rect[1]]);
             let z = camera.zoom;
             let rename_addr = addr.clone();
@@ -1465,7 +1639,7 @@ impl AppWindow {
                 .left(px(x))
                 .top(px(y))
                 .w(px(card.rect[2] * z))
-                .h(px(36. * z))
+                .h(px(card.rect[3] * z))
                 .rounded(px(8. * z))
                 .border_1()
                 .border_color(c(if state.panel.as_ref() == Some(&addr) {
@@ -1475,31 +1649,24 @@ impl AppWindow {
                 }))
                 .bg(c("surface"))
                 .flex()
-                .items_center()
+                .items_start()
                 .px(px(12. * z))
+                .py(px(9. * z))
                 .gap(px(8. * z))
                 .text_size(px(13. * z))
+                .line_height(px(18. * z))
                 .text_color(c("foreground"))
                 .overflow_hidden();
-            if let Some(icon) = if agent {
-                program["icon"].as_str().or(Some("icons/agent.svg"))
-            } else {
-                Some("icons/shell.svg")
-            } {
-                pill = pill.child(
-                    svg()
-                        .path(SharedString::from(icon.to_string()))
-                        .size(px(16. * z))
-                        .text_color(c("foreground")),
-                );
-            }
-            pill = pill.child(kind.to_owned()).child(
+            let (icon, tint) = program_icon(rec);
+            // Glyphs sit on the first line, so a two-line name keeps its icon top-left.
+            pill = pill.child(div().flex_none().mt(px(1. * z)).child(icon_element(&icon, tint, px(16. * z), c("foreground"))));
+            pill = pill.child(
                 div()
                     .flex_1()
                     .min_w_0()
+                    .line_clamp(2)
                     .text_ellipsis()
-                    .text_color(c("muted-foreground"))
-                    .child(name.to_owned())
+                    .child(name)
                     .id(SharedString::from(format!("canvas-name-{addr}")))
                     .on_mouse_down(
                         MouseButton::Left,
@@ -1523,6 +1690,7 @@ impl AppWindow {
                     svg()
                         .path("mods/workspace-chrome/spinner.svg")
                         .size(px(12. * z))
+                        .mt(px(3. * z))
                         .text_color(c("muted-foreground"))
                         .with_animation(
                             "working",
@@ -1537,6 +1705,7 @@ impl AppWindow {
                     svg()
                         .path("frame/settings/bell.svg")
                         .size(px(12. * z))
+                        .mt(px(3. * z))
                         .text_color(c("muted-foreground")),
                 );
             }
@@ -1545,6 +1714,7 @@ impl AppWindow {
                     svg()
                         .path("icons/external-link.svg")
                         .size(px(12. * z))
+                        .mt(px(3. * z))
                         .text_color(c("muted-foreground")),
                 );
             }
@@ -1674,6 +1844,14 @@ impl AppWindow {
                     } else {
                         this.canvas_state.files = true;
                         this.canvas_state.doc.panel.tree_hidden = false;
+                        // Bring back the tabs it closed with; files and terminals closed since are gone.
+                        if let Some((panel, file, tabs)) = this.canvas_state.closed.take() {
+                            let live = &this.live;
+                            let state = &mut this.canvas_state;
+                            state.tabs = tabs.into_iter().filter(|t| std::path::Path::new(t).is_absolute() || live.contains_key(t)).collect();
+                            state.file = file;
+                            state.panel = panel.filter(|p| live.contains_key(p));
+                        }
                         this.sync(window, cx);
                         cx.notify();
                     }
@@ -1746,26 +1924,7 @@ impl AppWindow {
                     ),
             );
             let addr = state.panel.as_deref().unwrap_or("");
-            let rec = self.live.get(addr).unwrap_or(&Value::Null);
-            let program = &rec["program"];
-            let agent = canvas_agent(rec);
-            let kind = if agent {
-                program["key"].as_str().unwrap_or("agent")
-            } else {
-                "terminal"
-            };
-            let name = self
-                .model
-                .pane_of(addr)
-                .and_then(|p| self.model.tab_of(&p))
-                .map(|t| t.name.as_str())
-                .filter(|s| !s.is_empty() && *s != "shell" && *s != kind)
-                .or(rec["name"]
-                    .as_str()
-                    .filter(|s| !s.is_empty() && *s != "shell" && *s != kind))
-                .or(rec["title"].as_str().filter(|s| !s.is_empty()))
-                .or_else(|| self.cwds.get(addr).and_then(|s| s.rsplit('/').next()))
-                .unwrap_or(addr);
+            let name = self.pill_name(addr);
             let mut tabs = div()
                 .id("canvas-tabs")
                 .flex()
@@ -1788,24 +1947,13 @@ impl AppWindow {
                 let label = if is_file {
                     std::path::Path::new(&tab).file_name().unwrap_or_default().to_string_lossy().into_owned()
                 } else {
-                    // The pill's name: the program's title, else its folder's name.
-                    self.live
-                        .get(&tab)
-                        .and_then(|r| r["title"].as_str())
-                        .filter(|s| !s.is_empty())
-                        .or_else(|| self.cwds.get(&tab).and_then(|s| s.rsplit('/').next()))
-                        .unwrap_or("terminal")
-                        .to_owned()
+                    self.pill_name(&tab)
                 };
-                let icon = if is_file {
-                    "mods/files/file.svg"
+                let (icon, tint) = if is_file {
+                    ("mods/files/file.svg".to_owned(), true)
                 } else {
-                    self.live
-                        .get(&tab)
-                        .and_then(|r| r["program"]["icon"].as_str())
-                        .unwrap_or("icons/shell.svg")
-                }
-                .to_owned();
+                    program_icon(self.live.get(&tab).unwrap_or(&Value::Null))
+                };
                 let activate = tab.clone();
                 let close = tab.clone();
                 tabs = tabs.child(
@@ -1830,12 +1978,7 @@ impl AppWindow {
                             this.sync(window, cx);
                             cx.notify();
                         }))
-                        .child(
-                            svg()
-                                .path(SharedString::from(icon))
-                                .size(px(14.))
-                                .text_color(c("muted-foreground")),
-                        )
+                        .child(icon_element(&icon, tint, px(14.), c("muted-foreground")))
                         .child(div().text_size(px(12.)).child(label))
                         .child(
                             panel_button(
@@ -1880,7 +2023,7 @@ impl AppWindow {
             let path = state
                 .file
                 .as_deref()
-                .unwrap_or_else(|| self.cwds.get(addr).map(String::as_str).unwrap_or(name));
+                .unwrap_or_else(|| self.cwds.get(addr).map(String::as_str).unwrap_or(&name));
             let root = self.panel_root();
             // Outside the tree's folder, paths read from home.
             let breadcrumb = canvas::breadcrumb(path, root.as_deref().filter(|r| std::path::Path::new(path).starts_with(r)).or(Some(&home())));
@@ -1979,12 +2122,15 @@ impl AppWindow {
                 })
                 .and_then(|p| state.previews.get(p))
             {
+                let quote_path = state.file.clone().unwrap();
+                let quote_view = view.clone();
                 // Padding sits on the TextView so its scrollbar overlay reaches the panel edge.
                 body = body.child(div().flex_1().min_w_0().h_full().child(gpui_base::TextView::new(view).scrollable(true).px(px(24.)).py(px(20.))
                     .image_source(|_| {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
                         gpui::ImageSource::Image(BLANK.clone())
-                    }).on_link_click(|_,_,_,_|{})));
+                    }).on_link_click(|_,_,_,_|{}))
+                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, &quote_view, e.position, window, cx))));
             } else if state.file.is_some() {
                 body = body.child(
                     div()
@@ -2033,6 +2179,57 @@ fn panel_button(id: &'static str, icon: &'static str, fg: Hsla, hover: Hsla) -> 
         .child(svg().path(icon).size(px(14.)).text_color(fg))
 }
 
+/// What a terminal is called on its pill, panel tab and quote row: a name the
+/// person gave it, else an agent's session title or program name ("Claude Code"),
+/// else the command in front ("uv run main.py"), else "terminal".
+fn pill_label(given: Option<&str>, rec: &Value) -> String {
+    let program = &rec["program"];
+    let key = program["key"].as_str().unwrap_or_default();
+    let shown = program["name"].as_str().unwrap_or_default();
+    let generic = |s: &str| s.is_empty() || s == "shell" || s == "terminal" || s == key || s == shown;
+    if let Some(name) = given.or(rec["name"].as_str()).map(str::trim).filter(|s| !generic(s)) {
+        return name.to_owned();
+    }
+    if canvas_agent(rec) {
+        let folder = rec["cwd"].as_str().and_then(|c| c.rsplit('/').next()).unwrap_or_default();
+        // An agent's title is its session name once it has one; paths and the folder are not.
+        return rec["title"].as_str().map(str::trim)
+            .filter(|t| !generic(t) && *t != folder && !t.contains('/'))
+            .or(Some(shown).filter(|s| !s.is_empty()))
+            .unwrap_or("agent")
+            .to_owned();
+    }
+    if program["shell"] == true {
+        return "terminal".into();
+    }
+    let mut argv: Vec<&str> = rec.pointer("/foreground/argv").and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    // The app's launch wrapper (`zsh -lic '"$@"; exec "$0" -li' zsh <cmd>...`, see programs::resolve) names <cmd>.
+    if argv.len() > 4 && argv[2].contains("\"$@\"") { argv.drain(..4); }
+    if argv.is_empty() { return if shown.is_empty() { "terminal".into() } else { shown.to_owned() }; }
+    // Long commands are cut by the pill's ellipsis.
+    argv.join(" ").replace(['\n', '\r'], " ")
+}
+
+/// A program's icon and whether to draw it in one color (`tint`) or its own colors.
+fn program_icon(rec: &Value) -> (String, bool) {
+    let program = &rec["program"];
+    let fallback = if canvas_agent(rec) { "icons/agent.svg" } else { "icons/shell.svg" };
+    (program["icon"].as_str().unwrap_or(fallback).to_owned(), program["tint"].as_bool().unwrap_or(true))
+}
+
+/// Tinted glyphs are one-color masks; brand icons keep their colors as images.
+fn icon_element(icon: &str, tint: bool, size: Pixels, color: Hsla) -> AnyElement {
+    if tint {
+        svg().path(SharedString::from(icon.to_owned())).size(size).flex_none().text_color(color).into_any_element()
+    } else {
+        img(icon.to_owned()).size(size).flex_none().into_any_element()
+    }
+}
+
+/// Pills share one width so the canvas reads as a tidy grid.
+const PILL_WIDTH: f32 = 220.;
+
 fn canvas_agent(rec: &Value) -> bool {
     rec["program"]["agent"] == true
         || rec["status"]
@@ -2077,5 +2274,104 @@ mod preview_tests {
             "       1  ```\n       2  ![image](https://example.com)\n       3  \n       4  end"
         );
         assert_eq!(super::numbered_code(""), "");
+    }
+}
+
+fn format_quote(quote: &Value, cwd: Option<&str>) -> String {
+    let path = std::path::Path::new(quote["path"].as_str().unwrap_or_default());
+    let display = cwd.and_then(|cwd| path.strip_prefix(cwd).ok()).unwrap_or(path);
+    let mut header = format!("@{}", display.display());
+    if let Some(start) = quote["start"].as_u64() {
+        header.push_str(&format!(":{start}"));
+        if let Some(end) = quote["end"].as_u64().filter(|end| *end != start) { header.push_str(&format!("-{end}")); }
+    }
+    let text = quote["text"].as_str().unwrap_or_default().trim_end_matches(['\r', '\n']);
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
+    let body = if ext.eq_ignore_ascii_case("md") {
+        format!("{header}\n{}", text.split('\n').map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n"))
+    } else { format!("{header}\n```{ext}\n{text}\n```") };
+    match quote["message"].as_str().map(str::trim).filter(|m| !m.is_empty()) {
+        Some(message) => format!("{body}\n\n{message}"),
+        None => body,
+    }
+}
+
+fn markdown_quote(path: &str, source: &str, text: &str) -> Value {
+    let mut quote = json!({"path":path,"text":text});
+    // shortcut: repeated rendered lines may match the wrong source lines, use source selection offsets when TextView exposes them.
+    let lines: Vec<_> = source.lines().collect();
+    let selected: Vec<_> = text.trim().lines().collect();
+    if let (Some(first), Some(last)) = (selected.first(), selected.last()) {
+        if let Some(start) = lines.iter().position(|l| l.trim().contains(first.trim())) {
+            if let Some(end) = lines[start..].iter().position(|l| l.trim().contains(last.trim())) {
+                quote["start"] = json!(start + 1);
+                quote["end"] = json!(start + end + 1);
+            }
+        }
+    }
+    quote
+}
+
+fn code_quote(path: &str, text: &str) -> Value {
+    let mut start = None;
+    let mut count = 0;
+    let text = text.lines().enumerate().map(|(index, line)| {
+        count = index + 1;
+        let trimmed = line.trim_start();
+        if let Some((number, code)) = trimmed.split_once("  ") {
+            if let Ok(number) = number.parse::<usize>() {
+                if number > index { start.get_or_insert(number - index); }
+                return code;
+            }
+        }
+        line
+    }).collect::<Vec<_>>().join("\n");
+    let end = start.map(|start| start + count.saturating_sub(1));
+    json!({"path":path,"text":text,"start":start,"end":end})
+}
+
+#[cfg(test)]
+mod quote_tests {
+    use super::{code_quote, markdown_quote, format_quote};
+    use serde_json::json;
+    #[test]
+    fn quote_sources_and_format() {
+        let q = code_quote("/work/a.rs", "    12  fn main() {}\n    13    x");
+        assert_eq!(q["text"], "fn main() {}\n  x");
+        assert_eq!(format_quote(&q, Some("/work")), "@a.rs:12-13\n```rs\nfn main() {}\n  x\n```");
+        let partial = code_quote("/work/a.rs", "main() {}\n    13    x");
+        assert_eq!(partial["start"], 12);
+        assert_eq!(partial["end"], 13);
+        let q = markdown_quote("/work/a.md", "# Title\nhello\nworld", "hello\nworld");
+        assert_eq!(format_quote(&q, None), "@/work/a.md:2-3\n> hello\n> world");
+        let q = markdown_quote("/a.md", "hello", "missing");
+        assert_eq!(format_quote(&q, None), "@/a.md\n> missing");
+        assert_eq!(format_quote(&json!({"path":"/a.md","start":12,"end":12,"text":"a\n"}), None), "@/a.md:12\n> a");
+        assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","message":"  why?\n"}), None), "@/a.md\n> a\n\nwhy?");
+        assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","message":" "}), None), "@/a.md\n> a");
+    }
+}
+
+#[cfg(test)]
+mod pill_label_tests {
+    use super::pill_label;
+    use serde_json::json;
+    #[test]
+    fn pills_say_what_runs() {
+        let claude = |title: &str| json!({"status":"idle","cwd":"/w/canopy","title":title,
+            "program":{"key":"claude","name":"Claude Code","agent":true,"shell":false}});
+        assert_eq!(pill_label(None, &claude("")), "Claude Code");
+        assert_eq!(pill_label(None, &claude("Claude Code")), "Claude Code");
+        assert_eq!(pill_label(None, &claude("~/w/canopy")), "Claude Code");
+        assert_eq!(pill_label(None, &claude("canopy")), "Claude Code");
+        assert_eq!(pill_label(None, &claude("Fix pill labels")), "Fix pill labels");
+        assert_eq!(pill_label(Some("review"), &claude("Fix pill labels")), "review");
+        assert_eq!(pill_label(Some("claude"), &claude("")), "Claude Code");
+        let shell = json!({"foreground":{"argv":["zsh"]},"program":{"key":"shell","name":"zsh","shell":true}});
+        assert_eq!(pill_label(Some(""), &shell), "terminal");
+        let uv = json!({"foreground":{"argv":["uv","run","main.py"]},"program":{"key":"uv","name":"uv","shell":false}});
+        assert_eq!(pill_label(None, &uv), "uv run main.py");
+        let wrapped = json!({"foreground":{"argv":["/bin/zsh","-lic","\"$@\"; exec \"$0\" -li","/bin/zsh","claude"]},"program":{"key":"zsh","name":"zsh","shell":false}});
+        assert_eq!(pill_label(None, &wrapped), "claude");
     }
 }

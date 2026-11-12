@@ -3157,6 +3157,8 @@ const BASE: &str = r#"  /** A row. */
 
   // HERDR: built-in source editing and read-only code viewing.
   export interface EditorState {
+    // HERDR: null when empty; source lines are 1-based and inclusive.
+    selection(): { text: string; start: number; end: number } | null;
     value(): string;
     /** Programmatic replacement works even in readonly mode. */
     set_value(value: string): void;

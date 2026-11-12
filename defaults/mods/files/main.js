@@ -214,6 +214,11 @@ export default class Files extends View {
     if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
     if (props()?.canvas === "viewer") return v_flex().size_full().min_h(0).text_color(t.foreground)
+      // A finished selection opens the quote popover where the mouse came up.
+      .on_mouse_up("left", (e) => {
+        const quote = this.code?.selection();
+        if (quote?.text.trim()) run("quote.menu", { ...quote, path: `${this.root}/${this.file}`, point: e.position });
+      })
       .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(16).text_color(t.dim).child(this.fileError || "Loading file…"));
     const list = props()?.canvas === "tree" ? this.rows("", 0, [], t) : null;
     if (props()?.canvas === "tree") return v_flex().size_full().min_h(0).text_size(13).text_color(t.muted)

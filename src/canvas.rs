@@ -53,7 +53,7 @@ impl Camera {
     }
     pub fn zoom_at(&mut self, zoom: f32, anchor: Point) {
         let p = self.to_world(anchor);
-        self.zoom = snap(zoom);
+        self.zoom = zoom;
         self.x = p[0] - anchor[0] / self.zoom;
         self.y = p[1] - anchor[1] / self.zoom;
     }
@@ -80,6 +80,21 @@ impl Camera {
         self.y = bounds[1] + bounds[3] / 2. - viewport[1] / self.zoom / 2.;
     }
 }
+pub fn zoom_factor(delta: f32) -> f32 { delta.clamp(-10., 10.).exp() }
+pub fn ease_out(t: f32) -> f32 { 1. - (1. - t.clamp(0., 1.)).powi(3) }
+pub fn friction(dt: f32) -> f32 { 0.92_f32.powf(dt / 0.016) }
+pub fn rubber_band(z: f32) -> f32 {
+    let limit = z.clamp(ZOOMS[0], ZOOMS[11]);
+    let d = z - limit;
+    limit + d / (1. + d.abs() / (limit * 0.08))
+}
+pub fn remember_folder(recent: &mut Vec<String>, folder: &str) {
+    if folder.is_empty() { return; }
+    recent.retain(|p| p != folder);
+    recent.insert(0, folder.into());
+    recent.truncate(10);
+}
+
 pub fn snap(z: f32) -> f32 {
     ZOOMS
         .into_iter()
@@ -255,6 +270,8 @@ pub struct Document {
     pub panel: Panel,
     #[serde(default)]
     pub previews: Vec<Preview>,
+    #[serde(default)]
+    pub recent_folders: Vec<String>,
 }
 impl Default for Document {
     fn default() -> Self {
@@ -266,6 +283,7 @@ impl Default for Document {
             cards: vec![],
             panel: Panel::default(),
             previews: vec![],
+            recent_folders: vec![],
         }
     }
 }
@@ -312,7 +330,7 @@ impl Document {
                 && doc.spaces.iter().all(|s| valid_rect(s.rect))
                 && doc.panel.width.is_none_or(|w| w.is_finite() && w > 0.)
             {
-                doc.camera.zoom = snap(doc.camera.zoom);
+                doc.camera.zoom = doc.camera.zoom.clamp(ZOOMS[0], ZOOMS[11]);
                 return Ok((doc, false));
             }
         }
@@ -728,5 +746,30 @@ mod panel_tests {
             breadcrumb("/repository/a", Some("/repo")),
             "repository / a"
         );
+    }
+}
+
+#[cfg(test)]
+mod motion_tests {
+    use super::*;
+    #[test]
+    fn motion_math() {
+        assert!((zoom_factor(2_f32.ln()) - 2.).abs() < 0.0001);
+        assert_eq!(ease_out(0.), 0.); assert_eq!(ease_out(1.), 1.);
+        assert!((friction(0.032) - friction(0.016).powi(2)).abs() < 0.0001);
+        assert_eq!(rubber_band(1.), 1.);
+        assert!(rubber_band(100.) > 2. && rubber_band(100.) < 2.16);
+        assert!(rubber_band(0.01) > 0.23);
+        let mut c = Camera::default(); let anchor = [142., 91.];
+        let world = c.to_world(anchor); c.zoom_at(1.037, anchor);
+        assert_eq!(c.to_world(anchor), world);
+    }
+    #[test]
+    fn recent_folders_are_bounded_and_unique() {
+        let mut recent = vec![];
+        for i in 0..12 { remember_folder(&mut recent, &format!("/{i}")); }
+        remember_folder(&mut recent, "/5"); remember_folder(&mut recent, "");
+        assert_eq!(recent.len(), 10); assert_eq!(recent[0], "/5");
+        assert_eq!(recent.iter().filter(|p| *p == "/5").count(), 1);
     }
 }

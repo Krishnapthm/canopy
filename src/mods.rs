@@ -919,7 +919,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
             })
         })
         .async_function("pickFolder", |a| {
-            let prompt = a.get(0).map(from_host).and_then(|v| v.get("prompt").and_then(Value::as_str).map(str::to_owned)).unwrap_or_else(|| "Open".into());
+            let prompt = a.get(0).map(from_host).and_then(|v| v.get("prompt").and_then(Value::as_str).map(str::to_owned)).unwrap_or_else(|| "Select folder".into());
             let picked = gpui_shell::with_current_app(|cx| cx.prompt_for_paths(gpui::PathPromptOptions {
                 files: false, directories: true, multiple: false, prompt: Some(prompt.into()),
             })).ok_or_else(|| HostError::new("no window to pick from"))?;

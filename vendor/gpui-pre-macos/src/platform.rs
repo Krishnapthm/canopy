@@ -931,8 +931,9 @@ impl Platform for MacPlatform {
                     }
                 });
 
+                // Canopy: the prompt is the panel's heading; the button keeps the native "Open".
                 if let Some(prompt) = options.prompt {
-                    panel.setPrompt(Some(&NSString::from_str(prompt.as_str())));
+                    panel.setMessage(Some(&NSString::from_str(prompt.as_str())));
                 }
 
                 panel.beginWithCompletionHandler(&handler);
