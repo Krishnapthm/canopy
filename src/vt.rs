@@ -1496,7 +1496,9 @@ impl Vt {
     /// Wraps pasted text the way the program asked (bracketed paste or not).
     pub fn paste_bytes(&self, text: &str) -> Vec<u8> {
         if self.mode(BRACKETED_PASTE) {
-            let clean = text.replace("\x1b[201~", "");
+            // Until none is left: one pass turns "ESC[20" ESC[201~ "1~" into a fresh end marker.
+            let mut clean = text.to_owned();
+            while clean.contains("\x1b[201~") { clean = clean.replace("\x1b[201~", ""); }
             [b"\x1b[200~".as_slice(), clean.as_bytes(), b"\x1b[201~"].concat()
         } else {
             text.replace("\r\n", "\r").replace('\n', "\r").into_bytes()
@@ -1845,6 +1847,14 @@ mod tests {
             vt.progress_search();
         }
         panic!("terminal search did not finish incrementally");
+    }
+
+    #[test]
+    fn bracketed_paste_cannot_end_itself_early() {
+        let mut vt = Vt::new(32, 4);
+        vt.write(b"\x1b[?2004h");
+        let bytes = vt.paste_bytes("a\x1b[20\x1b[201~1~\rrun this\r");
+        assert_eq!(bytes, b"\x1b[200~a\rrun this\r\x1b[201~");
     }
 
     #[test]
