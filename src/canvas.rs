@@ -104,6 +104,10 @@ pub fn snap(z: f32) -> f32 {
 pub fn intersects(a: Rect, b: Rect) -> bool {
     a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
 }
+/// The topmost space whose rect holds a world point (later spaces draw on top).
+pub fn space_at(spaces: &[Space], p: Point) -> Option<&Space> {
+    spaces.iter().rev().find(|s| p[0] >= s.rect[0] && p[1] >= s.rect[1] && p[0] <= s.rect[0] + s.rect[2] && p[1] <= s.rect[1] + s.rect[3])
+}
 pub fn clamp(mut r: Rect, space: Rect) -> Rect {
     r[0] = r[0].clamp(
         space[0] + 24.,
@@ -403,6 +407,14 @@ pub fn view_allows(view: &View, agent: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn space_at_picks_the_topmost_space_holding_the_point() {
+        let space = |id: &str, rect| Space { space: id.into(), rect, color: "red".into(), frame: true };
+        let spaces = [space("a", [0., 0., 100., 100.]), space("b", [50., 50., 100., 100.])];
+        assert_eq!(space_at(&spaces, [10., 10.]).unwrap().space, "a");
+        assert_eq!(space_at(&spaces, [60., 60.]).unwrap().space, "b");
+        assert!(space_at(&spaces, [200., 10.]).is_none());
+    }
     #[test]
     fn preview_rejects_binary_large_and_invalid_utf8() {
         assert!(preview_text(b"hello\n".to_vec()).is_ok());

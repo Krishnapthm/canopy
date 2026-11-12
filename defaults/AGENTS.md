@@ -1053,7 +1053,7 @@ Canvas space labels drag the space and its cards; bottom-right handles resize wi
 Space label menus offer Rename, Color, Show frame and confirmed Delete space.
 Empty-canvas menus create terminals in the space folder or home, installed agents,
 and root spaces through the Choose space dialog (previously used space folders, or New space: name, optional folder, recent folders). `canvas.create` takes an optional world
-`point` (default: the middle of the view), optional `space`, `argv`, or `kind: "space"`; `canvas.space_style` takes
+`point` (default: the middle of the view), optional `space` (default: the space under the point, else the root), `argv`, or `kind: "space"`; `canvas.space_style` takes
 `id` and optional palette `color` (without color it toggles the frame).
 `view.agents`, `view.all`, `view.terminals` select the saved canvas view, bound to
 Cmd+Shift+1/2/3 on macOS and Ctrl+Shift+1/2/3 elsewhere. Hidden cards lose panel focus.

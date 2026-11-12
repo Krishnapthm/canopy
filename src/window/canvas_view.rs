@@ -125,20 +125,14 @@ impl AppWindow {
         let space = self.canvas_state.doc.panel.space.as_deref()?;
         self.model.space(space).map(|s| s.folder.clone())
     }
-    /// The topmost framed space under a window position, if any.
+    /// The topmost space under a window position, if any.
     fn space_at(&self, position: Point<Pixels>) -> Option<String> {
         let origin = self.bounds.borrow().get("canopy-canvas").map(|b| b.origin).unwrap_or_default();
         let p = self.canvas_state.doc.camera.to_world([
             f32::from(position.x - origin.x),
             f32::from(position.y - origin.y),
         ]);
-        self.canvas_state
-            .doc
-            .spaces
-            .iter()
-            .rev()
-            .find(|s| p[0] >= s.rect[0] && p[1] >= s.rect[1] && p[0] <= s.rect[0] + s.rect[2] && p[1] <= s.rect[1] + s.rect[3])
-            .map(|s| s.space.clone())
+        canvas::space_at(&self.canvas_state.doc.spaces, p).map(|s| s.space.clone())
     }
     /// Points the panel's file tree at a space's folder.
     fn show_space_files(&mut self, space: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -533,7 +527,10 @@ impl AppWindow {
             return;
         }
         if args.get("folder").is_some() { return self.fail("folder is only for kind space"); }
-        let space = Self::owned(&args, "space");
+        // No space: the one under the point, so scripted creates land where they are placed.
+        let space = Self::owned(&args, "space").or_else(|| {
+            canvas::space_at(&self.canvas_state.doc.spaces, point).map(|s| s.space.clone()).filter(|id| self.model.space(id).is_some())
+        });
         let folder = space
             .as_deref()
             .and_then(|id| self.model.space(id))
