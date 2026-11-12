@@ -25,13 +25,15 @@ async function checkout(folder, on) {
 function items(p, git) {
   p = p ?? {};
   const tg = p.target ?? {};
+  // `machine` only picks which agents to list; canvas.create does not take it.
+  const { machine: _, ...at } = tg;
   switch (p.tab) {
     case "canvas-empty": return [
-      ["New terminal", "canvas.create", tg],
+      ["New terminal", "canvas.create", at],
       ["New agent >", "canvas-agents", tg],
-      ...(!tg.space ? [["New space here", "canvas.create", { ...tg, kind: "space" }]] : []),
+      ...(!tg.space ? [["New space here", "canvas.create", { ...at, kind: "space" }]] : []),
     ];
-    case "canvas-agents": return (p.agents ?? []).filter(a => a.installed).map(a => [a.name, "canvas.create", { ...tg, argv: a.run }]);
+    case "canvas-agents": return (p.agents ?? []).filter(a => a.installed).map(a => [a.name, "canvas.create", { ...at, argv: a.run }]);
     case "canvas-space": return [
       ["Rename", "space.rename", { id: tg.id }],
       ["Color >", "canvas-colors", tg],
