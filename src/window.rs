@@ -557,6 +557,7 @@ impl AppWindow {
                 return false;
             }
             let _ = closing.update(cx, |this, cx| {
+                this.close_pop_outs(cx);
                 this.drain_documents(window, cx);
                 this.close_mods_now(std::time::Instant::now() + Duration::from_millis(250), window, cx);
             });
@@ -761,8 +762,8 @@ impl AppWindow {
         }
         self.core = core.clone();
         self.publish(cx);
-        for t in self.terms.values() {
-            t.view.update(cx, |v, cx| v.reattach(core.clone(), cx));
+        for (_, view) in self.terminal_views(cx) {
+            view.update(cx, |v, cx| v.reattach(core.clone(), cx));
         }
         cx.notify();
     }
@@ -1372,16 +1373,7 @@ impl AppWindow {
             let dim = |k: &str, d: u64| rec.and_then(|r| r.get(k)).and_then(Value::as_u64).unwrap_or(d) as u16;
             let size_hint = (dim("cols", 120), dim("rows", 40));
             let view = cx.new(|cx| TerminalView::attach(self.core.clone(), address.clone(), size_hint, cx));
-            self.tell_term(&view, &address, cx);
-            let (block, addr) = (id.clone(), address.clone());
-            let sub = cx.subscribe_in(&view, window, move |this, _, ev: &TerminalEvent, window, cx| match ev {
-                TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
-                TerminalEvent::TitleChanged => this.publish(cx),
-                TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
-                TerminalEvent::ContextMenu(at) => {
-                    this.open_menu("pane", json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
-                }
-            });
+            let sub = self.setup_term(&view, &id, &address, window, cx);
             let focus = view.read(cx).focus_handle().clone();
             self.terms.insert(id, Term { view, address, focus, _sub: sub });
         }
@@ -1961,6 +1953,26 @@ impl AppWindow {
 
     // ---- core facts --------------------------------------------------------
 
+    fn terminal_views(&self, cx: &App) -> Vec<(String, Entity<TerminalView>)> {
+        self.terms.values().map(|t| (t.address.clone(), t.view.clone()))
+            .chain(self.canvas_state.popped.iter().filter_map(|(addr, handle)| {
+                handle.read(cx).ok().map(|pop| (addr.clone(), pop.terminal.clone()))
+            })).collect()
+    }
+
+    fn setup_term(&self, view: &Entity<TerminalView>, block: &str, address: &str, window: &mut Window, cx: &mut Context<Self>) -> Subscription {
+        self.tell_term(view, address, cx);
+        let (block, addr) = (block.to_owned(), address.to_owned());
+        cx.subscribe_in(view, window, move |this, _, ev: &TerminalEvent, window, cx| match ev {
+            TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
+            TerminalEvent::TitleChanged => this.publish(cx),
+            TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
+            TerminalEvent::ContextMenu(at) => {
+                this.open_menu("pane", json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
+            }
+        })
+    }
+
     /// What a terminal view takes from the core's facts: its folder, where right-clicks go.
     fn tell_term(&self, view: &Entity<TerminalView>, addr: &str, cx: &mut Context<Self>) {
         let cwd = self.cwds.get(addr).map(std::path::PathBuf::from);
@@ -2034,11 +2046,11 @@ impl AppWindow {
             }
         }
         self.track_folders(cx);
-        for t in self.terms.values() {
-            if self.live.get(&t.address).is_some_and(|r| r["pid"].as_u64().is_some()) {
-                t.view.update(cx, |v, cx| v.reattach_if_needed(self.core.clone(), cx));
+        for (address, view) in self.terminal_views(cx) {
+            if self.live.get(&address).is_some_and(|r| r["pid"].as_u64().is_some()) {
+                view.update(cx, |v, cx| v.reattach_if_needed(self.core.clone(), cx));
             }
-            self.tell_term(&t.view, &t.address, cx);
+            self.tell_term(&view, &address, cx);
         }
         self.listed_once = true;
         if changed {
@@ -5459,6 +5471,61 @@ mod tests {
         let (view, cx) = cx.add_window_view(|window, cx| super::AppWindow::new(crate::hc::offline(), requests, window, cx));
         assert_eq!(view.update(cx, |this, _| this.layout_name.clone()), "test");
         (view, cx)
+    }
+
+    #[test]
+    fn canvas_pop_out_lifecycle() {
+        in_own_process("pop_out_lifecycle");
+    }
+
+    #[gpui::test]
+    fn pop_out_lifecycle(cx: &mut TestAppContext) {
+        use serde_json::json;
+        if !running_alone("pop_out_lifecycle") { return; }
+        let (view, cx) = open_window(cx, "neighbor", "", json!({"id":"root", "type":"block", "content":{"mod":"neighbor"}}));
+        let pop = cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.live.insert("t1".into(), json!({"pid":1, "labels":{"herdr.right-click":"program"}}));
+            this.cwds.insert("t1".into(), "/tmp".into());
+            this.pop_canvas("t1".into(), false, window, cx);
+            let pop = this.canvas_state.popped["t1"];
+            let terminal = pop.read(cx).unwrap().terminal.clone();
+            assert!(terminal.read(cx).right_click_to_program);
+            this.live.get_mut("t1").unwrap()["labels"] = json!({});
+            terminal.update(cx, |v, _| v.ended = Some("holder_lost".into()));
+            this.tend_terminals(false, window, cx);
+            assert!(terminal.read(cx).ended.is_none());
+            assert!(!terminal.read(cx).right_click_to_program);
+            terminal.update(cx, |v, _| v.ended = Some("holder_lost".into()));
+            this.reconnected(crate::hc::offline(), cx);
+            assert!(terminal.read(cx).ended.is_none());
+            this.pop_canvas("t1".into(), true, window, cx);
+            assert!(this.canvas_state.popped.is_empty());
+            assert_eq!(this.canvas_state.panel.as_deref(), Some("t1"));
+            assert!(pop.read(cx).is_err());
+            this.pop_canvas("t1".into(), false, window, cx);
+            this.canvas_state.popped["t1"]
+        }));
+        let mut popped = gpui::VisualTestContext::from_window(pop.into(), &cx.cx);
+        assert!(popped.simulate_close());
+        // The test platform asks permission to close; the OS removes the window next.
+        popped.update(|window, _| window.remove_window());
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            assert!(this.canvas_state.popped.is_empty());
+            assert_eq!(this.canvas_state.panel.as_deref(), Some("t1"));
+            assert!(pop.read(cx).is_err());
+            this.pop_canvas("t1".into(), false, window, cx);
+        }));
+        if cfg!(target_os = "macos") {
+            cx.update(|_, cx| view.update(cx, |this, cx| {
+                assert_eq!(this.canvas_state.popped.len(), 1);
+                let pop = this.canvas_state.popped["t1"];
+                this.close_pop_outs(cx);
+                assert!(pop.read(cx).is_err());
+            }));
+        } else {
+            assert!(cx.simulate_close());
+        }
+        cx.update(|_, cx| view.update(cx, |this, _| assert!(this.canvas_state.popped.is_empty())));
     }
 
     #[test]

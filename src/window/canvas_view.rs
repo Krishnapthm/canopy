@@ -70,7 +70,8 @@ impl State {
     }
 }
 pub(super) struct PopOut {
-    terminal: Entity<TerminalView>,
+    pub(super) terminal: Entity<TerminalView>,
+    _sub: Option<Subscription>,
 }
 impl Render for PopOut {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -81,6 +82,12 @@ impl Render for PopOut {
     }
 }
 impl AppWindow {
+    pub(super) fn close_pop_outs(&mut self, cx: &mut Context<Self>) {
+        for (_, handle) in self.canvas_state.popped.drain() {
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+        }
+    }
+
     pub(super) fn pop_canvas(
         &mut self,
         addr: String,
@@ -133,11 +140,15 @@ impl AppWindow {
                 terminal.read(cx).focus_handle().clone().focus(window, cx);
                 cx.on_release(|this: &mut PopOut, cx| this.terminal.read(cx).detach())
                     .detach();
-                PopOut { terminal }
+                PopOut { terminal, _sub: None }
             })
         });
         match result {
             Ok(handle) => {
+                let terminal = handle.read(cx).unwrap().terminal.clone();
+                let block = self.model.pane_of(&addr).unwrap_or_else(|| "canvas-panel".into());
+                let sub = self.setup_term(&terminal, &block, &addr, window, cx);
+                let _ = handle.update(cx, |pop, _, _| pop._sub = Some(sub));
                 self.canvas_state.popped.insert(addr, handle);
                 self.canvas_state.panel = None;
                 self.sync(window, cx);
