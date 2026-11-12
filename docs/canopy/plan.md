@@ -650,3 +650,4 @@ Write here when the code disproves something above (date, what, new decision).
 - 2026-11-12: one terminal cannot be drawn at its own font size or zoom; font size, cell metrics and padding come from global settings (`docs/canopy/herdr-map.md`). Window mode's live scaling (7.5.3) needs a terminal renderer change: stopped before building it, Krishna decides. Pills (the default) are unaffected.
 - 2026-11-12: arbitrary text can be written into a terminal through core input (`src/hc.rs:512`), so 8.3's clipboard fallback is not needed.
 - 2026-11-12: isolation works by env only: `HERDR_APP_HOME`, `HC_SESSION`, `HC_SOCKET`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` (checked in installed `hc` 0.1.20). `scripts/dev` also sets `DO_NOT_TRACK=1` until phase 1.
+- 2026-11-12: first debug build (`just build`, Zig 0.16 from `brew install zig@0.16`, keg-only so prepend `$(brew --prefix zig@0.16)/bin` to PATH) took 16 min 01 s on Krishna's Mac.
