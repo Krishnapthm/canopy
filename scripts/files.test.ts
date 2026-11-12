@@ -127,3 +127,13 @@ test("Files follows directory links one level at a time", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("Files filter preserves folders for lazy expansion and matches names without case", () => {
+  const body = source.slice(source.indexOf("function matchesFile("), source.indexOf("async function directory("));
+  const matches = new Function(body + "; return matchesFile;")();
+  expect(matches({ dir: true, name: "src" }, "main")).toBe(true);
+  expect(matches({ dir: false, name: "Main.rs" }, "MAIN")).toBe(true);
+  expect(matches({ dir: false, name: "other.rs" }, "main")).toBe(false);
+  expect(matches({ dir: false, name: "other.rs" }, "")).toBe(true);
+});

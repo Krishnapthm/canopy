@@ -84,12 +84,13 @@ Set a space color or toggle its frame.
 
 ## `preview.open`
 
-Open a local file preview, or choose a file; point defaults to the view center.
+Open a file tab, or choose a file; place canvas or point pins a canvas card.
 
 | Argument | Required |
 |---|---|
 | `path` | no |
 | `point` | no |
+| `place` | no |
 
 ## `canvas.create`
 

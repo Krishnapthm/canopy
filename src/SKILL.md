@@ -181,12 +181,17 @@ Cmd+Shift+1/2/3 on macOS and Ctrl+Shift+1/2/3 elsewhere. Hidden cards lose panel
 `panel.pop_out` takes an optional `terminal` (defaults to the panel); `panel.bring_back`
 takes `terminal`. Pop-outs last only for the current run and keep the terminal alive.
 
-Canvas file previews: `preview.open {path?, point?}` opens a local text file at a world
-point (default: view center). Omit path for the native file picker. Empty-canvas
-Open file..., File > Open File..., Cmd-click terminal file paths, and Finder file
-drops share this command. URLs and folders keep their system handlers. Preview
-headers drag, the bottom-right grip resizes, and the close button removes the card.
-Markdown is rendered without external images or active links. Other text has line
-numbers in monospace. Binary, unreadable, and files over 2 MB show a toast. Open
-previews persist in canvas.json, reload from file watcher events, and show File
-deleted when missing. This command reads files only, never executes their content.
+Canvas file previews: `preview.open {path?, point?, place?}` opens an absolute local
+path in a read-only panel tab by default. Reopening activates the tab. Omit path for
+the native picker, which places a canvas card. `place: "canvas"` or an explicit
+world `point` also places a card. Open file... and Finder drops keep placing cards.
+Clicking a pill opens or activates its terminal tab. Closing a tab keeps its terminal
+running; the panel close button closes all panel tabs. Terminal pop-out is unchanged.
+The header shows a breadcrumb and a folder button toggles the right file tree,
+saved as `panel.tree_hidden` in canvas.json. The tree shows the folder of the space last
+clicked on the canvas (`panel.space`); clicking pills does not change it. File tabs have a pin
+button to place a canvas card. The Files mod supplies the bounded lazy tree and
+highlighted read-only code editor. Markdown uses the inert document renderer.
+Canvas cards retain their existing viewer, drag header and resize grip.
+Files follow folder watcher changes, show File deleted when missing, and never
+execute content or load remote images.

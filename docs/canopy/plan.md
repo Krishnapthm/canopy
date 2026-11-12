@@ -534,18 +534,19 @@ the shim called, with which file, did the CLI see the edit, what did the model r
   or `Bring back` returns it. The terminal keeps running throughout (core owns it).
 - Popped-out state is not persisted: on restart everything is back on the canvas.
 
-### 8.2 Preview cards
+### 8.2 Preview cards and panel tabs
 
-- Open a file by: Cmd-click a file path in a terminal (herdr's `src/links.rs` already finds
-  paths: hook into it), or `Open file...` in the right-click menu (native picker), or dragging a
-  file from Finder onto the canvas.
-- `.md` renders as markdown (first check whether herdr's vendored `gpui-kit` has a markdown
-  component; use it if so, otherwise ask Krishna before adding a dependency). Other text files
-  render as code with line numbers (syntax highlighting only if gpui-kit has it). Binary files:
-  a toast "Can't preview <name>".
-- The preview re-reads the file when it changes (herdr's `src/files.rs` already watches files
-  with `notify`; reuse it, no timers).
-- Untrusted content: never execute or load anything from the file (no remote images).
+- Terminal pills activate a panel tab. Files open in panel tabs by default through
+  `preview.open {path}`; `place: "canvas"` or a world `point` pins a card.
+- Keep Open file... picker and Finder drops placing cards. File tabs offer Pin to canvas.
+- Panel tabs are read-only, with a breadcrumb, terminal pop-out, close and file-tree toggle.
+  Closing a terminal tab leaves the core terminal running.
+- Reuse the Files mod for the bounded lazy tree and highlighted code. The tree shows the
+  folder of the space last clicked on the canvas (a plain click inside it or on its label;
+  a pan drag or a pill click does not switch it), saved as `panel.space`.
+- Markdown uses the existing inert document renderer. Never load remote images or execute content.
+- Folder watches refresh previews. Canvas cards retain their existing numbered text viewer.
+- Panel width and tree visibility are saved in canvas.json.
 
 ### 8.3 Quote to agent
 
@@ -682,3 +683,5 @@ Write here when the code disproves something above (date, what, new decision).
 
 - 2026-11-12: 8.2 stores previews in a serde-defaulted `previews` list alongside terminal cards. gpui-kit syntect is private to its editor module, so previews use plain numbered monospace. TextView images require an authoritative inert image override and links are disabled to keep untrusted previews offline.
 - 2026-11-12: Krishna wants the canvas side panel to look like Claude's file pane: a tab per open terminal or file, a path header, highlighted code or rendered markdown, and the selected pill's space file tree in a column on the right (root terminals: their current folder). Canvas preview cards stay as a way to pin a file, using the same viewer. Quote and send-to-session (8.3) follow after the look.
+
+- 2026-11-12: the Files mod exposes highlighted EditorState through the existing mod slot lifecycle, so the canvas panel can host its tree and code viewer without a new mod API. Markdown retains the Rust inert renderer because the JS text view has no authoritative image-source override. Cards retain their original viewer in this step.

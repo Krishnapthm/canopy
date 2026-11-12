@@ -212,6 +212,7 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
         module = module.async_function(name, move |a| {
             let first = a.get(0).map(from_host).unwrap_or(Value::Null);
             let reply = match name {
+                "readTextFile" if first == "/fixture/hello.rs" => Some(json!("fn main() {}")),
                 "readTextFile" if first == "/fixture/app/settings.json" || first == "/fixture/.ssh/config" => Some(Value::Null),
                 "readTextFile" => first
                     .as_str()
@@ -468,6 +469,18 @@ fn shipped_initial_descriptions(cx: &mut TestAppContext) {
         entries.len(),
         start.elapsed()
     );
+}
+
+#[gpui::test]
+fn canvas_files_slots_describe_tree_and_viewer(cx: &mut TestAppContext) {
+    cx.update(gpui_shell::init);
+    let staged = Staged::new();
+    for mode in ["tree", "viewer"] {
+        let tree = describe(cx, &staged, "mods/files", true,
+            json!({"canvas":mode,"root":"/fixture","file":if mode=="viewer" {Some("hello.rs")} else {None}}), None).unwrap();
+        assert!(!tree.is_empty());
+        if mode == "tree" { assert!(tree.contains("canvas-files-tree"), "{tree}"); }
+    }
 }
 
 /// A mod's localStorage write lands on the executor; one that lands after the

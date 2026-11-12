@@ -8,6 +8,10 @@ pub(super) struct State {
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
     preview_drag: Option<(String, bool, Point<Pixels>)>,
     pub panel: Option<String>,
+    pub file: Option<String>,
+    pub tabs: Vec<String>,
+    /// The folder button opened the panel for the file tree, with no tab needed.
+    pub files: bool,
     pub popped: HashMap<String, WindowHandle<PopOut>>,
     save: canvas::SaveSchedule,
     pub space_down: bool,
@@ -20,6 +24,8 @@ pub(super) struct State {
     pending_points: HashMap<String, canvas::Point>,
     space_drag: Option<(String, bool, Point<Pixels>)>,
     drag: Option<(Option<String>, Point<Pixels>)>,
+    /// The current left-button pan moved: its mouse-up is not a click.
+    pan_moved: bool,
 }
 impl State {
     pub fn load() -> Self {
@@ -40,6 +46,9 @@ impl State {
             previews: HashMap::new(),
             preview_drag: None,
             panel: None,
+            file: None,
+            tabs: Vec::new(),
+            files: false,
             popped: HashMap::new(),
             save: canvas::SaveSchedule::default(),
             space_down: false,
@@ -52,6 +61,7 @@ impl State {
             pending_points: HashMap::new(),
             space_drag: None,
             drag: None,
+            pan_moved: false,
         }
     }
     /// Ends any pan, card, space or panel-resize drag.
@@ -93,6 +103,62 @@ impl Render for PopOut {
     }
 }
 impl AppWindow {
+    /// The folder of the space last clicked on the canvas.
+    fn panel_root(&self) -> Option<String> {
+        let space = self.canvas_state.doc.panel.space.as_deref()?;
+        self.model.space(space).map(|s| s.folder.clone())
+    }
+    /// The topmost framed space under a window position, if any.
+    fn space_at(&self, position: Point<Pixels>) -> Option<String> {
+        let origin = self.bounds.borrow().get("canopy-canvas").map(|b| b.origin).unwrap_or_default();
+        let p = self.canvas_state.doc.camera.to_world([
+            f32::from(position.x - origin.x),
+            f32::from(position.y - origin.y),
+        ]);
+        self.canvas_state
+            .doc
+            .spaces
+            .iter()
+            .rev()
+            .find(|s| p[0] >= s.rect[0] && p[1] >= s.rect[1] && p[0] <= s.rect[0] + s.rect[2] && p[1] <= s.rect[1] + s.rect[3])
+            .map(|s| s.space.clone())
+    }
+    /// Points the panel's file tree at a space's folder.
+    fn show_space_files(&mut self, space: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.canvas_state.doc.panel.space.as_deref() != Some(space.as_str()) {
+            self.canvas_state.doc.panel.space = Some(space);
+            self.canvas_changed(cx);
+            self.sync(window, cx);
+            cx.notify();
+        }
+    }
+    pub(super) fn panel_mods(&self) -> Vec<(String, Instance)> {
+        if !self.has_canvas()
+            || (self.canvas_state.panel.is_none() && self.canvas_state.file.is_none() && !self.canvas_state.files)
+        {
+            return vec![];
+        }
+        let root = self.panel_root();
+        let mut slots = vec![];
+        if !self.canvas_state.doc.panel.tree_hidden {
+            slots.push((
+                "canvas-tree".into(),
+                Instance {
+                    name: "files".into(),
+                    props: json!({"canvas":"tree","root":root}),
+                },
+            ));
+        }
+        if let Some(path) = &self.canvas_state.file {
+            if !std::path::Path::new(path)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+            {
+                slots.push(("canvas-file".into(), Instance { name: "files".into(), props: json!({"canvas":"viewer","root":std::path::Path::new(path).parent(),"file":std::path::Path::new(path).file_name().map(|p|p.to_string_lossy())}) }));
+            }
+        }
+        slots
+    }
     pub(super) fn open_preview(
         &mut self,
         args: Value,
@@ -136,6 +202,23 @@ impl AppWindow {
             .detach();
             return;
         };
+        if args["place"] != "canvas" && args.get("point").is_none() {
+            let path = std::path::Path::new(path);
+            if !path.is_absolute() {
+                return self.fail("preview path must be absolute");
+            }
+            let path = path
+                .canonicalize()
+                .unwrap_or_else(|_| path.to_owned())
+                .to_string_lossy()
+                .into_owned();
+            canvas::open_panel_tab(&mut self.canvas_state.tabs, &path);
+            self.canvas_state.file = Some(path);
+            self.focus.focus(window, cx);
+            self.sync(window, cx);
+            cx.notify();
+            return;
+        }
         let path = std::path::Path::new(path);
         if canvas::read_preview(path).is_err() {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -171,7 +254,22 @@ impl AppWindow {
         cx.notify();
     }
     fn load_previews(&mut self, cx: &mut Context<Self>) {
-        for card in self.canvas_state.doc.previews.clone() {
+        let mut cards = self.canvas_state.doc.previews.clone();
+        if let Some(path) = &self.canvas_state.file {
+            if std::path::Path::new(path)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+            {
+                cards.push(canvas::Preview {
+                    path: path.clone(),
+                    rect: [0., 0., 0., 0.],
+                });
+            }
+        }
+        self.canvas_state
+            .previews
+            .retain(|path, _| cards.iter().any(|c| &c.path == path));
+        for card in cards {
             if self.canvas_state.previews.contains_key(&card.path) {
                 continue;
             }
@@ -677,9 +775,7 @@ impl AppWindow {
             .retain(|s| self.model.space(&s.space).is_some());
         changed |= before != state.doc.spaces.len();
         for space in &self.model.spaces {
-            if !root_space(space)
-                && !state.doc.spaces.iter().any(|s| s.space == space.id)
-            {
+            if !root_space(space) && !state.doc.spaces.iter().any(|s| s.space == space.id) {
                 let rect = canvas::new_space_rect(&state.doc.spaces);
                 state.doc.spaces.push(canvas::Space {
                     space: space.id.clone(),
@@ -818,6 +914,9 @@ impl AppWindow {
             }
             "panel.close" => {
                 state.panel = None;
+                state.file = None;
+                state.tabs.clear();
+                state.files = false;
                 self.focus.focus(window, cx);
             }
             "canvas.zoom_reset" => state.doc.camera.zoom_at(1., anchor),
@@ -1003,19 +1102,7 @@ impl AppWindow {
                         f32::from(e.position.x - origin.x),
                         f32::from(e.position.y - origin.y),
                     ]);
-                    let space = this
-                        .canvas_state
-                        .doc
-                        .spaces
-                        .iter()
-                        .rev()
-                        .find(|s| {
-                            point[0] >= s.rect[0]
-                                && point[1] >= s.rect[1]
-                                && point[0] <= s.rect[0] + s.rect[2]
-                                && point[1] <= s.rect[1] + s.rect[3]
-                        })
-                        .map(|s| s.space.clone());
+                    let space = this.space_at(e.position);
                     let machine = space
                         .as_deref()
                         .and_then(|s| this.model.space(s))
@@ -1037,6 +1124,7 @@ impl AppWindow {
                 cx.listener(|this, e: &MouseDownEvent, window, cx| {
                     this.focus.focus(window, cx);
                     this.canvas_state.drag = Some((None, e.position));
+                    this.canvas_state.pan_moved = false;
                     cx.notify();
                 }),
             )
@@ -1144,6 +1232,7 @@ impl AppWindow {
                     }
                 } else {
                     this.canvas_state.doc.camera.pan(d);
+                    this.canvas_state.pan_moved = true;
                 }
                 this.canvas_state.drag.as_mut().unwrap().1 = e.position;
                 this.canvas_changed(cx);
@@ -1151,8 +1240,13 @@ impl AppWindow {
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
+                cx.listener(|this, e: &MouseUpEvent, window, cx| {
+                    // A click that did not pan, inside a space: its files go to the panel tree.
+                    let click = matches!(this.canvas_state.drag, Some((None, _))) && !this.canvas_state.pan_moved;
                     this.canvas_state.end_drag();
+                    if let Some(space) = click.then(|| this.space_at(e.position)).flatten() {
+                        this.show_space_files(space, window, cx);
+                    }
                     cx.notify();
                 }),
             )
@@ -1164,7 +1258,12 @@ impl AppWindow {
                 }),
             );
         for space in &state.doc.spaces {
-            if self.model.spaces.iter().any(|s| s.id == space.space && root_space(s)) {
+            if self
+                .model
+                .spaces
+                .iter()
+                .any(|s| s.id == space.space && root_space(s))
+            {
                 continue;
             }
             let id = space.space.clone();
@@ -1197,9 +1296,10 @@ impl AppWindow {
                                 ))
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                                    cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                                         this.canvas_state.space_drag =
                                             Some((id.clone(), false, e.position));
+                                        this.show_space_files(id.clone(), window, cx);
                                         cx.stop_propagation();
                                     }),
                                 )
@@ -1503,6 +1603,7 @@ impl AppWindow {
                         this.model.focus_pane(&p);
                     }
                     this.canvas_state.panel = Some(addr.clone());
+                    this.canvas_state.file = None;
                     this.sync(window, cx);
                     if let Some(t) = this.terms.get("canvas-panel") {
                         t.focus.focus(window, cx);
@@ -1553,6 +1654,31 @@ impl AppWindow {
                     })),
             );
         }
+        // Like Claude's toolbar: the folder opens or closes the files pane (tree and preview).
+        let open = state.panel.is_some() || state.file.is_some() || state.files;
+        tabs = tabs.child(
+            div()
+                .id("canvas-files")
+                .flex()
+                .items_center()
+                .px(px(10.))
+                .py(px(6.))
+                .rounded(px(6.))
+                .cursor_pointer()
+                .hover(|d| d.bg(c("surface")))
+                .when(open, |d| d.bg(c("surface")))
+                .child(svg().path("mods/files/folder.svg").size(px(14.)).text_color(c("foreground")))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    if open {
+                        this.canvas_command("panel.close", window, cx);
+                    } else {
+                        this.canvas_state.files = true;
+                        this.canvas_state.doc.panel.tree_hidden = false;
+                        this.sync(window, cx);
+                        cx.notify();
+                    }
+                })),
+        );
         area = area.child(tabs);
         let mut row = div()
             .size_full()
@@ -1577,7 +1703,7 @@ impl AppWindow {
                     this.canvas_state.space_drag = None;
                 }),
             );
-        if state.panel.is_some() {
+        if state.panel.is_some() || state.file.is_some() || state.files {
             let full_width = self
                 .bounds
                 .borrow()
@@ -1619,7 +1745,7 @@ impl AppWindow {
                         }),
                     ),
             );
-            let addr = state.panel.as_deref().unwrap();
+            let addr = state.panel.as_deref().unwrap_or("");
             let rec = self.live.get(addr).unwrap_or(&Value::Null);
             let program = &rec["program"];
             let agent = canvas_agent(rec);
@@ -1640,47 +1766,194 @@ impl AppWindow {
                 .or(rec["title"].as_str().filter(|s| !s.is_empty()))
                 .or_else(|| self.cwds.get(addr).and_then(|s| s.rsplit('/').next()))
                 .unwrap_or(addr);
-            let icon = if agent {
-                program["icon"].as_str().unwrap_or("icons/agent.svg")
-            } else {
-                "icons/shell.svg"
-            };
+            let mut tabs = div()
+                .id("canvas-tabs")
+                .flex()
+                .gap(px(4.))
+                .px(px(8.))
+                .py(px(6.))
+                .h(px(40.))
+                .flex_none()
+                .overflow_x_scroll()
+                .border_b_1()
+                .border_color(c("border"));
+            for tab in &state.tabs {
+                let tab = tab.clone();
+                let is_file = std::path::Path::new(&tab).is_absolute();
+                let active = if is_file {
+                    state.file.as_ref() == Some(&tab)
+                } else {
+                    state.file.is_none() && state.panel.as_ref() == Some(&tab)
+                };
+                let label = if is_file {
+                    std::path::Path::new(&tab).file_name().unwrap_or_default().to_string_lossy().into_owned()
+                } else {
+                    // The pill's name: the program's title, else its folder's name.
+                    self.live
+                        .get(&tab)
+                        .and_then(|r| r["title"].as_str())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| self.cwds.get(&tab).and_then(|s| s.rsplit('/').next()))
+                        .unwrap_or("terminal")
+                        .to_owned()
+                };
+                let icon = if is_file {
+                    "mods/files/file.svg"
+                } else {
+                    self.live
+                        .get(&tab)
+                        .and_then(|r| r["program"]["icon"].as_str())
+                        .unwrap_or("icons/shell.svg")
+                }
+                .to_owned();
+                let activate = tab.clone();
+                let close = tab.clone();
+                tabs = tabs.child(
+                    div()
+                        .id(SharedString::from(format!("panel-tab-{tab}")))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(7.))
+                        .px(px(8.))
+                        .rounded(px(7.))
+                        .when(active, |d| d.bg(c("hover")))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if is_file {
+                                this.canvas_state.file = Some(activate.clone());
+                                this.focus.focus(window, cx);
+                            } else {
+                                this.canvas_state.panel = Some(activate.clone());
+                                this.canvas_state.file = None;
+                            }
+                            this.sync(window, cx);
+                            cx.notify();
+                        }))
+                        .child(
+                            svg()
+                                .path(SharedString::from(icon))
+                                .size(px(14.))
+                                .text_color(c("muted-foreground")),
+                        )
+                        .child(div().text_size(px(12.)).child(label))
+                        .child(
+                            panel_button(
+                                "tab-close",
+                                "mods/pane/close.svg",
+                                c("muted-foreground"),
+                                c("hover"),
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    let active = this
+                                        .canvas_state
+                                        .file
+                                        .as_ref()
+                                        .or(this.canvas_state.panel.as_ref())
+                                        .cloned();
+                                    let next = canvas::close_panel_tab(
+                                        &mut this.canvas_state.tabs,
+                                        active.as_deref(),
+                                        &close,
+                                    );
+                                    this.canvas_state.file = next
+                                        .as_ref()
+                                        .filter(|p| std::path::Path::new(p).is_absolute())
+                                        .cloned();
+                                    if let Some(next) =
+                                        next.filter(|p| !std::path::Path::new(p).is_absolute())
+                                    {
+                                        this.canvas_state.panel = Some(next);
+                                    } else if this.canvas_state.tabs.is_empty() {
+                                        this.canvas_state.panel = None;
+                                    }
+                                    this.sync(window, cx);
+                                    cx.notify();
+                                },
+                            )),
+                        ),
+                );
+            }
+            panel = panel.child(tabs);
+            let path = state
+                .file
+                .as_deref()
+                .unwrap_or_else(|| self.cwds.get(addr).map(String::as_str).unwrap_or(name));
+            let root = self.panel_root();
+            // Outside the tree's folder, paths read from home.
+            let breadcrumb = canvas::breadcrumb(path, root.as_deref().filter(|r| std::path::Path::new(path).starts_with(r)).or(Some(&home())));
             panel = panel.child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(px(6.))
                     .px(px(12.))
                     .h(px(36.))
                     .flex_none()
                     .border_b_1()
                     .border_color(c("border"))
                     .child(
-                        svg()
-                            .path(SharedString::from(icon.to_string()))
-                            .size(px(16.))
-                            .text_color(c("foreground")),
-                    )
-                    .child(kind.to_owned())
-                    .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .text_ellipsis()
+                            .text_size(px(12.))
                             .text_color(c("muted-foreground"))
-                            .child(name.to_owned()),
+                            .child(breadcrumb),
                     )
+                    .when(state.file.is_some(), |d| {
+                        d.child(
+                            panel_button(
+                                "panel-pin",
+                                "mods/workspace-chrome/pin.svg",
+                                c("muted-foreground"),
+                                c("hover"),
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    if let Some(path) = this.canvas_state.file.clone() {
+                                        this.open_preview(
+                                            json!({"path":path,"place":"canvas"}),
+                                            window,
+                                            cx,
+                                        );
+                                    }
+                                },
+                            )),
+                        )
+                    })
+                    .when(state.file.is_none(), |d| {
+                        d.child(
+                            panel_button(
+                                "canvas-panel-pop",
+                                "icons/external-link.svg",
+                                c("muted-foreground"),
+                                c("hover"),
+                            )
+                            .on_click(cx.listener(
+                                |this, _, window, cx| {
+                                    if let Some(addr) = this.canvas_state.panel.clone() {
+                                        this.pop_canvas(addr, false, window, cx);
+                                    }
+                                },
+                            )),
+                        )
+                    })
                     .child(
                         panel_button(
-                            "canvas-panel-pop",
-                            "icons/external-link.svg",
+                            "panel-tree",
+                            "mods/workspace-chrome/panel-right.svg",
                             c("muted-foreground"),
                             c("hover"),
                         )
                         .on_click(cx.listener(|this, _, window, cx| {
-                            if let Some(addr) = this.canvas_state.panel.clone() {
-                                this.pop_canvas(addr, false, window, cx);
-                            }
+                            this.canvas_state.doc.panel.tree_hidden =
+                                !this.canvas_state.doc.panel.tree_hidden;
+                            this.canvas_changed(cx);
+                            this.sync(window, cx);
+                            cx.notify();
                         })),
                     )
                     .child(
@@ -1695,9 +1968,50 @@ impl AppWindow {
                         })),
                     ),
             );
-            if let Some(t) = self.terms.get("canvas-panel") {
-                panel = panel.child(div().flex_1().min_h_0().child(shown_terminal(&t.view, cx)));
+            let mut body = div().flex().flex_1().min_h_0();
+            if let Some((view, _)) = state
+                .file
+                .as_ref()
+                .filter(|p| {
+                    std::path::Path::new(p)
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+                })
+                .and_then(|p| state.previews.get(p))
+            {
+                body = body.child(div().flex_1().min_w_0().h_full().px(px(24.)).py(px(20.)).child(gpui_base::TextView::new(view).scrollable(true)
+                    .image_source(|_| {
+                        static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
+                        gpui::ImageSource::Image(BLANK.clone())
+                    }).on_link_click(|_,_,_,_|{})));
+            } else if state.file.is_some() {
+                body = body.child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .child(self.render_slot("canvas-file", cx)),
+                );
+            } else if let Some(t) = self.terms.get("canvas-panel").filter(|_| state.panel.is_some()) {
+                body = body.child(div().flex_1().min_w_0().child(shown_terminal(&t.view, cx)));
+            } else {
+                body = body.child(
+                    div().flex_1().flex().items_center().justify_center().text_size(px(12.))
+                        .text_color(c("muted-foreground")).child("Select a file to preview it"),
+                );
             }
+            if !state.doc.panel.tree_hidden {
+                body = body.child(
+                    div()
+                        .w(px(220.))
+                        .h_full()
+                        .flex_none()
+                        .border_l_1()
+                        .border_color(c("border"))
+                        .child(self.render_slot("canvas-tree", cx)),
+                );
+            }
+            panel = panel.child(body);
             row = row.child(panel);
         }
         row.into_any_element()

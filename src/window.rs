@@ -1106,7 +1106,7 @@ impl AppWindow {
         if self.has_canvas() && let Some(addr) = &self.canvas_state.panel {
             terms.push(("canvas-panel".into(), addr.clone()));
         }
-        let mut mods = Vec::new();
+        let mut mods = self.panel_mods();
         let visit = |n: &Node, terms: &mut Vec<(String, String)>, mods: &mut Vec<(String, Instance)>| match n.content() {
             Some(Content::Terminal { terminal }) => terms.push((n.id.clone(), terminal.clone())),
             Some(Content::Mod { name, props }) => mods.push((n.id.clone(), Instance { name: name.clone(), props: props.clone() })),
@@ -1177,7 +1177,7 @@ impl AppWindow {
     /// nodes, inactive stack children, hidden floats), every pane mod of every
     /// tab (zoomed or not shown), and the overlays.
     fn owned_mods(&self) -> HashMap<String, Instance> {
-        let mut out = HashMap::new();
+        let mut out: HashMap<String, Instance> = self.panel_mods().into_iter().collect();
         let inst = |name: &String, props: &Value| Instance { name: name.clone(), props: props.clone() };
         for n in self.chrome.walk() {
             if let Some(Content::Mod { name, props }) = n.content() {
@@ -1338,6 +1338,10 @@ impl AppWindow {
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
         self.swapped.retain(|p, a| model.address_of(p).is_some() && live.contains_key(a));
+        if let Some(addr) = &self.canvas_state.panel {
+            if self.canvas_state.file.is_none() { crate::canvas::open_panel_tab(&mut self.canvas_state.tabs, addr); }
+        }
+        self.canvas_state.tabs.retain(|t| std::path::Path::new(t).is_absolute() || self.live.contains_key(t));
         let (mut terms, mods_visible) = self.visible();
         let covered: HashSet<&str> = terms.iter().filter_map(|(slot, _)| slot.strip_suffix(SWAP)).collect();
         let mut displayed: HashSet<String> = terms.iter().filter(|(slot, _)| !covered.contains(slot.as_str())).map(|(slot, _)| slot.clone()).collect();
@@ -1405,6 +1409,9 @@ impl AppWindow {
             }
         }
         self.publish_shown_copies();
+        if let Some(copy) = self.copies.get("canvas-tree") {
+            mods::send_command_to(copy.id, &json!({"selected":self.canvas_state.file}).to_string());
+        }
 
         // Keyboard to the focused pane when it changes (never steal it from an open dialog).
         let model_pane = self.model.focused_pane();
@@ -1434,7 +1441,7 @@ impl AppWindow {
         let tab_shown = self.shows_tab();
         let revealed = tab_shown && !self.tab_shown;
         self.tab_shown = tab_shown;
-        if self.has_canvas() && self.canvas_state.panel.is_some() {
+        if self.has_canvas() && self.canvas_state.panel.is_some() && self.canvas_state.file.is_none() {
             if no_dialog && let Some(t)=self.terms.get("canvas-panel") {t.focus.focus(window,cx);}
         } else if terminal_block(&self.chrome, focused.as_deref()).is_some() {
             if pane_changed && no_dialog && let Some(f) = focused.as_deref().and_then(|p| self.pane_focus(p, cx)) {
@@ -2862,6 +2869,7 @@ impl AppWindow {
                 if self.canvas_state.popped.contains_key(addr) { self.pop_canvas(addr.to_owned(), false, window, cx); return; }
                 if let Some(p)=self.model.pane_of(addr) {self.model.focus_pane(&p);}
                 self.canvas_state.panel=Some(addr.to_owned());
+                self.canvas_state.file=None;
             }
             "panel.pop_out" | "panel.bring_back" => {
                 if let Some(addr) = Self::owned(a, "terminal").or_else(|| self.canvas_state.panel.clone()) {

@@ -1,9 +1,10 @@
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window } from "herdr";
+import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, props, run, nextCommand } from "herdr";
 
 function location() {
+  if (props()?.canvas) return { cwd: props().root, on: null };
   const space = spaces().find(s => s.active), f = focused();
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
@@ -12,6 +13,10 @@ function location() {
 const key = () => JSON.stringify(location());
 const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 const PER_FOLDER = 500, TOTAL = 5000;
+
+function matchesFile(entry, filter) {
+  return entry.dir || !filter || entry.name.toLowerCase().includes(filter.toLowerCase());
+}
 
 async function directory(path, on) {
   const windowsDirectory = async () => {
@@ -40,6 +45,15 @@ async function directory(path, on) {
 
 export default class Files extends View {
   init(_props, cx) {
+    this.filter = "";
+    this.input = InputState.new({ placeholder: "Filter files" });
+    this.input.on("change", (_e, cx) => { this.filter = this.input.value(); cx.notify(); });
+    if (props()?.canvas === "tree") cx.spawn(async cx => {
+      while (true) {
+        const command = await nextCommand();
+        try { const selected = JSON.parse(command).selected; if (selected !== this.selected) { this.selected = selected; cx.notify(); } } catch {}
+      }
+    });
     this.saved = new Map();
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
     this.refresh(cx);
@@ -51,7 +65,7 @@ export default class Files extends View {
     this.watched = root;
     const context = this.context;
     cx.spawn(async cx => {
-      try { while (this.context === context) { await watchFolder(root); if (this.current(context)) this.refresh(cx); } }
+      try { while (this.context === context) { await watchFolder(root); if (this.current(context)) { this.refresh(cx); if (this.file) this.show(this.file, cx); } } }
       catch { if (this.context === context) this.watched = null; }
     });
   }
@@ -77,7 +91,7 @@ export default class Files extends View {
       this.context = { key: next, cwd, on }; this.root = cwd; this.on = on; this.entries = new Map(); this.folders = new Set(saved?.folders);
       this.pending = new Set(); this.marks = {}; this.show(null); this.watched = null; this.error = null; this.limited = false;
       this.loading = false;
-      if (saved?.file) this.show(saved.file, cx);
+      if (props()?.file || saved?.file) this.show(props()?.file || saved.file, cx);
     }
     if (!cwd || this.loading) return;
     const context = this.context;
@@ -101,6 +115,7 @@ export default class Files extends View {
         }
         if (!this.current(context)) return;
         this.marks = marks; this.error = null; this.watch(cwd, cx);
+
       } catch (e) { if (this.current(context)) this.error = String(e); }
       finally { if (this.context === context) this.loading = false; cx.notify(); }
     });
@@ -135,8 +150,8 @@ export default class Files extends View {
       try {
         const text = await readTextFile(`${root}/${path}`, { on });
         if (this.file !== path || !this.current(context)) return;
-        if (text === null) { this.fileError = "This file is no longer available"; return; }
-        if (text.includes("\0")) { this.fileError = "Binary file · no text preview"; return; }
+        if (text === null) { this.fileError = "File deleted"; return; }
+        if (text.includes("\0")) { this.fileError = "Can't preview"; return; }
         const t = theme(), ext = path.includes(".") ? path.split(".").pop() : "txt";
         this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: true,
           value: text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text,
@@ -151,9 +166,10 @@ export default class Files extends View {
     if (out.length >= TOTAL || depth > 40) return out;
     for (const entry of this.entries.get(prefix) ?? []) {
       if (out.length >= TOTAL) break;
+      if (!matchesFile(entry, this.filter)) continue;
       const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
-      out.push(h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover))
-        .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : this.show(path, cx))
+      out.push(h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover)).when((this.file === path || this.selected === `${this.root}/${path}`), el => el.bg(t.hover))
+        .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : props()?.canvas ? (this.selected = `${this.root}/${path}`, run("preview.open", { path: `${this.root}/${path}` }), cx.notify()) : this.show(path, cx))
         .child(entry.dir ? svg(`mods/files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
         .child(svg(`mods/files/${entry.dir ? "folder" : "file"}.svg`).size(14).flex_none().text_color(t.muted))
         .child(div().flex_1().min_w(0).truncate().child(entry.name))
@@ -166,6 +182,13 @@ export default class Files extends View {
   render(cx) {
     if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
+    if (props()?.canvas === "viewer") return v_flex().size_full().min_h(0).text_color(t.foreground)
+      .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(16).text_color(t.dim).child(this.fileError || "Loading file…"));
+    if (props()?.canvas === "tree") return v_flex().size_full().min_h(0).text_size(13).text_color(t.muted)
+      .child(div().p(8).flex_none().child(Input.new(this.input).w_full().h(30).px(8).rounded(6).bg(t.hover).text_size(12)))
+      .child(v_flex().id("canvas-files-tree").flex_1().min_h(0).overflow_y_scrollbar().px(6).pb(6).children(this.rows("", 0, [], t))
+        .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "Click a space to see its files"))))
+        .when(this.limited, el => el.child(div().p(8).text_size(11).child("File list limited"))));
     return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
         .when(Boolean(this.file), el => el.child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←")))

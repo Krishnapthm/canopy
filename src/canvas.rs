@@ -204,6 +204,11 @@ pub struct Card {
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Panel {
+    #[serde(default)]
+    pub tree_hidden: bool,
+    /// The space last clicked on the canvas: the panel's file tree shows its folder.
+    #[serde(default)]
+    pub space: Option<String>,
     pub width: Option<f32>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -410,7 +415,12 @@ mod tests {
     }
     #[test]
     fn new_space_never_lands_on_an_existing_one() {
-        let space = |x| Space { space: "s".into(), rect: [x, 0., 960., 640.], color: "blue".into(), frame: true };
+        let space = |x| Space {
+            space: "s".into(),
+            rect: [x, 0., 960., 640.],
+            color: "blue".into(),
+            frame: true,
+        };
         assert_eq!(new_space_rect(&[])[0], 0.);
         // After deleting the first of two, a count-based x would reuse 1056.
         let r = new_space_rect(&[space(1056.)]);
@@ -653,5 +663,70 @@ mod tests {
             b"broken"
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+pub fn open_panel_tab(tabs: &mut Vec<String>, item: &str) {
+    if !tabs.iter().any(|t| t == item) {
+        tabs.push(item.to_owned());
+    }
+}
+
+pub fn close_panel_tab(tabs: &mut Vec<String>, active: Option<&str>, item: &str) -> Option<String> {
+    tabs.retain(|t| t != item);
+    active
+        .filter(|a| *a != item && tabs.iter().any(|t| t == a))
+        .map(str::to_owned)
+        .or_else(|| tabs.last().cloned())
+}
+
+/// A path as "src / main.rs", relative to root when inside it; the root itself shows its name.
+pub fn breadcrumb(path: &str, root: Option<&str>) -> String {
+    let path = std::path::Path::new(path);
+    let relative = root
+        .and_then(|root| path.strip_prefix(root).ok())
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| path.file_name().map(std::path::Path::new).filter(|_| root.is_some_and(|r| path == std::path::Path::new(r))))
+        .unwrap_or(path);
+    relative
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(s) => Some(s.to_string_lossy()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" / ")
+}
+
+#[cfg(test)]
+mod panel_tests {
+    use super::*;
+    #[test]
+    fn tabs_activate_without_duplicates_and_close_to_neighbor() {
+        let mut tabs = vec![];
+        open_panel_tab(&mut tabs, "terminal");
+        open_panel_tab(&mut tabs, "/tmp/a.rs");
+        open_panel_tab(&mut tabs, "terminal");
+        assert_eq!(tabs, ["terminal", "/tmp/a.rs"]);
+        assert_eq!(
+            close_panel_tab(&mut tabs, Some("/tmp/a.rs"), "terminal").as_deref(),
+            Some("/tmp/a.rs")
+        );
+        assert_eq!(
+            close_panel_tab(&mut tabs, Some("/tmp/a.rs"), "/tmp/a.rs"),
+            None
+        );
+    }
+    #[test]
+    fn breadcrumbs_respect_directory_boundaries() {
+        assert_eq!(breadcrumb("/repo", Some("/repo")), "repo");
+        assert_eq!(
+            breadcrumb("/repo/src/main.rs", Some("/repo")),
+            "src / main.rs"
+        );
+        assert_eq!(
+            breadcrumb("/repository/a", Some("/repo")),
+            "repository / a"
+        );
     }
 }
