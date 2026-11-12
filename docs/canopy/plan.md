@@ -681,3 +681,4 @@ Write here when the code disproves something above (date, what, new decision).
 - 2026-11-12: phase 2 accepted live by Krishna (7.9 items 1-9 and 11, plus mouse pan, resize handles and the menu bar). Item 10 (window mode) is deferred.
 
 - 2026-11-12: 8.2 stores previews in a serde-defaulted `previews` list alongside terminal cards. gpui-kit syntect is private to its editor module, so previews use plain numbered monospace. TextView images require an authoritative inert image override and links are disabled to keep untrusted previews offline.
+- 2026-11-12: Krishna wants the canvas side panel to look like Claude's file pane: a tab per open terminal or file, a path header, highlighted code or rendered markdown, and the selected pill's space file tree in a column on the right (root terminals: their current folder). Canvas preview cards stay as a way to pin a file, using the same viewer. Quote and send-to-session (8.3) follow after the look.
