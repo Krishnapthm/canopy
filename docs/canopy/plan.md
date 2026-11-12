@@ -298,6 +298,10 @@ working (the canvas is additive).
 - **Pinch**, or **Cmd + scroll** (Ctrl on Linux): zoom one step per gesture tick, around the
   cursor (the world point under the cursor stays put).
 - **Space + drag** on the canvas, or **middle-mouse drag**: pan.
+- **H + left-drag** with canvas focus: pan anywhere, including pills and spaces.
+  H and Space show an open hand while held, closed while panning; focus loss clears held keys.
+- **Left-drag on empty canvas**: pan. A plain click still focuses the canvas; right-click opens
+  its menu. Pills, space labels, resize handles and controls retain their own mouse actions.
 - `Cmd+0`: zoom to 1.0 around the window center. `Cmd+=` / `Cmd+-`: one step in or out.
   `Cmd+Shift+F`: fit all spaces and cards in view (snap down to a step).
 - In window mode (7.5.3), scroll over the **focused** live terminal goes to the terminal
@@ -670,3 +674,5 @@ Write here when the code disproves something above (date, what, new decision).
 - 2026-11-12: terminal visibility used the main window's global frame counter.
   Standalone terminal views explicitly remain visible while their window lives;
   hidden-tab sizing skips popped terminals so it cannot overwrite their PTY size.
+
+- 2026-11-12: canvas adds focus-scoped H-drag and empty-canvas mouse drag pan, hand cursors for H/Space, and cleanup for missed key-up and mouse-up events.

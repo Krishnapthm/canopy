@@ -9,6 +9,7 @@ pub(super) struct State {
     pub popped: HashMap<String, WindowHandle<PopOut>>,
     save: canvas::SaveSchedule,
     pub space_down: bool,
+    pub h_down: bool,
     resizing: bool,
     writable: bool,
     save_task: Option<Task<()>>,
@@ -39,6 +40,7 @@ impl State {
             popped: HashMap::new(),
             save: canvas::SaveSchedule::default(),
             space_down: false,
+            h_down: false,
             resizing: false,
             writable,
             save_task: None,
@@ -49,6 +51,22 @@ impl State {
             space_drag: None,
             drag: None,
         }
+    }
+    /// Space or H is held: a left drag anywhere on the canvas pans.
+    pub fn pan_held(&self) -> bool {
+        self.space_down || self.h_down
+    }
+    /// Space or H was released or lost (window deactivated).
+    pub fn release_pan_keys(&mut self) {
+        self.space_down = false;
+        self.h_down = false;
+    }
+
+    /// Ends any pan, card, space or panel-resize drag.
+    pub(super) fn end_drag(&mut self) {
+        self.drag = None;
+        self.space_drag = None;
+        self.resizing = false;
     }
     pub fn flush(&mut self) {
         self.save_task = None;
@@ -704,6 +722,22 @@ impl AppWindow {
             .h_full()
             .overflow_hidden()
             .bg(c(bg))
+            .map(|d| match (&state.drag, state.pan_held()) {
+                (Some((None, _)), _) => d.cursor(CursorStyle::ClosedHand),
+                (_, true) => d.cursor(CursorStyle::OpenHand),
+                _ => d,
+            })
+            // Capture phase, before pills and space labels: middle drag, or left drag with
+            // Space/H held, pans from anywhere on the canvas.
+            .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, cx| {
+                if e.button == MouseButton::Middle
+                    || (e.button == MouseButton::Left && this.canvas_state.pan_held())
+                {
+                    this.canvas_state.drag = Some((None, e.position));
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
             .child(
                 canvas(
                     move |b, _, _| {
@@ -800,32 +834,25 @@ impl AppWindow {
                     cx.stop_propagation();
                 }),
             )
-            .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, _| {
-                if e.keystroke.key == "space" {
-                    this.canvas_state.space_down = true;
-                }
-            }))
-            .on_key_up(cx.listener(|this, e: &KeyUpEvent, _, _| {
-                if e.keystroke.key == "space" {
-                    this.canvas_state.space_down = false;
-                }
-            }))
             .on_mouse_down(
                 MouseButton::Left,
+                // Reached only on empty canvas: pills, space labels and controls stop propagation.
+                // A click without movement just focuses the canvas; moving pans.
                 cx.listener(|this, e: &MouseDownEvent, window, cx| {
                     this.focus.focus(window, cx);
-                    if this.canvas_state.space_down {
-                        this.canvas_state.drag = Some((None, e.position));
-                    }
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Middle,
-                cx.listener(|this, e: &MouseDownEvent, _, _| {
                     this.canvas_state.drag = Some((None, e.position));
+                    cx.notify();
                 }),
             )
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+                // The button came up outside the window: end any drag instead of panning on hover.
+                if e.pressed_button.is_none()
+                    && (this.canvas_state.drag.is_some() || this.canvas_state.space_drag.is_some())
+                {
+                    this.canvas_state.end_drag();
+                    cx.notify();
+                    return;
+                }
                 if let Some((id, resize, previous)) = this.canvas_state.space_drag.clone() {
                     let zoom = this.canvas_state.doc.camera.zoom;
                     let delta = [
@@ -898,18 +925,16 @@ impl AppWindow {
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| {
-                    this.canvas_state.drag = None;
-                    this.canvas_state.space_drag = None;
-                    this.canvas_state.resizing = false;
+                cx.listener(|this, _, _, cx| {
+                    this.canvas_state.end_drag();
+                    cx.notify();
                 }),
             )
             .on_mouse_up(
                 MouseButton::Middle,
-                cx.listener(|this, _, _, _| {
-                    this.canvas_state.drag = None;
-                    this.canvas_state.space_drag = None;
-                    this.canvas_state.resizing = false;
+                cx.listener(|this, _, _, cx| {
+                    this.canvas_state.end_drag();
+                    cx.notify();
                 }),
             );
         for space in &state.doc.spaces {
@@ -1214,11 +1239,6 @@ impl AppWindow {
                         cx.stop_propagation();
                         return;
                     }
-                    if this.canvas_state.space_down {
-                        this.canvas_state.drag = Some((None, e.position));
-                        cx.stop_propagation();
-                        return;
-                    }
                     this.canvas_state.drag = Some((Some(drag_addr.clone()), e.position));
                     cx.stop_propagation();
                     if e.click_count == 2 {
@@ -1263,7 +1283,8 @@ impl AppWindow {
             .gap(px(4.))
             .p(px(4.))
             .rounded(px(8.))
-            .bg(c("hover"));
+            .bg(c("hover"))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         for (command, label, view) in [
             ("view.agents", "Agents", canvas::View::Agents),
             ("view.all", "All", canvas::View::All),
