@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Close the dev app first so its reconnect loop cannot restart the scratch core.
+set -euo pipefail
+[[ $# == 0 ]] || { echo 'usage: scripts/dev-stop' >&2; exit 2; }
+root=${TMPDIR:-/tmp}/canopy-dev
+[[ $root == /* ]] || { echo 'TMPDIR must be absolute' >&2; exit 1; }
+export HERDR_APP_HOME=$root/home HC_SESSION=canopy-dev HC_SOCKET=$root/c.sock
+export XDG_STATE_HOME=$root/state XDG_CONFIG_HOME=$root/config
+unset HC_TERMINAL_ID HC_TERMINAL_SOCKET
+[[ -f $root/owned/hc ]] || { echo 'no scratch core reservation; nothing stopped' >&2; exit 1; }
+IFS= read -r hc <"$root/owned/hc"
+[[ $hc == /* && -x $hc ]] || { echo 'reserved hc binary missing' >&2; exit 1; }
+"$hc" server stop
+rm "$root/owned/hc"
+rmdir "$root/owned"

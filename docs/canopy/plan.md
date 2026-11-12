@@ -647,3 +647,6 @@ compiles, these can run as separate sessions on separate files: spaces + right-c
 Write here when the code disproves something above (date, what, new decision).
 
 - 2026-11-12: no `upstream` remote (Krishna). `pivot/canvas` was branched from a one-off clone of herdr-app `master` at `4c8c622`; pull later fixes with `git pull https://github.com/herdrdev/herdr-app master` when wanted.
+- 2026-11-12: one terminal cannot be drawn at its own font size or zoom; font size, cell metrics and padding come from global settings (`docs/canopy/herdr-map.md`). Window mode's live scaling (7.5.3) needs a terminal renderer change: stopped before building it, Krishna decides. Pills (the default) are unaffected.
+- 2026-11-12: arbitrary text can be written into a terminal through core input (`src/hc.rs:512`), so 8.3's clipboard fallback is not needed.
+- 2026-11-12: isolation works by env only: `HERDR_APP_HOME`, `HC_SESSION`, `HC_SOCKET`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` (checked in installed `hc` 0.1.20). `scripts/dev` also sets `DO_NOT_TRACK=1` until phase 1.
