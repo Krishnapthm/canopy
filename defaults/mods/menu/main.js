@@ -1,10 +1,11 @@
 // Modified for Canopy.
 // Context menus (Canopy's items). Opened as a popup with
 // props { tab: "pane" | "tab" | "space" | "global", target }.
-// ↑/↓ move, Enter runs, Esc closes. An item is [label, command, args];
-// a command "worktree" opens the worktree dialog instead.
+// ↑/↓ move, Enter runs, Esc closes. An item is [label, command, args, program?];
+// a command "worktree" opens the worktree dialog instead. A null command is a
+// section label or a note: shown, never chosen.
 
-import { View, div, svg } from "gpui-kit";
+import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, knownAgents } from "herdr";
 
@@ -22,7 +23,8 @@ async function checkout(folder, on) {
   return common.stdout.trim() === `${top.stdout.trim()}/.git` ? "main" : "linked";
 }
 
-function items(p, git) {
+// `agents`: knownAgents() for canvas-empty, undefined while it is still checking.
+function items(p, git, agents) {
   p = p ?? {};
   const tg = p.target ?? {};
   // `machine` only picks which agents to list; canvas.create does not take it.
@@ -31,10 +33,10 @@ function items(p, git) {
     case "canvas-empty": return [
       ["New terminal", "canvas.create", at],
       ["Open file...", "preview.open", { point: tg.point }],
-      ["New agent >", "canvas-agents", tg],
       ...(!tg.space ? [["New space here", "canvas.create", { ...at, kind: "space" }]] : []),
+      ["Agents", null, { label: true }],
+      ...agentItems(agents, at),
     ];
-    case "canvas-agents": return (p.agents ?? []).filter(a => a.installed).map(a => [a.name, "canvas.create", { ...at, argv: a.run }]);
     case "canvas-space": return [
       ["Rename", "space.rename", { id: tg.id }],
       ["Color >", "canvas-colors", tg],
@@ -102,6 +104,14 @@ function items(p, git) {
   }
 }
 
+// Installed agents from the program table, so a newly listed agent appears with no code change.
+function agentItems(agents, at) {
+  if (!agents) return [["Checking installed agents...", null, {}]];
+  const installed = agents.filter(a => a.installed);
+  if (!installed.length) return [["No agents installed", null, {}]];
+  return installed.map(a => [a.name, "canvas.create", { ...at, argv: a.run }, a]);
+}
+
 function menuIcon(command) {
   const name = command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
   return `mods/workspace-chrome/${name}.svg`;
@@ -117,11 +127,17 @@ function shortcut(name, args) {
 
 export default class Menu extends View {
   init(_props, cx) {
-    this.at = 0;
     this.git = null;
     this.handle = cx.focus_handle();
     this.handle.focus();
     const p = props();
+    // Checked when the menu opens: it runs a login shell, so it can take seconds.
+    if (p?.tab === "canvas-empty")
+      cx.spawn(async (cx) => {
+        this.agents = await knownAgents({ on: p.target?.machine }).catch(() => []);
+        cx.notify();
+      });
+    this.at = 0;
     const space = p?.tab === "space" && spaces().find((s) => s.id === p.target?.id);
     const folder = space && place(space);
     if (folder)
@@ -132,22 +148,20 @@ export default class Menu extends View {
   }
 
   choose(i, cx) {
-    const it = items(props(), this.git)[i];
-    if (!it) return;
+    const it = items(props(), this.git, this.agents)[i];
+    if (!it?.[1]) return;
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
     else if (it[1] === "canvas-close") openOverlay({ mod: "confirm", kind: "dialog", width: 380, props: { title: "Close terminal?", detail: "This ends the terminal and its running programs.", command: { name: "terminal.kill", args: it[2] } } });
-    else if (it[1] === "canvas-agents") cx.spawn(async () => {
-      const agents = await knownAgents({ on: it[2].machine }).catch(() => []);
-      if (agents.some(a => a.installed)) openOverlay({ mod: "menu", kind: "popup", width: 240, props: { tab: "canvas-agents", target: it[2], agents } });
-    });
     else if (it[1] === "canvas-colors") openOverlay({ mod: "menu", kind: "popup", width: 220, props: { tab: "canvas-colors", target: it[2] } });
     else run(it[1], it[2]);
   }
 
   render(cx) {
     const t = theme();
-    const list = items(props(), this.git);
+    const list = items(props(), this.git, this.agents);
+    // Arrow keys step over labels and notes.
+    const step = (d) => { for (let n = 1; n <= list.length; n++) { const j = (this.at + d * n + list.length * n) % list.length; if (list[j][1]) return j; } return this.at; };
     return v_flex()
       .id("menu")
       .track_focus(this.handle)
@@ -157,16 +171,21 @@ export default class Menu extends View {
       .bg(t.popover)
       .text_size(12.8)
       .on_key_down((e, cx) => {
-        if (e.key === "down") this.at = (this.at + 1) % list.length;
-        else if (e.key === "up") this.at = (this.at + list.length - 1) % list.length;
+        if (e.key === "down") this.at = step(1);
+        else if (e.key === "up") this.at = step(-1);
         else if (e.key === "enter") this.choose(this.at, cx);
         else if (e.key === "escape") closeOverlay(props().overlay);
         else return;
         cx.notify();
       })
       .children(
-        list.map((it, i) =>
-          v_flex()
+        list.map((it, i) => !it[1]
+          // shadcn ContextMenuSeparator + ContextMenuLabel; a note is a dim row.
+          ? v_flex()
+            .when(it[2].label, el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+            .child(div().px(8).py(it[2].label ? 5 : 7).text_size(it[2].label ? 11.5 : 12.8).text_color(t.dim)
+              .when(it[2].label, el => el.font_semibold()).child(it[0]))
+          : v_flex()
             .when(i > 0 && (it[1].endsWith(".close") || it[1] === "app.help" || (it[1] === "app.theme" && list[i - 1][1] !== "app.theme")), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
             .child(h_flex()
             .id(`mi-${i}`)
@@ -180,7 +199,9 @@ export default class Menu extends View {
             .when(i === this.at, (el) => el.bg(t.selected))
             .hover((s) => s.bg(t.hover))
             .on_click((_e, cx) => this.choose(i, cx))
-            .child(svg(menuIcon(it[1])).size(14).flex_none().text_color(t.muted))
+            .child(it[3]?.icon
+              ? (it[3].tint ? svg(it[3].icon).size(14).flex_none().text_color(t.foreground) : image(it[3].icon).w(14).h(14).flex_none())
+              : svg(menuIcon(it[1])).size(14).flex_none().text_color(t.muted))
             .child(div().flex_1().child(it[0]))
             .child(div().text_size(11).text_color(t.dim).child(shortcut(it[1], it[2])))),
         ),

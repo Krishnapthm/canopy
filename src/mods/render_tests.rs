@@ -912,6 +912,13 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
         let expected = if query == "settings" { "Settings" } else { "Nothing matches" };
         assert!(tree.contains(expected), "palette query {query}: {tree}");
     }
+    // The canvas menu lists installed agents under a label once knownAgents() answers.
+    let mut p = props();
+    p.as_object_mut().unwrap().extend(json!({"tab":"canvas-empty","target":{"point":[1,2],"space":null,"machine":null}}).as_object().unwrap().clone());
+    let tree = describe(cx, &staged, "mods/menu", true, p.clone(), None).unwrap();
+    assert!(tree.contains("Checking installed agents"), "canvas menu while checking: {tree}");
+    let tree = describe(cx, &staged, "mods/menu", true, p, Some("this.agents = [{name: \"Claude Code\", installed: true, run: [\"claude\"], icon: null, tint: false}];")).unwrap();
+    assert!(tree.contains("Agents") && tree.contains("Claude Code"), "canvas menu with an agent: {tree}");
     // Reviewed overlay contract table, not extracted from arbitrary JS call sites.
     let scenarios = [
         ("mods/menu", json!({"tab":"pane","target":{"pane":"p1","terminal":"t1"}})),
