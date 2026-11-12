@@ -35,6 +35,13 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.fit", &[], "Fit all spaces and cards."),
     cmd("panel.open", &[req("terminal")], "Open a terminal in the canvas side panel."),
     cmd("panel.close", &[], "Close the canvas panel, keeping its terminal running."),
+    cmd("view.agents", &[], "Show agent cards."),
+    cmd("view.all", &[], "Show all cards."),
+    cmd("view.terminals", &[], "Show terminal cards."),
+    cmd("canvas.space_style", &[req("id"), opt("color")], "Set a space color or toggle its frame."),
+    cmd("canvas.create", &[req("point"), opt("kind"), opt("space"), opt("argv"), opt("name")], "Create a canvas terminal or space at a world point."),
+    cmd("panel.pop_out", &[opt("terminal")], "Pop the panel terminal into its own window."),
+    cmd("panel.bring_back", &[req("terminal")], "Bring a popped terminal back."),
     // What exists.
     cmd("space.new", &[opt("name"), opt("folder"), opt("tab"), opt("argv"), opt("task"), opt("machine")],
         "Make a space: its name (default: none, so it's called after where its first terminal is), the folder its terminals start in (default: the focused terminal's), its first tab's name (default: none, so it's called by its number), optionally an agent (argv) and its first message (task), and the machine it lives on (`hc machine ls`; default the focused space's machine for keys and clicks, this computer for scripts; empty string: this computer; its terminals start in that machine's home unless folder)."),

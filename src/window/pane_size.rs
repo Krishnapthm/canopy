@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Geometry for panes that aren't drawn: programs starting, and tabs that are hidden.
 //! Layout metrics are shared with the renderer; normal resize still handles pixel rounding.
 
@@ -183,6 +184,7 @@ impl AppWindow {
         for tab in self.model.tabs().filter(|t| Some(&t.id) != active.as_ref()) {
             for pane in tab.shown().panes() {
                 if let Some(t) = self.terms.get(&pane.id)
+                    && !self.canvas_state.popped.contains_key(&t.address)
                     && let Some((cols, rows)) = self.shown_size(tab, &pane.id, window)
                 {
                     t.view.read(cx).fit(cols, rows, cell, scale);

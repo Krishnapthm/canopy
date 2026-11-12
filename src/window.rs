@@ -2840,11 +2840,28 @@ impl AppWindow {
     fn dispatch(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
-            "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" => { self.canvas_command(name, window, cx); }
+            "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
             "panel.open" => {
                 let Some(addr)=Self::arg(a,"terminal").filter(|a|self.live.contains_key(*a)) else {return self.fail("no running terminal")};
+                if self.canvas_state.popped.contains_key(addr) { self.pop_canvas(addr.to_owned(), false, window, cx); return; }
                 if let Some(p)=self.model.pane_of(addr) {self.model.focus_pane(&p);}
                 self.canvas_state.panel=Some(addr.to_owned());
+            }
+            "panel.pop_out" | "panel.bring_back" => {
+                if let Some(addr) = Self::owned(a, "terminal").or_else(|| self.canvas_state.panel.clone()) {
+                    self.pop_canvas(addr, name == "panel.bring_back", window, cx);
+                }
+            }
+            "canvas.create" => {
+                self.create_canvas(a.clone(), window, cx);
+            }
+            "canvas.space_style" => {
+                if a.get("color").is_some() && !Self::arg(a, "color").is_some_and(|c| crate::canvas::COLORS.contains(&c)) { return self.fail("invalid space color"); }
+                if let Some(space) = Self::arg(a, "id").and_then(|id| self.canvas_state.doc.spaces.iter_mut().find(|s| s.space == id)) {
+                    if let Some(color) = Self::arg(a, "color").filter(|c| crate::canvas::COLORS.contains(c)) { space.color = color.into(); }
+                    else { space.frame = !space.frame; }
+                    self.canvas_changed(cx);
+                }
             }
             // ---- spaces
             "space.new" => {

@@ -294,6 +294,37 @@ pub fn edge_visible(camera: Camera, (a, b): (Point, Point), viewport: Point) -> 
         viewport,
     )
 }
+pub const COLORS: [&str; 8] = [
+    "gray", "red", "orange", "yellow", "green", "teal", "blue", "purple",
+];
+
+pub fn unused_color(spaces: &[Space], seed: usize) -> &'static str {
+    let unused: Vec<_> = COLORS
+        .into_iter()
+        .filter(|c| !spaces.iter().any(|s| s.color == *c))
+        .collect();
+    if unused.is_empty() {
+        COLORS[seed % COLORS.len()]
+    } else {
+        unused[seed % unused.len()]
+    }
+}
+
+pub fn move_space(space: &mut Space, cards: &mut [Card], members: &[String], delta: Point) {
+    space.rect[0] += delta[0];
+    space.rect[1] += delta[1];
+    for card in cards.iter_mut().filter(|c| members.contains(&c.terminal)) {
+        card.rect[0] += delta[0];
+        card.rect[1] += delta[1];
+    }
+}
+
+pub fn clear_hidden_focus(view: &View, focus: &mut Option<String>, agent: bool) {
+    if !view_allows(view, agent) {
+        *focus = None;
+    }
+}
+
 pub fn view_allows(view: &View, agent: bool) -> bool {
     match view {
         View::All => true,
@@ -305,6 +336,59 @@ pub fn view_allows(view: &View, agent: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn space_drag_moves_only_its_cards() {
+        let mut space = Space {
+            space: "s".into(),
+            rect: [0., 0., 960., 640.],
+            color: "blue".into(),
+            frame: true,
+        };
+        let mut cards = vec![
+            Card {
+                terminal: "a".into(),
+                rect: [24., 24., 160., 36.],
+                z: 0,
+            },
+            Card {
+                terminal: "b".into(),
+                rect: [1., 2., 160., 36.],
+                z: 0,
+            },
+        ];
+        move_space(&mut space, &mut cards, &["a".into()], [10., -5.]);
+        assert_eq!(space.rect, [10., -5., 960., 640.]);
+        assert_eq!(cards[0].rect, [34., 19., 160., 36.]);
+        assert_eq!(cards[1].rect, [1., 2., 160., 36.]);
+    }
+    #[test]
+    fn new_card_clamps_at_click_point() {
+        assert_eq!(
+            clamp([900., 620., 240., 36.], [0., 0., 960., 640.]),
+            [696., 580., 240., 36.]
+        );
+    }
+    #[test]
+    fn random_color_uses_unused_palette_entries() {
+        let spaces: Vec<_> = COLORS[..7]
+            .iter()
+            .map(|c| Space {
+                space: c.to_string(),
+                rect: [0., 0., 960., 640.],
+                color: c.to_string(),
+                frame: true,
+            })
+            .collect();
+        for seed in 0..32 {
+            assert_eq!(unused_color(&spaces, seed), "purple");
+        }
+    }
+    #[test]
+    fn hiding_focused_card_clears_focus() {
+        let mut focus = Some("shell".into());
+        clear_hidden_focus(&View::Agents, &mut focus, false);
+        assert_eq!(focus, None);
+    }
     #[test]
     fn changes_share_one_pending_save() {
         let mut save = SaveSchedule::default();

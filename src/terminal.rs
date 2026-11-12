@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! A pane showing one core terminal: bytes in from the core, frames drawn
 //! with GPUI, keys and mouse encoded by libghostty-vt and sent back.
 
@@ -137,6 +138,8 @@ pub struct TerminalView {
     was_focused: bool,
     /// The window frame this terminal was last put on screen in (`FRAME`).
     shown_in: Cell<u64>,
+    /// A standalone window stays visible independently of the main window frame.
+    pub standalone: bool,
     /// When the person last typed here: output right after is shown at once.
     typed_at: Cell<Option<Instant>>,
     /// Scrolled this gesture, in lines, toward the next whole one.
@@ -295,6 +298,7 @@ impl TerminalView {
             focus: cx.focus_handle(),
             was_focused: false,
             shown_in: Cell::new(0),
+            standalone: false,
             typed_at: Cell::new(None),
             scrolled: point(0.0, 0.0),
             search_open: false,
@@ -561,7 +565,7 @@ impl TerminalView {
             self._render_hold = deadline.map(|deadline| (deadline, cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(deadline.saturating_duration_since(Instant::now())).await;
                 let _ = this.update(cx, |this, cx| {
-                    if this.shown_in.get() == FRAME.load(Ordering::Relaxed) {
+                    if this.on_screen_this_frame() {
                         cx.notify();
                     }
                 });
@@ -570,7 +574,7 @@ impl TerminalView {
         // Output in a terminal nobody sees doesn't redraw the window; it's
         // drawn fresh when shown again. Nor does output that changed nothing
         // on screen (an agent spinning its title).
-        if self.shown_in.get() == FRAME.load(Ordering::Relaxed) && self.grid.borrow_mut().vt.shows_change() {
+        if self.on_screen_this_frame() && self.grid.borrow_mut().vt.shows_change() {
             self.redraw_soon(cx);
         }
         open
@@ -624,7 +628,7 @@ impl TerminalView {
     }
 
     pub fn on_screen_this_frame(&self) -> bool {
-        self.shown_in.get() == FRAME.load(Ordering::Relaxed)
+        self.standalone || self.shown_in.get() == FRAME.load(Ordering::Relaxed)
     }
 
     fn send(&self, bytes: &[u8]) {
@@ -825,7 +829,7 @@ impl TerminalView {
                 if !this.search_open {
                     return None;
                 }
-                if this.shown_in.get() != FRAME.load(Ordering::Relaxed) {
+                if !this.on_screen_this_frame() {
                     return Some(Duration::from_millis(250));
                 }
                 if this.search_query.is_empty() {
@@ -991,7 +995,7 @@ impl TerminalView {
                 cx.background_executor().timer(Duration::from_millis(50)).await;
                 let keep = this.update(cx, |this, cx| {
                     if !this.selecting { return false; }
-                    if this.shown_in.get() != FRAME.load(Ordering::Relaxed) {
+                    if !this.on_screen_this_frame() {
                         this.finish_selection(None, cx);
                         return false;
                     }
@@ -2541,6 +2545,18 @@ mod tests {
         });
         cx.run_until_parked();
         assert_eq!(ends.read_with(cx, |count, _| *count), 1);
+    }
+
+    #[gpui::test]
+    fn standalone_terminal_stays_visible_across_main_window_frames(cx: &mut gpui::TestAppContext) {
+        use gpui::*;
+        let terminal = cx.new(|cx| super::TerminalView::attach(crate::hc::offline(), "t1".into(), (120, 40), cx));
+        terminal.update(cx, |terminal, _| {
+            terminal.standalone = true;
+            terminal.mark_shown();
+            super::next_frame();
+            assert!(terminal.on_screen_this_frame());
+        });
     }
 
     #[gpui::test]

@@ -165,3 +165,14 @@ terminal panel without ending the terminal. Geometry is in app-home canvas.json;
 `panel.open {terminal}` selects the terminal shown in the canvas panel. The
 `classic` layout preserves the previous sidebar and tabs. Canvas zoom bindings
 apply to the `main` layout; other layouts retain app zoom.
+
+Canvas space labels drag the space and its cards; bottom-right handles resize with card padding.
+Space label menus offer Rename, Color, Show frame and confirmed Delete space.
+Empty-canvas menus create terminals in the space folder or home, installed agents,
+and root spaces with a name and native folder picker. `canvas.create` takes a world
+`point`, optional `space`, `argv`, or `kind: "space"`; `canvas.space_style` takes
+`id` and optional palette `color` (without color it toggles the frame).
+`view.agents`, `view.all`, `view.terminals` select the saved canvas view, bound to
+Cmd+Shift+1/2/3 on macOS and Ctrl+Shift+1/2/3 elsewhere. Hidden cards lose panel focus.
+`panel.pop_out` takes an optional `terminal` (defaults to the panel); `panel.bring_back`
+takes `terminal`. Pop-outs last only for the current run and keep the terminal alive.

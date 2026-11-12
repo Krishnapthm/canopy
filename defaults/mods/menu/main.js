@@ -6,7 +6,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, knownAgents } from "herdr";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s) {
@@ -26,9 +26,23 @@ function items(p, git) {
   p = p ?? {};
   const tg = p.target ?? {};
   switch (p.tab) {
+    case "canvas-empty": return [
+      ["New terminal", "canvas.create", tg],
+      ["New agent >", "canvas-agents", tg],
+      ...(!tg.space ? [["New space here", "canvas.create", { ...tg, kind: "space" }]] : []),
+    ];
+    case "canvas-agents": return (p.agents ?? []).filter(a => a.installed).map(a => [a.name, "canvas.create", { ...tg, argv: a.run }]);
+    case "canvas-space": return [
+      ["Rename", "space.rename", { id: tg.id }],
+      ["Color >", "canvas-colors", tg],
+      ["Show frame", "canvas.space_style", { id: tg.id }],
+      ["Delete space", "space.close", { id: tg.id }],
+    ];
+    case "canvas-colors": return ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"].map(color => [color, "canvas.space_style", { id: tg.id, color }]);
     case "canvas-card": return [
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
-      ["Open in panel", "panel.open", { terminal: tg.terminal }],
+      [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],
+      ...(!tg.popped ? [["Open in panel", "panel.open", { terminal: tg.terminal }]] : []),
       ["Close terminal", "canvas-close", { terminal: tg.terminal }],
     ];
     case "pane": {
@@ -120,6 +134,11 @@ export default class Menu extends View {
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
     else if (it[1] === "canvas-close") openOverlay({ mod: "confirm", kind: "dialog", width: 380, props: { title: "Close terminal?", detail: "This ends the terminal and its running programs.", command: { name: "terminal.kill", args: it[2] } } });
+    else if (it[1] === "canvas-agents") cx.spawn(async () => {
+      const agents = await knownAgents({ on: it[2].machine }).catch(() => []);
+      if (agents.some(a => a.installed)) openOverlay({ mod: "menu", kind: "popup", width: 240, props: { tab: "canvas-agents", target: it[2], agents } });
+    });
+    else if (it[1] === "canvas-colors") openOverlay({ mod: "menu", kind: "popup", width: 220, props: { tab: "canvas-colors", target: it[2] } });
     else run(it[1], it[2]);
   }
 

@@ -2,8 +2,8 @@
 
 A control room for agents and terminals. Canopy is a native Rust/GPUI desktop
 app with persistent terminals powered by the separately installed herdr-core.
-The canvas interface is under development; this branch currently retains the
-original spaces and tabs.
+The main layout is a free canvas with spaces, terminal and agent cards, a view
+filter and terminal pop-outs. The classic layout retains the original spaces and tabs.
 
 Based on herdr-app: https://github.com/herdrdev/herdr-app.
 Licensed under Apache-2.0. See LICENSE, NOTICE and THIRD-PARTY-NOTICES.

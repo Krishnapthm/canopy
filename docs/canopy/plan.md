@@ -658,3 +658,15 @@ Write here when the code disproves something above (date, what, new decision).
 - 2026-11-12: keeping THIRD-PARTY-NOTICES byte-for-byte conflicts with its input-hash test after adding the canopy binary stanza: it hashes Cargo.toml and the generator source, not only dependency/license inputs. Leave the notice and hash policy unchanged; regeneration needs an explicit exception to the as-is requirement.
 - 2026-11-12: 0.4 isolation accepted live: `scripts/dev` window showed none of Krishna's spaces, scratch core listed 0 terminals, his real `hc ls` listed the same 2 terminals before and after, `scripts/dev-stop` stopped only the scratch core.
 - 2026-11-12: phase 2 core replaces the main layout, so upstream sidebar/tab geometry fixtures now use a preserved `classic` layout. Canvas keys are scoped to `layout:main` so legacy layouts retain app zoom. Theme colors did not include `ring`, `muted-foreground`, or `blue`; the canvas adds these aliases to the existing palette.
+
+- 2026-11-12: 7.7 reuses `knownAgents()` for installed CLI discovery. Its existing
+  new-menu deliberately shows some missing agents; the canvas menu filters all of them out.
+  The menu supports empty lists, so no disabled Open file placeholder is needed.
+  New terminals are acknowledged before their live program record arrives; click placement
+  is reapplied on that record so clamping uses the actual pill width.
+- 2026-11-12: 8.1 uses a separate terminal attachment in a GPUI window. The existing
+  renderer is independent of the canvas camera, so pop-outs have no canvas zoom.
+  Global UI/font settings still apply, as they do to the side panel. Window mode remains blocked.
+- 2026-11-12: terminal visibility used the main window's global frame counter.
+  Standalone terminal views explicitly remain visible while their window lives;
+  hidden-tab sizing skips popped terminals so it cannot overwrite their PTY size.

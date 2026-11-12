@@ -76,6 +76,9 @@
     "ctrl-+": "canvas.zoom_in",
     "ctrl--": "canvas.zoom_out",
     "ctrl-0": "canvas.zoom_reset",
-    "ctrl-shift-f": "canvas.fit"
+    "ctrl-shift-f": "canvas.fit",
+    "ctrl-shift-1": "view.agents",
+    "ctrl-shift-2": "view.all",
+    "ctrl-shift-3": "view.terminals"
   }
 }
