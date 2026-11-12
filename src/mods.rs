@@ -813,12 +813,16 @@ fn run_remote_with_limit(machine: &str, command: &str, args: &[String], cwd: Opt
 
 /// The agents a machine can start (`knownAgents()`), asked at most once a minute.
 fn known_agents(on: Option<String>, list: Vec<Value>) -> Result<Value, String> {
+    known_agents_with(on, list, crate::programs::installed)
+}
+
+fn known_agents_with(on: Option<String>, list: Vec<Value>, check: impl FnOnce(&[String], Option<&str>) -> Result<Vec<String>, String>) -> Result<Value, String> {
     type InstalledCache = std::collections::HashMap<Option<String>, (std::time::Instant, Vec<String>, Vec<String>)>;
     static SEEN: std::sync::Mutex<Option<InstalledCache>> = std::sync::Mutex::new(None);
     let commands: Vec<String> = list.iter().filter_map(|a| a["run"][0].as_str().map(str::to_owned)).collect();
     let cached = SEEN.lock().ok().and_then(|s| s.as_ref()?.get(&on).filter(|(at, checked, _)| at.elapsed().as_secs() < 60 && checked == &commands).map(|(_, _, v)| v.clone()));
     let have = if let Some(cached) = cached { cached } else {
-        let found = crate::programs::installed(&commands, on.as_deref())?;
+        let found = check(&commands, on.as_deref())?;
         if let Ok(mut s) = SEEN.lock() {
             s.get_or_insert_with(std::collections::HashMap::new).insert(on.clone(), (std::time::Instant::now(), commands, found.clone()));
         }
@@ -1248,18 +1252,32 @@ mod tests {
         set_shown_copies(Default::default());
     }
 
-    #[cfg(unix)]
     #[test]
     fn known_agents_uses_snapshot_and_refreshes_changed_commands() {
-        let snapshot = vec![json!({"key": "claude", "run": ["herdr_issue57_not_installed"]})];
-        let first = std::thread::spawn(move || known_agents(None, snapshot)).join().unwrap().unwrap();
-        assert_eq!(first[0]["run"], json!(["herdr_issue57_not_installed"]));
+        let on = Some("known-agents-snapshot-test".to_owned());
+        let snapshot = vec![json!({"key": "custom", "run": ["missing-agent"]})];
+        let first = known_agents_with(on.clone(), snapshot, |commands, machine| {
+            assert_eq!(commands, &["missing-agent"]);
+            assert_eq!(machine, on.as_deref());
+            Ok(Vec::new())
+        }).unwrap();
+        assert_eq!(first[0]["run"], json!(["missing-agent"]));
         assert_eq!(first[0]["installed"], false);
-        let snapshot = vec![json!({"key": "claude", "run": ["printf"]}), json!({"key": "claude-alt", "run": ["printf"]})];
-        let next = std::thread::spawn(move || known_agents(None, snapshot)).join().unwrap().unwrap();
+        let cached = known_agents_with(on.clone(), vec![json!({"key": "renamed", "run": ["missing-agent"]})], |_, _| panic!("unchanged commands must use the cache")).unwrap();
+        assert_eq!(cached[0]["key"], "renamed");
+        assert_eq!(cached[0]["installed"], false);
+        let snapshot = vec![json!({"key": "custom", "run": ["fake-agent"]}), json!({"key": "custom-alt", "run": ["fake-agent"]})];
+        let called = std::cell::Cell::new(false);
+        let next = known_agents_with(on.clone(), snapshot, |commands, machine| {
+            called.set(true);
+            assert_eq!(commands, &["fake-agent", "fake-agent"]);
+            assert_eq!(machine, on.as_deref());
+            Ok(vec!["fake-agent".into()])
+        }).unwrap();
+        assert!(called.get(), "changed commands must bypass the fresh cache");
         assert_eq!(next.as_array().unwrap().len(), 2);
         assert_eq!(next[0]["installed"], true);
-        assert_eq!(next[1]["key"], "claude-alt");
+        assert_eq!(next[1]["key"], "custom-alt");
         assert_eq!(next[1]["installed"], true);
     }
 

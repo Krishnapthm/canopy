@@ -652,8 +652,47 @@ mod tests {
         });
     }
 
+    /// How long a test waits for a change event. Condition waits, so this costs nothing when
+    /// events are prompt; FSEvents took 8-26 s on a loaded Mac (full suite, load average 30+).
+    const EVENT_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+    /// FSEvents registers a new stream asynchronously and drops changes made before it is live,
+    /// so wait for a probe instead of assuming a delay.
+    fn wait_until_live(root: &Path) {
+        use std::task::{Context, Poll, Waker};
+        let probe = root.join(".live-probe");
+        let path = root.to_string_lossy().into_owned();
+        let deadline = std::time::Instant::now() + EVENT_WAIT;
+        // One waiter kept across rewrites: dropping a quiet folder's last waiter stops its watch.
+        let mut change = Box::pin(next_change(path.clone()));
+        loop {
+            std::fs::write(&probe, "x").unwrap();
+            let retry = std::time::Instant::now() + std::time::Duration::from_millis(500);
+            while std::time::Instant::now() < retry {
+                if let Poll::Ready(changes) = change.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+                    if invalidates(&changes.unwrap(), &probe) {
+                        return;
+                    }
+                    change = Box::pin(next_change(path.clone()));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(std::time::Instant::now() < deadline, "the watch never went live");
+        }
+    }
+
+    /// A wait that is still pending, after taking any batch already buffered (a late probe).
+    fn quiet_wait(path: String) -> std::pin::Pin<Box<impl std::future::Future<Output = Result<Vec<String>, String>>>> {
+        loop {
+            let mut wait = Box::pin(next_change(path.clone()));
+            if wait.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())).is_pending() {
+                return wait;
+            }
+        }
+    }
+
     fn wait_for_change(root: &Path, path: &Path) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + EVENT_WAIT;
         loop {
             let changes = block_on_until(next_change(root.to_string_lossy().into_owned()), deadline).unwrap();
             if invalidates(&changes, path) {
@@ -728,16 +767,19 @@ mod tests {
     fn cancelled_waits_release_quiet_folders_without_stopping_other_callers() {
         use std::task::{Context, Waker};
         let root = test_repo("cancel");
+        wait_until_live(&root);
         let path = root.to_string_lossy().into_owned();
-        let mut first = Box::pin(next_change(path.clone()));
+        let first = quiet_wait(path.clone());
         let mut second = Box::pin(next_change(path.clone()));
         let mut context = Context::from_waker(Waker::noop());
-        assert!(first.as_mut().poll(&mut context).is_pending());
         assert!(second.as_mut().poll(&mut context).is_pending());
         drop(first);
         assert_eq!(folders().get(&root).unwrap().waiters.len(), 1);
         std::fs::write(root.join("changed"), "yes").unwrap();
-        assert!(invalidates(&block_on(second).unwrap(), &root.join("changed")));
+        // A late probe batch may arrive first; the surviving caller still gets news.
+        if !invalidates(&block_on(second).unwrap(), &root.join("changed")) {
+            wait_for_change(&root, &root.join("changed"));
+        }
         folders().remove(&root);
         std::fs::remove_dir_all(root).unwrap();
         let root = test_repo("cancel-quiet");
@@ -913,6 +955,7 @@ mod tests {
         let root = test_repo(if rename { "renamed" } else { "replaced" });
         std::fs::create_dir_all(root.join("sub/deep")).unwrap();
         install_watch(&root);
+        wait_until_live(&root);
         // The old paths survive in the selected set, but now name new inodes.
         if rename {
             std::fs::rename(root.join("sub"), root.join("moved")).unwrap();
@@ -933,7 +976,7 @@ mod tests {
 
     /// Drives a future to its end on this thread (the tests have no executor).
     fn block_on<F: std::future::Future>(f: F) -> F::Output {
-        block_on_until(f, std::time::Instant::now() + std::time::Duration::from_secs(10))
+        block_on_until(f, std::time::Instant::now() + EVENT_WAIT)
     }
 
     fn block_on_until<F: std::future::Future>(f: F, deadline: std::time::Instant) -> F::Output {
@@ -960,8 +1003,8 @@ mod tests {
     #[test]
     fn a_watched_folder_reports_changes_and_misses_none_between_waits() {
         let dir = test_repo("between-waits");
-        let mut first = Box::pin(next_change(dir.to_string_lossy().into_owned()));
-        assert!(first.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())).is_pending());
+        wait_until_live(&dir);
+        let first = quiet_wait(dir.to_string_lossy().into_owned());
         std::fs::write(dir.join("a.md"), "one").unwrap();
         let changes = block_on(first).unwrap();
         if !invalidates(&changes, &dir.join("a.md")) {
