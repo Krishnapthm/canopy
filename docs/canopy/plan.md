@@ -298,8 +298,7 @@ working (the canvas is additive).
 - **Pinch**, or **Cmd + scroll** (Ctrl on Linux): zoom one step per gesture tick, around the
   cursor (the world point under the cursor stays put).
 - **Space + drag** on the canvas, or **middle-mouse drag**: pan.
-- **H + left-drag** with canvas focus: pan anywhere, including pills and spaces.
-  H and Space show an open hand while held, closed while panning; focus loss clears held keys.
+- Space shows an open hand while held, a closed hand while panning; focus loss clears it.
 - **Left-drag on empty canvas**: pan. A plain click still focuses the canvas; right-click opens
   its menu. Pills, space labels, resize handles and controls retain their own mouse actions.
 - `Cmd+0`: zoom to 1.0 around the window center. `Cmd+=` / `Cmd+-`: one step in or out.
@@ -678,3 +677,4 @@ Write here when the code disproves something above (date, what, new decision).
 - 2026-11-12: canvas adds focus-scoped H-drag and empty-canvas mouse drag pan, hand cursors for H/Space, and cleanup for missed key-up and mouse-up events.
 - 2026-11-12: Krishna's decisions. Window mode (7.5.3): deferred, pills only, no renderer work until revisited after phase 3. Phase 3: start 8.2 preview cards now; 8.3 and 8.4 wait until Krishna reads `agent-integration.md` and approves the token-spending `$EDITOR` shim runs.
 - 2026-11-12: Krishna asked for a native macOS menu bar (Canopy, File, Edit, View, Window, Help). Items run existing app commands, so they show bound keys; `canvas.create` without `point` uses the middle of the view for File > New Terminal / New Space.
+- 2026-11-12: Krishna dropped hold-H panning after trying it; empty-canvas drag, Space+drag and middle drag remain. Panel and space resize handles now show resize cursors and highlight.

@@ -167,9 +167,9 @@ terminal panel without ending the terminal. Geometry is in app-home canvas.json;
 apply to the `main` layout; other layouts retain app zoom.
 
 Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor.
-Hold bare H or Space with canvas focus and left-drag anywhere to pan, with hand cursors.
+Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
 Empty-canvas left-drag and middle-mouse drag also pan; an empty click focuses the canvas.
-Focused terminals still receive h and Space. Right-click keeps the canvas menus.
+Focused terminals still receive Space. Right-click keeps the canvas menus.
 Canvas space labels drag the space and its cards; bottom-right handles resize with card padding.
 Space label menus offer Rename, Color, Show frame and confirmed Delete space.
 Empty-canvas menus create terminals in the space folder or home, installed agents,

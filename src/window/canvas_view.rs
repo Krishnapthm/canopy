@@ -9,7 +9,6 @@ pub(super) struct State {
     pub popped: HashMap<String, WindowHandle<PopOut>>,
     save: canvas::SaveSchedule,
     pub space_down: bool,
-    pub h_down: bool,
     resizing: bool,
     writable: bool,
     save_task: Option<Task<()>>,
@@ -40,7 +39,6 @@ impl State {
             popped: HashMap::new(),
             save: canvas::SaveSchedule::default(),
             space_down: false,
-            h_down: false,
             resizing: false,
             writable,
             save_task: None,
@@ -52,16 +50,6 @@ impl State {
             drag: None,
         }
     }
-    /// Space or H is held: a left drag anywhere on the canvas pans.
-    pub fn pan_held(&self) -> bool {
-        self.space_down || self.h_down
-    }
-    /// Space or H was released or lost (window deactivated).
-    pub fn release_pan_keys(&mut self) {
-        self.space_down = false;
-        self.h_down = false;
-    }
-
     /// Ends any pan, card, space or panel-resize drag.
     pub(super) fn end_drag(&mut self) {
         self.drag = None;
@@ -729,16 +717,16 @@ impl AppWindow {
             .h_full()
             .overflow_hidden()
             .bg(c(bg))
-            .map(|d| match (&state.drag, state.pan_held()) {
+            .map(|d| match (&state.drag, state.space_down) {
                 (Some((None, _)), _) => d.cursor(CursorStyle::ClosedHand),
                 (_, true) => d.cursor(CursorStyle::OpenHand),
                 _ => d,
             })
             // Capture phase, before pills and space labels: middle drag, or left drag with
-            // Space/H held, pans from anywhere on the canvas.
+            // Space held, pans from anywhere on the canvas.
             .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, cx| {
                 if e.button == MouseButton::Middle
-                    || (e.button == MouseButton::Left && this.canvas_state.pan_held())
+                    || (e.button == MouseButton::Left && this.canvas_state.space_down)
                 {
                     this.canvas_state.drag = Some((None, e.position));
                     cx.stop_propagation();
@@ -1010,6 +998,16 @@ impl AppWindow {
                                 .right_0()
                                 .bottom_0()
                                 .size(px(12. * camera.zoom))
+                                .rounded_br(px(12. * camera.zoom))
+                                .cursor(CursorStyle::ResizeUpLeftDownRight)
+                                .border_r_2()
+                                .border_b_2()
+                                .border_color(c(&space.color).opacity(0.35))
+                                .hover(|d| d.border_color(c(&space.color)))
+                                .when(
+                                    matches!(&state.space_drag, Some((s, true, _)) if *s == space.space),
+                                    |d| d.border_color(c(&space.color)),
+                                )
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -1375,10 +1373,13 @@ impl AppWindow {
                 div()
                     .id("canvas-panel-resize")
                     .absolute()
-                    .left_0()
+                    .left(px(-3.))
                     .top_0()
                     .w(px(6.))
                     .h_full()
+                    .cursor(CursorStyle::ResizeLeftRight)
+                    .hover(|d| d.bg(c("ring")))
+                    .when(state.resizing, |d| d.bg(c("ring")))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _, _, cx| {

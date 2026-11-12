@@ -3850,8 +3850,8 @@ impl AppWindow {
                 self.sync(window, cx);
             } else {
                 self.looked.clear();
-                // A key-up lost to another app would leave Space/H pan stuck on.
-                self.canvas_state.release_pan_keys();
+                // A key-up lost to another app would leave Space pan stuck on.
+                self.canvas_state.space_down = false;
                 self.canvas_state.end_drag();
             }
             // Tell mods now: render publishes window() too, but a mod it refreshes
@@ -4783,30 +4783,22 @@ impl Render for AppWindow {
         let pane_drag = self.pane_drag_layer(cx);
         div()
             .id("herdr")
-            // Space or a bare H held while the canvas itself has focus: drag pans.
-            // A focused terminal (side panel) still gets its own space and h.
+            // Space held while the canvas itself has focus: drag pans.
+            // A focused terminal (side panel) still gets its own space.
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
                 let k = &e.keystroke;
-                if !this.has_canvas() || k.modifiers.modified() || !this.focus.is_focused(window) {
-                    return;
-                }
-                let held = match k.key.as_str() {
-                    "space" => &mut this.canvas_state.space_down,
-                    "h" => &mut this.canvas_state.h_down,
-                    _ => return,
-                };
-                if !*held {
-                    *held = true;
+                if k.key == "space" && !k.modifiers.modified() && !this.canvas_state.space_down
+                    && this.has_canvas() && this.focus.is_focused(window)
+                {
+                    this.canvas_state.space_down = true;
                     cx.notify();
                 }
             }))
             .on_key_up(cx.listener(|this, e: &KeyUpEvent, _, cx| {
-                match e.keystroke.key.as_str() {
-                    "space" => this.canvas_state.space_down = false,
-                    "h" => this.canvas_state.h_down = false,
-                    _ => return,
+                if e.keystroke.key == "space" {
+                    this.canvas_state.space_down = false;
+                    cx.notify();
                 }
-                cx.notify();
             }))
             .track_focus(&self.focus)
             // `layout:<name>` key sections apply while that layout shows.
