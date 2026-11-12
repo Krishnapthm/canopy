@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export HERDR_APP_SANDBOX="peek-paste-test-$$"
-root="/var/tmp/herdr-app-$HERDR_APP_SANDBOX"
+root="/var/tmp/canopy-$HERDR_APP_SANDBOX"
 sandbox() { scripts/sandbox "$@"; }
 trap 'sandbox down' EXIT
 sandbox up

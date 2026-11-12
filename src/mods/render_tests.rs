@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Shipped JS descriptions and native rendering regressions.
 use super::*;
 use gpui::TestAppContext;
@@ -86,7 +87,7 @@ impl Staged {
     fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let path = PathBuf::from(format!(
-            "/var/tmp/herdr-render-{}-{}",
+            "/tmp/herdr-render-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
@@ -134,15 +135,7 @@ struct Calls {
     shared: BTreeMap<String, Value>,
 }
 
-fn updates(app: &str, core: &str) -> Value {
-    json!({
-        "app": {"version":"0.1.0", "updates":app != "source", "ready": (app == "ready").then_some("0.1.1")},
-        "core": {"version":"0.1.5", "ready":(core == "ready").then_some("0.1.6"), "managed":(core == "managed").then_some("homebrew"), "error":(core == "error").then_some("offline"), "updating":core == "updating"},
-        "checked":1700000000, "checks":app != "source", "checking":false
-    })
-}
-
-fn fixture(populated: bool, props: Value, update: Value) -> BTreeMap<String, Value> {
+fn fixture(populated: bool, props: Value) -> BTreeMap<String, Value> {
     let program =
         json!({"key":"pi", "name":"Pi", "icon":null, "tint":true, "tile":"#334455", "color":"#aabbcc", "shell":false, "agent":true});
     let mut values = BTreeMap::from([
@@ -154,8 +147,6 @@ fn fixture(populated: bool, props: Value, update: Value) -> BTreeMap<String, Val
         ("theme".into(), serde_json::to_value(&*crate::settings::theme()).unwrap()),
         ("settings".into(), serde_json::to_value(crate::settings::Settings::default()).unwrap()),
         ("themes".into(), json!([{"name":"graphite", "colors": &*crate::settings::theme()}])),  ("fonts".into(), json!(["Monospace", "Sans"])),
-        ("updates".into(), update),
-        ("telemetry".into(), json!({"enabled":true,"setting":true,"sends":true,"off_because":null,"endpoint":"https://invalid.example", "draft":{},"queued":[],"last_sent":null})),
         ("window".into(), json!({"platform":"linux","titlebar":"none","buttons":true,"maximized":false,"fullscreen":false,"active":true})),
         ("placement".into(), Value::Null),
         ("home".into(), json!("/fixture")), ("appHome".into(), json!("/fixture/app")),
@@ -183,11 +174,6 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
     for (name, value) in values {
         module = module.function(name, move |_| Ok(to_host(&value)));
     }
-    module = module.function("feedbackPreview", |a| {
-        Ok(to_host(
-            &json!({"available":true,"body":{"message":a.string(0)?,"email":a.string(1)?}}),
-        ))
-    });
     let shared = calls.clone();
     module = module.function("shared", move |a| {
         Ok(shared.borrow().shared.get(a.string(0)?).map(to_host).unwrap_or(HostValue::Null))
@@ -197,7 +183,7 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
         shared.borrow_mut().shared.insert(a.string(0)?.into(), from_host(a.value(1)?));
         Ok(HostValue::Null)
     });
-    for name in ["run", "playSound", "setAgentOrder", "openOverlay", "closeOverlay", "notify", "presentUpdateNotes"] {
+    for name in ["run", "playSound", "setAgentOrder", "openOverlay", "closeOverlay", "notify"] {
         let calls = calls.clone();
         module = module.function(name, move |a| {
             if name == "run" {
@@ -217,15 +203,11 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
             })
         });
     }
-    for name in ["feedbackPasteImage", "feedbackClearImages", "feedbackAttachImages"] {
-        module = module.function(name, |_| Ok(HostValue::Null));
-    }
-    module = module.async_function("feedbackPickImages", |_| Ok(async { Ok(HostValue::Array(vec![])) }));
     module = module.async_function("knownAgents", |_| Ok(async { Ok(HostValue::Array(vec![])) }));
     module = module.async_function("pickFolder", |_| Ok(async { Ok(HostValue::Null) }));
     module = module.async_function("nextCommand", |_| Ok(std::future::pending::<gpui_shell::HostResult>()));
     module = module.cancellable_async_function("watchFolder", HostValue::Array(vec![]), |_| Ok(std::future::pending::<gpui_shell::HostResult>()));
-    for name in ["exec", "hc", "readTextFile", "writeTextFile", "sendFeedback"] {
+    for name in ["exec", "hc", "readTextFile", "writeTextFile"] {
         let calls = calls.clone();
         module = module.async_function(name, move |a| {
             let first = a.get(0).map(from_host).unwrap_or(Value::Null);
@@ -427,10 +409,9 @@ fn describe(
     entry: &str,
     populated: bool,
     props: Value,
-    update: Value,
     setup: Option<&str>,
 ) -> anyhow::Result<String> {
-    describe_with_values(cx, staged, entry, fixture(populated, props, update), setup)
+    describe_with_values(cx, staged, entry, fixture(populated, props), setup)
 }
 
 fn describe_with_values(
@@ -477,7 +458,7 @@ fn shipped_initial_descriptions(cx: &mut TestAppContext) {
     let mut count = 0;
     for entry in &entries {
         for populated in [false, true] {
-            describe(cx, &staged, entry, populated, props(), updates("current", "current"), None)
+            describe(cx, &staged, entry, populated, props(), None)
                 .unwrap_or_else(|e| panic!("{entry}/{}: {e:#}", if populated { "populated" } else { "empty" }));
             count += 1;
         }
@@ -496,7 +477,7 @@ fn a_described_mod_leaves_no_folder_behind(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let staged = Staged::new();
     let path = staged.0.clone();
-    describe(cx, &staged, "mods/agents", true, props(), updates("current", "current"), None).unwrap();
+    describe(cx, &staged, "mods/agents", true, props(), None).unwrap();
     drop(staged);
     cx.run_until_parked();
     assert!(!path.exists(), "left behind: {:?}", std::fs::read_dir(&path).map(|d| d.flatten().map(|e| e.file_name()).collect::<Vec<_>>()));
@@ -507,7 +488,7 @@ fn brand_leaves_room_for_macos_traffic_lights_only_outside_full_screen(cx: &mut 
     cx.update(gpui_shell::init);
     let staged = Staged::new();
     for (fullscreen, inset) in [(false, true), (true, false)] {
-        let mut values = fixture(true, props(), updates("current", "current"));
+        let mut values = fixture(true, props());
         values.insert("window".into(), json!({"platform":"macos","titlebar":"none","fullscreen":fullscreen,"buttons":false}));
         let tree = describe_with_values(cx, &staged, "mods/workspace-chrome", values, None).unwrap();
         let root = tree.lines().next().unwrap();
@@ -532,7 +513,7 @@ fn tabs_leave_room_for_macos_traffic_lights(cx: &mut TestAppContext) {
         ("linux", "none", false, 44, true, 1.0, 10),
         ("windows", "none", false, 44, true, 1.0, 10),
     ] {
-        let mut values = fixture(true, props(), updates("current", "current"));
+        let mut values = fixture(true, props());
         values.insert("window".into(), json!({"platform":platform,"titlebar":titlebar,"fullscreen":fullscreen,"buttons":false}));
         values.get_mut("settings").unwrap()["zoom"] = json!(zoom);
         let layout = values.get_mut("layout").unwrap();
@@ -553,7 +534,7 @@ fn windows_tab_buttons_use_matching_vector_icons(cx: &mut TestAppContext) {
     let staged = Staged::new();
     for platform in ["windows", "linux"] {
         for maximized in [false, true] {
-            let mut values = fixture(true, props(), updates("current", "current"));
+            let mut values = fixture(true, props());
             values.insert("window".into(), json!({"platform":platform,"buttons":true,"maximized":maximized}));
             let tree = describe_with_values(cx, &staged, "mods/tabs", values, None).unwrap();
             if platform == "windows" {
@@ -576,7 +557,7 @@ fn font_pickers_contain_scroll_on_the_wrapper(cx: &mut TestAppContext) {
         let mut p = props();
         p["section"] = json!("look");
         let tree = describe(
-            cx, &staged, "frame/settings", true, p, updates("current", "current"),
+            cx, &staged, "frame/settings", true, p,
             Some(&format!("this.picking = '{which}';")),
         ).unwrap();
         let scroll = tree.lines().find(|line| line.contains(&format!("st-fl-{which}"))).unwrap();
@@ -593,7 +574,7 @@ fn long_theme_names_stay_inside_their_card(cx: &mut TestAppContext) {
     let long = "catppuccin-macchiato";
     let mut p = props();
     p["section"] = json!("look");
-    let mut values = fixture(true, p, updates("current", "current"));
+    let mut values = fixture(true, p);
     let theme = values["theme"].clone();
     values.insert("themes".into(), json!([{ "name": long, "light": false, "colors": theme }]));
     let mut settings = values["settings"].clone();
@@ -618,7 +599,7 @@ fn confirm_dialog_background_follows_the_frame_corners(cx: &mut TestAppContext) 
     let mut p = props();
     p["title"] = json!("Close space?");
     p["command"] = json!({"name": "space.close", "args": {"id": "s1"}});
-    let tree = describe(cx, &staged, "mods/confirm", true, p, updates("current", "current"), None).unwrap();
+    let tree = describe(cx, &staged, "mods/confirm", true, p, None).unwrap();
     let root = tree.lines().find(|l| l.contains(":id[Str(\"confirm\")]")).unwrap();
     assert!(root.contains(".rounded[Number(8.0)]"), "the dialog background must follow the frame's corners: {root}");
 }
@@ -628,7 +609,7 @@ fn pane_header_divider_faces_the_terminal(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let staged = Staged::new();
     for (position, reveal) in [("bottom", "always"), ("top", "always"), ("", "always"), ("bottom", "hover"), ("top", "hover")] {
-        let mut values = fixture(true, props(), updates("current", "current"));
+        let mut values = fixture(true, props());
         values.insert("layout".into(), json!({
             "id": "root", "type": "column", "children": [
                 {"id": "hidden", "type": "block", "hidden": true,
@@ -658,7 +639,7 @@ fn layout_previews_stay_inside_their_cards(cx: &mut TestAppContext) {
     let staged = Staged::new();
     let mut p = props();
     p["section"] = json!("look");
-    let mut values = fixture(true, p, updates("current", "current"));
+    let mut values = fixture(true, p);
     values.insert("layouts".into(), json!(["main"]));
     let tree = describe_with_values(
         cx, &staged, "frame/settings", values,
@@ -707,7 +688,7 @@ fn rebuilt_machine_offers_connect_only_for_identity_mismatch(cx: &mut TestAppCon
             "this.machines = [{{name:'cloud', state:{}, why:{}, target:'host'}}]; this.folded.add('cloud');",
             json!(state), json!(why)
         );
-        let tree = describe(cx, &staged, "mods/spaces", false, props(), updates("current", "current"), Some(&setup)).unwrap();
+        let tree = describe(cx, &staged, "mods/spaces", false, props(), Some(&setup)).unwrap();
         assert_eq!(tree.contains("machine-connect-cloud"), offered, "{state}/{why}: {tree}");
         assert_eq!(tree.contains("rebuilt ·"), offered, "{tree}");
         assert_eq!(tree.contains("This machine was rebuilt or replaced. Click to connect to the new one."), offered, "{tree}");
@@ -721,12 +702,12 @@ fn machine_logout_warning_tracks_current_remote_state(cx: &mut TestAppContext) {
     let staged = Staged::new();
     for state in ["false", "true", "null", "undefined"] {
         let setup = format!("this.hosts = []; this.added = [{{name:'cloud', target:'host', keeps_running_after_logout:{state}, logout_linger_user:'-alice'}}];");
-        let tree = describe(cx, &staged, "mods/machine-add", false, props(), updates("current", "current"), Some(&setup)).unwrap();
+        let tree = describe(cx, &staged, "mods/machine-add", false, props(), Some(&setup)).unwrap();
         assert_eq!(tree.contains("Agents on cloud stop when you disconnect"), state == "false", "{tree}");
         assert_eq!(tree.contains("ma-logout-copy-cloud"), state == "false", "{tree}");
         if state == "false" { assert!(tree.contains("sudo loginctl enable-linger -- -alice"), "{tree}"); }
         let setup = format!("this.machines = [{{name:'cloud', target:'host', state:'connected', keeps_running_after_logout:{state}}}];");
-        let tree = describe(cx, &staged, "mods/spaces", false, props(), updates("current", "current"), Some(&setup)).unwrap();
+        let tree = describe(cx, &staged, "mods/spaces", false, props(), Some(&setup)).unwrap();
         assert_eq!(tree.contains("machine-logout-cloud"), state == "false", "{tree}");
     }
 }
@@ -736,7 +717,7 @@ fn machine_picker_keeps_long_lists_scrollable(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let staged = Staged::new();
     let tree = describe(
-        cx, &staged, "mods/machine-add", false, props(), updates("current", "current"),
+        cx, &staged, "mods/machine-add", false, props(),
         Some("this.hosts = Array.from({length: 30}, (_, i) => ({alias: `host-${i}`, aliases: []}));"),
     ).unwrap();
     let scroll = tree.lines().find(|line| line.contains("ma-hosts")).unwrap();
@@ -751,7 +732,7 @@ fn machine_add_needing_input_keeps_the_picker_and_shows_instructions(cx: &mut Te
     cx.update(gpui_shell::init);
     let staged = Staged::new();
     let calls = Rc::new(RefCell::new(Calls::default()));
-    let policy = Policy::new().with_host_module(module(fixture(false, props(), updates("current", "current")), calls.clone())).unwrap();
+    let policy = Policy::new().with_host_module(module(fixture(false, props()), calls.clone())).unwrap();
     let root = staged.wrapper("mods/machine-add", "this.typed = 'host'; this.add('host', cx);");
     let window = cx.add_window(|_, _| Empty);
     let mut session = window.update(cx, |_, window, cx| {
@@ -777,7 +758,7 @@ fn option_key_settings_are_only_shown_on_macos(cx: &mut TestAppContext) {
     for platform in ["linux", "windows", "macos"] {
         let mut p = props();
         p["section"] = json!("keyboard");
-        let mut values = fixture(true, p, updates("current", "current"));
+        let mut values = fixture(true, p);
         values.insert("window".into(), json!({"platform":platform}));
         let tree = describe_with_values(cx, &staged, "frame/settings", values, None).unwrap();
         for value in ["auto", "on", "off", "left", "right"] {
@@ -788,50 +769,16 @@ fn option_key_settings_are_only_shown_on_macos(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
-fn settings_sections_and_updates(cx: &mut TestAppContext) {
+fn settings_sections(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let start = Instant::now();
     let staged = Staged::new();
-    for section in ["look", "alerts", "privacy", "updates"] {
+    for section in ["look", "alerts", "keyboard", "machines"] {
         let mut p = props();
         p["section"] = json!(section);
-        describe(cx, &staged, "frame/settings", true, p, updates("current", "current"), None).unwrap();
+        describe(cx, &staged, "frame/settings", true, p, None).unwrap();
     }
-    for app in ["source", "current", "ready"] {
-        for core in ["current", "ready", "error", "managed", "updating"] {
-            let mut p = props();
-            p["section"] = json!("updates");
-            let tree = describe(cx, &staged, "frame/settings", true, p, updates(app, core), None)
-                .unwrap_or_else(|e| panic!("updates/{app}/{core}: {e:#}"));
-            if app == "current" && core == "current" {
-                assert!(
-                    tree.contains("check-app") && tree.contains("check-core"),
-                    "both update buttons must exist: {tree}"
-                );
-            }
-        }
-    }
-    for (checking, checked, asked) in [
-        (false, None, false), (false, None, true),
-        (true, None, false), (true, None, true),
-        (true, Some(1700000000u64), false), (true, Some(1700000000), true),
-        (false, Some(1700000000), false), (false, Some(1700000000), true),
-    ] {
-        let mut p = props();
-        p["section"] = json!("updates");
-        let mut u = updates("current", "current");
-        u["checked"] = json!(checked);
-        u["checking"] = json!(checking);
-        let setup = asked.then_some("this.asked = Date.now();");
-        let tree = describe(cx, &staged, "frame/settings", true, p, u, setup).unwrap();
-        let succeeded = !checking && checked.is_some();
-        assert_eq!(tree.contains("Up to date"), succeeded, "success requires a completed, successful check: {tree}");
-        if !checking && checked.is_none() {
-            assert!(tree.contains("check-app") && tree.contains("check-core"), "failed checks must remain retryable: {tree}");
-        }
-        assert!(tree.contains(if checking { "Checking" } else if succeeded { "Up to date" } else { "Check your connection" }), "check status missing: {tree}");
-    }
-    eprintln!("27 settings cases, each twice: {:?}", start.elapsed());
+    eprintln!("settings sections, each twice: {:?}", start.elapsed());
 }
 
 #[gpui::test]
@@ -921,29 +868,6 @@ fn animated_images_advance_with_explicit_and_implicit_ids(cx: &mut TestAppContex
 }
 
 #[gpui::test]
-fn settings_keep_notes_in_the_whats_new_window(cx: &mut TestAppContext) {
-    cx.update(gpui_shell::init);
-    let staged = Staged::new();
-    let notes = json!([
-        {"version":"1.8.0","date":"2026-10-26","items":[{"headline":"Newest headline","detail":"Newest details","fixed":false,"media":[]},{"headline":"","detail":"Newest fix","fixed":true,"media":[]}],"spotlight":true},
-        {"version":"1.7.0","date":"2026-10-25","items":[{"headline":"Older headline","detail":"Older details","fixed":false,"media":[]},{"headline":"Another older headline","detail":"Hidden detail","fixed":false,"media":[]}],"spotlight":true}
-    ]);
-    let mut update = updates("ready", "current");
-    update["notes"] = notes.clone();
-    let mut p = props();
-    p["section"] = json!("updates");
-    let tree = describe(cx, &staged, "frame/settings", true, p, update.clone(), None).unwrap();
-    assert!(tree.contains("st-whats-new") && tree.contains("st-app-update") && tree.contains("st-check-core"));
-    assert!(!tree.contains("Newest details") && !tree.contains("Older headline"));
-    let mut p = props();
-    p["notes"] = notes;
-    let tree = describe(cx, &staged, "frame/whatsnew", true, p, update, None).unwrap();
-    assert!(tree.contains("Newest details") && tree.contains("Older details"));
-    assert!(tree.contains("Also fixed") && tree.contains("Newest fix"));
-    assert!(tree.contains("Oct 26") && !tree.contains("2026-10-26"));
-}
-
-#[gpui::test]
 fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let start = Instant::now();
@@ -955,36 +879,11 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
             "frame/welcome",
             true,
             props(),
-            updates("current", "current"),
             Some(&format!("this.page = {page};")),
         )
         .unwrap();
-        let expected = ["Herdr runs your terminals in the background", "Add your other machines", "Choose your panels", "Make it yours"][page - 1];
+        let expected = ["Canopy runs your terminals in the background", "Add your other machines", "Choose your panels", "Make it yours"][page - 1];
         assert!(tree.contains(expected), "welcome page {page}: {tree}");
-    }
-    for setup in ["", "this.sent = true;", "this.error = 'Fixture error';"] {
-        let tree = describe(
-            cx,
-            &staged,
-            "frame/feedback",
-            true,
-            props(),
-            updates("current", "current"),
-            Some(setup),
-        )
-        .unwrap();
-        assert!(tree.contains("feedback"), "{tree}");
-        if setup.is_empty() {
-            assert!(
-                tree.contains("Input #") && tree.contains("Textarea #") && tree.contains("A prefilled message"),
-                "{tree}"
-            );
-        } else {
-            assert!(
-                tree.contains(if setup.contains("sent") { "Sent. Thanks" } else { "Fixture error" }),
-                "{tree}"
-            );
-        }
     }
     for query in ["settings", "no-such-command"] {
         let tree = describe(
@@ -993,7 +892,6 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
             "frame/palette",
             true,
             props(),
-            updates("current", "current"),
             Some(&format!("this.query = {query:?};")),
         )
         .unwrap();
@@ -1025,7 +923,7 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
         assert!(entries.iter().any(|e| e == entry), "orphan scenario: {entry}");
         let mut p = props();
         p.as_object_mut().unwrap().extend(patch.as_object().unwrap().clone());
-        describe(cx, &staged, entry, true, p, updates("current", "current"), None).unwrap();
+        describe(cx, &staged, entry, true, p, None).unwrap();
     }
     eprintln!("18 local-state/overlay cases, each twice: {:?}", start.elapsed());
 }
@@ -1037,7 +935,7 @@ fn duplicate_element_negative_control(cx: &mut TestAppContext) {
     let dir = staged.0.join("negative");
     std::fs::create_dir(&dir).unwrap();
     std::fs::write(dir.join("main.js"), "import { View, div } from 'gpui-kit'; export default class Bad extends View { render() { const child = div().child('reused'); return div().child(div().child(child)).child(div().child(child)); } }").unwrap();
-    let error = describe(cx, &staged, "negative", false, props(), updates("current", "current"), None).unwrap_err();
+    let error = describe(cx, &staged, "negative", false, props(), None).unwrap_err();
     assert!(format!("{error:#}").contains("already added to a parent"), "{error:#}");
 }
 
@@ -1117,7 +1015,7 @@ fn shipped_layouts_and_keys() {
 fn picker_scrolls_the_selection_into_view(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let staged = Staged::new();
-    let mut values = fixture(true, props(), updates("current", "current"));
+    let mut values = fixture(true, props());
     let tabs: Vec<Value> = (1..=12)
         .map(|i| json!({"id":format!("tab{i}"),"index":i,"name":format!("Task {i}"),"active":i==1,"status":"done","panes":1,"zoomed":false,"settled":false,"settled_at":null,"changed_at":null,"working_since":null}))
         .collect();
@@ -1137,13 +1035,13 @@ fn picker_scrolls_the_selection_into_view(cx: &mut TestAppContext) {
 fn status_bar_shows_the_real_palette_key(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let staged = Staged::new();
-    let mut bound = fixture(true, props(), updates("current", "current"));
+    let mut bound = fixture(true, props());
     bound.insert("keys".into(), json!([{"section":"global","keys":"ctrl-p","action":"app.palette"}]));
     let tree = describe_with_values(cx, &staged, "mods/workspace-status", bound, None).unwrap();
     assert!(tree.contains("Ctrl+P"), "hint must show the real binding: {tree}");
     assert!(!tree.contains("Shift P"), "stale hardcoded hint: {tree}");
 
-    let mut unbound = fixture(true, props(), updates("current", "current"));
+    let mut unbound = fixture(true, props());
     unbound.insert("keys".into(), json!([{"section":"global","keys":"ctrl-k","action":"app.help"}]));
     let tree = describe_with_values(cx, &staged, "mods/workspace-status", unbound, None).unwrap();
     assert!(tree.contains("commands"), "unbound hint still offers commands: {tree}");

@@ -32,11 +32,20 @@ class DistributionTests(unittest.TestCase):
         path.chmod(0o755)
 
     def run_script(self, script, os_name, arch, *args):
-        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", TEST_OS=os_name, TEST_ARCH=arch)
+        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", TEST_OS=os_name, TEST_ARCH=arch, HERDR_RELEASES_URL="https://releases.example")
         return subprocess.run(
             [str(ROOT / script), *args], cwd=ROOT, env=env,
             capture_output=True, text=True, check=False,
         )
+
+    def test_installer_requires_explicit_release_source(self):
+        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}")
+        env.pop("HERDR_RELEASES_URL", None)
+        result = subprocess.run([str(ROOT / "distribution/install.sh")], env=env,
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("set HERDR_RELEASES_URL", result.stderr)
+        self.assertNotIn("unexpected download", result.stderr)
 
     def test_intel_mac_installer_stops_before_download(self):
         for arch in ("x86_64", "amd64"):
@@ -74,7 +83,7 @@ done
 exit 97''')
                 result = self.run_script("distribution/install.sh", "Darwin", "x86_64")
                 self.assertEqual(result.returncode, 1)
-                self.assertIn("Installing Herdr test for macos-aarch64", result.stdout)
+                self.assertIn("Installing Canopy test for macos-aarch64", result.stdout)
                 self.assertIn("download is damaged", result.stderr)
                 self.assertNotIn("Intel Macs", result.stderr)
 
@@ -82,8 +91,8 @@ exit 97''')
         """The URL install.sh downloads the app from, for a manifest giving `url`."""
         home = Path(self.work.name) / "home"
         data = home / ".local/share"
-        shutil.rmtree(data / "herdr-app", ignore_errors=True)
-        (data / "herdr-app" if installed else data).mkdir(parents=True, exist_ok=True)
+        shutil.rmtree(data / "canopy", ignore_errors=True)
+        (data / "canopy" if installed else data).mkdir(parents=True, exist_ok=True)
         log = Path(self.work.name) / "urls"
         log.unlink(missing_ok=True)
         manifest = Path(self.work.name) / "latest.json"
@@ -105,13 +114,13 @@ exit 22''')
 
     def test_installer_marks_plain_release_downloads_for_the_counter(self):
         r = "https://releases.example"
-        tarball = f"{r}/app/1.0.0/herdr-app-linux-x86_64.tar.gz"
+        tarball = f"{r}/app/1.0.0/canopy-linux-x86_64.tar.gz"
         self.assertEqual(self.download_url(tarball), f"{tarball}?src=install")
         self.assertEqual(self.download_url(tarball, installed=True), f"{tarball}?src=reinstall")
         # A mirror's query (a signed URL) or fragment, or another host: exactly as given.
         for url in (f"{tarball}?sig=a%2Fb&exp=1", f"{tarball}?src=update", f"{tarball}#x",
-                    "https://mirror.example/app/1.0.0/herdr-app-linux-x86_64.tar.gz",
-                    "https://releases.example.evil/app/1.0.0/herdr-app-linux-x86_64.tar.gz"):
+                    "https://mirror.example/app/1.0.0/canopy-linux-x86_64.tar.gz",
+                    "https://releases.example.evil/app/1.0.0/canopy-linux-x86_64.tar.gz"):
             with self.subTest(url=url):
                 self.assertEqual(self.download_url(url), url)
         # A test server elsewhere marks its own URLs.
@@ -122,13 +131,13 @@ exit 22''')
         home = self.bin / "home"
         (home / ".local/bin").mkdir(parents=True)
         (home / ".local/bin/herdr-core").touch()
-        source = self.bin / "source/Herdr.app/Contents"
+        source = self.bin / "source/Canopy.app/Contents"
         source.mkdir(parents=True)
         plist = b"signed release plist must stay unchanged"
         (source / "Info.plist").write_bytes(plist)
         archive = self.bin / "release.tar.gz"
         with tarfile.open(archive, "w:gz") as tar:
-            tar.add(source.parent, arcname="Herdr.app")
+            tar.add(source.parent, arcname="Canopy.app")
         sha = hashlib.sha256(archive.read_bytes()).hexdigest()
         manifest = self.bin / "manifest.json"
         manifest.write_text('{"version":"1.0.0","targets":{"macos-aarch64":{"url":"release","sha256":"%s"}}}' % sha)
@@ -138,7 +147,7 @@ for a; do
   prev=$a
 done
 case $url in */latest.json) cp "{manifest}" "$out" ;; release) cp "{archive}" "$out" ;; *) exit 97 ;; esac''')
-        installed = home / "Applications/Herdr.app/Contents/Info.plist"
+        installed = home / "Applications/Canopy.app/Contents/Info.plist"
         installed.parent.mkdir(parents=True)
         installed.write_bytes(b"previous installed app")
         fixture = self.bin / "signature.txt"
@@ -162,7 +171,7 @@ printf 'dev PATH added' >> "$3"''')
         installer = self.bin / "install.sh"
         installer.write_text(script)
         env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", TEST_OS="Darwin",
-                   TEST_ARCH="arm64", HOME=str(home))
+                   TEST_ARCH="arm64", HOME=str(home), HERDR_RELEASES_URL="https://releases.example")
         result = subprocess.run(["sh", str(installer)], cwd=ROOT, env=env,
                                 capture_output=True, text=True, check=False)
         return result, installed.read_bytes(), log.read_text().splitlines(), plist_log.exists(), plist
@@ -230,8 +239,8 @@ printf 'dev PATH added' >> "$3"''')
     def test_packages_keep_full_notices_on_every_platform(self):
         checkout = self.bin / "checkout"
         for path in [
-            "Cargo.toml", "LICENSE", "THIRD-PARTY-NOTICES", "scripts/package",
-            "assets/icons/herdr-ui-icon-clean.svg", "assets/icons/Herdr.icns",
+            "Cargo.toml", "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES", "scripts/package",
+            "assets/icons/canopy.svg", "assets/icons/Canopy.icns",
         ]:
             destination = checkout / path
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -241,25 +250,25 @@ printf 'dev PATH added' >> "$3"''')
         sign.chmod(0o755)
         release = checkout / "target/release"
         release.mkdir(parents=True)
-        for name in ("herdr-app", "herdr-app.exe"):
+        for name in ("canopy", "canopy.exe"):
             (release / name).write_bytes(b"test binary")
         self.stub("cargo", "exit 0")
         for os_name, arch, target, prefix in (
-            ("Linux", "x86_64", "linux-x86_64", "herdr-app"),
-            ("Darwin", "arm64", "macos-aarch64", "Herdr.app/Contents/Resources"),
-            ("MINGW64_NT", "x86_64", "windows-x86_64", "herdr-app"),
+            ("Linux", "x86_64", "linux-x86_64", "canopy"),
+            ("Darwin", "arm64", "macos-aarch64", "Canopy.app/Contents/Resources"),
+            ("MINGW64_NT", "x86_64", "windows-x86_64", "canopy"),
         ):
             with self.subTest(target=target):
                 result = self.run_script(checkout / "scripts/package", os_name, arch)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                with tarfile.open(checkout / f"dist/herdr-app-{target}.tar.gz") as archive:
-                    for name in ("LICENSE", "THIRD-PARTY-NOTICES"):
+                with tarfile.open(checkout / f"dist/canopy-{target}.tar.gz") as archive:
+                    for name in ("LICENSE", "NOTICE", "THIRD-PARTY-NOTICES"):
                         self.assertEqual(
                             archive.extractfile(f"{prefix}/{name}").read(),
                             (ROOT / name).read_bytes(),
                         )
         self.stub("cargo", 'echo "unexpected build" >&2; exit 97')
-        for name in ("LICENSE", "THIRD-PARTY-NOTICES"):
+        for name in ("LICENSE", "NOTICE", "THIRD-PARTY-NOTICES"):
             notice = checkout / name
             original = notice.read_bytes()
             for state in ("empty", "missing"):

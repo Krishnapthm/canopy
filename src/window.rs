@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! The window. The chrome (`layouts/<name>.json`) is a tree of the locked
 //! primitives; a `{ "tab": "active" }` block shows the selected
 //! tab's terminals as it arranges them. Every visible part that isn't a
@@ -132,7 +133,7 @@ fn launch_failure(record: &Value, output: &str) -> Option<String> {
     Some(if tail.is_empty() { format!("Exit code {code}") } else { format!("Exit code {code}\n{tail}") })
 }
 
-/// The shipped layouts (defaults/layouts): `main` is Herdr's window (spaces
+/// The shipped layouts (defaults/layouts): `main` is Canopy's window (spaces
 /// sidebar, tab bar).
 const LAYOUTS: &[(&str, &str)] = &[
     ("main", include_str!("../defaults/layouts/main.json")),
@@ -151,7 +152,7 @@ fn shipped_layout(name: &str) -> &'static str {
     LAYOUTS.iter().find(|(n, _)| *n == name).unwrap_or(&LAYOUTS[0]).1
 }
 
-/// A layout as shipped (main for names Herdr doesn't ship).
+/// A layout as shipped (main for names Canopy doesn't ship).
 fn default_layout(name: &str) -> Node {
     serde_json::from_str(shipped_layout(name)).expect("defaults/layouts are valid")
 }
@@ -410,7 +411,7 @@ pub struct AppWindow {
     cwds: HashMap<String, String>,
     /// When each terminal's repo and branch were last read, and what it was doing.
     folders_checked: HashMap<String, FolderCheck>,
-    /// When Herdr started each terminal: a listing already in flight can't know them yet.
+    /// When Canopy started each terminal: a listing already in flight can't know them yet.
     born: RefCell<HashMap<String, Instant>>,
     /// Connection epoch: ignore replies from an old connection.
     core_generation: u64,
@@ -444,13 +445,6 @@ pub struct AppWindow {
     /// The OS tells us when files change (`files.rs`); else the disk is polled.
     file_events: Option<crate::files::FileEvents>,
     polls: u64,
-    /// The downloaded update the frame's pill offers, and the one closed for now.
-    /// What's waiting, in words (`update_label`).
-    update_ready: Option<String>,
-    update_dismissed: Option<String>,
-    core_update_error_dismissed: Option<String>,
-    update_success: bool,
-    update_status: String,
     focus: FocusHandle,
     _tasks: Vec<Task<()>>,
     /// Gives the keyboard back when what had it leaves the screen (`restore_focus`).
@@ -538,11 +532,6 @@ impl AppWindow {
             system_dark: is_dark(window.appearance()),
             file_events,
             polls: 0,
-            update_ready: None,
-            update_dismissed: None,
-            core_update_error_dismissed: None,
-            update_success: false,
-            update_status: String::new(),
             focus: cx.focus_handle(),
             _tasks: Vec::new(),
             _focus_lost: None,
@@ -576,13 +565,13 @@ impl AppWindow {
         install_layouts();
         let name = mods::shared("layout").and_then(|v| v.as_str().map(str::to_owned)).filter(|n| layout_path(n).exists());
         // A layout whose mods are gone (Zen, T4, ADE after the update took
-        // theirs) starts on Herdr's instead of a wall of "did not load".
+        // theirs) starts on Canopy's instead of a wall of "did not load".
         let gone = name.as_deref().map(missing_mods).unwrap_or_default();
         w.load_layout(if gone.is_empty() { name.as_deref().unwrap_or("main") } else { "main" });
         w.apply_look(window, cx);
         w.show_layout_notes(window, cx);
         if let (Some(n), false) = (&name, gone.is_empty()) {
-            let note = json!({ "title": format!("{n} needs mods that aren't here"), "body": format!("Showing Herdr instead. Missing: {}. Your {n} layout file is still there.", gone.join(", ")), "level": "info", "timeout": 12000 });
+            let note = json!({ "title": format!("{n} needs mods that aren't here"), "body": format!("Showing Canopy instead. Missing: {}. Your {n} layout file is still there.", gone.join(", ")), "level": "info", "timeout": 12000 });
             w.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": note }), window, cx);
         }
 
@@ -718,7 +707,6 @@ impl AppWindow {
                 let Ok(core) = this.update(cx, |this, _| this.core.clone()) else { break };
                 core.closed().await;
                 tracing::warn!("lost the core; reconnecting");
-                crate::telemetry::count("core_lost");
                 let fresh = loop {
                     cx.background_executor().timer(Duration::from_millis(1000)).await;
                     if let Ok(core) = cx.background_executor().spawn(async { Core::connect() }).await {
@@ -730,7 +718,6 @@ impl AppWindow {
                 }
             }
         }));
-        Self::note_core(&w.core);
         w.sync(window, cx);
         w.restore_focus(window, cx);
         // The first time the app opens: the frame's welcome (it sets
@@ -743,51 +730,10 @@ impl AppWindow {
             mods::set_shared("space.colors".into(), c);
         }
         let first_install = mods::shared("frame.welcomed").is_none();
-        crate::update_notes::started(first_install);
         if first_install {
             cx.defer_in(window, |this, window, cx| this.open_welcome(window, cx));
-        } else if !crate::update_notes::spotlights().is_empty() {
-            cx.defer_in(window, |this, window, cx| this.open_whats_new(false, window, cx));
-        } else {
-            w.update_success = crate::update_notes::changed();
         }
-        crate::telemetry::window_open();
         w
-    }
-
-    /// What telemetry.rs counts: how much is open, never what's in it.
-    fn observe(&self) {
-        if !crate::telemetry::collecting() {
-            return;
-        }
-        let m = &self.model;
-        let agents: Vec<&model::Agent> = m.agents.iter().filter(|(a, _)| self.live.contains_key(*a) && m.status(a).is_some()).map(|(_, a)| a).collect();
-        crate::telemetry::observe(crate::telemetry::Observation {
-            foreground: self.window_active,
-            agents_working: agents.iter().filter(|a| a.word.as_deref() == Some("working")).count(),
-            agents: agents.iter().map(|a| a.app.clone()).collect(),
-            spaces: m.spaces.len(),
-            tabs: m.spaces.iter().map(|p| p.tabs.len()).sum(),
-            terminals: m.spaces.iter().flat_map(|p| &p.tabs).map(|c| model::addresses(&c.root).len()).sum(),
-            layout: self.layout_name.clone(),
-            mods: self.visible().1.into_iter().map(|(_, i)| i.name).collect(),
-            theme: settings::get().theme.clone(),
-            welcome: mods::shared("frame.welcomed").and_then(|v| v.as_str().map(str::to_owned)),
-        });
-    }
-
-    /// After an update: unseen spotlights. Asked for: the pending range, or this version's notes.
-    fn open_whats_new(&mut self, asked: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let notes = if asked { crate::update_notes::notes(crate::update::ready().as_deref()) } else { crate::update_notes::spotlights() };
-        if notes.is_empty() {
-            self.run("app.settings", json!({ "section": "updates" }), window, cx);
-            return;
-        }
-        let viewport = window.viewport_size();
-        let width = 880.0_f32.min((f32::from(viewport.width) / settings::zoom() - 24.0).max(1.0));
-        let height = 760.0_f32.min((f32::from(viewport.height) / settings::zoom() - 24.0).max(1.0));
-        let spec = json!({ "mod": "frame-whatsnew", "kind": "window", "width": width, "height": height, "props": { "notes": notes } });
-        self.open_overlay(mods::new_overlay_id(), spec, window, cx);
     }
 
     fn open_welcome(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -795,17 +741,6 @@ impl AppWindow {
         // each step changes what's behind it, and a click beside it doesn't end it.
         let spec = json!({ "mod": "frame-welcome", "kind": "window", "width": 660, "height": 600 });
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
-    }
-
-    /// Tells the updater which core this is and who owns it (off the UI thread).
-    fn note_core(core: &Arc<Core>) {
-        let core = core.clone();
-        std::thread::spawn(move || {
-            if let Ok(s) = core.call("server.status", json!({})) {
-                let text = |k: &str| s.get(k).and_then(Value::as_str).map(str::to_owned);
-                crate::update::set_core(text("version").map(|v| v.trim_start_matches("hc ").to_owned()), text("installed_by"));
-            }
-        });
     }
 
     fn reconnected(&mut self, core: Arc<Core>, cx: &mut Context<Self>) {
@@ -819,7 +754,6 @@ impl AppWindow {
             slot.pending = None;
             slot.blocked = false;
         }
-        Self::note_core(&core);
         self.core = core.clone();
         self.publish(cx);
         for t in self.terms.values() {
@@ -874,7 +808,6 @@ impl AppWindow {
         let s_time = mtime(&settings::path());
         if s_time.is_none() || s_time != self.watched.settings {
             let loaded = settings::load_person();
-            crate::telemetry::set_setting(settings::telemetry_setting(&loaded));
             match loaded {
                 Ok(p) => {
                     self.person = p;
@@ -1109,7 +1042,7 @@ impl AppWindow {
     /// What installing layouts kept of the person's own, as toasts.
     fn show_layout_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         for clone in mods::take_sync_notes() {
-            let n = json!({ "title": format!("Your edits are in {clone}"), "body": "Herdr's own layouts and mods can't be changed: clone one to make it yours.", "level": "info", "timeout": 12000 });
+            let n = json!({ "title": format!("Your edits are in {clone}"), "body": "Canopy's own layouts and mods can't be changed: clone one to make it yours.", "level": "info", "timeout": 12000 });
             self.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": n }), window, cx);
         }
     }
@@ -1665,7 +1598,7 @@ impl AppWindow {
     fn load(&self, inst: Instance, window: &mut Window, cx: &mut Context<Self>) -> Copy {
         let mut copy = Copy { inst, id: 0, root: None, _watch: None, error: None };
         let (Some(runtime), Some(folder)) = (&self.runtime, self.folders.get(&copy.inst.name)) else {
-            copy.error = Some(format!("no mod folder ~/.config/herdr-app/mods/{}", copy.inst.name));
+            copy.error = Some(format!("no mod folder ~/.config/canopy/mods/{}", copy.inst.name));
             return copy;
         };
         copy.id = mods::prepare_load(&copy.inst);
@@ -2078,7 +2011,7 @@ impl AppWindow {
         }
         self.written_seen.retain(|a, _| self.live.contains_key(a));
         changed |= self.share_seen(cx);
-        // Changes already made before Herdr started aren't news.
+        // Changes already made before Canopy started aren't news.
         if self.listed_once {
             for (addr, alert, looking) in alerts {
                 self.alert(&addr, alert, looking, window, cx);
@@ -2099,7 +2032,7 @@ impl AppWindow {
         }
     }
 
-    /// Tells the person an agent needs them or finished: Herdr's sounds, and a
+    /// Tells the person an agent needs them or finished: Canopy's sounds, and a
     /// toast (drawn by the `toast` mod; click it to go there) unless they're
     /// looking at that agent.
     fn alert(&mut self, addr: &str, alert: model::Alert, looking: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -2202,12 +2135,12 @@ impl AppWindow {
 
     /// Puts a live terminal where its labels say, without changing what's
     /// shown. A space or tab the app doesn't know is made under the label's
-    /// id, unnamed (called Herdr's way).
+    /// id, unnamed (called Canopy's way).
     fn adopt(&mut self, addr: &str, space: &str, ctx: Option<&str>) {
         let machine = addr.split_once('/').map(|(m, _)| m.to_owned());
         let pane = self.model.fresh_id_on("p", machine.as_deref());
         let ctx_id = ctx.map(str::to_owned).unwrap_or_else(|| self.model.fresh_id_on("tb", machine.as_deref()));
-        // Found by its labels: no names, so they're called Herdr's way.
+        // Found by its labels: no names, so they're called Canopy's way.
         let new_ctx = Tab::new(&ctx_id, "", &pane, addr);
         if self.model.space(space).is_none() {
             // Its live folder may not be read yet: the core's record has it.
@@ -2363,7 +2296,7 @@ impl AppWindow {
     // ---- creating terminals ------------------------------------------------
 
     /// The folder new terminals in `space` start in: where its shown tab's focused
-    /// pane is now (Herdr's "follow"), else the folder the space was made in.
+    /// pane is now (Canopy's "follow"), else the folder the space was made in.
     fn folder_for(&self, space: &str) -> String {
         let p = self.model.space(space);
         let here = p.and_then(|p| p.active_tab()).and_then(|c| c.focused_pane()).and_then(|f| self.model.address_of(&f)).and_then(|a| self.cwds.get(&a).cloned());
@@ -2376,7 +2309,7 @@ impl AppWindow {
             Some(slot) if slot.available => Ok(()),
             Some(slot) => Err(slot.error.clone().unwrap_or_else(|| "This machine's layout is unavailable. Try again when it reconnects.".into())),
             None => Err(match machine {
-                Some(m) => format!("Herdr has no machine called {m}. See hc machine ls; machines added with --temp stay out of Herdr."),
+                Some(m) => format!("Canopy has no machine called {m}. See hc machine ls; machines added with --temp stay out of Canopy."),
                 None => "This machine's layout is unavailable. Try again when it reconnects.".into(),
             }),
         }
@@ -2814,7 +2747,7 @@ impl AppWindow {
                 return json!({ "ok": true });
             }
             tracing::warn!("unknown command {name:?}");
-            return json!({ "error": format!("unknown command {name:?}: see `herdr-app commands`; a mod's are <mod>.<command> and need the mod loaded") });
+            return json!({ "error": format!("unknown command {name:?}: see `canopy commands`; a mod's are <mod>.<command> and need the mod loaded") });
         };
         if let Err(error) = crate::commands::validate_args(command, &args) {
             return json!({ "error": error });
@@ -2834,7 +2767,6 @@ impl AppWindow {
             return json!({ "error": format!("{name} needs {arg}") });
         }
         if person {
-            crate::telemetry::command(command.name);
         }
         if name == "space.new" {
             let machine = new_space_machine(&args, person, &self.model);
@@ -3271,7 +3203,7 @@ impl AppWindow {
                     Err(e) => return self.fail(format!("layout: {e}")),
                 };
                 if layout_sync::without_clicks(&self.chrome, &n) != self.chrome {
-                    return self.fail("Only supported click/look fields can change on Herdr's own layouts: clone one for other changes");
+                    return self.fail("Only supported click/look fields can change on Canopy's own layouts: clone one for other changes");
                 }
                 let mut state = layout_sync::State::between(&self.file_chrome, &n);
                 if n.look.theme == self.chrome.look.theme {
@@ -3321,7 +3253,7 @@ impl AppWindow {
             "layout.reset" => {
                 let name = Self::owned(a, "name").unwrap_or_else(|| self.layout_name.clone());
                 let Some((_, text)) = LAYOUTS.iter().find(|(n, _)| *n == name) else {
-                    return self.fail(format!("{name:?} isn't a layout Herdr ships"));
+                    return self.fail(format!("{name:?} isn't a layout Canopy ships"));
                 };
                 // Theirs is kept under a name nothing else has (never over an older one).
                 if layout_path(&name).exists() {
@@ -3369,10 +3301,6 @@ impl AppWindow {
                 self.open_welcome(window, cx);
                 return;
             }
-            "app.whats_new" => {
-                self.open_whats_new(true, window, cx);
-                return;
-            }
             "app.palette" => {
                 // Once: a second press closes the palette instead of stacking another.
                 if self.overlays.iter().any(|o| o.id == "palette") {
@@ -3381,17 +3309,6 @@ impl AppWindow {
                     let spec = json!({ "mod": "frame-palette", "kind": "popup", "at": "top", "offset": 60, "width": 620, "height": 0.85 });
                     self.open_overlay("palette".into(), spec, window, cx);
                 }
-                return;
-            }
-            "app.feedback" => {
-                let from = Self::owned(a, "from").unwrap_or_else(|| "person".into());
-                if !matches!(from.as_str(), "person" | "agent") {
-                    return self.fail("from must be person or agent");
-                }
-                // A window, not a dialog: the app stays usable behind it (copy an error, paste it in).
-                let spec = json!({ "mod": "frame-feedback", "kind": "window", "key": "feedback", "width": 680,
-                    "props": { "message": Self::owned(a, "message").unwrap_or_default(), "from": from, "layout": self.layout_name } });
-                self.open_overlay(mods::new_overlay_id(), spec, window, cx);
                 return;
             }
             "app.settings" => {
@@ -3406,13 +3323,6 @@ impl AppWindow {
                     self.open_overlay("settings".into(), spec, window, cx);
                 }
                 return;
-            }
-            "app.check_updates" => crate::update::check_now(),
-            "app.update_core" => {
-                if crate::update::core().ready.is_none() && crate::update::core().error.is_none() {
-                    return self.fail("herdr-core is up to date");
-                }
-                crate::update::update_core();
             }
             "app.help" => {
                 if self.overlays.iter().any(|o| o.id == "help") {
@@ -3449,14 +3359,6 @@ impl AppWindow {
                 self.write_person(|p| p.zoom = zoom, window, cx);
             }
             "app.quit" => cx.quit(),
-            "app.update" => {
-                if !crate::update::apply() {
-                    return self.fail("no update is ready yet");
-                }
-                self.drain_documents(window, cx);
-                crate::update::relaunch();
-                cx.quit();
-            }
             "window.close" | "window.minimize" | "window.maximize" => return self.window_command(name, window, cx),
             // Hiding apps is macOS's (bound natively there).
             "app.hide" | "app.hide_others" | "app.show_all" => return,
@@ -3708,11 +3610,6 @@ impl AppWindow {
 
     /// Closes an overlay; a kept window stays closed on the next start too.
     fn close_overlay(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if id == "core-update-error" {
-            self.core_update_error_dismissed = crate::update::core().error;
-            cx.notify();
-            return;
-        }
         if let Some(k) = self.overlays.iter().find(|o| o.id == id).and_then(|o| o.key.clone()) {
             movable::forget(&self.layout_name, &k);
         }
@@ -3794,7 +3691,7 @@ impl AppWindow {
         if cmd.get("commands").is_some() {
             return crate::commands::listing();
         }
-        // Herdr was launched again: this window comes to the front instead.
+        // Canopy was launched again: this window comes to the front instead.
         if cmd.get("raise").is_some() {
             cx.activate(true);
             window.activate_window();
@@ -3831,7 +3728,7 @@ impl AppWindow {
         json!({ "error": "expected { do }, { ls }, { commands } or { status }" })
     }
 
-    /// Spaces, their tabs and terminals, for `herdr-app ls`. Sub-agents are listed
+    /// Spaces, their tabs and terminals, for `canopy ls`. Sub-agents are listed
     /// under the terminal that started them.
     fn world(&self) -> Value {
         let m = &self.model;
@@ -3877,18 +3774,6 @@ impl AppWindow {
 
     fn poll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.flush_documents(false, window, cx);
-        let ready = Self::update_label();
-        if ready != self.update_ready {
-            self.update_ready = ready;
-            cx.notify();
-        }
-        // The settings screen shows versions and progress: redraw mods when they move.
-        let status = crate::update::status().to_string();
-        if status != self.update_status {
-            reconcile_core_update_error(&mut self.core_update_error_dismissed, &crate::update::core());
-            self.update_status = status;
-            self.refresh_mods(cx);
-        }
         if let Some(r) = &self.runtime {
             crate::bench::note_mods(&r.read_metrics());
         }
@@ -3896,7 +3781,6 @@ impl AppWindow {
         // was missed.
         self.polls += 1;
         if self.polls.is_multiple_of(25) {
-            self.observe();
         }
         if self.file_events.is_none() || self.polls.is_multiple_of(25) {
             self.reload_config(window, cx);
@@ -4230,7 +4114,7 @@ impl AppWindow {
                 .text_xs()
                 .text_color(c("blocked"))
                 .overflow_y_scroll()
-                .child(format!("{} did not load:\n\n{}\n\nFix the files; Herdr retries on save.", inst.name, error.as_deref().unwrap_or("?")))
+                .child(format!("{} did not load:\n\n{}\n\nFix the files; Canopy retries on save.", inst.name, error.as_deref().unwrap_or("?")))
                 .into_any_element(),
             None => div().into_any_element(),
         }
@@ -4354,11 +4238,6 @@ impl AppWindow {
     fn render_overlays(&self, viewport: Size<Pixels>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut out = Vec::new();
         let mut toast_y = 16.0;
-        // Drawn last, so it stays clickable over an open dialog.
-        let pill = self.render_update_pill(cx);
-        if pill.is_some() {
-            toast_y += UPDATE_PILL_HEIGHT + 8.0;
-        }
         // Windows under dialogs, popups and toasts; each kind in the order opened
         // (a window pressed last is last: on top).
         let order = self.overlays.iter().filter(|o| o.kind == OverlayKind::Window).chain(self.overlays.iter().filter(|o| o.kind != OverlayKind::Window));
@@ -4426,107 +4305,7 @@ impl AppWindow {
                 }
             }
         }
-        let core = crate::update::core();
-        if let Some(error) = core.error.filter(|error| core.managed.is_none() && self.core_update_error_dismissed.as_ref() != Some(error)) {
-            out.push(div().absolute().right(settings::z(16.0)).bottom(settings::z(toast_y))
-                .max_w(settings::z(540.0)).p(settings::z(12.0)).rounded_lg().bg(c("popover"))
-                .border_1().border_color(c("border")).text_size(settings::z(13.0)).text_color(c("foreground"))
-                .occlude().flex().items_center().gap(settings::z(8.0))
-                .child(div().id("core-update-error").flex_1().min_w_0().cursor_pointer()
-                    .on_click(cx.listener(|this, _, w, cx| this.run("app.settings", json!({ "section": "updates" }), w, cx)))
-                    .child(format!("herdr-core update failed: {error} · Open Updates")))
-                .child(div().id("core-update-error-dismiss").size(settings::z(24.0)).flex_none()
-                    .flex().items_center().justify_center().rounded_full().cursor_pointer()
-                    .text_color(c("dim")).hover(|s| s.bg(c("raised")).text_color(c("foreground"))).child("×")
-                    .on_click(cx.listener(|this, _, w, cx| this.close_overlay("core-update-error", w, cx))))
-                .into_any_element());
-        }
-        out.extend(pill);
         out
-    }
-}
-
-const UPDATE_PILL_HEIGHT: f32 = 34.0;
-
-impl AppWindow {
-    /// "Herdr 0.2.0 is ready · Restart": the frame's, so no layout or mod can hide it.
-    /// What's waiting, in words: the pill shows it until clicked or dismissed.
-    fn update_label() -> Option<String> {
-        let core = crate::update::core();
-        let core = core.ready.filter(|_| !core.updating && core.managed.is_none());
-        match (crate::update::ready(), core) {
-            (Some(a), Some(c)) => Some(format!("Herdr {a} and herdr-core {c} are ready")),
-            (Some(a), None) => Some(format!("Herdr {a} is ready")),
-            (None, Some(c)) => Some(format!("herdr-core {c} is ready")),
-            (None, None) => None,
-        }
-    }
-
-    fn render_update_pill(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let app_version = crate::update::ready();
-        let app_ready = app_version.is_some();
-        let success = self.update_ready.is_none() && self.update_success;
-        let label = self.update_ready.clone().or_else(|| success.then(|| format!("Updated to {}", env!("CARGO_PKG_VERSION"))))?;
-        let dismissal = app_version.map(|v| format!("app:{v}")).unwrap_or_else(|| label.clone());
-        if self.update_dismissed.as_ref() == Some(&dismissal) { return None; }
-        let pill = div()
-            .absolute()
-            .right(settings::z(16.0))
-            .bottom(settings::z(16.0))
-            .h(settings::z(UPDATE_PILL_HEIGHT))
-            .pl(settings::z(14.0))
-            .pr(settings::z(6.0))
-            .flex()
-            .items_center()
-            .gap(settings::z(10.0))
-            .bg(c("popover"))
-            .border_1()
-            .border_color(c("border"))
-            .rounded_full()
-            .shadow_lg()
-            .occlude()
-            .text_size(settings::z(13.0))
-            .child(div().text_color(c("foreground")).child(label.clone()))
-            .when(app_ready, |pill| pill.child(
-                div()
-                    .id("update-restart")
-                    .h(settings::z(24.0))
-                    .px(settings::z(10.0))
-                    .flex()
-                    .items_center()
-                    .rounded_full()
-                    .cursor_pointer()
-                    .bg(c("accent"))
-                    .text_color(c("accent_foreground"))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .hover(|s| s.opacity(0.9))
-                    .child("Restart")
-                    .on_click(cx.listener(|this, _, w, cx| this.run("app.update", json!({}), w, cx))),
-            ))
-            .child(div().id("update-notes").px(settings::z(6.0)).cursor_pointer().text_color(c("accent"))
-                .child(if app_ready || success { "What changed" } else { "Open Updates" })
-                .on_click(cx.listener(move |this, _, w, cx| {
-                    if success { this.update_success = false; }
-                    this.run("app.settings", json!({ "section": "updates" }), w, cx);
-                })))
-            .child(
-                div()
-                    .id("update-dismiss")
-                    .size(settings::z(24.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_full()
-                    .cursor_pointer()
-                    .text_color(c("dim"))
-                    .hover(|s| s.bg(c("raised")).text_color(c("foreground")))
-                    .child("×")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.update_dismissed = Some(dismissal.clone());
-                        cx.notify();
-                    })),
-            );
-        Some(pill.into_any_element())
     }
 }
 
@@ -4605,7 +4384,7 @@ struct FolderCheck {
     repo: bool,
 }
 
-/// Changes made outside Herdr (a commit in another app): looked for this often,
+/// Changes made outside Canopy (a commit in another app): looked for this often,
 /// in repos, while the window is in front.
 const FOLDER_FALLBACK: Duration = Duration::from_secs(60);
 
@@ -4951,7 +4730,7 @@ impl Render for AppWindow {
             .id("herdr")
             .track_focus(&self.focus)
             // `layout:<name>` key sections apply while that layout shows.
-            .key_context(format!("Herdr layout = {}", self.layout_name).as_str())
+            .key_context(format!("Canopy layout = {}", self.layout_name).as_str())
             .size_full()
             .relative()
             .bg(c("background"))
@@ -5070,38 +4849,10 @@ fn changed_asset_paths(home: &std::path::Path, changed: &[std::path::PathBuf]) -
     paths.into_iter().collect()
 }
 
-fn reconcile_core_update_error(dismissed: &mut Option<String>, core: &crate::update::CoreInfo) {
-    if core.error.as_ref().is_some_and(|error| dismissed.as_ref() != Some(error)) || (!core.updating && core.error.is_none()) {
-        *dismissed = None;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use gpui::{div, point, px, size, Context, IntoElement, Render, TestAppContext, Window};
     use gpui::prelude::*;
-
-    #[test]
-    fn core_error_dismissal_survives_failed_retries_but_resets_after_recovery() {
-        let mut dismissed = Some("connection closed".to_owned());
-        let mut core = crate::update::CoreInfo { updating: true, ..Default::default() };
-        super::reconcile_core_update_error(&mut dismissed, &core);
-        assert!(dismissed.is_some());
-        core.updating = false;
-        core.error = Some("connection closed".into());
-        super::reconcile_core_update_error(&mut dismissed, &core);
-        assert_eq!(dismissed, core.error);
-        core.error = None;
-        super::reconcile_core_update_error(&mut dismissed, &core);
-        assert!(dismissed.is_none());
-        core.error = Some("connection closed".into());
-        super::reconcile_core_update_error(&mut dismissed, &core);
-        assert_ne!(dismissed, core.error);
-        dismissed = core.error.clone();
-        core.error = Some("checksum mismatch".into());
-        super::reconcile_core_update_error(&mut dismissed, &core);
-        assert!(dismissed.is_none());
-    }
 
     #[test]
     fn going_back_into_a_split_column_takes_its_top_pane_whatever_the_fractions() {
@@ -5626,7 +5377,7 @@ mod tests {
     /// fresh app home: a window takes process-wide things (the app home, the
     /// mods' request channel) that tests beside it would otherwise share.
     fn in_own_process(name: &str) {
-        let home = std::path::PathBuf::from(format!("/var/tmp/herdr-window-test-{name}-{}", std::process::id()));
+        let home = std::path::PathBuf::from(format!("/tmp/herdr-window-test-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", &format!("window::tests::{name}"), "--nocapture", "--test-threads=1"])
@@ -6038,7 +5789,7 @@ export default class SystemToast extends View {
                 (id.clone(), this.copies[&format!("overlay:{id}")].inst.name.clone())
             })
         };
-        // Herdr's own notes ("Your edits are in …") may show up too.
+        // Canopy's own notes ("Your edits are in …") may show up too.
         let shown = |id: &str, cx: &mut gpui::VisualTestContext| {
             cx.run_until_parked();
             view.update(cx, |this, _| this.overlays.iter().any(|o| o.id == id))

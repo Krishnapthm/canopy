@@ -8,11 +8,9 @@ root=${TMPDIR:-/tmp}/canopy-dev
 export HERDR_APP_HOME=$root/home HC_SESSION=canopy-dev HC_SOCKET=$root/c.sock
 export XDG_STATE_HOME=$root/state XDG_CONFIG_HOME=$root/config
 export HERDR_APP_NO_SOUND=1
-# Until phase 1 deletes telemetry, keep dev runs from phoning home.
-export DO_NOT_TRACK=1 HERDR_TELEMETRY=0
 unset HC_TERMINAL_ID HC_TERMINAL_SOCKET
 [[ ${#HC_SOCKET} -le 80 ]] || { echo 'TMPDIR socket path too long; use TMPDIR=/tmp' >&2; exit 1; }
-[[ -x $repo/target/debug/herdr-app ]] || { echo 'debug app missing; build it separately' >&2; exit 1; }
+[[ -x $repo/target/debug/canopy ]] || { echo 'debug app missing; build it separately' >&2; exit 1; }
 hc=$(command -v hc) || { echo 'hc missing from PATH' >&2; exit 1; }
 [[ $hc == /* && -x $hc ]] || { echo 'hc must be an executable absolute path' >&2; exit 1; }
 umask 077
@@ -27,4 +25,4 @@ printf '%s\n' "$hc" >"$root/owned/hc"
 # Keep the reservation even on failure: dev-stop can stop a partially started core.
 "$hc" server start
 [[ -S $HC_SOCKET ]] || { echo 'core did not create the scratch socket' >&2; exit 1; }
-exec "$repo/target/debug/herdr-app"
+exec "$repo/target/debug/canopy"

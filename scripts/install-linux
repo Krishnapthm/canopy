@@ -1,6 +1,6 @@
 #!/bin/bash
-# Points ~/.local/bin/herdr-app at this checkout's release build and adds the
-# launcher entry with the Herdr icon. Re-run after moving the checkout.
+# Points ~/.local/bin/canopy at this checkout's release build and adds the
+# launcher entry with the Canopy icon. Re-run after moving the checkout.
 set -euo pipefail
 
 [[ $(uname -s) == Linux ]] || { echo 'This installer is for Linux.' >&2; exit 1; }
@@ -9,18 +9,18 @@ cargo build --release
 
 data=${XDG_DATA_HOME:-$HOME/.local/share}
 mkdir -p "$HOME/.local/bin" "$data/applications" "$data/icons/hicolor/scalable/apps"
-ln -sfn "$PWD/target/release/herdr-app" "$HOME/.local/bin/herdr-app"
-cp assets/icons/herdr-ui-icon-clean.svg "$data/icons/hicolor/scalable/apps/herdr-app.svg"
-cat > "$data/applications/herdr-app.desktop" <<EOF
+ln -sfn "$PWD/target/release/canopy" "$HOME/.local/bin/canopy"
+cp assets/icons/canopy.svg "$data/icons/hicolor/scalable/apps/canopy.svg"
+cat > "$data/applications/canopy.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Herdr
+Name=Canopy
 Comment=Terminals and coding agents that keep running
-Exec=$HOME/.local/bin/herdr-app
-Icon=herdr-app
+Exec=$HOME/.local/bin/canopy
+Icon=canopy
 Terminal=false
 Categories=Development;
-StartupWMClass=herdr-app
+StartupWMClass=canopy
 EOF
 update-desktop-database "$data/applications" 2>/dev/null || true
 # A stale icon cache hides new icons until it's rebuilt.
@@ -29,4 +29,4 @@ update-desktop-database "$data/applications" 2>/dev/null || true
 # so a fresh install shows an empty page in the taskbar.
 command -v dbus-send >/dev/null 2>&1 &&
   dbus-send --session --type=signal /KIconLoader org.kde.KIconLoader.iconChanged int32:0 2>/dev/null || true
-echo "Installed herdr-app. Quit and reopen Herdr to use the new build."
+echo "Installed canopy. Quit and reopen Canopy to use the new build."

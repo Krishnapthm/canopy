@@ -1,5 +1,5 @@
-//! `herdr-app do <command> [--arg value ... | json]`, `herdr-app ls`, `herdr-app commands`
-//! and `herdr-app status`: drive a running window from a shell (agents, tests)
+//! `canopy do <command> [--arg value ... | json]`, `canopy ls`, `canopy commands`
+//! and `canopy status`: drive a running window from a shell (agents, tests)
 //! over `$HERDR_APP_HOME/herdr-app.sock`, one JSON line each way.
 
 use crate::mods::{self, Request};
@@ -20,7 +20,7 @@ fn socket() -> PathBuf {
 pub fn listen(tx: async_channel::Sender<Request>) {
     let path = socket();
     if UnixStream::connect(&path).is_ok() {
-        tracing::warn!("another Herdr is serving {}; `herdr-app do` goes there", path.display());
+        tracing::warn!("another Canopy is serving {}; `canopy do` goes there", path.display());
         return;
     }
     let _ = std::fs::remove_file(&path);
@@ -53,7 +53,7 @@ fn serve(stream: UnixStream, tx: async_channel::Sender<Request>) {
     let _ = (&stream).write_all(format!("{reply}\n").as_bytes());
 }
 
-/// One Herdr per home: a second launch brings the running window to the
+/// One Canopy per home: a second launch brings the running window to the
 /// front and quits. True when one is running (even one too busy to answer:
 /// a second window would ring every alert twice).
 pub fn raise_running() -> bool {
@@ -89,22 +89,15 @@ pub fn client(args: &[String]) -> i32 {
         },
         [verb] if verb == "status" => json!({ "status": true }),
         [verb] if verb == "ls" => json!({ "ls": true }),
-        [verb, message] if verb == "feedback" => json!({ "do": "app.feedback", "args": { "message": message, "from": "agent" } }),
         [verb, command, rest @ ..] if verb == "do" => match parse_args(rest) {
             Ok(a) => json!({ "do": command, "args": a }),
             Err(e) => return fail(&e),
         },
-        _ => return fail("usage: herdr-app ls | herdr-app commands | herdr-app status | herdr-app shot [file.png] | herdr-app do <command> [--arg value ... | json]"),
+        _ => return fail("usage: canopy ls | canopy commands | canopy status | canopy shot [file.png] | canopy do <command> [--arg value ... | json]"),
     };
     let mut stream = match UnixStream::connect(socket()) {
         Ok(s) => s,
-        Err(_) if args.first().is_some_and(|v| v == "feedback") => {
-            let body = crate::feedback::draft(&args[1], "", 0, "agent", "other");
-            println!("{}", serde_json::to_string_pretty(&body).unwrap_or_default());
-            eprintln!("Herdr must be open to review and send this feedback. Nothing was sent; core version and layout will reflect the open window.");
-            return 1;
-        }
-        Err(e) => return fail(&format!("no Herdr window at {}: {e}", socket().display())),
+        Err(e) => return fail(&format!("no Canopy window at {}: {e}", socket().display())),
     };
     let _ = stream.set_read_timeout(Some(Duration::from_secs(35)));
     let mut line = String::new();
@@ -173,7 +166,7 @@ pub fn save_shot(window: &gpui::Window, path: &std::path::Path) -> anyhow::Resul
 }
 
 fn fail(message: &str) -> i32 {
-    eprintln!("herdr-app: {message}");
+    eprintln!("canopy: {message}");
     2
 }
 

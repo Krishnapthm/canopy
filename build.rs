@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Embeds the default mods (defaults/mods/**), the program icons
 //! (defaults/icons/*) and the frame's mods (defaults/frame/**) so Herdr can
 //! install them.
@@ -42,7 +43,7 @@ fn main() {
     // Windows takes the window, taskbar and Start menu icon from the program file.
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        println!("cargo:rerun-if-changed=assets/icons/herdr-app.ico");
-        winresource::WindowsResource::new().set_icon("assets/icons/herdr-app.ico").compile().expect("cannot embed the icon");
+        println!("cargo:rerun-if-changed=assets/icons/canopy.ico");
+        winresource::WindowsResource::new().set_icon("assets/icons/canopy.ico").compile().expect("cannot embed the icon");
     }
 }

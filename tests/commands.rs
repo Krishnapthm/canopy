@@ -23,7 +23,7 @@ export default class Probe extends View {
     let path = home.join("shared.json");
     for original in [Some("{\"sentinel\":true}"), Some("broken json"), None] {
         if let Some(text) = original { std::fs::write(&path, text).unwrap(); }
-        let output = Command::new(env!("CARGO_BIN_EXE_herdr-app"))
+        let output = Command::new(env!("CARGO_BIN_EXE_canopy"))
             .arg("check").arg(&module)
             .env("HERDR_APP_HOME", &home)
             .env("HC_SESSION", format!("check-shared-{}", std::process::id()))
@@ -47,7 +47,7 @@ fn commands_need_no_window_or_app_home() {
         std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
     ));
-    let output = Command::new(env!("CARGO_BIN_EXE_herdr-app"))
+    let output = Command::new(env!("CARGO_BIN_EXE_canopy"))
         .arg("commands")
         .env("HERDR_APP_HOME", &home)
         .output()

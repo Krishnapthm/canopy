@@ -28,8 +28,12 @@ function lockInputs(content: string): string {
 }
 
 function manifestInputs(content: string): string {
+  let inBin = false;
   let inPackage = false;
-  return content.split("\n").map(line => {
+  return content.split("\n").filter(line => {
+    if (line.startsWith("[")) inBin = line === "[[bin]]";
+    return !inBin;
+  }).map(line => {
     if (line.startsWith("[")) inPackage = line === "[package]";
     return inPackage && line.startsWith("version = ") ? 'version = "<workspace version>"' : line;
   }).join("\n");
@@ -48,6 +52,8 @@ if (generated.exitCode !== 0) throw new Error("cargo-about failed");
 let text = "Herdr third-party notices\n=========================\n"
   + "Regenerate with just notices. See licenses/README.md.\n\n";
 for (const path of inputs) {
+  // Generator code carries no license inputs.
+  if (path === "scripts/notices.ts") continue;
   // Normalize checkout line endings so the same check works on Windows.
   const content = (await Bun.file(path).text()).replaceAll("\r\n", "\n");
   const input = path === "Cargo.lock" ? lockInputs(content)

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The bench's scenarios in Ghostty alone and in Herdr 1.x inside Ghostty,
+"""The bench's scenarios in Ghostty alone and in Canopy 1.x inside Ghostty,
 measured the same way (macOS: instructions, energy, wakeups) for a CPU
 baseline comparison.
 
     scripts/bench_compare.py ghostty|herdr --root <bench artifact folder>
 
-Herdr 1.x runs in a throwaway session (`herdr --session hb1`), stopped and
+Canopy 1.x runs in a throwaway session (`herdr --session hb1`), stopped and
 deleted after. Run `scripts/bench.py` first: it writes the fake agent.
 """
 

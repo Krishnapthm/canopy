@@ -1,5 +1,5 @@
-//! Attention sounds, as Herdr plays them: one when an agent needs you, one
-//! when it finished while you weren't looking. Bundled sounds (Herdr's), or a
+//! Attention sounds, as Canopy plays them: one when an agent needs you, one
+//! when it finished while you weren't looking. Bundled sounds (Canopy's), or a
 //! file from settings.json; played with whichever MP3-capable player exists
 //! (Windows plays them itself).
 
@@ -26,7 +26,7 @@ const PLAYERS: &[(&str, &[&str])] = &[
 #[cfg(not(windows))]
 const PLAYER_LIMIT: Duration = Duration::from_secs(15);
 
-/// `done`, `blocked`, or a file (absolute, or relative to ~/.config/herdr-app). Off the UI thread.
+/// `done`, `blocked`, or a file (absolute, or relative to ~/.config/canopy). Off the UI thread.
 pub fn play(sound: &str) {
     if std::env::var_os("HERDR_APP_NO_SOUND").is_some() {
         return;

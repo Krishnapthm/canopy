@@ -2,14 +2,14 @@
 
 # Commands
 
-Inspect the window with `herdr-app ls` and `herdr-app status`.
-`herdr-app commands` lists the app actions below, even without an open window.
+Inspect the window with `canopy ls` and `canopy status`.
+`canopy commands` lists the app actions below, even without an open window.
 
-Run an action in the open window with `herdr-app do`:
+Run an action in the open window with `canopy do`:
 
 ```sh
-herdr-app do pane.split --direction right
-herdr-app do pane.split '{"direction":"right"}'
+canopy do pane.split --direction right
+canopy do pane.split '{"direction":"right"}'
 ```
 
 Arguments can be named flags or one JSON object. Required arguments are marked below.
@@ -148,7 +148,7 @@ Take a terminal's pane away and disable core keep; it keeps running (a sub-agent
 
 ## `terminal.right_click`
 
-Where right-clicks in a terminal (default: the focused one) go when its program takes the mouse: "program" or "menu" (Herdr's, the default). Shift+right-click is always the menu.
+Where right-clicks in a terminal (default: the focused one) go when its program takes the mouse: "program" or "menu" (Canopy's, the default). Shift+right-click is always the menu.
 
 | Argument | Required |
 |---|---|
@@ -157,7 +157,7 @@ Where right-clicks in a terminal (default: the focused one) go when its program 
 
 ## `terminal.pin`
 
-Pin an agent to the top of the agent lists (pinned true) or unpin it (false). Pins are kept with the terminal, so every Herdr client shows them, and end with it.
+Pin an agent to the top of the agent lists (pinned true) or unpin it (false). Pins are kept with the terminal, so every Canopy client shows them, and end with it.
 
 | Argument | Required |
 |---|---|
@@ -298,7 +298,7 @@ No arguments.
 
 ## `terminal.scroll`
 
-Scroll a terminal's view of its history (default: the focused one). Give exactly one of: lines (a whole number; negative goes up, toward history), pages (a number, fractions allowed; one page is the terminal's rows), to: "top" (oldest history) or "bottom" (the live screen). This scrolls Herdr's view, not the program.
+Scroll a terminal's view of its history (default: the focused one). Give exactly one of: lines (a whole number; negative goes up, toward history), pages (a number, fractions allowed; one page is the terminal's rows), to: "top" (oldest history) or "bottom" (the live screen). This scrolls Canopy's view, not the program.
 
 | Argument | Required |
 |---|---|
@@ -458,21 +458,6 @@ Show the welcome again.
 
 No arguments.
 
-## `app.whats_new`
-
-Show what this release brought (it opens once by itself after an update).
-
-No arguments.
-
-## `app.feedback`
-
-Draft feedback for the person to review and send (from: person or agent).
-
-| Argument | Required |
-|---|---|
-| `message` | no |
-| `from` | no |
-
 ## `app.palette`
 
 Toggle the command palette: every command by name, with its key; calling again closes it.
@@ -481,23 +466,11 @@ No arguments.
 
 ## `app.settings`
 
-Open the settings (section: look, alerts, updates).
+Open the settings (section: look, keyboard, machines, alerts).
 
 | Argument | Required |
 |---|---|
 | `section` | no |
-
-## `app.check_updates`
-
-Look for a newer Herdr and herdr-core now.
-
-No arguments.
-
-## `app.update_core`
-
-Update herdr-core to its latest release of this generation; terminals keep running.
-
-No arguments.
 
 ## `app.reset`
 
@@ -528,12 +501,6 @@ No arguments.
 ## `app.zoom_reset`
 
 Back to normal size.
-
-No arguments.
-
-## `app.update`
-
-Restart into the update Herdr downloaded (your terminals keep running).
 
 No arguments.
 
@@ -579,4 +546,4 @@ Maximize the window, or back.
 
 No arguments.
 
-[Back to Herdr](../README.md)
+[Back to Canopy](../README.md)

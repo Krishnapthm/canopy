@@ -1,7 +1,7 @@
-# herdr-app: drive the person's window
+# canopy: drive the person's window
 
-Herdr shows spaces, tabs and panes. herdr-core (`hc`) runs their terminals
-and keeps them alive when the window closes. Use `herdr-app` only to change
+Canopy shows spaces, tabs and panes. herdr-core (`hc`) runs their terminals
+and keeps them alive when the window closes. Use `canopy` only to change
 what the person sees. For starting, reading, messaging, waiting on or cleaning
 up agents and programs, read `hc --skill` and use hc.
 Your terminal address is `$HC_TERMINAL_ID`; it is not a pane ID.
@@ -9,22 +9,16 @@ Your terminal address is `$HC_TERMINAL_ID`; it is not a pane ID.
 ## Inspect before acting
 
 ```sh
-herdr-app ls          # spaces > tabs > terminals, including pane IDs
-herdr-app status      # current layout, focus, overlays, zoom and file/mod errors
-herdr-app commands    # available commands, arguments and descriptions
+canopy ls          # spaces > tabs > terminals, including pane IDs
+canopy status      # current layout, focus, overlays, zoom and file/mod errors
+canopy commands    # available commands, arguments and descriptions
 ```
 
 `ls` and `status` talk to the running window, not a new app. `commands`
 prints the built-in command list even without an open window. Do not launch bare
-`herdr-app` to inspect it: that opens or raises the window. Do not stop,
+`canopy` to inspect it: that opens or raises the window. Do not stop,
 signal or restart the person's app or core. A window closing does not kill
 its terminals.
-
-`app.check_updates` checks for newer releases. Settings reports "Up to date"
-only after a successful check; on failure, check the connection and retry.
-Package-managed cores are checked but updated through their package manager.
-Dismiss a core update error with its × or `overlay.close {id:"core-update-error"}`;
-it stays dismissed until the error changes or the update recovers.
 
 ## Show something when asked
 
@@ -34,16 +28,16 @@ default names. Use IDs from `ls` rather than guessing or acting on the wrong
 focused pane.
 
 ```sh
-herdr-app do space.new --name api --folder /path/to/api
-herdr-app do tab.new --name "fix login" --argv '["claude"]' --task "Look at the login bug"
-herdr-app do pane.split --direction right --pane p12
-herdr-app do agent.focus --terminal t7
+canopy do space.new --name api --folder /path/to/api
+canopy do tab.new --name "fix login" --argv '["claude"]' --task "Look at the login bug"
+canopy do pane.split --direction right --pane p12
+canopy do agent.focus --terminal t7
 ```
 
 For a remote space:
 
 ```sh
-herdr-app do space.new --name "remote api" --machine vps --folder /srv/api
+canopy do space.new --name "remote api" --machine vps --folder /srv/api
 ```
 
 The folder is on that machine; tabs and splits in the space stay there.
@@ -67,7 +61,7 @@ the current-target default can apply. Null keeps its omitted-argument meaning.
 Use `commands` to confirm the command's exact shape:
 
 ```sh
-herdr-app do pane.split '{"direction":"right","pane":"p12"}'
+canopy do pane.split '{"direction":"right","pane":"p12"}'
 ```
 
 `pane.swap {pane?, direction | target}` trades the places of `pane` (default:
@@ -75,7 +69,7 @@ the focused one) and its neighbor in a direction, or `target`, another pane of
 the same tab. Give `direction` or `target`, not both. Focus stays with the same pane:
 
 ```sh
-herdr-app do pane.swap '{"pane":"p12","target":"p14"}'
+canopy do pane.swap '{"pane":"p12","target":"p14"}'
 ```
 
 `terminal.select_all {terminal?}` selects a terminal's whole screen and scrollback,
@@ -97,7 +91,7 @@ with a nonzero code within two seconds, the window shows an error toast with
 the exit code and last output lines.
 
 A terminal started with hc opts into the window with `herdr.space=<id>`.
-`herdr.tab=<id>` chooses its tab; without it, Herdr creates a tab in that space.
+`herdr.tab=<id>` chooses its tab; without it, Canopy creates a tab in that space.
 Unlabeled workers stay hidden. Do not add labels just to run a background
 worker. Use app commands when the
 user wants to see a new tab or split, hc for orchestration that need not change
@@ -105,7 +99,7 @@ the screen.
 
 ## Customize layouts, keys, or mods
 
-First read `~/.config/herdr-app/AGENTS.md` (or `$HERDR_APP_HOME/AGENTS.md` if
+First read `~/.config/canopy/AGENTS.md` (or `$HERDR_APP_HOME/AGENTS.md` if
 set). It is the installed guide to settings, layouts, commands and mods.
 Read the generated `.d.ts` files beside it for full API details; do not edit
 those files or the generated guide. The app rewrites them on start.
@@ -114,16 +108,16 @@ those files or the generated guide. The app rewrites them on start.
   `terminal_scroll_speed` (default 1, 0.1..5) adjusts wheel and trackpad
   scrolling, including mouse reports. Set them in settings.json or the
   layout's look; the layout wins.
-- Home defaults to `~/.config/herdr-app`; `HERDR_APP_HOME` selects another.
+- Home defaults to `~/.config/canopy`; `HERDR_APP_HOME` selects another.
 - Mods live in `mods/<name>/` with `main.js` and optional `mod.json`.
   They are trusted JavaScript with command and network access.
   `"focusable": true` in `mod.json` lets `pane.go` move onto a copy; it receives
   `"focus"` from `nextCommand()` and focuses its own keyboard handle.
 - A mod's `watchFolder(dir)` promise has `cancel()`; cancel it when the folder
   is no longer shown. It resolves with `[]` and releases only that call.
-- Shipped mods belong to Herdr: duplicate with `mod.clone` before editing.
+- Shipped mods belong to Canopy: duplicate with `mod.clone` before editing.
   Shipped layouts likewise use `layout.clone` for a personal copy.
-  Discover required arguments with `herdr-app commands`.
+  Discover required arguments with `canopy commands`.
 - Save to reload. A broken save keeps the old version running and reports
   an error in `status`; a still-working screen is not proof the edit worked.
 - Make only the requested change. Don't touch unrelated mods or settings.
@@ -138,9 +132,9 @@ those files or the generated guide. The app rewrites them on start.
 After every mod change:
 
 ```sh
-herdr-app check ~/.config/herdr-app/mods/<name>
-herdr-app status
-herdr-app shot /tmp/mod.png   # then look at the picture
+canopy check ~/.config/canopy/mods/<name>
+canopy status
+canopy shot /tmp/mod.png   # then look at the picture
 ```
 
 `check` loads the mod and renders it once. It exits nonzero with the exact
@@ -149,7 +143,7 @@ untouched. Never call a mod done without a passing check. Then confirm it is
 shown correctly in the running window with `shot`; don't claim a visual
 check you haven't made.
 
-`herdr-app shot [file.png]` saves the window's last frame and prints its
+`canopy shot [file.png]` saves the window's last frame and prints its
 absolute path (default: `herdr-shot.png` in your current folder). It is the
 app's own rendering at full pixel size: terminals, images, overlays and
 floats included, even when the window is covered or minimized. No screen
@@ -158,8 +152,6 @@ capture or permissions. It needs a running window that has drawn a frame;
 
 ## Problems and safety
 
-If Herdr misbehaves, `herdr-app feedback "<what happened>"` drafts a report.
-The person reviews and sends it; it does not silently send feedback.
 
 Never experiment with pointer/key automation on the person's real display.
 When developing the app on Linux, its `scripts/sandbox` provides an isolated

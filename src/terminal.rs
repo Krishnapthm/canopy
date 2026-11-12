@@ -863,7 +863,7 @@ impl TerminalView {
             return;
         }
         let k = &ev.keystroke;
-        // Typing clears a selection, as in Herdr.
+        // Typing clears a selection, as in Canopy.
         if !k.key.starts_with("shift") && !k.key.starts_with("control") && !k.key.starts_with("alt") {
             self.grid.borrow_mut().vt.clear_selection();
         }
@@ -919,13 +919,13 @@ impl TerminalView {
         cx.notify();
     }
 
-    /// The program tracks the mouse and Shift isn't held (Shift keeps the mouse Herdr's).
+    /// The program tracks the mouse and Shift isn't held (Shift keeps the mouse Canopy's).
     fn takes_mouse(&self, mods: Modifiers) -> bool {
         self.grid.borrow().vt.mouse_tracking() && !mods.shift
     }
 
     /// Sends a mouse event to a program that tracks the mouse. Returns whether it did
-    /// (shift keeps the mouse for Herdr: selecting, the menu).
+    /// (shift keeps the mouse for Canopy: selecting, the menu).
     fn mouse(&mut self, action: GhosttyMouseAction, button: Option<MouseButton>, pos: Point<Pixels>, mods: Modifiers) -> bool {
         let mut g = self.grid.borrow_mut();
         if !track_mouse_button(&mut g.buttons_down, action, button) {
@@ -1033,7 +1033,7 @@ impl TerminalView {
         g.vt.select(step, col, row, x, y, cw, height);
         drop(g);
         if matches!(step, Select::Release) {
-            // Copy on select, as in Herdr.
+            // Copy on select, as in Canopy.
             self.copy(cx);
         }
         cx.notify();
@@ -1095,7 +1095,7 @@ fn selection_scroll_lines(y: f32, cell_height: f32, rows: u16) -> isize {
 /// A scroll thumb's top and length in px inside a `track` px lane: the
 /// scrollable area is `total` rows, the `len`-row viewport sits `offset` rows
 /// from its top. None when nothing scrolls; `min` keeps a huge scrollback
-/// grabbable. The proportions are Herdr's scrollbar's.
+/// grabbable. The proportions are Canopy's scrollbar's.
 fn scrollbar_thumb(total: u64, offset: u64, len: u64, track: f32, min: f32) -> Option<(f32, f32)> {
     if total <= len || len == 0 || track <= 0.0 {
         return None;
@@ -1131,7 +1131,7 @@ fn scrollbar_row_at(total: u64, len: u64, track: f32, min: f32, top: f32) -> usi
 
 /// A title as it's shown: an agent's spinner in front of it (`\u{2733} Fix the
 /// tests`, braille dots) is no part of it, nor braille dots after a short
-/// prefix (`\u{03c0} \u{2839} task`). Herdr draws its own, and a title that
+/// prefix (`\u{03c0} \u{2839} task`). Canopy draws its own, and a title that
 /// spins would redraw every mod that shows titles, 10 times a second.
 pub(crate) fn shown_title(title: &str) -> std::borrow::Cow<'_, str> {
     use std::borrow::Cow;
@@ -1202,7 +1202,7 @@ fn is_image_bytes(bytes: &[u8]) -> bool {
 /// that path instead.
 ///
 /// macOS gives read access to the thumbnail's temporary file only to the app
-/// that received the drop; a pane's processes are children of the Herdr
+/// that received the drop; a pane's processes are children of the Canopy
 /// daemon, not of this app, so they cannot open it, and the file is gone
 /// within seconds. This app can read it now, so it copies the bytes into the
 /// temp directory and the pane gets a path that stays readable.
@@ -2060,7 +2060,7 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
     {
         let mut g = grid.borrow_mut();
         g.cursor_at = frame.cursor_cell.map(|(x, y)| Bounds::new(at(x as usize, y as usize), cell));
-        // As in Herdr, hide on the alternate screen and below five columns.
+        // As in Canopy, hide on the alternate screen and below five columns.
         g.thumb = None;
         g.track = None;
         let sb = g.vt.scrollbar();
@@ -2270,13 +2270,13 @@ impl Render for TerminalView {
                 }
                 drop(g);
                 if this.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(ev.button), ev.position, ev.modifiers) {
-                    // The program took the click: Herdr's old selection ends, so a copy can't repeat it.
+                    // The program took the click: Canopy's old selection ends, so a copy can't repeat it.
                     this.clear_selection(cx);
                 } else {
                     this.start_selection(ev.position, cx);
                 }
             }))
-            // Right-click is Herdr's menu, even when the program tracks the mouse
+            // Right-click is Canopy's menu, even when the program tracks the mouse
             // (agent TUIs do, and then a pane had no menu at all), unless the pane
             // sends right-clicks to its program.
             .on_mouse_down(MouseButton::Right, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
@@ -2803,7 +2803,7 @@ mod tests {
         struct Root(Entity<super::TerminalView>);
         impl Render for Root {
             fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-                div().key_context("Herdr").size_full()
+                div().key_context("Canopy").size_full()
                     .on_action(cx.listener(|this, action: &gpui_shell::action::ShellAction, _, cx| {
                         match action.id() {
                             "terminal.paste" => this.0.update(cx, |terminal, cx| terminal.paste(cx)),
@@ -3072,7 +3072,7 @@ mod tests {
         impl Render for Root {
             fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
                 div()
-                    .key_context("Herdr")
+                    .key_context("Canopy")
                     .size_full()
                     .on_action(cx.listener(|this, action: &gpui_shell::action::ShellAction, window, cx| {
                         if action.id() == "terminal.search" {
@@ -4064,7 +4064,7 @@ mod tests {
         let _guard = OPTION_AS_ALT_TEST_LOCK.lock().unwrap();
         #[cfg(target_os = "macos")]
         gpui_macos::set_option_as_alt(Some(gpui_macos::OptionAsAlt::None));
-        // Herdr keeps native Option text on macOS (libghostty's default
+        // Canopy keeps native Option text on macOS (libghostty's default
         // option-as-alt=false); other platforms prefix an unconsumed Alt.
         const ALT_B: &[u8] = if cfg!(target_os = "macos") { b"b" } else { b"\x1bb" };
         const KITTY_ALT_B: &[u8] = if cfg!(target_os = "macos") { b"b" } else { b"\x1b[98;3u" };

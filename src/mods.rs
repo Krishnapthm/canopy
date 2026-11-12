@@ -1,5 +1,6 @@
-//! Mods: folders of JavaScript under ~/.config/herdr-app/mods that agents write and
-//! Herdr runs live (gpui-shell), plus the `herdr` module they import.
+// Modified for Canopy.
+//! Mods: folders of JavaScript under ~/.config/canopy/mods that agents write and
+//! Canopy runs live (gpui-shell), plus the `herdr` module they import.
 
 use crate::layout::Node;
 use gpui::App;
@@ -47,10 +48,10 @@ pub fn note_fonts(cx: &gpui::App) {
 }
 
 /// The app's home: `$HERDR_APP_HOME` (tests, experiments), else
-/// `$XDG_CONFIG_HOME/herdr-app`, else `~/.config/herdr-app`, on every OS.
+/// `$XDG_CONFIG_HOME/canopy`, else `~/.config/canopy`, on every OS.
 pub fn app_dir() -> PathBuf {
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    env("HERDR_APP_HOME").unwrap_or_else(|| env("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config")).join("herdr-app"))
+    env("HERDR_APP_HOME").unwrap_or_else(|| env("XDG_CONFIG_HOME").unwrap_or_else(|| home().join(".config")).join("canopy"))
 }
 
 pub fn mods_dir() -> PathBuf {
@@ -267,26 +268,6 @@ fn clone_mod_at(mods: &Path, name: &str, to: &str) -> std::io::Result<()> {
     result
 }
 
-/// Mods in use by kind, for telemetry: the shipped ones as shipped (by
-/// name), how many shipped ones were edited, how many are the person's own
-/// (never their names).
-pub fn kinds(names: &std::collections::BTreeSet<String>) -> (Vec<String>, usize, usize) {
-    let text = std::fs::read_to_string(app_dir().join("installed.json")).unwrap_or_default();
-    let installed: Installed = serde_json::from_str(&text).unwrap_or_default();
-    let shipped = |n: &str| DEFAULT_MODS.iter().any(|(p, _)| p.split('/').next() == Some(n));
-    let (mut builtin, mut edited, mut custom) = (Vec::new(), 0, 0);
-    for name in names {
-        if !shipped(name) {
-            custom += 1;
-        } else if installed.get(name).is_some_and(|files| as_shipped(&mods_dir().join(name), files)) {
-            builtin.push(name.clone());
-        } else {
-            edited += 1;
-        }
-    }
-    (builtin, edited, custom)
-}
-
 /// Exactly as installed: every file unchanged and none added.
 fn as_shipped(dir: &Path, files: &Files) -> bool {
     fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
@@ -311,7 +292,7 @@ fn as_shipped(dir: &Path, files: &Files) -> bool {
 
 /// File path (inside the mod) to content fingerprint.
 type Files = std::collections::BTreeMap<String, String>;
-/// Default mods Herdr installed, with the files as installed.
+/// Default mods Canopy installed, with the files as installed.
 type Installed = std::collections::BTreeMap<String, Files>;
 
 /// FNV-1a: stable across builds, unlike std's hasher.
@@ -320,7 +301,7 @@ fn fingerprint(bytes: &[u8]) -> String {
     format!("{h:016x}")
 }
 
-/// Whether every file Herdr installed is still there as installed.
+/// Whether every file Canopy installed is still there as installed.
 fn untouched(dir: &Path, files: &Files) -> bool {
     files.iter().all(|(path, want)| std::fs::read(dir.join(path)).is_ok_and(|b| fingerprint(&b) == *want))
 }
@@ -391,7 +372,7 @@ pub enum Request {
     OpenOverlay { id: String, spec: Value },
     CloseOverlay { id: String },
     Refresh,
-    /// From `herdr-app do` / `herdr-app status` (control.rs); answer on `reply`.
+    /// From `canopy do` / `canopy status` (control.rs); answer on `reply`.
     Control { cmd: Value, reply: std::sync::mpsc::Sender<Value> },
 }
 
@@ -897,9 +878,6 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         copies.insert(copy, Rc::downgrade(&reads));
     });
     let props = inst.props.clone();
-    let feedback_frame = inst.name == "frame-feedback";
-    let feedback_from = inst.props.get("from").and_then(Value::as_str).unwrap_or("person").to_owned();
-    let feedback_layout = inst.props.get("layout").and_then(Value::as_str).unwrap_or("other").to_owned();
     let (cmd_tx, commands) = async_channel::unbounded::<String>();
     COMMANDS.with_borrow_mut(|commands| {
         commands.retain(|(_, _, tx)| !tx.is_closed());
@@ -927,46 +905,6 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         .function("home", |_| Ok(home().to_string_lossy().into_owned().into()))
         .function("appHome", |_| Ok(app_dir().to_string_lossy().into_owned().into()))
         .function("fonts", |_| Ok(to_host(&json!(*FONTS.lock().unwrap()))))
-        .function("updates", |_| Ok(to_host(&crate::update::status())))
-        .function("presentUpdateNotes", |a| {
-            crate::update_notes::presented(&strings(a.get(0)));
-            Ok(HostValue::Null)
-        })
-        .function("telemetry", |_| Ok(to_host(&crate::telemetry::status())))
-        .function("feedbackPreview", move |a| {
-            let images = a.get(2).and_then(|v| match v { HostValue::Number(n) => Some(*n as usize), _ => None }).unwrap_or(0);
-            let body = crate::feedback::draft(a.string(0)?, a.string(1)?, images, &feedback_from, &feedback_layout);
-            Ok(to_host(&json!({ "body": body, "available": crate::feedback::available() })))
-        })
-        .function("feedbackPasteImage", move |_| {
-            if !feedback_frame { return Err(HostError::new("feedback screenshots are frame-only")); }
-            let bytes = gpui_shell::with_current_app(|cx| {
-                cx.read_from_clipboard()?.entries().iter().find_map(|e| match e {
-                    gpui::ClipboardEntry::Image(i) => Some(i.bytes.clone()),
-                    _ => None,
-                })
-            }).flatten();
-            Ok(match bytes {
-                None => HostValue::Null,
-                Some(b) => to_host(&match crate::feedback::attach(&b) { Ok(path) => json!({ "path": path }), Err(e) => json!({ "error": e }) }),
-            })
-        })
-        .function("feedbackAttachImages", move |a| {
-            if !feedback_frame { return Err(HostError::new("feedback screenshots are frame-only")); }
-            let paths = strings(a.get(0)).into_iter().map(std::path::PathBuf::from).collect::<Vec<_>>();
-            Ok(to_host(&json!(crate::feedback::attach_files(&paths))))
-        })
-        .async_function("feedbackPickImages", move |_| {
-            if !feedback_frame { return Err(HostError::new("feedback screenshots are frame-only")); }
-            let picked = gpui_shell::with_current_app(|cx| cx.prompt_for_paths(gpui::PathPromptOptions {
-                files: true, directories: false, multiple: true, prompt: Some("Add".into()),
-            })).ok_or_else(|| HostError::new("no window to pick from"))?;
-            Ok(async move {
-                let paths = picked.await.ok().and_then(Result::ok).flatten().unwrap_or_default();
-                let out = crate::feedback::attach_files(&paths);
-                Ok(to_host(&Value::Array(out)))
-            })
-        })
         .async_function("knownAgents", |a| {
             let on = opt_str(a.get(0), "on");
             // The table is loaded on the window thread; workers have only defaults.
@@ -988,22 +926,6 @@ fn module(inst: Instance, copy: u64) -> HostModule {
             Ok(async move {
                 let path = picked.await.ok().and_then(Result::ok).flatten().and_then(|p| p.into_iter().next());
                 Ok(path.map(|p| HostValue::Str(p.to_string_lossy().into_owned())).unwrap_or(HostValue::Null))
-            })
-        })
-        .function("feedbackClearImages", move |_| {
-            if feedback_frame { crate::feedback::clear_shots(); }
-            Ok(HostValue::Null)
-        })
-        .async_function("sendFeedback", move |a| {
-            if !feedback_frame { return Err(HostError::new("sending feedback is frame-only")); }
-            let body = from_host(a.value(0)?);
-            let shots: Vec<String> = from_host(a.value(1).unwrap_or(&HostValue::Null)).as_array()
-                .map(|l| l.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect()).unwrap_or_default();
-            Ok(async move {
-                Ok(match crate::feedback::send(body, shots).await {
-                    Ok(()) => HostValue::Null,
-                    Err(why) => HostValue::Str(why),
-                })
             })
         })
         .function("themes", |_| {
@@ -1103,7 +1025,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         })
         .async_function("nextCommand", move |_| {
             let rx = commands.clone();
-            Ok(async move { rx.recv().await.map(HostValue::Str).map_err(|_| HostError::new("herdr-app is shutting down")) })
+            Ok(async move { rx.recv().await.map(HostValue::Str).map_err(|_| HostError::new("canopy is shutting down")) })
         })
 }
 

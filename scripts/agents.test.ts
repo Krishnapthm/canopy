@@ -51,21 +51,21 @@ test("already shared pins need no write and pending writes survive restart", () 
 
 test("an unnamed tab's row reads its terminal's title, not the tab number", () => {
   const title = new Function("View", "localStorage", "props", "run", `${source}; return title;`)(class {}, {}, () => ({}), () => {});
-  const claude = { program: { name: "claude", key: "claude" }, title: "Herdr session names" };
-  expect(title({ name: "3", named: false }, claude)).toBe("Herdr session names");
-  expect(title({ name: "claude", named: true }, claude)).toBe("Herdr session names");
+  const claude = { program: { name: "claude", key: "claude" }, title: "Canopy session names" };
+  expect(title({ name: "3", named: false }, claude)).toBe("Canopy session names");
+  expect(title({ name: "claude", named: true }, claude)).toBe("Canopy session names");
   expect(title({ name: "fix login", named: true }, claude)).toBe("fix login");
   expect(title({ name: "3", named: false }, { ...claude, title: "claude" })).toBe("3");
 });
 
 test("a title that is a folder never replaces the tab's name", () => {
   const title = new Function("View", "localStorage", "props", "run", `${source}; return title;`)(class {}, {}, () => ({}), () => {});
-  const claude = { program: { name: "claude", key: "claude" }, title: "Herdr session names" };
+  const claude = { program: { name: "claude", key: "claude" }, title: "Canopy session names" };
   expect(title({ name: "3", named: false }, { ...claude, title: "~/src/api" })).toBe("3");
   expect(title({ name: "3", named: false }, { ...claude, title: "/tmp" })).toBe("3");
   expect(title({ name: "3", named: false }, { ...claude, title: "\u2733 ~/src/api" })).toBe("3");
   expect(title({ name: "3", named: false }, { ...claude, title: "C:\\src\\api" })).toBe("3");
-  expect(title({ name: "3", named: false }, { ...claude, title: "\u2733 Herdr session names" })).toBe("Herdr session names");
+  expect(title({ name: "3", named: false }, { ...claude, title: "\u2733 Canopy session names" })).toBe("Canopy session names");
 });
 
 test("tab labels prefer the first agent, then focused terminal, then first terminal", () => {

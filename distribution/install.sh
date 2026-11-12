@@ -1,22 +1,18 @@
 #!/bin/sh
-# Installs the Herdr app, and herdr-core if there's none yet:
-#
-#   curl -fsSL https://releases.herdr.dev/app/install.sh | sh
-#
-# Linux: the app into ~/.local/share/herdr-app, `herdr-app` in ~/.local/bin,
-# a launcher entry and icon. macOS: Herdr.app into ~/Applications, keeping
-# its release signature intact (ad hoc for unsigned/dev builds). The core, with its
-# own installer, into ~/.local/bin/herdr-core (and `hc`) only if none is
-# there yet; the app
-# keeps it current after that. Running it again updates the app.
+# Installs Canopy from an explicit release source. Canopy has no default endpoint.
+#   HERDR_RELEASES_URL=https://your-release-source sh distribution/install.sh
+# Linux: ~/.local/share/canopy, with canopy in ~/.local/bin.
+# macOS: ~/Applications/Canopy.app. Install herdr-core separately.
+# Running this again updates the app.
 set -eu
 
-releases=${HERDR_RELEASES_URL:-https://releases.herdr.dev}
+releases=${HERDR_RELEASES_URL:-}
 bin="$HOME/.local/bin"
 
 say() { printf '%s\n' "$*"; }
 fail() { say "herdr: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "needs $1"; }
+[ -n "$releases" ] || fail "set HERDR_RELEASES_URL to an explicit Canopy release source; Canopy has no default release endpoint"
 need curl
 need tar
 
@@ -37,7 +33,7 @@ if [ "$os" = macos ] && [ "$arch" = x86_64 ]; then
      [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
     arch=aarch64
   else
-    fail "Intel Macs aren't supported; build from source: https://github.com/herdrdev/herdr-app#build-from-source"
+    fail "Intel Macs aren't supported; build from source: https://github.com/herdrdev/canopy#build-from-source"
   fi
 fi
 target="$os-$arch"
@@ -63,7 +59,7 @@ version=$(tr -d '\n ' < "$tmp/latest.json" | sed -n 's/^{"version":"\([^"]*\)".*
 # use are marked: one with a query or fragment (a mirror's signed URL) is
 # fetched exactly as the manifest gives it.
 src=install
-for have in "${XDG_DATA_HOME:-$HOME/.local/share}/herdr-app" "$HOME/Applications/Herdr.app" /Applications/Herdr.app; do
+for have in "${XDG_DATA_HOME:-$HOME/.local/share}/canopy" "$HOME/Applications/Canopy.app" /Applications/Canopy.app; do
   if [ -e "$have" ]; then src=reinstall; fi
 done
 case $url in
@@ -72,7 +68,7 @@ case $url in
   *) download=$url ;;
 esac
 
-say "Installing Herdr ${version:-} for $target..."
+say "Installing Canopy ${version:-} for $target..."
 curl -fsSL "$download" -o "$tmp/app.tar.gz" || fail "download failed"
 [ "$(sha256 "$tmp/app.tar.gz")" = "$want" ] || fail "download is damaged (checksum mismatch); try again"
 tar -xzf "$tmp/app.tar.gz" -C "$tmp"
@@ -80,25 +76,25 @@ mkdir -p "$bin"
 
 if [ "$os" = linux ]; then
   data=${XDG_DATA_HOME:-$HOME/.local/share}
-  home="$data/herdr-app"
+  home="$data/canopy"
   mkdir -p "$data"
   rm -rf "$home.new"
-  mv "$tmp/herdr-app" "$home.new"
+  mv "$tmp/canopy" "$home.new"
   rm -rf "$home"
   mv "$home.new" "$home"
-  ln -sfn "$home/herdr-app" "$bin/herdr-app"
+  ln -sfn "$home/canopy" "$bin/canopy"
   mkdir -p "$data/applications" "$data/icons/hicolor/scalable/apps"
-  cp "$home/herdr-app.svg" "$data/icons/hicolor/scalable/apps/herdr-app.svg"
-  cat > "$data/applications/herdr-app.desktop" <<EOF
+  cp "$home/canopy.svg" "$data/icons/hicolor/scalable/apps/canopy.svg"
+  cat > "$data/applications/canopy.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=Herdr
+Name=Canopy
 Comment=Terminals and coding agents that keep running
-Exec=$bin/herdr-app
-Icon=herdr-app
+Exec=$bin/canopy
+Icon=canopy
 Terminal=false
 Categories=Development;
-StartupWMClass=herdr-app
+StartupWMClass=canopy
 EOF
   command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$data/applications" 2>/dev/null || true
   [ -f "$data/icons/hicolor/icon-theme.cache" ] && gtk-update-icon-cache -f -t "$data/icons/hicolor" >/dev/null 2>&1 || true
@@ -108,14 +104,14 @@ EOF
     dbus-send --session --type=signal /KIconLoader org.kde.KIconLoader.iconChanged int32:0 2>/dev/null || true
 else
   apps="$HOME/Applications"
-  app="$apps/Herdr.app"
+  app="$apps/Canopy.app"
   mkdir -p "$apps"
   # Prepared in the temp folder, so Spotlight never indexes a half-made
   # bundle under a temporary name in Applications.
   # Never change a certificate-signed bundle: macOS permissions follow its
   # signing identity. Only unsigned/ad-hoc development builds need this PATH.
   signed=false
-  if signature=$(/usr/bin/codesign -dvv "$tmp/Herdr.app" 2>&1); then
+  if signature=$(/usr/bin/codesign -dvv "$tmp/Canopy.app" 2>&1); then
     if printf '%s\n' "$signature" | grep -q '^Authority=Developer ID Application:'; then
       signed=true
     elif ! printf '%s\n' "$signature" | grep -qx 'Signature=adhoc'; then
@@ -125,25 +121,19 @@ else
     fail "cannot determine app signature: $signature"
   fi
   if [ "$signed" = true ]; then
-    /usr/bin/codesign --verify --deep --strict "$tmp/Herdr.app" || fail "invalid app signature"
+    /usr/bin/codesign --verify --deep --strict "$tmp/Canopy.app" || fail "invalid app signature"
   else
-    /usr/libexec/PlistBuddy -c "Add :LSEnvironment:PATH string $bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" "$tmp/Herdr.app/Contents/Info.plist"
-    /usr/bin/codesign --force --sign - "$tmp/Herdr.app" >/dev/null 2>&1
+    /usr/libexec/PlistBuddy -c "Add :LSEnvironment:PATH string $bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" "$tmp/Canopy.app/Contents/Info.plist"
+    /usr/bin/codesign --force --sign - "$tmp/Canopy.app" >/dev/null 2>&1
   fi
   rm -rf "$app"
-  mv "$tmp/Herdr.app" "$app"
-  ln -sfn "$app/Contents/MacOS/Herdr" "$bin/herdr-app"
+  mv "$tmp/Canopy.app" "$app"
+  ln -sfn "$app/Contents/MacOS/Canopy" "$bin/canopy"
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app" 2>/dev/null || true
 fi
 
-# The core: installed only if there's none yet. One that's already there
-# (yours, or from a package manager) is left alone; the app updates it.
-if [ ! -e "$bin/herdr-core" ] && ! command -v herdr-core >/dev/null 2>&1; then
-  curl -fsSL "$releases/core/install.sh" | HC_INSTALL_DIR="$bin" HERDR_RELEASES_URL="$releases" sh || say "herdr-core didn't install; Herdr will offer it when it opens."
-fi
-
-say "Herdr is installed. Open it from your apps, or run: herdr-app"
+say "Canopy is installed. Open it from your apps, or run: canopy"
 case ":$PATH:" in
   *":$bin:"*) ;;
-  *) say "Add $bin to your PATH to use herdr-app and hc from a terminal." ;;
+  *) say "Add $bin to your PATH to use canopy and hc from a terminal." ;;
 esac

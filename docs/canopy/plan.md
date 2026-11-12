@@ -651,3 +651,9 @@ Write here when the code disproves something above (date, what, new decision).
 - 2026-11-12: arbitrary text can be written into a terminal through core input (`src/hc.rs:512`), so 8.3's clipboard fallback is not needed.
 - 2026-11-12: isolation works by env only: `HERDR_APP_HOME`, `HC_SESSION`, `HC_SOCKET`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME` (checked in installed `hc` 0.1.20). `scripts/dev` also sets `DO_NOT_TRACK=1` until phase 1.
 - 2026-11-12: first debug build (`just build`, Zig 0.16 from `brew install zig@0.16`, keg-only so prepend `$(brew --prefix zig@0.16)/bin` to PATH) took 16 min 01 s on Krishna's Mac.
+
+- 2026-11-12: phase 1 verification is source-only by instruction: the orchestrator launches the app and audits traffic after review. CI has no Clippy job. The existing Canopy CLI is on PATH at ~/.cargo/bin/canopy; it is not replaced.
+- 2026-11-12: section 9 branding excludes preserved internal API, environment, core discovery and release-key history names per section 6; those remain for compatibility.
+- 2026-11-12: upstream test fixtures hardcode /var/tmp, unavailable in this workspace sandbox; use /tmp for those scratch fixtures so native render/lifecycle checks can run without touching user data.
+- 2026-11-12: keeping THIRD-PARTY-NOTICES byte-for-byte conflicts with its input-hash test after adding the canopy binary stanza: it hashes Cargo.toml and the generator source, not only dependency/license inputs. Leave the notice and hash policy unchanged; regeneration needs an explicit exception to the as-is requirement.
+- 2026-11-12: 0.4 isolation accepted live: `scripts/dev` window showed none of Krishna's spaces, scratch core listed 0 terminals, his real `hc ls` listed the same 2 terminals before and after, `scripts/dev-stop` stopped only the scratch core.

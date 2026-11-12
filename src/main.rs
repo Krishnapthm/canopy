@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // Windows: a window app, but tests inherit Cargo's console for their child processes.
 #![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 
@@ -30,11 +31,7 @@ mod setup;
 mod sound;
 mod spawn;
 mod sprites;
-mod telemetry;
-mod feedback;
 mod terminal;
-mod update;
-mod update_notes;
 mod vt;
 mod win32_keys;
 mod window;
@@ -42,28 +39,27 @@ mod window;
 use gpui::*;
 
 const HELP: &str = "\
-herdr-app: the Herdr desktop app. With no arguments it opens the window.
+canopy: the Canopy desktop app. With no arguments it opens the window.
 
 Usage:
-  herdr-app                        open the window
-  herdr-app ls                     spaces, their tabs and terminals, in the open window
-  herdr-app do <command> [args]    run a command: --name api --argv '[\"pi\"]', or one JSON object
-  herdr-app feedback <text>        draft feedback for the person to review and send
-  herdr-app commands               every command, its arguments, what it does
-  herdr-app status                 what the window shows, and any errors
-  herdr-app shot [file.png]        save the last window frame (default: herdr-shot.png)
-  herdr-app check <mod folder>     load a mod once and report what's wrong
-  herdr-app --skill                Agent Skill: driving the window, and where hc fits
-  herdr-app --version
+  canopy                        open the window
+  canopy ls                     spaces, their tabs and terminals, in the open window
+  canopy do <command> [args]    run a command: --name api --argv '[\"pi\"]', or one JSON object
+  canopy commands               every command, its arguments, what it does
+  canopy status                 what the window shows, and any errors
+  canopy shot [file.png]        save the last window frame (default: herdr-shot.png)
+  canopy check <mod folder>     load a mod once and report what's wrong
+  canopy --skill                Agent Skill: driving the window, and where hc fits
+  canopy --version
 
 The terminals run in herdr-core (`hc`), which keeps them alive when the
 window closes. `hc --help`: start, read, wait on and talk to terminals and
 agents. The app shows them and arranges them in spaces and tabs.
 
-Home: ~/.config/herdr-app (HERDR_APP_HOME picks another).
+Home: ~/.config/canopy (HERDR_APP_HOME picks another).
 ";
 
-/// A Windows window app has no console: answers to `herdr-app ls` and the
+/// A Windows window app has no console: answers to `canopy ls` and the
 /// like go to the terminal it was started from. Output already piped (agents,
 /// scripts) keeps its pipes.
 #[cfg(windows)]
@@ -84,13 +80,13 @@ fn main() {
     if args.len() > 1 {
         attach_console();
     }
-    // `herdr-app check <mod>` / `herdr-app types <mod>`: gpui-shell's own checker, with Herdr's module installed.
+    // `canopy check <mod>` / `canopy types <mod>`: gpui-shell's own checker, with Canopy's module installed.
     if matches!(args.get(1).map(String::as_str), Some("check" | "types")) {
         mods::install_check_policy();
         gpui_shell::host::main_with_components(gpui_shell::FrozenComponentRegistry::default());
         return;
     }
-    if matches!(args.get(1).map(String::as_str), Some("do" | "status" | "ls" | "commands" | "feedback" | "shot")) {
+    if matches!(args.get(1).map(String::as_str), Some("do" | "status" | "ls" | "commands" | "shot")) {
         std::process::exit(control::client(&args[1..]));
     }
     // Anything else from a shell answers in the shell; only a bare launch opens the window.
@@ -100,9 +96,9 @@ fn main() {
         None => {}
         Some("-h" | "--help" | "help") => return print!("{HELP}"),
         Some("--skill") => return print!("{}", include_str!("SKILL.md")),
-        Some("-V" | "--version" | "version") => return println!("herdr-app {}", env!("CARGO_PKG_VERSION")),
+        Some("-V" | "--version" | "version") => return println!("canopy {}", env!("CARGO_PKG_VERSION")),
         Some(other) => {
-            eprint!("herdr-app: unknown argument {other:?}\n\n{HELP}");
+            eprint!("canopy: unknown argument {other:?}\n\n{HELP}");
             std::process::exit(2);
         }
     }
@@ -116,15 +112,9 @@ fn main() {
         )
         .init();
 
-    update::leave_install_folder();
-    if update::apply_on_startup() {
-        return;
-    }
-
-    telemetry::clock();
     // A first start sizes the app to the screen and the system's text size.
     let fresh = !settings::path().exists();
-    // The core people installed; without one, the setup screen installs it.
+    // The core people installed; without one, show manual setup instructions.
     let person = settings::load_person();
     let configured = person.as_ref().ok().and_then(|p| p.core.clone());
     let core: Result<std::sync::Arc<hc::Core>, setup::Need> = match core_bin::find(configured.as_deref()) {
@@ -135,7 +125,7 @@ fn main() {
                 // One that can't serve this app gets the screen that fixes it.
                 Ok(core) => hc::check(&core.hello).map(|()| core).map_err(setup::Need::Fix),
                 Err(e) => {
-                    eprintln!("herdr-app: {e:#}");
+                    eprintln!("canopy: {e:#}");
                     Err(setup::Need::connection(e))
                 }
             }
@@ -143,14 +133,9 @@ fn main() {
     };
     #[cfg(target_os = "macos")]
     core_bin::install_cli_link();
-    if let Ok(core) = &core {
-        update::after_update(core.clone());
-    }
-    update::start();
-    telemetry::start(settings::telemetry_setting(&person));
     bench::start();
     if let Err(e) = mods::write_workspace() {
-        eprintln!("herdr-app: cannot write {}: {e}", mods::app_dir().display());
+        eprintln!("canopy: cannot write {}: {e}", mods::app_dir().display());
     }
 
     gpui_platform::application()
@@ -164,7 +149,6 @@ fn main() {
             settings::note_fonts(cx.text_system().all_font_names());
             settings::load_home_fonts(cx);
             mods::init(cx);
-            // Not restarted for it: the update goes in when the app quits.
             cx.on_app_quit(|cx| {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
                 // Where the window was, for the next start (a quit never asks the window).
@@ -178,8 +162,6 @@ fn main() {
                     }
                 }
                 mods::finish_shared();
-                telemetry::quit();
-                update::apply();
                 async {}
             })
             .detach();
@@ -212,7 +194,7 @@ pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiv
                 // macOS: always see-through, so a layout can draw its own title bar
                 // live; the app drags the window (window/titlebar.rs).
                 titlebar: Some(TitlebarOptions {
-                    title: Some("Herdr".into()),
+                    title: Some("Canopy".into()),
                     // Windows: hidden for good (it can't change live); the app draws it.
                     appears_transparent: cfg!(any(target_os = "macos", windows)),
                     traffic_light_position: cfg!(target_os = "macos").then(|| point(px(12.0), px(7.0))),
@@ -222,11 +204,11 @@ pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiv
                 // system's off on the first render, while KWin maps the window, shrinks
                 // it to 20x20; turning it on later (a "system" layout) is fine.
                 window_decorations: Some(WindowDecorations::Client),
-                // Herdr Dev and other side-by-side builds get their own dock icon.
-                app_id: Some(std::env::var("HERDR_APP_ID").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "herdr-app".into())),
+                // Canopy Dev and other side-by-side builds get their own dock icon.
+                app_id: Some(std::env::var("HERDR_APP_ID").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "dev.canopy.app".into())),
                 ..Default::default()
             };
             cx.open_window(options, |window, cx| cx.new(|cx| window::AppWindow::new(core, requests, window, cx)))
-                .expect("cannot open the Herdr window");
+                .expect("cannot open the Canopy window");
             cx.activate(true);
 }

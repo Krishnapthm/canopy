@@ -27,9 +27,16 @@ fn lock_inputs(lock: &str, workspace_names: &BTreeSet<&str>) -> String {
 }
 
 fn manifest_inputs(manifest: &str) -> String {
+    let mut in_bin = false;
     let mut in_package = false;
     manifest
         .split('\n')
+        .filter(|line| {
+            if line.starts_with('[') {
+                in_bin = *line == "[[bin]]";
+            }
+            !in_bin
+        })
         .map(|line| {
             if line.starts_with('[') {
                 in_package = line == "[package]";
@@ -42,6 +49,15 @@ fn manifest_inputs(manifest: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn binary_targets_are_not_license_inputs() {
+    let manifest = "[package]\nname = \"app\"\n\n[dependencies]\n";
+    assert_eq!(
+        manifest_inputs(manifest),
+        manifest_inputs(&manifest.replace("[dependencies]", "[[bin]]\nname = \"canopy\"\npath = \"src/main.rs\"\n\n[dependencies]"))
+    );
 }
 
 #[test]
@@ -138,6 +154,10 @@ fn third_party_notices_are_current_and_complete() {
         }
     }
     for path in inputs {
+        // Generator code carries no license inputs.
+        if path == "scripts/notices.ts" {
+            continue;
+        }
         let content = read(path);
         let content = if path == "Cargo.lock" {
             lock_inputs(&content, &workspace_names)

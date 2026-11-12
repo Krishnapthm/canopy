@@ -30,7 +30,7 @@ fn write(path: &Path, text: &str, expected: Option<&str>) -> Result<(), String> 
     }
     if read(path)?.as_deref() != expected {
         return Err(
-            "The file changed outside Herdr. Reload before saving; your draft is still here."
+            "The file changed outside Canopy. Reload before saving; your draft is still here."
                 .into(),
         );
     }
@@ -116,7 +116,7 @@ mod tests {
     use super::*;
     #[test]
     fn creates_updates_and_rejects_stale_text() {
-        let root = std::path::PathBuf::from("/var/tmp").join(format!(
+        let root = std::env::temp_dir().join(format!(
             "herdr-app-files-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

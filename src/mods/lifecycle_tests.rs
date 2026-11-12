@@ -8,7 +8,7 @@ struct Fixture(PathBuf);
 impl Fixture {
     fn new(source: &str) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
-        let dir = PathBuf::from(format!("/var/tmp/herdr-lifecycle-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let dir = PathBuf::from(format!("/tmp/herdr-lifecycle-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("main.js"), source).unwrap();
         Self(dir)

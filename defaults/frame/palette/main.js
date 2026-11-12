@@ -53,12 +53,11 @@ const NAMED = [
   ["app.settings", {}, "App", "Settings", "preferences options config look font theme sound"],
   ["app.help", {}, "App", "Keys", "keybindings shortcuts help"],
   ["app.welcome", {}, "App", "Welcome", "intro start onboarding"],
-  ["app.whats_new", {}, "App", "What's new", "release changes news update"],
   ["app.reset", {}, "App", "Reset to the default screen", "escape hatch broken restore"],
   ["app.zoom_in", {}, "App", "Zoom in", "bigger font size"],
   ["app.zoom_out", {}, "App", "Zoom out", "smaller font size"],
   ["app.zoom_reset", {}, "App", "Reset zoom", "font size"],
-  ["app.quit", {}, "App", "Quit Herdr", "exit"],
+  ["app.quit", {}, "App", "Quit Canopy", "exit"],
   ...["graphite", "ink", "moss", "atom-one-dark"].map((n) => ["app.theme", { name: n }, "App", `Theme: ${n.replace(/-/g, " ")}`, "colors look"]),
 ];
 
@@ -84,7 +83,7 @@ function entries() {
     .filter(([n]) => !(mac && n.startsWith("window.")))
     .map(([name, args, group, title, words]) => ({ name, args, group, title, words }));
   for (const l of layouts()) {
-    const t = { main: "Herdr", terminals: "Terminals", win98: "Herdr 98" }[l] ?? l.charAt(0).toUpperCase() + l.slice(1);
+    const t = { main: "Canopy", terminals: "Terminals", win98: "Canopy 98" }[l] ?? l.charAt(0).toUpperCase() + l.slice(1);
     list.push({ name: "layout.switch", args: { name: l }, group: "Layout", title: `Layout: ${t}`, words: `look ${l}` });
   }
   // Anything new in the app shows up too, until it gets a better name here.

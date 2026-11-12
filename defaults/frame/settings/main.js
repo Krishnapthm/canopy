@@ -1,8 +1,9 @@
+// Modified for Canopy.
 // App-owned settings mod. Writes changes immediately; no Save step.
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, InputState, Input, Popup } from "gpui-base";
-import { hc, run, theme, themes, fonts, updates, telemetry, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window } from "herdr";
+import { hc, run, theme, themes, fonts, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window } from "herdr";
 
 const I = (name) => `frame/settings/${name}.svg`;
 
@@ -11,11 +12,9 @@ const SECTIONS = [
   ...(window()?.platform === "macos" ? [{ id: "keyboard", title: "Keyboard", icon: "keyboard" }] : []),
   { id: "machines", title: "Machines", icon: "server" },
   { id: "alerts", title: "Alerts", icon: "bell" },
-  { id: "updates", title: "Updates", icon: "refresh" },
-  { id: "privacy", title: "Privacy", icon: "shield" },
 ];
 
-const LOOKS = { main: "Herdr", terminals: "Terminals", win98: "Herdr 98" };
+const LOOKS = { main: "Canopy", terminals: "Terminals", win98: "Canopy 98" };
 const APPEARANCES = [
   [null, "System"],
   ["light", "Light"],
@@ -46,7 +45,6 @@ export default class Settings extends View {
     this.raw = null;
     this.previews = {}; // layout name -> its "preview" picture
     this.previewsOf = "";
-    this.showData = false;
     this.machineList = null;
     this.machineLoading = false;
     this.machineError = null;
@@ -59,14 +57,6 @@ export default class Settings extends View {
     cx.spawn(async (cx) => {
       await this.load();
       if (this.section === "machines") await this.loadMachines();
-      cx.notify();
-    });
-    // After "Check now": follow the look (the answer comes from the app), then
-    // "Up to date" for a moment.
-    cx.timer.every(300, (cx) => {
-      if (!this.asked) return;
-      if (updates().checking) this.asked = Date.now();
-      else if (Date.now() - this.asked >= 3000) this.asked = null;
       cx.notify();
     });
     cx.timer.every(3000, (cx) => {
@@ -594,11 +584,7 @@ export default class Settings extends View {
         let payload = null;
         try { payload = JSON.parse(r.stdout || r.stderr); } catch {}
         if (r.code !== 0) throw new Error(payload?.error?.message || (r.stderr || r.stdout || "It didn't work.").trim());
-        const message = action === "update"
-          ? `Updated ${machine}${payload?.version ? ` to hc ${payload.version}` : ""}; its terminals kept running.`
-          : action === "rename" ? `Renamed ${machine} to ${name.trim()}.` : `Removed ${machine}; its terminals keep running there.`;
-        if (action === "update") this.machineResults[machine] = { message, ok: true };
-        else this.machineNotice = message;
+        this.machineNotice = action === "rename" ? `Renamed ${machine} to ${name.trim()}.` : `Removed ${machine}; its terminals keep running there.`;
       } catch (e) {
         this.machineResults[machine] = { message: String(e), ok: false };
       } finally {
@@ -609,34 +595,15 @@ export default class Settings extends View {
     });
   }
 
-  olderCore(remote, local) {
-    const parse = (v) => /^(\d+)\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.*)?$/.exec(v ?? "");
-    const a = parse(remote), b = parse(local);
-    if (!a || !b) return false;
-    for (let i = 1; i <= 3; i++) {
-      if (+a[i] !== +b[i]) return +a[i] < +b[i];
-    }
-    if (!a[4] || !b[4]) return Boolean(a[4] && !b[4]);
-    const x = a[4].split("."), y = b[4].split(".");
-    for (let i = 0; i < Math.max(x.length, y.length); i++) {
-      if (x[i] === y[i]) continue;
-      if (x[i] === undefined || y[i] === undefined) return x[i] === undefined;
-      const xn = /^\d+$/.test(x[i]), yn = /^\d+$/.test(y[i]);
-      return xn && yn ? +x[i] < +y[i] : xn !== yn ? xn : x[i] < y[i];
-    }
-    return false;
-  }
-
-  machineRow(t, m, localVersion) {
+  machineRow(t, m) {
     const busy = this.machineBusy[m.name];
     const edit = this.machineEdit?.machine === m.name ? this.machineEdit : null;
     const state = String(m.state ?? "unknown").replace(/[_-]/g, " ");
     const color = ["connected", "online"].includes(m.state) ? t.ansi2 : ["connecting", "reconnecting"].includes(m.state) ? t.working : t.blocked;
     const result = this.machineResults[m.name];
     const controls = h_flex().gap(6).items_center();
-    if (busy) controls.child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12).text_color(t.muted).child(busy === "update" ? "Updating…" : busy === "rename" ? "Renaming…" : "Removing…"));
+    if (busy) controls.child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12).text_color(t.muted).child(busy === "rename" ? "Renaming…" : "Removing…"));
     else {
-      if (this.olderCore(m.version, localVersion)) controls.child(this.button(t, `st-m-update-${m.name}`, "Update", (_e, cx) => this.machineAction(m.name, "update", cx)));
       for (const [action, label] of [["rename", "Rename"], ["rm", "Remove"]]) {
         controls.child(this.button(t, `st-m-${action}-${m.name}`, label, (_e, cx) => {
           this.machineEdit = { machine: m.name, action, name: m.name };
@@ -672,7 +639,6 @@ export default class Settings extends View {
             cx.notify();
           }))));
     }
-    if (busy === "update") row.child(div().text_size(12.5).text_color(t.dim).child("Copying this computer's herdr-core. Its terminals keep running."));
     if (edit && !busy) {
       const cancel = this.button(t, `st-m-cancel-${m.name}`, "Cancel", (_e, cx) => { this.machineEdit = null; this.handle.focus(); cx.notify(); });
       if (edit.action === "rm") row.child(v_flex().gap(8)
@@ -689,12 +655,11 @@ export default class Settings extends View {
   }
 
   machines(t) {
-    const version = updates().core.version;
     return v_flex().w_full()
       .child(this.heading(t, "Machines"))
       .child(div().pb(8).text_size(12.5).line_height("18px").text_color(t.dim).child("Your computers, reached over ssh. Their terminals keep running when you disconnect."))
-      .child(this.row(t, "This computer", `Connected · ${version ? `hc ${version}` : "hc version unknown"}`, div().w(7).h(7).rounded(4).bg(t.ansi2)))
-      .children((this.machineList ?? []).map((m) => this.machineRow(t, m, version)))
+      .child(this.row(t, "This computer", "Connected", div().w(7).h(7).rounded(4).bg(t.ansi2)))
+      .children((this.machineList ?? []).map((m) => this.machineRow(t, m)))
       .when(this.machineList === null && !this.machineError, (el) => el.child(h_flex().py(14).gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12.5).text_color(t.dim).child("Reading machines…"))))
       .when(this.machineList?.length === 0, (el) => el.child(div().py(14).text_size(12.5).text_color(t.dim).child("No other machines yet.")))
       .when(Boolean(this.machineError), (el) => el.child(div().py(10).text_size(12.5).text_color(t.blocked).child(this.machineError)))
@@ -707,7 +672,7 @@ export default class Settings extends View {
   alerts(t) {
     const sounds = this.person.sounds ?? {};
     const on = sounds.enabled !== false;
-    const file = (f) => (f ? f.split(/[\\/]/).pop() : "Herdr's sound");
+    const file = (f) => (f ? f.split(/[\\/]/).pop() : "Canopy's sound");
     return v_flex()
       .w_full()
       .child(this.heading(t, "Sounds"))
@@ -724,136 +689,10 @@ export default class Settings extends View {
       .child(div().pt(12).text_size(12.5).line_height("18px").text_color(t.dim).child("Want your own sounds? Ask your agent to set sounds.done and sounds.blocked in settings.json to an MP3."));
   }
 
-  // Updates --------------------------------------------------------------
-
-  updates(t) {
-    const u = updates();
-    const at = (secs) => {
-      const d = new Date(secs * 1000);
-      return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    };
-    const checked = u.checked ? ` Checked at ${at(u.checked)}.` : "";
-    const result = u.checking ? "Checking\u2026" : u.checked
-      ? `Up to date.${checked}`
-      : "No successful check. Check your connection and try again.";
-    // Pressed: "Checking\u2026" while it looks, then "Up to date" for a moment
-    // (a find changes the row instead). One per row: an element shows once.
-    const asked = this.asked && Date.now() - this.asked < 3000;
-    const check = (id) =>
-      !u.checks
-        ? null
-        : u.checking && this.asked
-          ? div().px(12).py(5).text_size(13).text_color(t.dim).child("Checking\u2026")
-          : asked && u.checked && !u.checking
-            ? div().px(12).py(5).text_size(13).text_color(t.ansi2).child("\u2713 Up to date")
-            : this.button(t, id, "Check now", (_e, cx) => {
-                this.asked = Date.now();
-                run("app.check_updates");
-                cx.notify();
-              });
-    const primary = (id, label, f) =>
-      div().id(id).px(12).py(5).rounded(7).cursor_pointer().bg(t.accent).text_color(t.accent_foreground).text_size(13).font_semibold().hover((s) => s.opacity(0.9)).on_click(f).child(label);
-    const app = !u.app.updates
-      ? ["A build from source: it updates with git, not here.", null]
-      : u.app.ready
-        ? [`${u.app.ready} is ready. Restart to switch now; it also switches when you quit.`, primary("st-app-update", "Restart to update", () => run("app.update"))]
-        : [result, check("st-check-app")];
-    const c = u.core;
-    const core = c.managed
-      ? [`Managed by ${c.managed}: update it there.${c.ready ? ` ${c.ready} is available.` : ""}`, u.checks ? check("st-check-core") : null]
-      : c.updating
-        ? ["Updating\u2026 your terminals keep running.", null]
-        : c.error
-          ? [`The update failed: ${c.error}`, primary("st-core-retry", "Try again", () => run("app.update_core"))]
-          : c.ready
-            ? [`${c.ready} is ready. Your terminals keep running through it.`, primary("st-core-update", "Update herdr-core", () => run("app.update_core"))]
-            : u.checks
-              ? [result, check("st-check-core")]
-              : ["Not checked: a build from source looks for no updates.", null];
-    return v_flex()
-      .w_full()
-      .child(this.heading(t, "Herdr"))
-      .child(this.row(t, `Herdr ${u.app.version}`, app[0], h_flex().gap(8).flex_none()
-        .child(this.button(t, "st-whats-new", "What's new", () => { closeOverlay(props()?.overlay); run("app.whats_new"); }))
-        .when(Boolean(app[1]), (el) => el.child(app[1]))))
-      .child(div().h(18))
-      .child(this.heading(t, "herdr-core"))
-      .child(this.row(t, `herdr-core ${c.version ?? ""}`, core[0], core[1] ?? div()))
-      .child(div().pt(12).text_size(12.5).line_height("18px").text_color(t.dim).child("Herdr looks for both every hour and tells you in the corner. herdr-core runs your terminals, so they keep running through its updates."));
-  }
-
-
-  // Privacy --------------------------------------------------------------
-
-  // A report as it goes out, one line per line of JSON.
-  report(t, id, title, about, report) {
-    const lines = JSON.stringify(report, null, 2).split("\n");
-    return v_flex()
-      .w_full()
-      .pt(14)
-      .gap(4)
-      .child(div().text_size(13.5).text_color(t.foreground).child(title))
-      .when(Boolean(about), (el) => el.child(div().text_size(12.5).text_color(t.dim).child(about)))
-      .child(
-        v_flex()
-          .id(id)
-          .mt(4)
-          .w_full()
-          .p(10)
-          .rounded(8)
-          .border_1()
-          .border_color(t.border)
-          .bg(t.background)
-          .children(lines.map((l) => div().font_family(DEFAULT_FONT).text_size(12).line_height("17px").text_color(t.muted).whitespace_nowrap().child(l || " "))),
-      );
-  }
-
-  privacy(t) {
-    const s = telemetry();
-    const on = s ? s.setting : this.person.telemetry !== false;
-    const at = (secs) => new Date(secs * 1000).toLocaleString();
-    const why = s?.off_because ? `Off for now: ${s.off_because} is set where Herdr started.` : null;
-    const body = v_flex()
-      .w_full()
-      .child(this.heading(t, "Usage data"))
-      .child(
-        this.row(
-          t,
-          "Share anonymous usage data",
-          why ?? "Once a day: which agents and features you use, how many spaces and tabs, your system and Herdr's version. Never what's in your terminals, never names of files, folders or projects.",
-          this.toggle(t, "st-telemetry", on, (_e, cx) =>
-            this.change((p) => {
-              if (on) p.telemetry = false;
-              else delete p.telemetry;
-            }, cx),
-          ),
-        ),
-      )
-      .child(
-        this.row(
-          t,
-          "What we send",
-          s && !s.sends ? "This build never sends: it's built from source. You can still see what a release would send." : "Exactly what leaves your computer, word for word.",
-          this.button(t, "st-telemetry-show", this.showData ? "Hide" : "Show", (_e, cx) => {
-            this.showData = !this.showData;
-            cx.notify();
-          }),
-        ),
-      );
-    if (!this.showData) return body;
-    if (!s?.enabled) return body.child(div().pt(14).text_size(13).text_color(t.dim).child("Nothing is collected or sent while it's off."));
-    return body
-      .children(s.queued.map((r, i) => this.report(t, `st-tq-${i}`, `Waiting to send: ${r.day}`, "Sent as is, soon.", r)))
-      .when(Boolean(s.draft), (el) => el.child(this.report(t, "st-td", "Today so far", "A draft: it changes until the day ends (UTC), then goes out once.", s.draft)))
-      .when(Boolean(s.last_sent), (el) => el.child(this.report(t, "st-tl", `Last sent: ${s.last_sent.report.day}`, `Sent ${at(s.last_sent.at)}.`, s.last_sent.report)));
-  }
-
   // ----------------------------------------------------------------------
 
   render(cx) {
     const t = theme();
-    const u = updates();
-    const waiting = Boolean(u.app.ready || (u.core.ready && !u.core.managed));
     const nav = v_flex()
       .flex_none()
       .w(190)
@@ -885,7 +724,6 @@ export default class Settings extends View {
             })
             .child(svg(I(s.icon)).size(15).text_color(on ? t.accent : t.dim))
             .child(div().flex_1().text_size(13.5).text_color(on ? t.foreground : t.muted).child(s.title))
-            .when(s.id === "updates" && waiting, (el) => el.child(div().w(7).h(7).rounded(4).bg(t.accent)));
         }),
       );
     return h_flex()
@@ -919,7 +757,7 @@ export default class Settings extends View {
         cx.stop_propagation();
         cx.notify();
       })
-      .child(nav.h_full().child(div().flex_1()).child(this.button(t, "st-feedback", "Send feedback", () => { closeOverlay(props()?.overlay); run("app.feedback"); })))
+      .child(nav.h_full().child(div().flex_1()))
       .child(
         // A bar that always shows: the pages are taller than the dialog and
         // people should see that they scroll.
@@ -948,9 +786,7 @@ export default class Settings extends View {
                         ? this.machines(t)
                       : this.section === "alerts"
                         ? this.alerts(t)
-                        : this.section === "privacy"
-                          ? this.privacy(t)
-                          : this.updates(t),
+                        : this.look(t, cx),
                   ),
               ),
           )
