@@ -852,11 +852,11 @@ impl AppWindow {
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
                 .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(8.)).overflow_hidden()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(div().flex().items_center().gap(px(8.)).px(px(12.)).h(px(36. * camera.zoom)).flex_none()
+                .child(div().flex().items_center().gap(px(8.)).px(px(12.)).h(px(36. * camera.zoom)).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                         this.canvas_state.preview_drag = Some((drag.clone(), false, e.position)); cx.stop_propagation();
                     }))
-                    .child(svg().path("mods/files/file.svg").size(px(16.)))
+                    .child(svg().path("mods/files/file.svg").size(px(16.)).text_color(c("foreground")))
                     .child(div().text_ellipsis().child(path.file_name().unwrap_or_default().to_string_lossy().into_owned()))
                     .child(div().flex_1().min_w_0().text_ellipsis().text_color(c("muted-foreground")).child(path.parent().unwrap_or(path).to_string_lossy().into_owned()))
                     .child(panel_button("preview-close", "mods/pane/close.svg", c("muted-foreground"), c("hover"))
@@ -866,7 +866,7 @@ impl AppWindow {
                             this.canvas_state.previews.remove(&close);
                             this.canvas_changed(cx); cx.notify();
                         }))))
-                .child(div().flex_1().min_h_0().overflow_hidden().child(gpui_base::TextView::new(view).scrollable(true)
+                .child(div().flex_1().min_h_0().overflow_hidden().px(px(16.)).py(px(12.)).child(gpui_base::TextView::new(view).scrollable(true)
                     .image_source(|_| {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
                         gpui::ImageSource::Image(BLANK.clone())
