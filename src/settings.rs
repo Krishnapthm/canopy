@@ -375,58 +375,74 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
     t
 }
 
-/// settings.json: preferences used where a layout leaves its look unset.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Person {
-    /// Ask before closing a plain terminal from its canvas cell.
+// One table drives defaults, the CLI reference and the guide's completeness check.
+macro_rules! person_settings {
+    ($( $(#[$attr:meta])* $key:ident: $ty:ty = $default:expr => $help:literal; )*) => {
+        /// Preferences in settings.json, used where a layout leaves its look unset.
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        #[serde(default)]
+        pub struct Person { $( #[doc = $help] $(#[$attr])* pub $key: $ty, )* }
+        impl Default for Person {
+            fn default() -> Self { Self { $( $key: $default, )* } }
+        }
+        const SETTING_KEYS: &[&str] = &[$(stringify!($key)),*];
+        /// Every setting's default and explanation, without reading the person's files.
+        pub fn config() -> String {
+            let person = Person::default();
+            let mut out = String::new();
+            $( out.push_str(&format!("{} = {}  {}\n", stringify!($key), serde_json::to_string(&person.$key).unwrap(), $help)); )*
+            out
+        }
+    }
+}
+
+person_settings! {
     #[serde(skip_serializing_if = "is_true")]
-    pub confirm_close_terminal: bool,
-    pub canvas_color: Option<String>,
-    /// Wire postcard length in characters. Hand-edited only: never written back, never in Settings.
+    confirm_close_terminal: bool = true => "Ask before closing a plain terminal cell.";
+    canvas_color: Option<String> = None => "Canvas background; null follows the theme.";
+    canvas_gap: f32 = 24. => "Cell and space gap in world pixels (0..1024).";
+    canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live or only on drop (live, drop).";
+    space_fill: f32 = 0.04 => "Space background opacity (0..1).";
+    terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
     #[serde(skip_serializing_if = "is_default_wire_limit")]
-    pub wire_limit: usize,
-    /// Agent postcards a wire carries before it trips (0: never). Hand-edited only.
+    wire_limit: usize = crate::wire::DEFAULT_LIMIT => "Maximum Wire postcard length in characters.";
     #[serde(skip_serializing_if = "is_default_wire_budget")]
-    pub wire_budget: u32,
-    /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
-    pub zoom: f32,
-    pub sounds: Sounds,
-    /// The herdr-core to use, when it isn't where Canopy looks (core_bin.rs).
+    wire_budget: u32 = crate::wire::DEFAULT_BUDGET => "Agent postcards before a wire trips; 0 disables the breaker.";
+    zoom: f32 = 1.0 => "Whole app scale (0.5..3).";
+    sounds: Sounds = Sounds::default() => "Attention sounds: enabled, done and blocked file overrides.";
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub core: Option<String>,
-    /// Fonts for layouts that don't set their own.
+    core: Option<String> = None => "Core binary override, read at startup.";
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub font: Option<String>,
+    font: Option<String> = None => "Terminal font where the layout leaves it unset.";
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub font_size: Option<f32>,
-    /// Enable programming ligatures in terminal fonts.
-    pub font_ligatures: bool,
-    /// Cell height multiplier, 0.8..2.
-    pub terminal_line_height: f32,
-    /// Wheel and trackpad scroll multiplier, 0.1..5.
-    pub terminal_scroll_speed: f32,
-    /// The panels' font (their sizes follow zoom).
+    font_size: Option<f32> = None => "Terminal font size where the layout leaves it unset.";
+    font_ligatures: bool = false => "Enable programming ligatures.";
+    terminal_line_height: f32 = 1.0 => "Terminal row height multiplier (0.8..2).";
+    terminal_scroll_speed: f32 = 1.0 => "Terminal scroll multiplier (0.1..5).";
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub ui_font: Option<String>,
-    /// Allow terminal programs (including remote ones) to copy text locally.
+    ui_font: Option<String> = None => "Panel font where the layout leaves it unset.";
     #[serde(skip_serializing_if = "is_true")]
-    pub clipboard_write: bool,
-    /// A draggable scroll position thumb at a terminal pane's right edge.
+    clipboard_write: bool = true => "Allow terminal programs to copy text locally.";
     #[serde(skip_serializing_if = "is_true")]
-    pub pane_scrollbars: bool,
-    /// Minimum terminal text contrast ratio; 1 leaves program colors unchanged.
-    pub minimum_contrast: f32,
-    /// macOS Option sends Alt shortcuts, or follows the keyboard layout.
+    pane_scrollbars: bool = true => "Show terminal scrollback thumbs.";
+    minimum_contrast: f32 = 1.0 => "Terminal text contrast threshold (1..21).";
     #[serde(skip_serializing_if = "OptionAsAlt::is_auto")]
-    pub option_as_alt: OptionAsAlt,
-    /// Light or dark: the system's, or one always.
+    option_as_alt: OptionAsAlt = OptionAsAlt::Auto => "macOS Option behavior: auto, off, on, left, right.";
     #[serde(skip_serializing_if = "Appearance::is_system")]
-    pub appearance: Appearance,
+    appearance: Appearance = Appearance::System => "Follow system appearance, or force light or dark.";
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub theme: Option<crate::layout::ThemeChoice>,
+    theme: Option<crate::layout::ThemeChoice> = None => "Theme name or light/dark names; null follows the layout.";
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-    pub colors: BTreeMap<String, String>,
+    colors: BTreeMap<String, String> = BTreeMap::new() => "Theme color overrides by name.";
+}
+
+/// When neighbours move while a canvas cell is manipulated.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CanvasPush {
+    #[default]
+    Live,
+    Drop,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -473,38 +489,19 @@ fn is_default_wire_budget(n: &u32) -> bool {
     *n == crate::wire::DEFAULT_BUDGET
 }
 
-impl Default for Person {
-    fn default() -> Self {
-        Person {
-            confirm_close_terminal: true,
-            canvas_color: None,
-            wire_limit: crate::wire::DEFAULT_LIMIT,
-            wire_budget: crate::wire::DEFAULT_BUDGET,
-            zoom: 1.0,
-            sounds: Sounds::default(),
-            core: None,
-            font: None,
-            font_size: None,
-            font_ligatures: false,
-            terminal_line_height: 1.0,
-            terminal_scroll_speed: 1.0,
-            ui_font: None,
-            clipboard_write: true,
-            pane_scrollbars: true,
-            minimum_contrast: 1.0,
-            option_as_alt: OptionAsAlt::Auto,
-            appearance: Appearance::System,
-            theme: None,
-            colors: BTreeMap::new(),
-        }
-    }
-}
-
 /// What the app runs with: the shown layout's look over the defaults, at
 /// the person's zoom. Everything reads this one value.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Cell and space gap in world pixels.
+    pub canvas_gap: f32,
+    /// Whether neighbours move during a drag or on release.
+    pub canvas_push: CanvasPush,
+    /// Space background opacity.
+    pub space_fill: f32,
+    /// Columns and rows of a newly expanded terminal.
+    pub terminal_size: [u16; 2],
     pub font_family: String,
     pub font_size: f32,
     pub font_ligatures: bool,
@@ -558,7 +555,12 @@ impl Default for Sounds {
 
 impl Default for Settings {
     fn default() -> Self {
+        let person = Person::default();
         Settings {
+            canvas_gap: person.canvas_gap,
+            canvas_push: person.canvas_push,
+            space_fill: person.space_fill,
+            terminal_size: person.terminal_size,
             font_family: DEFAULT_FONT.into(),
             font_size: 14.0,
             font_ligatures: false,
@@ -598,6 +600,10 @@ impl Settings {
             None => (DEFAULT_LIGHT.to_owned(), DEFAULT_DARK.to_owned()),
         };
         Settings {
+            canvas_gap: person.canvas_gap,
+            canvas_push: person.canvas_push,
+            space_fill: person.space_fill,
+            terminal_size: person.terminal_size,
             // The layout's own, else the person's, else Canopy's.
             font_family: look.font.clone().or(person.font.clone()).unwrap_or(d.font_family),
             font_size: look.font_size.or(person.font_size).unwrap_or(d.font_size),
@@ -711,11 +717,54 @@ pub fn load_person() -> Result<Person, String> {
         let _ = crate::persist::write_atomic(&p, serde_json::to_string_pretty(&Person::default()).unwrap() + "\n");
     }
     let text = std::fs::read_to_string(&p).map_err(|e| e.to_string())?;
-    let person: Person = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    if !(ZOOM_MIN..=ZOOM_MAX).contains(&person.zoom) {
-        return Err(format!("zoom {} is outside {ZOOM_MIN}..{ZOOM_MAX}", person.zoom));
+    parse_person(&text)
+}
+
+fn parse_person(text: &str) -> Result<Person, String> {
+    let person: Person = serde_json::from_str(text).map_err(|e| json_error("settings.json", e))?;
+    for (valid, problem) in [
+        ((ZOOM_MIN..=ZOOM_MAX).contains(&person.zoom), "zoom must be in 0.5..3"),
+        ((0.0..=1024.0).contains(&person.canvas_gap), "canvas_gap must be in 0..1024"),
+        ((0.0..=1.0).contains(&person.space_fill), "space_fill must be in 0..1"),
+        ((20..=500).contains(&person.terminal_size[0]) && (5..=200).contains(&person.terminal_size[1]), "terminal_size must be [columns 20..500, rows 5..200]"),
+    ] {
+        if !valid { return Err(format!("settings.json: {problem}")); }
     }
     Ok(person)
+}
+
+/// The keys of settings.json that no setting reads, each with a close spelling when there is
+/// exactly one. A warning only: the rest of the file still applies.
+pub fn unknown_keys(text: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    let found: Vec<String> = value.as_object()?.keys().filter(|key| !SETTING_KEYS.contains(&key.as_str())).map(|key| {
+        let mut close: Vec<_> = SETTING_KEYS.iter().map(|known| (distance(key, known), known)).filter(|(d, _)| *d <= 2).collect();
+        close.sort();
+        match close.as_slice() {
+            [(d, known), rest @ ..] if rest.first().is_none_or(|(next, _)| next > d) => format!("unknown key `{key}`, did you mean `{known}`?"),
+            _ => format!("unknown key `{key}`"),
+        }
+    }).collect();
+    (!found.is_empty()).then(|| format!("settings.json: {}", found.join("; ")))
+}
+
+/// JSON diagnostics shared by the three hand-edited config files.
+pub fn json_error(file: &str, error: serde_json::Error) -> String {
+    format!("{file}:{}:{}: {error}", error.line(), error.column())
+}
+
+fn distance(a: &str, b: &str) -> usize {
+    let mut row: Vec<_> = (0..=b.chars().count()).collect();
+    for (i, x) in a.chars().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, y) in b.chars().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (diagonal + usize::from(x != y)).min(row[j] + 1).min(above + 1);
+            diagonal = above;
+        }
+    }
+    *row.last().unwrap()
 }
 
 /// Disables terminal-close prompts while preserving other hand-edited settings.
@@ -1000,15 +1049,46 @@ mod tests {
         assert_eq!(Settings::compose(&person, &win98.look, true).theme, "ink");
     }
 
+    #[test]
+    fn canvas_settings_validate_and_reference_every_default() {
+        let defaults = parse_person("{}").unwrap();
+        assert_eq!(defaults.canvas_gap, 24.);
+        assert_eq!(defaults.canvas_push, CanvasPush::Live);
+        assert_eq!(defaults.space_fill, 0.04);
+        assert_eq!(defaults.terminal_size, [100, 30]);
+        for invalid in [r#"{"canvas_gap":-1}"#, r#"{"canvas_gap":1025}"#,
+            r#"{"canvas_push":"later"}"#, r#"{"space_fill":1.1}"#, r#"{"space_fill":-0.1}"#,
+            r#"{"terminal_size":[0,30]}"#, r#"{"terminal_size":[100,201]}"#] {
+            assert!(parse_person(invalid).unwrap_err().starts_with("settings.json:"), "{invalid}");
+        }
+        assert_eq!(parse_person(r#"{"canvas_push":"drop"}"#).unwrap().canvas_push, CanvasPush::Drop);
+        assert_eq!(parse_person(r#"{"canvas_gab":24,"zoom":2}"#).unwrap().zoom, 2., "an unknown key never drops the rest");
+        assert_eq!(unknown_keys(r#"{"canvas_gab":24}"#).unwrap(),
+            "settings.json: unknown key `canvas_gab`, did you mean `canvas_gap`?");
+        assert_eq!(unknown_keys(r#"{"unrelated":24}"#).unwrap(), "settings.json: unknown key `unrelated`");
+        assert_eq!(unknown_keys(r#"{"fome":24}"#).unwrap(), "settings.json: unknown key `fome`");
+        assert_eq!(unknown_keys(r#"{"zoom":1}"#), None);
+        assert_eq!(distance("", "font"), 4);
+        assert_eq!(distance("fönt", "font"), 1);
+        let reference = config();
+        assert_eq!(reference.lines().count(), SETTING_KEYS.len());
+        for key in SETTING_KEYS { assert_eq!(reference.lines().filter(|l| l.starts_with(&format!("{key} = "))).count(), 1); }
+        for line in reference.lines() {
+            let (key, rest) = line.split_once(" = ").unwrap();
+            let (default, help) = rest.split_once("  ").unwrap();
+            assert!(!help.is_empty());
+            parse_person(&format!("{{\"{key}\":{default}}}")).unwrap();
+        }
+    }
+
     /// The guide agents read (written to the home folder) explains every
     /// settings.json key.
     #[test]
     fn the_guide_explains_every_setting() {
-        let all = Person { wire_limit: 1, wire_budget: 1, confirm_close_terminal: false, core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), ui_font: Some(String::new()), clipboard_write: false, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
-        let keys: Vec<String> = serde_json::to_value(&all).unwrap().as_object().unwrap().keys().cloned().collect();
+        let keys = SETTING_KEYS;
         let guide = include_str!("../defaults/AGENTS.md");
         let section = guide.split("## The person").nth(1).and_then(|s| s.split("\n## ").next()).unwrap_or_default();
-        let missing: Vec<&String> = keys.iter().filter(|k| !section.contains(&format!("`{k}`"))).collect();
+        let missing: Vec<_> = keys.iter().filter(|k| !section.contains(&format!("`{k}`"))).collect();
         assert!(missing.is_empty(), "defaults/AGENTS.md (## The person) doesn't explain: {missing:?}");
     }
 }

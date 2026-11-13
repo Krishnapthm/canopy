@@ -55,6 +55,7 @@ Usage:
   canopy hook sub-start|sub-stop|session-end|wire  report a session hook (JSON on stdin, best effort)
   canopy wire [tell|ask|reply|wait|read ...]  Wire: list peers and mail, or send a postcard to a wired cell
   canopy check <mod folder>     load a mod once and report what's wrong
+  canopy config                 Settings defaults and explanations
   canopy --skill                Agent Skill: driving the window, and where hc fits
   canopy --version
 
@@ -111,6 +112,7 @@ fn main() {
         None if control::raise_running() => return,
         None => {}
         Some("-h" | "--help" | "help") => return print!("{HELP}"),
+        Some("config") => return print!("{}", settings::config()),
         Some("--skill") => return print!("{}", include_str!("SKILL.md")),
         Some("-V" | "--version" | "version") => return println!("canopy {}", env!("CARGO_PKG_VERSION")),
         Some(other) => {

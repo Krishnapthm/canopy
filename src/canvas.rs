@@ -138,8 +138,8 @@ pub fn intersects(a: Rect, b: Rect) -> bool {
 pub fn space_at(spaces: &[Space], p: Point) -> Option<&Space> {
     spaces.iter().rev().find(|s| p[0] >= s.rect[0] && p[1] >= s.rect[1] && p[0] <= s.rect[0] + s.rect[2] && p[1] <= s.rect[1] + s.rect[3])
 }
-/// The fixed spacing between cells and spaces, in world pixels.
-pub const GAP: f32 = 24.;
+#[cfg(test)]
+const GAP: f32 = 24.;
 
 /// Resolve from rest positions, fixing the pinned rect first and then its nearest neighbours.
 pub fn solve(rest: &[Rect], pinned: usize, rect: Rect, gap: f32) -> Vec<Rect> {
@@ -199,16 +199,18 @@ fn separated(a: Rect, b: Rect, gap: f32) -> bool {
 
 /// Grow a space to contain its cells with padding, preserving its previous extent.
 pub fn grow(space: Rect, cells: &[Rect]) -> Rect {
+    let gap = crate::settings::get().canvas_gap;
     let Some(b) = union(cells) else { return space };
     union(&[
         space,
-        [b[0] - GAP, b[1] - GAP, b[2] + 2. * GAP, b[3] + 2. * GAP],
+        [b[0] - gap, b[1] - gap, b[2] + 2. * gap, b[3] + 2. * gap],
     ])
     .unwrap()
 }
 
 /// Arrange cells in reading order, or breadth-first parent layers, preserving their sizes.
 pub fn arrange(rects: &[Rect], parents: &[Option<usize>], layout: &str) -> Vec<Rect> {
+    let gap = crate::settings::get().canvas_gap;
     let Some(bounds) = union(rects) else {
         return vec![];
     };
@@ -273,13 +275,13 @@ pub fn arrange(rects: &[Rect], parents: &[Option<usize>], layout: &str) -> Vec<R
     let mut bottoms = vec![bounds[1]; rects.len()];
     let height = rects.iter().map(|r| r[3]).fold(0_f32, f32::max);
     for (i, (col, row)) in order.iter().zip(slots) {
-        out[*i][0] = bounds[0] + widths[..col].iter().map(|w| w + GAP).sum::<f32>();
+        out[*i][0] = bounds[0] + widths[..col].iter().map(|w| w + gap).sum::<f32>();
         out[*i][1] = if layout == "wires" {
             bottoms[col]
         } else {
-            bounds[1] + row as f32 * (height + GAP)
+            bounds[1] + row as f32 * (height + gap)
         };
-        bottoms[col] = out[*i][1] + rects[*i][3] + GAP;
+        bottoms[col] = out[*i][1] + rects[*i][3] + gap;
     }
     out
 }

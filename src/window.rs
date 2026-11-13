@@ -577,7 +577,7 @@ impl AppWindow {
         crate::programs::install_icons();
         match crate::programs::load() {
             Ok(()) => { let _ = std::fs::remove_file(file("programs.error")); }
-            Err(e) => w.report("programs", &e),
+            Err(e) => w.report("programs", &e, window, cx),
         }
         w.watched.programs = mtime(&crate::programs::path());
         w.reload_config(window, cx);
@@ -784,8 +784,9 @@ impl AppWindow {
         cx.notify();
     }
 
-    fn report(&self, what: &str, message: &str) {
+    fn report(&mut self, what: &str, message: &str, window: &mut Window, cx: &mut Context<Self>) {
         tracing::warn!("{what}.json not applied: {message}");
+        self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast", "notification":{"title":format!("{what}.json was not applied"), "body":message, "level":"error"}}), window, cx);
         let _ = std::fs::write(file(&format!("{what}.error")), format!("{what}.json was not applied: {message}\n"));
     }
 
@@ -829,16 +830,28 @@ impl AppWindow {
     fn reload_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let s_time = mtime(&settings::path());
         if s_time.is_none() || s_time != self.watched.settings {
+            let old_gap = self.person.canvas_gap;
             let loaded = settings::load_person();
             match loaded {
                 Ok(p) => {
                     self.person = p;
                     let _ = std::fs::remove_file(file("settings.error"));
+                    if let Some(warning) = std::fs::read_to_string(settings::path()).ok().and_then(|t| settings::unknown_keys(&t)) {
+                        self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast", "notification":{"title":"settings.json", "body":warning, "level":"warning"}}), window, cx);
+                    }
                 }
-                Err(e) => self.report("settings", &e),
+                Err(e) => self.report("settings", &e, window, cx),
             }
             self.watched.settings = mtime(&settings::path());
             self.apply_look(window, cx);
+            if old_gap != self.person.canvas_gap && self.listed_once {
+                let pins: Vec<_> = self.canvas_state.doc.cards.iter().map(|c| c.key())
+                    .chain(self.canvas_state.doc.previews.iter().map(|p| p.path.clone())).collect();
+                for pin in pins { self.solve_layout(Some(&pin), None, cx); }
+                let spaces: Vec<_> = self.canvas_state.doc.spaces.iter().map(|s| s.space.clone()).collect();
+                for space in spaces { self.solve_layout(None, Some(&space), cx); }
+                self.canvas_changed(cx);
+            }
         }
         let k_time = mtime(&crate::keys::path());
         if k_time.is_none() || k_time != self.watched.keys {
@@ -849,7 +862,7 @@ impl AppWindow {
                     let _ = std::fs::remove_file(file("keys.error"));
                 }
                 Err(e) => {
-                    self.report("keys", &e);
+                    self.report("keys", &e, window, cx);
                     if self.watched.keys.is_none() {
                         crate::keys::install(vec![], cx);
                     }
@@ -865,7 +878,7 @@ impl AppWindow {
                     mods::warm_known_agents();
                     self.check_editors(window, cx);
                 }
-                Err(e) => self.report("programs", &e),
+                Err(e) => self.report("programs", &e, window, cx),
             }
             self.watched.programs = p_time;
             self.publish(cx);
@@ -5540,11 +5553,11 @@ mod tests {
     /// Runs `window::tests::<name>` alone in a test process of its own, on a
     /// fresh app home: a window takes process-wide things (the app home, the
     /// mods' request channel) that tests beside it would otherwise share.
-    fn in_own_process(name: &str) {
-        let home = std::path::PathBuf::from(format!("/tmp/herdr-window-test-{name}-{}", std::process::id()));
+    pub(super) fn in_own_process(name: &str) {
+        let home = std::path::PathBuf::from(format!("/tmp/herdr-window-test-{}-{}", name.replace("::", "-"), std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         let out = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", &format!("window::tests::{name}"), "--nocapture", "--test-threads=1"])
+            .args(["--exact", &if name.contains("::") { name.to_owned() } else { format!("window::tests::{name}") }, "--nocapture", "--test-threads=1"])
             .env("HERDR_APP_HOME", &home)
             .env("HERDR_TEST_WINDOW", name)
             .output()
@@ -5555,7 +5568,7 @@ mod tests {
     }
 
     /// In the process `in_own_process` started for `name`: whether to go on.
-    fn running_alone(name: &str) -> bool {
+    pub(super) fn running_alone(name: &str) -> bool {
         std::env::var("HERDR_TEST_WINDOW").as_deref() == Ok(name)
     }
 
@@ -5564,7 +5577,7 @@ mod tests {
     /// welcome (it lists machines through the core). No other mods: the
     /// shipped ones run programs on threads of their own, which the test
     /// executor refuses.
-    fn open_window<'a>(cx: &'a mut gpui::TestAppContext, mod_name: &str, main_js: &str, layout: serde_json::Value) -> (gpui::Entity<super::AppWindow>, &'a mut gpui::VisualTestContext) {
+    pub(super) fn open_window<'a>(cx: &'a mut gpui::TestAppContext, mod_name: &str, main_js: &str, layout: serde_json::Value) -> (gpui::Entity<super::AppWindow>, &'a mut gpui::VisualTestContext) {
         use serde_json::json;
         let home = crate::mods::app_dir();
         crate::mods::write_workspace().unwrap();
@@ -5616,7 +5629,7 @@ mod tests {
             assert!(!this.overlays.iter().any(|o| o.kind.modal_keys()), "global close did not take the mode key");
             assert!(this.canvas_state.doc.cards.iter().all(|c| c.size.is_none()));
             this.canvas_keyboard("canvas.nudge", &json!({"direction":"right"}), window, cx);
-            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 500. + crate::canvas::GAP);
+            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 500. + this.person.canvas_gap);
             this.undo_canvas(window, cx);
             assert_eq!(this.canvas_state.doc.cards[1].rect[0], 500.);
             this.undo_canvas(window, cx);
@@ -5677,6 +5690,74 @@ mod tests {
             this.canvas_command("canvas.fit", window, cx);
             assert_eq!(this.canvas_state.motion_target_for_test(), original);
         }));
+    }
+
+    #[test]
+    fn broken_config_keeps_last_good_values_and_toasts_the_place() {
+        in_own_process("config_reload");
+    }
+
+    #[gpui::test]
+    fn config_reload(cx: &mut TestAppContext) {
+        use serde_json::json;
+        if !running_alone("config_reload") { return; }
+        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root", "type":"row", "children":[]}));
+        view.update_in(cx, |this, window, cx| {
+            this.listed_once = true;
+            this.canvas_state.doc.cards = serde_json::from_value(json!([
+                {"terminal":"t1","rect":[0,0,200,100],"z":0,"size":[200,100]},
+                {"terminal":"t2","rect":[224,0,200,100],"z":1,"size":[200,100]}
+            ])).unwrap();
+            let settings = crate::settings::path();
+            std::fs::write(&settings, r#"{"canvas_gap":60,"space_fill":0.08,"canvas_push":"drop","terminal_size":[140,45]}"#).unwrap();
+            this.watched.settings = None;
+            this.reload_config(window, cx);
+            assert_eq!(this.person.canvas_gap, 60.);
+            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 260.);
+            assert_eq!(crate::settings::get().canvas_gap, 60.);
+            assert_eq!(crate::settings::get().space_fill, 0.08);
+            assert_eq!(crate::settings::get().canvas_push, crate::settings::CanvasPush::Drop);
+            assert_eq!(crate::settings::get().terminal_size, [140,45]);
+            assert_eq!(this.person.space_fill, 0.08);
+            assert_eq!(this.person.terminal_size, [140,45]);
+            let programs = crate::programs::path();
+            std::fs::write(&programs, r#"{"programs":{"phase6":{"name":"Mine"}}}"#).unwrap();
+            this.watched.programs = None;
+            this.reload_config(window, cx);
+            assert_eq!(crate::programs::name("phase6"), "Mine");
+            let keys_before: Vec<_> = cx.key_bindings().borrow().bindings()
+                .filter(|b| b.action().name() == "gpui_shell::ShellAction")
+                .map(|b| b.keystrokes().to_vec()).collect();
+            for (name, path) in [("settings", settings.clone()), ("keys", crate::keys::path()), ("programs", programs)] {
+                std::fs::write(&path, "{\n  \"broken\": \n}").unwrap();
+                match name {
+                    "settings" => this.watched.settings = None,
+                    "keys" => this.watched.keys = Some(std::time::UNIX_EPOCH),
+                    _ => this.watched.programs = None,
+                }
+                this.reload_config(window, cx);
+                let diagnostic = format!("{name}.json:3:1:");
+                assert!(std::fs::read_to_string(super::file(&format!("{name}.error"))).unwrap().contains(&diagnostic));
+                let toast = this.overlays.last().unwrap();
+                let props = &this.copies[&format!("overlay:{}", toast.id)].inst.props;
+                assert_eq!(props["level"], "error");
+                assert!(props["body"].as_str().unwrap().starts_with(&diagnostic), "{props}");
+                assert_eq!(this.person.canvas_gap, 60.);
+                assert_eq!(crate::programs::name("phase6"), "Mine");
+                let keys_after: Vec<_> = cx.key_bindings().borrow().bindings()
+                    .filter(|b| b.action().name() == "gpui_shell::ShellAction")
+                .map(|b| b.keystrokes().to_vec()).collect();
+                assert_eq!(keys_after, keys_before);
+            }
+            std::fs::write(settings, r#"{"canvas_gab":24,"canvas_gap":40}"#).unwrap();
+            this.watched.settings = None;
+            this.reload_config(window, cx);
+            assert_eq!(this.person.canvas_gap, 40., "the known keys still apply");
+            let toast = this.overlays.last().unwrap();
+            let props = &this.copies[&format!("overlay:{}", toast.id)].inst.props;
+            assert_eq!(props["level"], "warning");
+            assert!(props["body"].as_str().unwrap().contains("did you mean `canvas_gap`?"));
+        });
     }
 
     #[test]

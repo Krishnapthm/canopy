@@ -153,7 +153,7 @@ impl AppWindow {
                 let Some(key) = selected else { return self.fail("select a cell first"); };
                 self.canvas_state.end_drag();
                 self.begin_layout();
-                if self.canvas_state.nudge(&key, d) {
+                if self.canvas_state.nudge(&key, d, self.person.canvas_gap) {
                     self.solve_layout(Some(&key), None, cx);
                     self.canvas_state.end_drag();
                     self.canvas_changed(cx);
@@ -163,7 +163,8 @@ impl AppWindow {
                 let space = self.keyboard_space();
                 let rect = selected.as_deref().and_then(|key| self.keyboard_cells(cx).into_iter().find(|(k, _)| k == key)).map(|(_,r)|r)
                     .or_else(|| space.as_ref().and_then(|id| self.canvas_state.doc.spaces.iter().find(|s| &s.space == id)).map(|s| s.rect));
-                let point = rect.map(|r| [r[0] + canvas::GAP, r[1] + canvas::GAP]);
+                let gap = self.person.canvas_gap;
+                let point = rect.map(|r| [r[0] + gap, r[1] + gap]);
                 let mut at = json!({});
                 if let Some(point) = point { at["point"] = json!(point); }
                 if let Some(id) = space { at["space"] = json!(id); }
@@ -183,12 +184,12 @@ impl AppWindow {
 }
 
 impl State {
-    fn nudge(&mut self, key: &str, direction: canvas::Point) -> bool {
+    fn nudge(&mut self, key: &str, direction: canvas::Point, gap: f32) -> bool {
         let rect = self.doc.cards.iter_mut().find(|c| c.key() == key).map(|c| &mut c.rect)
             .or_else(|| self.doc.previews.iter_mut().find(|p| p.path == key).map(|p| &mut p.rect));
         let Some(rect) = rect else { return false };
-        rect[0] += direction[0] * canvas::GAP;
-        rect[1] += direction[1] * canvas::GAP;
+        rect[0] += direction[0] * gap;
+        rect[1] += direction[1] * gap;
         true
     }
 }

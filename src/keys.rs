@@ -196,7 +196,7 @@ fn load_text(path: &std::path::Path, defaults: &str, originals: &[&str]) -> Resu
 }
 
 pub fn parse(text: &str) -> Result<Vec<KeyBinding>, String> {
-    let sections: Sections = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let sections: Sections = serde_json::from_str(text).map_err(|e| crate::settings::json_error("keys.json", e))?;
     let mut out = Vec::new();
     let mut problems = Vec::new();
     for (section, keys) in &sections {

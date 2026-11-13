@@ -33,12 +33,14 @@ anyone when you connect, and nothing costs a token until somebody writes.
   are computed from sub-agent cells and the core's `parent`.
 - Postcards are appended to `<app home>/wires/<space id>.jsonl`, one JSON
   object per line (`n, at, from, to, kind, re, text, refs, delivered`);
-  receipts (`delivered`, `pending`) and breaker `reset`s are lines too, so the
-  file is append-only and every writer takes a file lock. Text is always shown
-  as text.
+  receipts (`delivered`, `pending`) and breaker `reset`s are lines too. A receipt’s
+  `delivered` is true for delivery, false for pending; old receipts are still read
+  by their `kind`. The file is append-only and every writer takes a file lock.
+  Text is always shown as text.
 - `canopy wire` checks the edge, the length and the breaker, appends, then
-  types `<wire from="name" n="17" kind="ask">text</wire>` with `hc send` only
-  at a turn boundary (idle). A CLI marked `"wire": "queue"` in programs.json
+  types `<wire from="name (address)" n="17" kind="ask">text</wire>`
+  using `hc send` only at a turn boundary (idle). The address distinguishes peers
+  running the same program. A CLI marked `"wire": "queue"` in programs.json
   (Claude) is typed to at once, because it queues the line itself. A busy,
   blocked or exited receiver keeps the postcard; the sender is told `queued` or
   `not running`. A sub-agent cell's postcards go to its parent, addressed
