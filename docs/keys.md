@@ -1,32 +1,42 @@
-# Keyboard
+# Keyboard and mouse
 
-Canvas mode selects and controls cells without sending keys to a terminal.
-Press Cmd+J on macOS, Ctrl+Shift+J on Linux or Windows, then release it.
-The bottom hint bar reads your `canvas-mode` bindings; `?` opens the full list.
-There is no timeout. Dialogs and menus keep their own keys while open.
+The canvas works like Figma. Click a cell to select it, drag to move it (the
+whole selection moves together), drag on empty canvas to draw a selection box
+(Shift adds to the selection), and double-click a cell to enter it: it expands
+and its terminal takes the keyboard. Click empty canvas or another cell, or
+press Cmd+Esc (Ctrl+Esc on Linux and Windows), to leave; Esc itself stays with
+the terminal, so agents can still be interrupted. Pan with Space+drag, middle
+drag or the trackpad; zoom with pinch or Cmd+scroll. On Home, double-click a
+space card (or select it and press Enter) to go inside.
 
-| In canvas mode | Action |
+Hold Option (Alt) while the canvas has the keyboard: each selected cell, or the
+one under the pointer, shows its actions with their keys, and the bottom bar
+lists every canvas key. Release Option to hide them.
+
+| Canvas has the keyboard | Action |
 |---|---|
-| Arrows, h j k l | Select the nearest cell in that direction, without expanding |
-| Tab / Shift+Tab | Next / previous space |
-| Enter | Expand the selection, focus its terminal and leave mode |
-| Esc | Leave mode, keeping the selection |
+| Enter | Enter the selected cell, or go into the selected space |
+| Esc | Cancel a connection, else clear the selection, else go back Home |
+| Shift+1 / Shift+2 / Shift+0 | Fit everything / fit the selection / 100% |
+| f | Fit the selection, else everything; again restores the previous view |
+| Cmd+A (Ctrl+A) | Select everything here |
+| Arrows | Move the selection by one gap, with one undo step |
+| h j k l, Tab / Shift+Tab | Select the nearest cell in that direction |
 | x | Collapse the selected terminal |
-| f | Fit the current space; again restores the previous camera |
-| c | Start a wire; arrows select its other cell, Enter connects, Esc cancels |
+| c | Start a wire; select its other cell, Enter connects, Esc cancels |
 | t | Open the selected wire's thread, or the selected cell's first wire |
-| a / Shift+A | Repeat arrange / choose a layout |
-| n / Shift+N | New terminal in this space / installed agent list |
-| Shift+arrows | Move the selection by one gap, with one undo step |
+| Shift+A / a | Arrange (repeat the last layout) / choose a layout |
+| n / Shift+N | New terminal here / installed agent list |
 | Backspace / Delete | Close, using the usual agent and terminal confirmations |
 | ? | Full key list |
 
 Enter on a sub-agent opens its transcript; on a file card it opens the file.
-A connection stays in mode after Enter; Esc cancels a pending connection first.
 
-| Direct action | macOS | Linux / Windows |
+| Anywhere on the canvas | macOS | Linux / Windows |
 |---|---|---|
-| Canvas mode | Cmd+J | Ctrl+Shift+J |
+| Leave the entered cell | Cmd+Esc or Cmd+J | Ctrl+Esc or Ctrl+Shift+J |
+| Go into space 1..9 | Cmd+1..9 | Ctrl+1..9 |
+| Home | Cmd+Shift+H | Ctrl+Shift+H |
 | Focus fit toggle | Cmd+Shift+F | Ctrl+Shift+F on canvas |
 | Expand / collapse | Cmd+Enter | Ctrl+Shift+Enter |
 | Arrange | Cmd+Shift+A | Ctrl+Shift+A |
@@ -35,13 +45,11 @@ A connection stays in mode after Enter; Esc cancels a pending connection first.
 
 Cmd+T / Ctrl+Shift+T is `tab.new`, Cmd+N / Ctrl+Shift+N `space.new` and
 Cmd+B / Ctrl+Shift+B `layout.toggle:sidebar`. On Linux and Windows,
-Ctrl+Shift+F is terminal search while a terminal has focus. For a canvas
-terminal use mode `n`; for the file panel, the folder icon.
+Ctrl+Shift+F is terminal search while a terminal has focus.
 
-Edit app-home `keys.json` to rebind. Mode is one window flag: while it is set,
-the `canvas-mode` section is consulted before normal bindings, and an unbound
-key is swallowed unless it carries Ctrl, Alt or Cmd (those reach the normal
-bindings, so quit and the reset key still work; the canvas holds the focus, so
-no terminal sees them). Its bindings must be single keys, never sequences. Outside
-mode, plain Ctrl+letters and Esc belong to the terminal. Backspace, Delete and
-undo also reach a focused terminal unchanged.
+Edit app-home `keys.json` to rebind; changes apply as you save. The
+`canvas-mode` section holds the canvas keys above: it is consulted first
+whenever the canvas itself has the keyboard (no cell entered, no input focused),
+and an unbound key is swallowed unless it carries Ctrl, Alt or Cmd. Its
+bindings may carry modifiers but are never sequences. An entered terminal gets
+every key except the bindings in `layout:main` and `global`.

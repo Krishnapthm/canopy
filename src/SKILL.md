@@ -263,11 +263,13 @@ warning toast (with a close spelling when there is one) and the rest still appli
 `classic` layout preserves the previous sidebar and tabs. Canvas zoom bindings
 apply to the `main` layout; other layouts retain app zoom.
 
-Expanded cells: click a terminal pill to expand it in place into a live terminal
-(100 x 30 cells, neighbours give way); click its header to collapse it, which
-puts the neighbours back. Drag the bottom-right corner to resize; the terminal
-is resized on release. Several can be open. The wheel scrolls a focused expanded
-terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
+Canvas mouse (Figma style): click selects, drag moves the selection, a drag on empty canvas draws a
+selection box (Shift adds), double-click enters a cell (expands it, focuses its terminal). Clicking
+empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. Holding Option/Alt on
+the canvas shows each selected or hovered cell's actions with their keys. Expanded cells are
+100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
+neighbours back. Drag the bottom-right corner to resize; the terminal is resized on release. Several
+can be open. The wheel scrolls a focused expanded terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
 the named or last selected cell; `panel.open {terminal}` only expands. Below 0.5 zoom an expanded cell draws as its
 pill. The side panel shows files and sub-agent transcripts only.
 
@@ -325,8 +327,8 @@ is present (an empty string means no folder); omitting it opens the Choose space
 
 ## Canvas selection and views
 
-Click a pill to expand it. Canvas mode selects cells without expanding them;
-Enter focuses the selected terminal, and Esc leaves with selection unchanged. `canvas.close` (Backspace or Delete) closes the selection: running agents
+Double-click a cell to enter it; a click only selects it.
+Enter enters the selected cell; Esc clears the selection, then goes Home. `canvas.close` (Backspace or Delete) closes the selection: running agents
 always ask "Terminate <name> and close?"; plain terminals ask "Close this
 terminal?" with "Don't ask again". That choice writes
 `confirm_close_terminal: false` to settings.json (default true). Done
@@ -337,13 +339,15 @@ Views are in the macOS View menu or the Linux titlebar's primary menu
 the active view is checked. `view.agents`, `view.all`, `view.terminals` and
 their keys still work. The canvas toolbar has file and focus-fit buttons.
 
-Canvas mode: Cmd+J / Ctrl+Shift+J runs `canvas.mode`. A window flag gives the
-`canvas-mode` key section first refusal; unbound keys without Ctrl, Alt or
-Cmd are swallowed. No idle timer. The hint mod reads the bindings with `keys()`. Dialogs and menus
-keep their own keys. `canvas.leave` cancels a pending connection or leaves
-mode; `canvas.enter` connects or expands the selection and leaves mode.
+Canvas keyboard: the canvas has the keyboard unless a cell is entered; then the `canvas-mode`
+key section gets first refusal and unbound keys without Ctrl, Alt or Cmd are swallowed. No idle
+timer. The hint mod reads the bindings with `keys()` and shows while Option is held. Dialogs, menus
+and inputs keep their own keys. `canvas.mode` (Cmd+Esc, Cmd+J) leaves the entered cell.
+`canvas.leave` (Esc) cancels a pending connection, else clears the selection, else goes Home;
+`canvas.enter` connects, enters the selected cell or goes into the selected space.
+`canvas.select_all` selects everything in the current place; `canvas.fit_all` fits it all.
 `canvas.go {direction: "left" | "right" | "up" | "down"}` selects without
-expanding; `canvas.space {direction: "next" | "prev"}` changes space.
+expanding; `canvas.space` goes into another space and `canvas.home` back to Home.
 `canvas.collapse` collapses; `canvas.connect` starts choosing a peer;
 `canvas.thread` opens the selected wire or the cell's first wire.
 `canvas.nudge {direction}` moves one gap with one undo step; `canvas.new`

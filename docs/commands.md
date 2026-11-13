@@ -53,7 +53,7 @@ No arguments.
 
 ## `canvas.fit`
 
-Fit the current space in the visible canvas; repeat to restore the previous camera.
+Fit the selection, else everything in the current space or Home; repeat to restore the previous camera.
 
 No arguments.
 
@@ -85,11 +85,29 @@ Select the nearest shown cell left, right, up or down without expanding it.
 
 ## `canvas.space`
 
-Select the next or prev canvas space and its first shown cell.
+Go into the next or prev space, or space N (1-based); its cells fill the canvas.
 
 | Argument | Required |
 |---|---|
 | `direction` | yes |
+
+## `canvas.home`
+
+Leave the space for Home: space cards and cells outside any space.
+
+No arguments.
+
+## `canvas.select_all`
+
+Select every cell, preview and (on Home) space card in the current place.
+
+No arguments.
+
+## `canvas.fit_all`
+
+Fit everything in the current place, whatever is selected; repeat to restore the previous camera.
+
+No arguments.
 
 ## `canvas.collapse`
 
@@ -262,12 +280,12 @@ No arguments.
 
 ## `canvas.space_style`
 
-Set a space color or toggle its frame.
+Set a space color.
 
 | Argument | Required |
 |---|---|
 | `id` | yes |
-| `color` | no |
+| `color` | yes |
 
 ## `panel.editor`
 

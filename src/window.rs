@@ -2920,8 +2920,8 @@ impl AppWindow {
     fn dispatch(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
-            "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
-            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.collapse" | "canvas.connect" | "canvas.thread" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
+            "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "canvas.fit_all" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
+            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.select_all" | "canvas.collapse" | "canvas.connect" | "canvas.thread" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
             "canvas.sub_message" => self.message_sub(a, window, cx),
@@ -5641,10 +5641,10 @@ mod tests {
             assert_eq!(this.canvas_state.doc.wires.len(), 1);
             assert!(this.canvas_state.mode);
             this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
-            assert!(!this.canvas_state.mode);
-            assert!(!this.canvas_key(&gpui::Keystroke::parse("q").unwrap(), window, cx));
+            assert!(this.canvas_state.mode && this.canvas_state.selected.is_empty(), "Escape clears the selection; the canvas keeps the keyboard");
             assert!(this.focus.is_focused(window));
-            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), window, cx);
+            assert_eq!(this.canvas_state.selected, ["t1"]);
             this.canvas_keyboard("canvas.connect", &json!({}), window, cx);
             this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
             assert!(this.canvas_state.mode, "Escape cancels the connection before leaving mode");

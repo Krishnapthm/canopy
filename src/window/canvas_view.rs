@@ -60,6 +60,11 @@ pub(super) struct State {
     zoomed_at: Option<std::time::Instant>,
     zoom_task: Option<Task<()>>,
     wire: wire_view::WireUi,
+    /// A box being dragged on empty canvas: where it started, where the pointer is, and the
+    /// selection it adds to (Shift), in window coordinates.
+    marquee: Option<(Point<Pixels>, Point<Pixels>, Vec<String>)>,
+    /// Option (Alt) held on the canvas: each target cell shows its actions, with keys from keys.json.
+    pub(super) actions: Option<Vec<(String, String, String)>>,
 }
 #[derive(Default)]
 struct Motion {
@@ -84,7 +89,8 @@ impl State {
         };
         Self {
             doc,
-            mode: false,
+            // The canvas has the keyboard until a cell is entered (double-click or Enter).
+            mode: true,
             connecting: None,
             previous_camera: None,
             rest: None,
@@ -126,6 +132,8 @@ impl State {
             zoomed_at: None,
             zoom_task: None,
             wire: Default::default(),
+            marquee: None,
+            actions: None,
         }
     }
     /// The requested camera before animation finishes, for keyboard integration tests.
@@ -677,6 +685,48 @@ impl AppWindow {
         ]);
         canvas::space_at(&self.canvas_state.doc.spaces, p).map(|s| s.space.clone())
     }
+    /// While Option is held: under each selected cell (else the hovered one) its actions, each
+    /// with the key bound to it. A click selects that cell and runs the action.
+    fn action_strips(&self, doc: &Document, keys: &[(String, String, String)], cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let state = &self.canvas_state;
+        let targets: Vec<String> = if state.selected.is_empty() { state.wire.hover.iter().cloned().collect() } else { state.selected.clone() };
+        let key_of = |command: &str| keys.iter().filter(|(s, _, a)| (s == "canvas-mode" || s == "layout:main") && a == command)
+            .map(|(_, k, _)| k.clone()).next().unwrap_or_default();
+        let camera = doc.camera;
+        let mut out = vec![];
+        for key in targets {
+            let Some(card) = doc.cards.iter().find(|c| c.key() == key && c.sub.is_none()) else { continue };
+            let Some(r) = self.wire_cell(doc, &key) else { continue };
+            let [x, y] = camera.to_screen([r[0], r[1] + r[3]]);
+            let expanded = card.size.is_some();
+            let items = [
+                ("Enter", "canvas.enter"),
+                (if expanded { "Collapse" } else { "Expand" }, if expanded { "canvas.collapse" } else { "canvas.expand" }),
+                ("Connect", "canvas.connect"),
+                ("Thread", "canvas.thread"),
+                ("Close", "canvas.close"),
+            ];
+            let mut row = div().absolute().left(px(x)).top(px(y + 6.)).flex().gap(px(2.)).p(px(3.))
+                .rounded(px(8.)).bg(c("popover")).border_1().border_color(c("border")).shadow_md()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+            for (label, command) in items {
+                let (target, hint) = (key.clone(), key_of(command));
+                row = row.child(
+                    div().id(SharedString::from(format!("action-{key}-{command}"))).flex().items_center().gap(px(6.))
+                        .px(px(8.)).py(px(4.)).rounded(px(6.)).cursor_pointer().text_size(px(12.)).text_color(c("foreground"))
+                        .hover(|d| d.bg(c("hover")))
+                        .child(label)
+                        .when(!hint.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("muted-foreground")).child(hint)))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.canvas_state.selected = vec![target.clone()];
+                            this.run_key(command, json!({}), window, cx);
+                        })),
+                );
+            }
+            out.push(row.into_any_element());
+        }
+        out
+    }
     /// Shows a space's room (None: Home) with the camera it had there; a first visit fits what is inside.
     pub(super) fn go_room(&mut self, room: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         let first = !self.canvas_state.doc.cameras.contains_key(&room.clone().unwrap_or_default());
@@ -709,7 +759,7 @@ impl AppWindow {
     pub(super) fn panel_mods(&self) -> Vec<(String, Instance)> {
         if !self.has_canvas() { return vec![]; }
         let mut slots = vec![];
-        if self.canvas_state.mode {
+        if self.canvas_state.actions.is_some() || self.canvas_state.connecting.is_some() {
             slots.push(("canvas-keys".into(), Instance { name: "canvas-keys".into(), props: json!({"connecting":self.canvas_state.connecting.is_some()}) }));
         }
         if self.canvas_state.file.is_none() && !self.canvas_state.files { return slots; }
@@ -1693,9 +1743,9 @@ impl AppWindow {
             f32::from(bounds.size.height) / 2.,
         ];
         // Fit the selection, else everything in the current place.
-        let fit_rects = if name == "canvas.fit" {
+        let fit_rects = if name.starts_with("canvas.fit") {
             let doc = &self.canvas_state.doc;
-            let all = self.canvas_state.selected.is_empty();
+            let all = name == "canvas.fit_all" || self.canvas_state.selected.is_empty();
             let pick = |key: &String| all || self.canvas_state.selected.contains(key);
             doc.cards.iter().filter(|c| doc.shows(c.space.as_ref()) && pick(&c.key())).map(|c| self.pill_rect(c, cx))
                 .chain(doc.previews.iter().filter(|p| doc.shows(p.space.as_ref()) && pick(&p.path)).map(|p| p.rect))
@@ -1725,7 +1775,7 @@ impl AppWindow {
                 self.focus.focus(window, cx);
             }
             "canvas.zoom_reset" => state.doc.camera.zoom_at(1., anchor),
-            "canvas.fit" => {
+            "canvas.fit" | "canvas.fit_all" => {
                 canvas::focus_fit(&mut state.doc.camera, &mut state.previous_camera,
                     &fit_rects, [anchor[0] * 2., anchor[1] * 2.]);
             }
@@ -1865,6 +1915,16 @@ impl AppWindow {
                     this.open_preview(json!({"path":path,"point":point}), window, cx);
                 }
             }))
+            .on_modifiers_changed(cx.listener(|this, e: &ModifiersChangedEvent, window, cx| {
+                // Option alone, while the canvas has the keyboard, shows each cell's actions.
+                let m = e.modifiers;
+                let held = m.alt && !m.platform && !m.control && this.canvas_state.mode && this.focus.is_focused(window);
+                if held != this.canvas_state.actions.is_some() {
+                    this.canvas_state.actions = held.then(crate::keys::listing);
+                    this.sync(window, cx);
+                    cx.notify();
+                }
+            }))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| {
                 this.canvas_state.motion.target = None;
                 this.canvas_state.motion.velocity = [0.; 2];
@@ -1951,13 +2011,16 @@ impl AppWindow {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                // Reached only on empty canvas: pills, space labels and controls stop propagation.
-                // A click without movement just focuses the canvas; moving pans.
+                // Reached only on empty canvas: pills, space cards and controls stop propagation.
+                // A click takes the keyboard back to the canvas; dragging draws a selection box
+                // (Shift adds to the selection). Space+drag, middle drag and scrolling pan.
                 cx.listener(|this, e: &MouseDownEvent, window, cx| {
                     if this.wire_click(e.position, window, cx) { return; }
+                    this.canvas_state.mode = true;
                     this.focus.focus(window, cx);
-                    this.canvas_state.selected.clear();
-                    this.canvas_state.drag = Some((None, e.position));
+                    let base = if e.modifiers.shift { this.canvas_state.selected.clone() } else { vec![] };
+                    this.canvas_state.selected = base.clone();
+                    this.canvas_state.marquee = Some((e.position, e.position, base));
                     this.canvas_state.pan_moved = false;
                     cx.notify();
                 }),
@@ -2040,6 +2103,22 @@ impl AppWindow {
                     cx.notify();
                     return;
                 }
+                if let Some((start, _, base)) = this.canvas_state.marquee.clone() {
+                    if e.pressed_button.is_none() { this.canvas_state.marquee = None; cx.notify(); return; }
+                    this.canvas_state.pan_moved = true;
+                    let (a, b) = (this.wire_local(start), this.wire_local(e.position));
+                    let camera = this.canvas_state.doc.camera;
+                    let (p, q) = (camera.to_world([a[0].min(b[0]), a[1].min(b[1])]), camera.to_world([a[0].max(b[0]), a[1].max(b[1])]));
+                    let area = [p[0], p[1], q[0] - p[0], q[1] - p[1]];
+                    let mut picked = base;
+                    for (key, rect) in this.keyboard_cells(cx) {
+                        if canvas::intersects(area, rect) && !picked.contains(&key) { picked.push(key); }
+                    }
+                    this.canvas_state.selected = picked;
+                    this.canvas_state.marquee = Some((start, e.position, this.canvas_state.marquee.take().map(|m| m.2).unwrap_or_default()));
+                    cx.notify();
+                    return;
+                }
                 let Some((card, previous)) = this.canvas_state.drag.clone() else {
                     return;
                 };
@@ -2049,21 +2128,19 @@ impl AppWindow {
                 ];
                 this.canvas_state.pan_moved |= d != [0., 0.];
                 if let Some(id) = card {
-                    if let Some(card) = this
-                        .canvas_state
-                        .doc
-                        .cards
-                        .iter()
-                        .find(|c| c.key() == id)
-                    {
-                        let zoom = this.canvas_state.doc.camera.zoom;
-                        let point = [card.rect[0] + d[0] / zoom, card.rect[1] + d[1] / zoom];
-                        if let Err(error) = this.place_canvas_card(&id, point, cx) {
-                            this.canvas_state.error = Some(error);
+                    // The whole selection moves together when the dragged cell is part of it.
+                    let zoom = this.canvas_state.doc.camera.zoom;
+                    let state = &mut this.canvas_state;
+                    let group = if state.selected.contains(&id) { state.selected.clone() } else { vec![id.clone()] };
+                    for key in &group {
+                        if let Some(r) = state.doc.cards.iter_mut().find(|c| &c.key() == key).map(|c| &mut c.rect)
+                            .or_else(|| state.doc.previews.iter_mut().find(|p| &p.path == key).map(|p| &mut p.rect)) {
+                            r[0] += d[0] / zoom;
+                            r[1] += d[1] / zoom;
                         }
-                        this.solve_layout(Some(&id),None,cx);
-                        this.animate_layout(window,cx);
                     }
+                    this.solve_layout(Some(&id),None,cx);
+                    this.animate_layout(window,cx);
                 } else {
                     let now = std::time::Instant::now();
                     let dt = this.canvas_state.motion.sample.map(|t| now.duration_since(t).as_secs_f32()).unwrap_or(0.016).max(0.001);
@@ -2080,19 +2157,10 @@ impl AppWindow {
                 MouseButton::Left,
                 cx.listener(|this, e: &MouseUpEvent, window, cx| {
                     if this.wire_release(e.position, window, cx) { return; }
-                    // A click that did not pan, inside a space: its files go to the panel tree.
-                    let click = matches!(this.canvas_state.drag, Some((None, _))) && !this.canvas_state.pan_moved;
-                    // A click on a pill expands it; a click on an expanded cell's header collapses it.
-                    let toggled = match &this.canvas_state.drag {
-                        Some((Some(key), _)) if !this.canvas_state.pan_moved && !e.modifiers.shift
-                            && this.canvas_state.doc.cards.iter().any(|c| c.sub.is_none() && &c.terminal == key) => Some(key.clone()),
-                        _ => None,
-                    };
+                    // A click (no box drawn) inside a space: its files go to the panel tree.
+                    let click = this.canvas_state.marquee.take().is_some() && !this.canvas_state.pan_moved;
                     this.end_canvas_drag(cx);
                     this.animate_camera(window, cx);
-                    if let Some(key) = toggled {
-                        this.expand_canvas_cell(&json!({"terminal":key}), window, cx);
-                    }
                     if let Some(space) = click.then(|| this.space_at(e.position)).flatten() {
                         this.show_space_files(space, window, cx);
                     }
@@ -2427,9 +2495,14 @@ impl AppWindow {
                     } else if !this.canvas_state.selected.contains(&drag_addr) { this.canvas_state.selected = vec![drag_addr.clone()]; }
                     this.canvas_state.drag = Some((Some(drag_addr.clone()), e.position));
                     cx.stop_propagation();
+                    this.canvas_state.mode = true;
+                    this.focus.focus(window, cx);
                     if e.click_count == 2 {
-                        // Fit the selection; the fit key or another double-click returns to the view before.
-                        this.canvas_command("canvas.fit", window, cx);
+                        // Double-click enters the cell: it expands and its terminal takes the keyboard.
+                        this.canvas_state.selected = vec![drag_addr.clone()];
+                        this.canvas_state.drag = None;
+                        this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+                        return;
                     }
                     if let Some(p) = this.model.pane_of(&addr) {
                         this.model.focus_pane(&p);
@@ -2458,10 +2531,24 @@ impl AppWindow {
                 .w_full()
                 .overflow_hidden()
                 .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                    if this.canvas_state.mode && e.button == MouseButton::Left {
-                        // Keep native text composition on the canvas too, before the terminal can take focus.
-                        this.canvas_state.selected = vec![mode_addr.clone()];
+                    // Only the entered cell's terminal takes clicks. Elsewhere a click selects the
+                    // cell (and leaves the entered one), a drag moves it, a double-click enters it.
+                    let entered = !this.canvas_state.mode && this.canvas_state.selected.last() == Some(&mode_addr);
+                    if !entered && e.button == MouseButton::Left {
+                        this.canvas_state.mode = true;
                         this.focus.focus(window, cx);
+                        if e.click_count == 2 {
+                            this.canvas_state.selected = vec![mode_addr.clone()];
+                            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+                        } else {
+                            if e.modifiers.shift {
+                                if this.canvas_state.selected.contains(&mode_addr) { this.canvas_state.selected.retain(|k| k != &mode_addr); }
+                                else { this.canvas_state.selected.push(mode_addr.clone()); }
+                            } else if !this.canvas_state.selected.contains(&mode_addr) { this.canvas_state.selected = vec![mode_addr.clone()]; }
+                            this.begin_layout();
+                            this.canvas_state.pan_moved = false;
+                            this.canvas_state.drag = Some((Some(mode_addr.clone()), e.position));
+                        }
                         cx.stop_propagation();
                         cx.notify();
                     }
@@ -2516,6 +2603,15 @@ impl AppWindow {
         for (_, pill) in pills { area = area.child(pill); }
         // Edges paint above cells: they route around them, and stay visible when they cannot.
         area = area.child(edge_layer).children(edge_marks).children(self.wire_handles(cx));
+        if let Some((a, b, _)) = &state.marquee {
+            let (a, b) = (self.wire_local(*a), self.wire_local(*b));
+            area = area.child(div().absolute().left(px(a[0].min(b[0]))).top(px(a[1].min(b[1])))
+                .w(px((a[0] - b[0]).abs())).h(px((a[1] - b[1]).abs()))
+                .border_1().border_color(c("ring")).bg(c("ring").opacity(0.08)));
+        }
+        if let Some(keys) = &state.actions {
+            area = area.children(self.action_strips(shown_doc, keys, cx));
+        }
         let mut tabs = div()
             .absolute()
             .top(px(12.))
@@ -2592,7 +2688,7 @@ impl AppWindow {
         tabs = tabs.child(panel_button("canvas-focus", "mods/pane/zoom.svg", c("foreground"), c("surface"))
             .on_click(cx.listener(|this, _, window, cx| this.canvas_command("canvas.fit", window, cx))));
         area = area.child(tabs);
-        if state.mode {
+        if state.actions.is_some() || state.connecting.is_some() {
             area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(72.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_slot("canvas-keys", cx)));

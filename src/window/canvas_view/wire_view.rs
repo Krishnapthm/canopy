@@ -15,7 +15,7 @@ const GRAB: f32 = 6.;
 #[derive(Default)]
 pub(in crate::window) struct WireUi {
     /// The cell whose side "+" handles show.
-    hover: Option<String>,
+    pub(super) hover: Option<String>,
     /// A wire being drawn: the cell it starts at, where it starts (world) and the pointer (window).
     drag: Option<(String, canvas::Point, Point<Pixels>)>,
     pub(super) selected: Option<(String, String)>,
@@ -57,7 +57,7 @@ impl AppWindow {
     }
 
     /// The drawn rect of a cell the current view shows.
-    fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
+    pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
         let card = doc.cards.iter().find(|c| c.key() == key && doc.shows(c.space.as_ref()))?;
         let view = &self.canvas_state.doc.view;
         if card.sub.is_some() {
@@ -89,7 +89,7 @@ impl AppWindow {
     }
 
     /// A window position in canvas-local pixels.
-    fn wire_local(&self, position: Point<Pixels>) -> canvas::Point {
+    pub(super) fn wire_local(&self, position: Point<Pixels>) -> canvas::Point {
         let origin = self.bounds.borrow().get("canopy-canvas").map(|b| b.origin).unwrap_or_default();
         [f32::from(position.x - origin.x), f32::from(position.y - origin.y)]
     }

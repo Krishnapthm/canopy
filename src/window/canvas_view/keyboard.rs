@@ -14,7 +14,13 @@ impl AppWindow {
     /// the reset key), and the canvas holds the focus, so no terminal sees them.
     pub(in crate::window) fn canvas_key(&mut self, key: &gpui::Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.canvas_state.mode || !self.has_canvas() || self.overlays.iter().any(|o| o.kind.modal_keys()) { return false; }
-        self.focus.focus(window, cx);
+        // Something else on the canvas has the keyboard (a rename, the thread input, the files panel).
+        if !self.focus.is_focused(window) { return false; }
+        // Space held: drag pans (the key-up clears it).
+        if key.key == "space" && !key.modifiers.modified() {
+            if !self.canvas_state.space_down { self.canvas_state.space_down = true; cx.notify(); }
+            return true;
+        }
         if let Some(action) = crate::keys::canvas_action(key, cx) {
             if let Some(a) = action.as_any().downcast_ref::<ShellAction>() {
                 self.run_action(a.id(), window, cx);
@@ -37,7 +43,7 @@ impl AppWindow {
     }
 
     /// What the keyboard can select in the current place: its cells and previews, and on Home the space cards.
-    fn keyboard_cells(&self, cx: &App) -> Vec<(String, canvas::Rect)> {
+    pub(super) fn keyboard_cells(&self, cx: &App) -> Vec<(String, canvas::Rect)> {
         let doc = &self.canvas_state.doc;
         doc.cards.iter().filter(|c| doc.shows(c.space.as_ref()) && canvas::view_allows(&doc.view, c.sub.is_some() || self.live.get(&c.terminal).is_some_and(canvas_agent)))
             .map(|c| (c.key(), self.pill_rect(c, cx)))
@@ -63,6 +69,7 @@ impl AppWindow {
         let selected = self.canvas_state.selected.last().cloned();
         match name {
             "canvas.mode" => {
+                // Leaves the entered cell (it stays selected), or gives the canvas the keyboard.
                 self.canvas_state.mode = true;
                 self.canvas_state.space_down = false;
                 if selected.is_none() {
@@ -74,8 +81,20 @@ impl AppWindow {
                 self.focus.focus(window, cx);
             }
             "canvas.leave" => {
-                if self.canvas_state.connecting.take().is_none() { self.canvas_state.mode = false; }
+                // Like Figma's Escape: cancel a connection, else clear the selection, else go up to Home.
+                if self.canvas_state.connecting.take().is_none() {
+                    if !self.canvas_state.selected.is_empty() || self.canvas_state.wire.selected.is_some() {
+                        self.canvas_state.selected.clear();
+                        self.canvas_state.wire.selected = None;
+                    } else if self.canvas_state.doc.room.is_some() {
+                        return self.go_room(None, window, cx);
+                    }
+                }
+                self.canvas_state.mode = true;
                 self.focus.focus(window, cx);
+            }
+            "canvas.select_all" => {
+                self.canvas_state.selected = self.keyboard_cells(cx).into_iter().map(|(k, _)| k).collect();
             }
             "canvas.enter" => {
                 if let Some(from) = self.canvas_state.connecting.clone() {

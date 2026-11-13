@@ -85,27 +85,42 @@
     "cmd-z": "canvas.undo",
     "cmd-j": "canvas.mode",
     "cmd-enter": "canvas.expand",
-    "cmd-shift-a": "canvas.arrange"
+    "cmd-shift-a": "canvas.arrange",
+    "cmd-1": "canvas.space:1",
+    "cmd-2": "canvas.space:2",
+    "cmd-3": "canvas.space:3",
+    "cmd-4": "canvas.space:4",
+    "cmd-5": "canvas.space:5",
+    "cmd-6": "canvas.space:6",
+    "cmd-7": "canvas.space:7",
+    "cmd-8": "canvas.space:8",
+    "cmd-9": "canvas.space:9",
+    "cmd-escape": "canvas.mode",
+    "cmd-shift-h": "canvas.home"
   },
   "canvas-mode": {
-    "left": "canvas.go:left",
+    "left": "canvas.nudge:left",
+    "right": "canvas.nudge:right",
+    "up": "canvas.nudge:up",
+    "down": "canvas.nudge:down",
     "h": "canvas.go:left",
-    "right": "canvas.go:right",
     "l": "canvas.go:right",
-    "up": "canvas.go:up",
     "k": "canvas.go:up",
-    "down": "canvas.go:down",
     "j": "canvas.go:down",
-    "tab": "canvas.space:next",
-    "shift-tab": "canvas.space:prev",
+    "tab": "canvas.go:right",
+    "shift-tab": "canvas.go:left",
     "enter": "canvas.enter",
     "escape": "canvas.leave",
-    "x": "canvas.collapse",
+    "shift-1": "canvas.fit_all",
+    "shift-2": "canvas.fit",
+    "shift-0": "canvas.zoom_reset",
     "f": "canvas.fit",
+    "cmd-a": "canvas.select_all",
+    "x": "canvas.collapse",
     "c": "canvas.connect",
     "t": "canvas.thread",
-    "a": "canvas.arrange",
-    "shift-a": {
+    "shift-a": "canvas.arrange",
+    "a": {
       "command": "canvas.arrange",
       "args": {
         "picker": true
@@ -115,10 +130,6 @@
     "shift-n": "canvas.agents",
     "backspace": "canvas.close",
     "delete": "canvas.close",
-    "?": "app.help",
-    "shift-left": "canvas.nudge:left",
-    "shift-right": "canvas.nudge:right",
-    "shift-up": "canvas.nudge:up",
-    "shift-down": "canvas.nudge:down"
+    "?": "app.help"
   }
 }
