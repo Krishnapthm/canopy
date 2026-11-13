@@ -2073,6 +2073,8 @@ impl AppWindow {
         let mut alerts = Vec::new();
         // Terminals that reached a turn boundary (idle, or an agent just started): Wire's postman rings them.
         let mut rings = Vec::new();
+        // Spawned children whose turn just ended, and their parent agents (Wire idle notices).
+        let mut idle = Vec::new();
         for (addr, rec) in &self.live {
             let word = rec.get("status").and_then(Value::as_str).map(str::to_owned);
             let app = rec.get("report").and_then(|r| r.get("app")).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
@@ -2080,6 +2082,12 @@ impl AppWindow {
             let prev = self.model.agents.get(addr).and_then(|a| a.word.clone());
             let child = rec.get("parent").and_then(Value::as_str).is_some_and(|p| !p.is_empty());
             if prev.as_deref() != word.as_deref() && matches!(word.as_deref(), Some("idle" | "done")) { rings.push(addr.clone()); }
+            // A program whose own turn-end hook reports idle (with its answer) is left to it.
+            if prev.as_deref() == Some("working") && matches!(word.as_deref(), Some("idle" | "done")) && !crate::programs::reports_idle(&rec["program"])
+                && let Some(parent) = rec.get("parent").and_then(Value::as_str).filter(|p| self.live.get(*p).is_some_and(|r| crate::programs::agent_program(&r["program"])))
+            {
+                idle.push((addr.clone(), parent.to_owned()));
+            }
             if let Some(alert) = self.model.alert_for(addr, child, prev.as_deref(), word.as_deref(), looking) {
                 alerts.push((addr.clone(), alert, looking));
             }
@@ -2095,6 +2103,9 @@ impl AppWindow {
             for (addr, alert, looking) in alerts {
                 self.alert(&addr, alert, looking, window, cx);
             }
+        }
+        for (child, parent) in idle {
+            if crate::wire::post_idle(&self.canvas_state.doc, &child, &parent, "").is_some() { rings.push(parent); }
         }
         for addr in rings { self.wire_postman(&addr, window, cx); }
         if !self.listed_once { self.refresh_wires(window, cx); }

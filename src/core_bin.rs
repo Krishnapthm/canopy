@@ -50,6 +50,33 @@ pub fn use_core(bin: PathBuf) {
     *BIN.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bin);
 }
 
+/// Makes `canopy` reachable in every terminal, installed or not: `<app home>/bin/canopy` links to
+/// this app, and that folder goes first on the app's PATH, which a core the app starts inherits and
+/// `Core::run` passes to each local terminal. Agents call `canopy wire` and `canopy spawn` by name.
+// shortcut: Unix only; Windows terminals still need the installer's PATH entry.
+#[cfg(unix)]
+pub fn put_cli_on_path() {
+    let dir = crate::mods::app_dir().join("bin");
+    let link = dir.join("canopy");
+    if let Ok(exe) = std::env::current_exe()
+        && std::fs::read_link(&link).ok() != Some(exe.clone())
+    {
+        let made = std::fs::create_dir_all(&dir).and_then(|()| {
+            let _ = std::fs::remove_file(&link);
+            std::os::unix::fs::symlink(&exe, &link)
+        });
+        if let Err(e) = made {
+            eprintln!("canopy: cannot link {}: {e}", link.display());
+        }
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let dirs = std::iter::once(dir.clone()).chain(std::env::split_paths(&path).filter(|d| *d != dir));
+    if let Ok(joined) = std::env::join_paths(dirs) {
+        // SAFETY: called at startup, before other threads read the environment.
+        unsafe { std::env::set_var("PATH", joined) };
+    }
+}
+
 /// Finder and Dock launches don't inherit the person's shell PATH.
 #[cfg(target_os = "macos")]
 pub fn fill_path() {

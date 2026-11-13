@@ -56,3 +56,18 @@ another Claude session's `CLAUDE_CODE_*` variables turns transcript saving off.
     `env -i` launch, or Claude reports "Not logged in".
 
 Not checked: the live pill repro in the app (folded into the phase 1 hand check).
+
+## Live checks for agent teams, 2026-11-13 (2.1.322, Haiku, dev app, hc 0.1.20)
+
+- **`Stop` hook carries the last answer - verified.** A `Stop` command hook got
+  `last_assistant_message` on stdin ("Hello there, Krishna, friend!" for "Say hi in five
+  words."); `canopy hook idle` turned it into the parent's idle line.
+- **A plain header line is read as a peer message - verified.** `Message from "Claude Code"
+  (#1, reply with: canopy wire reply 1 "...")` plus the body: the receiver answered with
+  `canopy wire reply 1 "4"` and the sender got the reply as a new turn.
+- **An inherited Claude Code environment hides status - verified.** A core started from
+  inside a Claude Code session passes `CLAUDE_CODE_*` (including
+  `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`) to agents: hc then reports no status (`null`) for
+  them, even mid-turn. Start dev cores with `env -i HOME USER SHELL LANG TERM PATH`.
+- A spawned Claude in an untrusted folder stops at the folder trust dialog; `canopy spawn`
+  passes the caller's folder (`--cwd`) so the child starts where its parent works.

@@ -1,6 +1,8 @@
 # Canopy: Wire, canvas feel and keyboard
 
-Plan written 2026-11-13 on `pivot/canvas`. Owner: Krishna. Nothing here is built.
+Plan written 2026-11-13 on `pivot/canvas`. Owner: Krishna. Phases 1 to 6 are built and
+merged; `docs/wire.md` and `docs/sub-agents.md` describe what shipped, and where Wire
+now differs from this plan (plain message headers, idle lines, `canopy spawn`), they win.
 Revised the same day with Krishna's decisions and the phase 0 results (Claude done,
 Codex and two app items still open).
 It follows `docs/canopy/plan.md` (rules in its section 3 and AGENTS.md still hold) and

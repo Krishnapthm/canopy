@@ -16,7 +16,8 @@ pub const PERSON: &str = "you";
 pub const DEFAULT_LIMIT: usize = 1000;
 pub const DEFAULT_BUDGET: u32 = 8;
 
-/// One line of a thread file: a postcard (`tell`, `ask`, `reply`), a breaker `reset`
+/// One line of a thread file: a postcard (`tell`, `ask`, `reply`, or `idle`: a spawned child's
+/// turn ended, sent to its parent), a breaker `reset`
 /// on the wire `from`-`to`, or a `delivered`/`pending` receipt for postcard `n`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Line {
@@ -47,7 +48,7 @@ impl Line {
         Line { from: from.into(), to: to.into(), kind: kind.into(), re, text: text.into(), refs, ..Default::default() }
     }
     fn is_card(&self) -> bool {
-        matches!(self.kind.as_str(), "tell" | "ask" | "reply")
+        matches!(self.kind.as_str(), "tell" | "ask" | "reply" | "idle")
     }
     fn on(&self, a: &str, b: &str) -> bool {
         (self.from == a && self.to == b) || (self.from == b && self.to == a)
@@ -184,13 +185,13 @@ pub fn waiting<'a>(lines: &'a [Line], to: &'a str) -> impl Iterator<Item = &'a L
 }
 
 /// Whether the wire `a`-`b` has used its `budget` of agent postcards since a person last wrote
-/// to either end or reset it. A budget of 0 turns the breaker off.
+/// to either end or reset it. Idle notices do not count. A budget of 0 turns the breaker off.
 pub fn tripped(lines: &[Line], a: &str, b: &str, budget: u32) -> bool {
     let mut used = 0;
     for l in lines {
         if (l.kind == "reset" && l.on(a, b)) || (l.is_card() && l.from == PERSON && (l.to == a || l.to == b)) {
             used = 0;
-        } else if l.is_card() && l.on(a, b) {
+        } else if l.is_card() && l.kind != "idle" && l.on(a, b) {
             used += 1;
         }
     }
@@ -214,20 +215,34 @@ pub fn refuse(text: &str, limit: usize) -> Option<String> {
     }
 }
 
-/// The line typed into a receiver: `<wire from="name (address)" n="17" kind="ask">text</wire>`, with
-/// `for="sub <id> '<name>'"` first when the postcard is for a sub-agent cell its parent relays.
-/// Names lose quotes and control characters; the text cannot close the tag.
+/// The text typed into a receiver: a plain header line, then the body.
+/// `Message from "reviewer" (#17, reply with: canopy wire reply 17 "...")`, or `Message from the
+/// person (#3)`; with `sub` (id, name) it is for a sub-agent its parent relays. An idle notice is
+/// one line: `"luna" is idle: <its last answer>`, else `"luna" is idle: canopy wire read t7`. Names lose quotes and control characters, and a
+/// body line cannot pose as a header.
 pub fn tag(line: &Line, from_name: &str, sub: Option<(&str, &str)>) -> String {
     let clean = |s: &str| s.chars().filter(|c| !c.is_control() && !matches!(c, '"' | '\'')).collect::<String>();
-    let mut out = String::from("<wire");
+    if line.kind == "idle" {
+        let name = clean(from_name);
+        // The address, not the name: a cell's shown name can be its long, changing title.
+        return if line.text.is_empty() { format!("\"{name}\" is idle: canopy wire read {}", line.from) } else { format!("\"{name}\" is idle: {}", line.text) };
+    }
+    let mut head = if line.from == PERSON { "Message from the person".to_owned() } else { format!("Message from \"{}\"", clean(from_name)) };
     if let Some((id, name)) = sub {
-        out += &format!(" for=\"sub {} '{}'\"", clean(id), clean(name));
+        head += &format!(" for your sub-agent \"{}\" ({}), pass it on", clean(name), clean(id));
     }
-    out += &format!(" from=\"{}\" n=\"{}\" kind=\"{}\"", clean(&if line.from == PERSON { from_name.to_owned() } else { format!("{from_name} ({})", line.from) }), line.n, line.kind);
-    if let Some(re) = line.re {
-        out += &format!(" re=\"{re}\"");
-    }
-    format!("{out}>{}</wire>", line.text.replace("</wire", "<\\/wire"))
+    let re = line.re.map(|re| format!(", re #{re}")).unwrap_or_default();
+    let how = if line.from == PERSON { String::new() } else { format!(", reply with: canopy wire reply {} \"...\"", line.n) };
+    let body = line.text.lines().map(|l| if l.starts_with("Message from ") { format!("> {l}") } else { l.to_owned() }).collect::<Vec<_>>().join("\n");
+    format!("{head} (#{}{re}{how})\n{body}", line.n)
+}
+
+/// The idle notice a spawned child sends its parent when its turn ends: its last answer on one
+/// line, cut to 300 characters (empty: the notice says to read its screen).
+pub fn idle_line(child: &str, parent: &str, answer: &str) -> Line {
+    let one: String = answer.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = if one.chars().count() > 300 { format!("{}...", one.chars().take(300).collect::<String>()) } else { one };
+    Line { from: child.into(), to: parent.into(), kind: "idle".into(), text, ..Default::default() }
 }
 
 /// `sub:<parent>:<id>` taken apart.
@@ -364,7 +379,7 @@ pub fn ring(path: &Path, to: &str, door: &Door, name: &dyn Fn(&str) -> String, s
     };
     let sub = sub_parts(to).map(|(_, id)| id);
     let sub_name = sub.map(|_| name(to));
-    let text = cards.iter().map(|l| tag(l, &if l.from == PERSON { PERSON.to_owned() } else { name(&l.from) }, sub.zip(sub_name.as_deref()))).collect::<Vec<_>>().join("\n");
+    let text = cards.iter().map(|l| tag(l, &if l.from == PERSON { PERSON.to_owned() } else { name(&l.from) }, sub.zip(sub_name.as_deref()))).collect::<Vec<_>>().join("\n\n");
     match send(&door.terminal, &text, flag) {
         Ok(()) => Sent::Delivered(cards.len()),
         Err(e) => {
@@ -472,9 +487,18 @@ struct Me {
     wires: Vec<Wire>,
 }
 
+/// The caller's terminal, taken out of the environment: an `hc send` run from inside a terminal
+/// wraps the text in `<hc from="t1">`, and Wire's line must reach the receiver as written.
+fn my_terminal() -> Option<String> {
+    let id = std::env::var("HC_TERMINAL_ID").ok().filter(|s| !s.is_empty());
+    // SAFETY: CLI entry points call this first, before any thread starts.
+    unsafe { std::env::remove_var("HC_TERMINAL_ID") };
+    id
+}
+
 impl Me {
     fn new() -> Result<Me, Failed> {
-        let addr = std::env::var("HC_TERMINAL_ID").ok().filter(|s| !s.is_empty()).map_or_else(|| fail("run this inside a Canopy terminal ($HC_TERMINAL_ID is not set)"), Ok)?;
+        let addr = my_terminal().map_or_else(|| fail("run this inside a Canopy terminal ($HC_TERMINAL_ID is not set)"), Ok)?;
         let rec = Rec::get(&addr).map_or_else(|| fail(format!("cannot read terminal {addr} from the core")), Ok)?;
         let doc = load_doc()?;
         let key = addr.clone();
@@ -547,7 +571,8 @@ impl Peer {
 
 fn find_peer(me: &Me, who: &str) -> Result<Peer, Failed> {
     let peers = me.peers();
-    let hit = |p: &Peer| p.key == who || p.name.eq_ignore_ascii_case(who) || p.rec.as_ref().is_some_and(|r| r.addr == who);
+    // As `canopy wire` lists it too: `name (t2)`.
+    let hit = |p: &Peer| p.key == who || p.name.eq_ignore_ascii_case(who) || p.rec.as_ref().is_some_and(|r| r.addr == who || format!("{} ({})", p.name, r.addr).eq_ignore_ascii_case(who));
     let mut found = peers.into_iter().filter(hit);
     match (found.next(), found.next()) {
         (Some(p), None) => Ok(p),
@@ -651,7 +676,7 @@ fn run(args: &[String]) -> Result<String, Failed> {
                 out.push("Mail for you:".into());
                 out.extend(mine.iter().map(|l| show(&me, l)));
             }
-            out.push("Send: canopy wire tell|ask <peer> \"<text>\"   answer: reply <n> \"<text>\"   wait <n>   read <n|peer>".into());
+            out.push("Send: canopy wire tell <peer> \"<text>\"   answer: reply <n> \"<text>\"   wait <n>   read <n|peer>".into());
             Ok(out.join("\n"))
         }
         Some(kind @ ("tell" | "ask")) => {
@@ -682,9 +707,6 @@ fn run(args: &[String]) -> Result<String, Failed> {
             }
             let peer = find_peer(&me, &who)?;
             let Some(rec) = &peer.rec else { return fail(format!("{} is closed", peer.name)) };
-            if rec.agent || peer.is_sub() {
-                return fail(format!("{} is an agent: ask it (canopy wire ask {} \"...\")", peer.name, peer.name));
-            }
             match hc(&["read", &rec.addr, "--lines", "0"], Duration::from_secs(10)) {
                 Ok((0, out, _)) => Ok(out.lines().rev().skip_while(|l| l.trim().is_empty()).take(40).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n")),
                 Ok((_, _, err)) => fail(hc_message(&err)),
@@ -704,6 +726,117 @@ pub fn cli(args: &[String]) -> i32 {
         }
         Err((code, msg)) => {
             eprintln!("canopy wire: {msg}");
+            code
+        }
+    }
+}
+
+// ---- `canopy hook idle` -------------------------------------------------------------
+
+/// Puts a spawned child's idle notice in its parent's thread when both are cells on the canvas.
+/// Returns the thread it went to. Idle notices go to the spawner only, never along drawn edges.
+pub fn post_idle(doc: &Document, child: &str, parent: &str, answer: &str) -> Option<PathBuf> {
+    let on = |k: &str| doc.cards.iter().any(|c| c.key() == k);
+    if !on(child) || !on(parent) {
+        return None;
+    }
+    let path = thread_path(doc.space_of(child).map(|s| s.space.as_str()));
+    append(&path, idle_line(child, parent, answer)).ok()?;
+    Some(path)
+}
+
+/// Claude's `Stop` hook (payload on stdin): tells this terminal's parent agent that it is idle,
+/// with its last answer (`last_assistant_message`). Best effort.
+pub fn hook_idle() {
+    let Some(terminal) = my_terminal() else { return };
+    let mut text = String::new();
+    let _ = std::io::stdin().take(512 * 1024).read_to_string(&mut text);
+    let payload: Value = serde_json::from_str(&text).unwrap_or_default();
+    let answer = payload["last_assistant_message"].as_str().unwrap_or_default();
+    let _ = crate::programs::load();
+    let Some(me) = Rec::get(&terminal) else { return };
+    let Some(parent) = me.parent.as_deref().and_then(Rec::get).filter(|p| p.agent) else { return };
+    let Ok(doc) = load_doc() else { return };
+    if let Some(path) = post_idle(&doc, &terminal, &parent.addr, answer) {
+        ring(&path, &parent.addr, &parent.door(), &|k| if k == terminal { me.name.clone() } else { k.to_owned() }, &hc_send);
+    }
+}
+
+// ---- `canopy spawn` -----------------------------------------------------------------
+
+/// The argv `canopy spawn` runs: the program's `run` from programs.json, Canopy's flags, the
+/// model, then the first message. `path` keeps `canopy` reachable when the core's PATH lacks it.
+fn spawn_argv(run: &[String], model: Option<&str>, prompt: Option<&str>, exe: &str, path: Option<&str>) -> Vec<String> {
+    let mut argv = run.to_vec();
+    crate::programs::append_flags(&mut argv, exe);
+    if let Some(m) = model {
+        argv.extend(["--model".into(), m.into()]);
+    }
+    argv.extend(prompt.map(str::to_owned));
+    match path {
+        Some(p) => ["env".to_owned(), format!("PATH={p}")].into_iter().chain(argv).collect(),
+        None => argv,
+    }
+}
+
+/// `canopy spawn <program> --name <n> [--model <m>] [-- <prompt>]`: starts another agent as a
+/// real terminal beside the caller, wired to it (the core records the caller as its parent).
+fn spawn(args: &[String]) -> Result<String, Failed> {
+    const USAGE: &str = "usage: canopy spawn <program> --name <name> [--model <model>] [-- <first message>]";
+    let (head, prompt) = match args.iter().position(|a| a == "--") {
+        Some(i) => (&args[..i], Some(args[i + 1..].join(" ")).filter(|p| !p.trim().is_empty())),
+        None => (args, None),
+    };
+    let (mut program, mut name, mut model) = (None, None, None);
+    let mut words = head.iter();
+    while let Some(w) = words.next() {
+        match w.as_str() {
+            "--name" => name = words.next().cloned(),
+            "--model" => model = words.next().cloned(),
+            _ if program.is_none() && !w.starts_with('-') => program = Some(w.clone()),
+            _ => return fail(format!("unexpected '{w}'\n{USAGE}")),
+        }
+    }
+    let (Some(program), Some(name)) = (program, name) else { return fail(USAGE) };
+    let _ = crate::programs::load();
+    let known = crate::programs::startable();
+    let Some(run) = known.iter().find(|p| p["key"] == program.as_str() || p["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(&program))) else {
+        let keys: Vec<&str> = known.iter().filter_map(|p| p["key"].as_str()).collect();
+        return fail(format!("'{program}' is not an agent Canopy knows: {}", keys.join(", ")));
+    };
+    let run: Vec<String> = serde_json::from_value(run["run"].clone()).unwrap_or_default();
+    let me = Me::new()?;
+    let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "canopy".into());
+    let path = std::env::var("PATH").ok();
+    let argv = spawn_argv(&run, model.as_deref(), prompt.as_deref(), &exe, path.as_deref());
+    let mut hc_args = vec!["run".to_owned(), "--bg".into(), "--name".into(), name.clone(), "--parent".into(), me.rec.addr.clone()];
+    // `hc` runs from the home folder; the child works where its parent does.
+    if let Ok(cwd) = std::env::current_dir() {
+        hc_args.extend(["--cwd".into(), cwd.to_string_lossy().into_owned()]);
+    }
+    // The parent's space, so the app places the child there (born wire included).
+    if let Some(space) = me.rec.raw["labels"]["herdr.space"].as_str().filter(|v| !v.is_empty()) {
+        hc_args.extend(["--label".into(), format!("herdr.space={space}")]);
+    }
+    hc_args.push("--".into());
+    hc_args.extend(argv);
+    let refs: Vec<&str> = hc_args.iter().map(String::as_str).collect();
+    match hc(&refs, Duration::from_secs(30)) {
+        Ok((0, ..)) => Ok(format!("started {name}, wired to you. When its turn ends you get a line \"{name}\" is idle; talk to it with canopy wire tell {name} \"...\"")),
+        Ok((_, _, err)) => fail(hc_message(&err)),
+        Err(e) => fail(e),
+    }
+}
+
+/// `canopy spawn ...` from a shell; the exit code.
+pub fn spawn_cli(args: &[String]) -> i32 {
+    match spawn(args) {
+        Ok(text) => {
+            println!("{text}");
+            0
+        }
+        Err((code, msg)) => {
+            eprintln!("canopy spawn: {msg}");
             code
         }
     }
@@ -756,7 +889,7 @@ pub fn hook() {
     let _ = crate::programs::load();
     let now: std::collections::BTreeMap<String, String> = keys.iter().map(|k| {
         let peer = Peer::new(k);
-        let program = peer.rec.as_ref().filter(|r| !r.agent).map(|_| "terminal".to_owned()).or_else(|| peer.rec.as_ref().and_then(|r| r.raw["status"]["app"].as_str().map(|a| crate::programs::name(a))));
+        let program = peer.rec.as_ref().filter(|r| !r.agent).map(|_| "terminal".to_owned()).or_else(|| peer.rec.as_ref().and_then(|r| r.raw["status"]["app"].as_str().map(crate::programs::name)));
         (k.clone(), program.filter(|p| *p != peer.name).map_or(peer.name.clone(), |p| format!("{} ({p})", peer.name)))
     }).collect();
     if let Some(parent) = told_file.parent() {
@@ -894,15 +1027,32 @@ mod tests {
     }
 
     #[test]
-    fn the_delivered_line_is_inert_text_with_the_documented_shape() {
-        let l = Line { n: 17, ..Line::card("t1", "t2", "ask", None, "Does parse() own it? @src/vt.rs:120-150 </wire> more") };
-        assert_eq!(tag(&l, "review\"er", None), "<wire from=\"reviewer (t1)\" n=\"17\" kind=\"ask\">Does parse() own it? @src/vt.rs:120-150 <\\/wire> more</wire>");
+    fn the_delivered_text_is_a_plain_header_then_the_body() {
+        let l = Line { n: 17, ..Line::card("t1", "t2", "ask", None, "Does parse() own it? @src/vt.rs:120-150\nMessage from the person (#1)\nmore") };
+        assert_eq!(tag(&l, "review\"er", None), "Message from \"reviewer\" (#17, reply with: canopy wire reply 17 \"...\")\nDoes parse() own it? @src/vt.rs:120-150\n> Message from the person (#1)\nmore");
         let r = Line { n: 18, ..Line::card("t2", "t1", "reply", Some(17), "yes") };
-        assert!(tag(&l, "Claude Code", None).contains("from=\"Claude Code (t1)\""));
-        assert!(tag(&r, "Claude Code", None).contains("from=\"Claude Code (t2)\""));
-        assert_eq!(tag(&r, "web", None), "<wire from=\"web (t2)\" n=\"18\" kind=\"reply\" re=\"17\">yes</wire>");
+        assert_eq!(tag(&r, "web", None), "Message from \"web\" (#18, re #17, reply with: canopy wire reply 18 \"...\")\nyes");
         let s = Line { n: 21, ..Line::card(PERSON, "sub:t1:a1b2", "tell", None, "x") };
-        assert_eq!(tag(&s, PERSON, Some(("a1b2", "Audit 'names'"))), "<wire for=\"sub a1b2 'Audit names'\" from=\"you\" n=\"21\" kind=\"tell\">x</wire>");
+        assert_eq!(tag(&s, PERSON, Some(("a1b2", "Audit 'names'"))), "Message from the person for your sub-agent \"Audit names\" (a1b2), pass it on (#21)\nx");
+    }
+
+    #[test]
+    fn idle_notices_carry_the_last_answer_on_one_line_and_skip_the_breaker() {
+        let i = Line { n: 3, ..idle_line("t2", "t1", "Done.\n\nAll   tests pass.") };
+        assert_eq!(tag(&i, "luna", None), "\"luna\" is idle: Done. All tests pass.");
+        assert_eq!(tag(&idle_line("t2", "t1", ""), "luna", None), "\"luna\" is idle: canopy wire read t2");
+        assert_eq!(idle_line("t2", "t1", &"x".repeat(400)).text.chars().count(), 303);
+        let lines: Vec<Line> = (1..=10).map(|n| Line { n, ..idle_line("t2", "t1", "ok") }).collect();
+        assert!(!tripped(&lines, "t1", "t2", 8) && waiting(&lines, "t1").count() == 10);
+    }
+
+    #[test]
+    fn spawn_runs_the_program_with_flags_model_and_task_and_keeps_canopy_on_path() {
+        let run = vec!["claude".to_owned()];
+        let argv = spawn_argv(&run, Some("haiku"), Some("review src/x.rs"), "/c", Some("/home/bin:/usr/bin"));
+        assert_eq!(argv[..3], ["env", "PATH=/home/bin:/usr/bin", "claude"]);
+        assert_eq!(argv[argv.len() - 3..], ["--model", "haiku", "review src/x.rs"]);
+        assert_eq!(spawn_argv(&["pi".to_owned()], None, None, "/c", None), ["pi"]);
     }
 
     #[test]
@@ -924,7 +1074,7 @@ mod tests {
         assert_eq!(ring(&path, "t2", &door(Some("idle"), false), &names, &send), Sent::Delivered(2));
         assert_eq!(typed.borrow().len(), 1, "one paste for the whole batch");
         assert_eq!(typed.borrow()[0].2.as_deref(), Some("idle"));
-        assert_eq!(typed.borrow()[0].1.lines().count(), 2);
+        assert_eq!(typed.borrow()[0].1.matches("Message from ").count(), 2);
         assert_eq!(ring(&path, "t2", &door(Some("idle"), false), &names, &send), Sent::Delivered(0));
         // A queueing CLI takes it mid-turn, without a status check.
         append(&path, card("t1", "t2", "tell", None)).unwrap();
