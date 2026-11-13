@@ -436,6 +436,7 @@ pub fn route(a: Rect, b: Rect, others: &[Rect]) -> Vec<Point> {
     // Only cells near the pair can be in the way.
     let near = union(&[a, b]).map(|u| [u[0] - 200., u[1] - 200., u[2] + 400., u[3] + 400.]).unwrap();
     let others: Vec<Rect> = others.iter().copied().filter(|r| *r != a && *r != b && intersects(*r, near)).collect();
+    let between = union(&[a, b]).map(|u| [u[0] - EDGE_PAD, u[1] - EDGE_PAD, u[2] + 2. * EDGE_PAD, u[3] + 2. * EDGE_PAD]).unwrap();
     let mut best: Option<(f32, Vec<Point>)> = None;
     for sa in 0..4 {
         for sb in 0..4 {
@@ -444,7 +445,8 @@ pub fn route(a: Rect, b: Rect, others: &[Rect]) -> Vec<Point> {
             let e = [pb[0] + nb[0] * EDGE_PAD, pb[1] + nb[1] * EDGE_PAD];
             let mut xs = vec![(s[0] + e[0]) / 2.];
             let mut ys = vec![(s[1] + e[1]) / 2.];
-            for r in others.iter().chain([&a, &b]) {
+            // Bends hug the cells that can be in the way: the two ends and those between them.
+            for r in others.iter().filter(|r| intersects(**r, between)).chain([&a, &b]) {
                 xs.extend([r[0] - EDGE_PAD, r[0] + r[2] + EDGE_PAD]);
                 ys.extend([r[1] - EDGE_PAD, r[1] + r[3] + EDGE_PAD]);
             }

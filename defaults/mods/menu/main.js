@@ -195,6 +195,8 @@ export default class Menu extends View {
   // One menu box: the rows of `list`, `at` highlighted.
   box(t, list, at, row) {
     return v_flex().w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(8).shadow_lg().text_size(12.8)
+      // Clicks inside the box never reach the root, which closes the menu.
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .children(list.map((it, i) => !it[1]
         // shadcn ContextMenuSeparator + ContextMenuLabel; a note is a dim row.
         ? v_flex()
@@ -225,7 +227,7 @@ export default class Menu extends View {
     const step = (rows, from, d) => { for (let n = 1; n <= rows.length; n++) { const j = (from + d * n + rows.length * n) % rows.length; if (rows[j][1]) return j; } return from; };
     const inSub = sub && this.subAt >= 0;
     // The submenu hangs beside its row: rows above it, their rules and the box padding.
-    const top = this.sub ? list.slice(0, this.sub.i + 1).reduce((y, it, i) => y + (it[1] ? ROW : LABEL) + (rule(list, i) || it[2]?.label ? 9 : 0), 5) - ROW - 5 : 0;
+    const top = this.sub ? list.slice(0, this.sub.i + 1).reduce((y, it, i) => y + (it[1] || !it[2]?.label ? ROW : LABEL) + (rule(list, i) || it[2]?.label ? 9 : 0), 5) - ROW - 5 : 0;
     return h_flex()
       .id("menu")
       .track_focus(this.handle)
@@ -258,9 +260,8 @@ export default class Menu extends View {
           else if (this.sub) { this.sub = null; cx.notify(); }
           else cx.notify();
         })
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click((_e, cx) => this.choose(i, cx))))
-      .when(Boolean(sub), el => el.child(div().mt(top).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .when(Boolean(sub), el => el.child(div().mt(top)
         .child(this.box(t, sub ?? [], this.subAt, (row, it) => row.on_click(() => this.run(it))))));
   }
 }

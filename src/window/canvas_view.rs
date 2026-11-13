@@ -63,6 +63,8 @@ pub(super) struct State {
     /// A box being dragged on empty canvas: where it started, where the pointer is, and the
     /// selection it adds to (Shift), in window coordinates.
     marquee: Option<(Point<Pixels>, Point<Pixels>, Vec<String>)>,
+    /// The selection a cell drag carries along: the solver keeps them where the drag put them.
+    group: Vec<String>,
     /// Option (Alt) held on the canvas: each target cell shows its actions, with keys from keys.json.
     pub(super) actions: Option<Vec<(String, String, String)>>,
 }
@@ -133,6 +135,7 @@ impl State {
             zoom_task: None,
             wire: Default::default(),
             marquee: None,
+            group: vec![],
             actions: None,
         }
     }
@@ -160,6 +163,7 @@ impl State {
         }
         self.preview_drag = None;
         self.drag = None;
+        self.group.clear();
         self.space_drag = None;
         self.resizing = false;
         changed
@@ -274,7 +278,9 @@ impl AppWindow {
             .map(|(c, r)| [c.rect[0], c.rect[1], r[2], r[3]])
             .chain(doc.previews.iter().map(|p| p.rect))
             .collect();
-        if let Some(i) = pinned {
+        // The pinned cell, and the rest of a dragged selection, stay where they were put.
+        let keys: Vec<String> = doc.cards.iter().map(|c| c.key()).chain(doc.previews.iter().map(|p| p.path.clone())).collect();
+        for i in (0..cells.len()).filter(|i| Some(*i) == pinned || state.group.contains(&keys[*i])) {
             cells[i] = current[i];
             if i < count {
                 cells[i][2] = sizes[i][2];
@@ -579,6 +585,10 @@ impl AppWindow {
             self.focus.is_focused(window).then(|| self.canvas_state.selected.last().cloned()).flatten()
         });
         let Some(key) = key else { return };
+        // A space card on Home: delete the space, with its usual confirmation.
+        if self.canvas_state.doc.spaces.iter().any(|s| s.space == key) {
+            return self.run_key("space.close", json!({"id":key}), window, cx);
+        }
         let Some(card) = self.canvas_state.doc.cards.iter().find(|c| c.key() == key) else { return };
         let sub = card.parent.as_ref().and_then(|p| self.canvas_state.subs.get(p)).into_iter().flatten()
             .find(|s| Some(&s.id) == card.sub.as_ref());
@@ -729,6 +739,7 @@ impl AppWindow {
     }
     /// Shows a space's room (None: Home) with the camera it had there; a first visit fits what is inside.
     pub(super) fn go_room(&mut self, room: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        if room == self.canvas_state.doc.room { return; }
         let first = !self.canvas_state.doc.cameras.contains_key(&room.clone().unwrap_or_default());
         self.end_canvas_drag(cx);
         self.canvas_state.motion = Motion::default();
@@ -1571,12 +1582,16 @@ impl AppWindow {
                 break;
             }
         }
-        let members = self.canvas_members();
+        // The core says where a cell lives (None: Home); one it does not know yet keeps its last space.
+        let members: Vec<_> = self.canvas_state.doc.cards.iter().map(|c| {
+            cell_space(&self.model, &self.live, c.parent.as_deref().unwrap_or(&c.terminal)).map(|s| (!root_space(s)).then(|| s.id.clone()))
+        }).collect();
         let state = &mut self.canvas_state;
         for (card, member) in state.doc.cards.iter_mut().zip(members) {
-            // The core says where a cell lives; one it no longer knows keeps its last space.
-            if member.is_some() && card.space != member { card.space = member; changed = true; }
+            if let Some(member) = member && card.space != member { card.space = member; changed = true; }
         }
+        let spaces = &state.doc.spaces;
+        state.doc.cameras.retain(|id, _| id.is_empty() || spaces.iter().any(|s| &s.space == id));
         if changed {
             state.doc.sync_subs(&state.subs);
             if self.canvas_state.rest.is_none() {
@@ -2131,8 +2146,8 @@ impl AppWindow {
                     // The whole selection moves together when the dragged cell is part of it.
                     let zoom = this.canvas_state.doc.camera.zoom;
                     let state = &mut this.canvas_state;
-                    let group = if state.selected.contains(&id) { state.selected.clone() } else { vec![id.clone()] };
-                    for key in &group {
+                    state.group = if state.selected.contains(&id) { state.selected.clone() } else { vec![id.clone()] };
+                    for key in &state.group {
                         if let Some(r) = state.doc.cards.iter_mut().find(|c| &c.key() == key).map(|c| &mut c.rect)
                             .or_else(|| state.doc.previews.iter_mut().find(|p| &p.path == key).map(|p| &mut p.rect)) {
                             r[0] += d[0] / zoom;
