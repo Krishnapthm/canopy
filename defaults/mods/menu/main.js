@@ -30,6 +30,7 @@ function items(p, git, agents) {
   // `machine` only picks which agents to list; canvas.create does not take it.
   const { machine: _, ...at } = tg;
   switch (p.tab) {
+    case "primary": return tg.items ?? [];
     case "canvas-editors": return [["Open here", "panel.editor", { choice: "here", path: tg.path }, { icon: "mods/workspace-chrome/square-pen.svg", tint: true }],
       ...(tg.editors ?? []).map(e => [`Open in ${e.name}`, "panel.editor", { choice: e.key, path: tg.path }, e])];
     case "canvas-empty": return [
@@ -46,12 +47,13 @@ function items(p, git, agents) {
       ["Delete space", "space.close", { id: tg.id }],
     ];
     case "canvas-colors": return ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"].map(color => [color, "canvas.space_style", { id: tg.id, color }]);
-    case "canvas-sub": return [["Message", "canvas.sub_message", { terminal: tg.terminal, id: tg.id }]];
+    case "canvas-sub": return [["Message through parent", "canvas.sub_message", { terminal: tg.terminal, id: tg.id }]];
     case "canvas-card": return [
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],
       ...(!tg.popped ? [["Open in panel", "panel.open", { terminal: tg.terminal }]] : []),
-      ["Close terminal", "canvas-close", { terminal: tg.terminal }],
+      ...(tg.finished ? [["Clear finished", "canvas.clear_finished", { terminal: tg.terminal }]] : []),
+      ["Close terminal", "canvas.close", { terminal: tg.terminal }],
     ];
     case "pane": {
       // A kept sub-agent can go back under its parent, still running.
@@ -155,7 +157,6 @@ export default class Menu extends View {
     if (!it?.[1]) return;
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
-    else if (it[1] === "canvas-close") openOverlay({ mod: "confirm", kind: "dialog", width: 380, props: { title: "Close terminal?", detail: "This ends the terminal and its running programs.", command: { name: "terminal.kill", args: it[2] } } });
     else if (it[1] === "canvas-colors") openOverlay({ mod: "menu", kind: "popup", width: 220, props: { tab: "canvas-colors", target: it[2] } });
     else run(it[1], it[2]);
   }

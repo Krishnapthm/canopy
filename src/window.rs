@@ -2040,7 +2040,13 @@ impl AppWindow {
         // Place newly labeled terminals first: one that is blocked on its first
         // listing is ours, and must ring.
         let mut changed = self.reconcile(window, cx);
+        if listed { self.refresh_sub_hooks(); }
         self.sync_canvas(window,cx);
+        if listed {
+            if self.canvas_state.doc.sync_subs(&self.canvas_state.subs) { self.canvas_changed(cx); }
+            self.watch_subs(cx);
+            cx.notify();
+        }
         if let Some(error)=self.canvas_state.error.take() { self.layout_notice("Canvas", &error, window, cx); }
         let visible: HashSet<String> = self.visible_addresses().into_iter().collect();
         let mut alerts = Vec::new();
@@ -2066,7 +2072,6 @@ impl AppWindow {
                 self.alert(&addr, alert, looking, window, cx);
             }
         }
-        self.refresh_sub_hooks();
         self.track_folders(cx);
         for (address, view) in self.terminal_views(cx) {
             if self.live.get(&address).is_some_and(|r| r["pid"].as_u64().is_some()) {
@@ -2891,6 +2896,19 @@ impl AppWindow {
         match name {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
             "canvas.sub_message" => self.message_sub(a, window, cx),
+            "canvas.clear_finished" => self.clear_subs(a, window, cx),
+            "canvas.close" => self.close_canvas_cell(a, window, cx),
+            "app.menu" => {
+                let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
+                let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
+                    groups.into_iter().find(|(name, _)| *name == group).map(|(_, rows)| rows.into_iter().map(|mut row| {
+                        if row[3] == true { row[0] = json!(format!("✓ {}", row[0].as_str().unwrap())); }
+                        row.as_array_mut().unwrap().truncate(3);
+                        row
+                    }).collect()).unwrap_or_default()
+                } else { groups.into_iter().map(|(name, _)| json!([format!("{name} >"), "app.menu", {"group":name}])).collect() };
+                self.open_menu("primary", json!({"items":rows}), None, window, cx);
+            }
             "quote.menu" | "quote.send" => self.quote_command(name, a, window, cx),
             "panel.open" => {
                 let Some(addr)=Self::arg(a,"terminal").filter(|a|self.live.contains_key(*a)) else {return self.fail("no running terminal")};
@@ -4813,6 +4831,8 @@ impl Render for AppWindow {
         }
         self.tick_floats(window);
         self.apply_titlebar(window);
+        #[cfg(target_os = "macos")]
+        crate::macos::set_view(&self.canvas_state.doc.view, cx);
         if mods::publish_window(self.window_json(window)) {
             self.refresh_snapshot_mods(cx);
         }
@@ -4851,6 +4871,10 @@ impl Render for AppWindow {
             .text_color(c("foreground"))
             .font_family(settings::get().ui_font_family.clone())
             .on_action(cx.listener(|this, a: &ShellAction, w, cx| {
+                if a.id() == "canvas.close" && !this.focus.is_focused(w) {
+                    cx.propagate();
+                    return;
+                }
                 // Nothing selected: the copy chord goes to the program (#216).
                 if a.id() == "terminal.copy" {
                     if !this.copy_key(w, cx) {
@@ -4863,6 +4887,10 @@ impl Render for AppWindow {
             .on_action(cx.listener(|this, a: &crate::keys::CommandBinding, w, cx| {
                 match a.command() {
                     Ok((name, args)) => {
+                        if name == "canvas.close" && args.get("terminal").is_none() && !this.focus.is_focused(w) {
+                            cx.propagate();
+                            return;
+                        }
                         #[cfg(target_os = "macos")]
                         if let Some(action) = crate::macos::action(&name) {
                             w.dispatch_action(action, cx);

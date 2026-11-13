@@ -379,6 +379,9 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Person {
+    /// Ask before closing a plain terminal from its canvas cell.
+    #[serde(skip_serializing_if = "is_true")]
+    pub confirm_close_terminal: bool,
     pub canvas_color: Option<String>,
     /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
     pub zoom: f32,
@@ -459,6 +462,7 @@ fn is_true(b: &bool) -> bool {
 impl Default for Person {
     fn default() -> Self {
         Person {
+            confirm_close_terminal: true,
             canvas_color: None,
             zoom: 1.0,
             sounds: Sounds::default(),
@@ -696,6 +700,19 @@ pub fn load_person() -> Result<Person, String> {
         return Err(format!("zoom {} is outside {ZOOM_MIN}..{ZOOM_MAX}", person.zoom));
     }
     Ok(person)
+}
+
+/// Disables terminal-close prompts while preserving other hand-edited settings.
+pub fn skip_terminal_confirmation(path: &std::path::Path) -> Result<(), String> {
+    // A fresh install has no settings.json yet.
+    let text = match std::fs::read_to_string(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => "{}".into(),
+        r => r.map_err(|e| e.to_string())?,
+    };
+    let mut value: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let object = value.as_object_mut().ok_or("settings.json must contain an object")?;
+    object.insert("confirm_close_terminal".into(), serde_json::json!(false));
+    crate::persist::write_atomic(path, serde_json::to_string_pretty(&value).unwrap() + "\n").map_err(|e| e.to_string())
 }
 
 pub fn write_person(person: &Person) -> std::io::Result<()> {
@@ -971,11 +988,34 @@ mod tests {
     /// settings.json key.
     #[test]
     fn the_guide_explains_every_setting() {
-        let all = Person { core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), ui_font: Some(String::new()), clipboard_write: false, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
+        let all = Person { confirm_close_terminal: false, core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), ui_font: Some(String::new()), clipboard_write: false, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
         let keys: Vec<String> = serde_json::to_value(&all).unwrap().as_object().unwrap().keys().cloned().collect();
         let guide = include_str!("../defaults/AGENTS.md");
         let section = guide.split("## The person").nth(1).and_then(|s| s.split("\n## ").next()).unwrap_or_default();
         let missing: Vec<&String> = keys.iter().filter(|k| !section.contains(&format!("`{k}`"))).collect();
         assert!(missing.is_empty(), "defaults/AGENTS.md (## The person) doesn't explain: {missing:?}");
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::*;
+    #[test]
+    fn disabling_close_prompts_preserves_unknown_settings_and_rejects_bad_files() {
+        let path = std::env::temp_dir().join(format!("canopy-close-settings-{}.json", std::process::id()));
+        std::fs::write(&path, r#"{"future_setting":42,"confirm_close_terminal":true}"#).unwrap();
+        skip_terminal_confirmation(&path).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value["future_setting"], 42);
+        assert_eq!(value["confirm_close_terminal"], false);
+        for invalid in ["[1,2]", "broken"] {
+            std::fs::write(&path, invalid).unwrap();
+            assert!(skip_terminal_confirmation(&path).is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), invalid);
+        }
+        std::fs::remove_file(&path).unwrap();
+        skip_terminal_confirmation(&path).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\n  \"confirm_close_terminal\": false\n}\n");
+        std::fs::remove_file(path).unwrap();
     }
 }

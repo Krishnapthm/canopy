@@ -1,13 +1,14 @@
 // Asks before something destructive, e.g. "Close space?". Opened as a
-// dialog with props { title, detail, command?: { name, args } }.
+// Props: title, detail, command?, accept?; dontAsk offers the terminal-close opt-out.
 // Enter confirms (runs the command), Esc cancels.
 
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
+import { v_flex, h_flex, Checkbox } from "gpui-base";
 import { run, props, closeOverlay, theme } from "herdr";
 
 export default class Confirm extends View {
   init(_props, cx) {
+    this.dontAsk = false;
     this.handle = cx.focus_handle();
     this.handle.focus();
   }
@@ -15,7 +16,7 @@ export default class Confirm extends View {
   yes() {
     const p = props();
     closeOverlay(p.overlay);
-    if (p.command) run(p.command.name, p.command.args ?? {});
+    if (p.command) run(p.command.name, { ...(p.command.args ?? {}), ...(p.dontAsk && this.dontAsk ? { dont_ask: true } : {}) });
   }
 
   render(cx) {
@@ -41,13 +42,16 @@ export default class Confirm extends View {
       .text_size(13)
       .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child(p.title ?? "Are you sure?")).child(div().text_size(11).text_color(t.dim).child("Esc")))
       .child(div().flex_1().min_h(0).overflow_y_scrollbar().text_color(t.muted).child(p.detail ?? ""))
+      .when(p.dontAsk, el => el.child(Checkbox.new("dont-ask").checked(this.dontAsk).accessibility_label("Don't ask again").flex().gap(8).items_center().cursor_pointer()
+        .on_change((checked, cx) => { this.dontAsk = checked; cx.notify(); })
+        .child(div().child(this.dontAsk ? "☑" : "☐")).child("Don't ask again")))
       .child(
         h_flex()
           .justify_end()
           .gap(8)
           .text_size(12)
           .child(button("no", p.command ? "Cancel" : "Close", t.raised, t.foreground, () => closeOverlay(props().overlay)))
-          .children(p.command ? [button("yes", "Confirm", t.solid, t.solid_foreground, () => this.yes())] : []),
+          .children(p.command ? [button("yes", p.accept ?? "Confirm", t.solid, t.solid_foreground, () => this.yes())] : []),
       );
   }
 }

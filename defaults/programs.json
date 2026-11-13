@@ -7,7 +7,7 @@
     "zed": {"name": "Zed", "icon": "icons/external-link.svg", "tint": true, "open": ["zed"], "app": "Zed"},
     "cursor-editor": {"name": "Cursor", "icon": "icons/external-link.svg", "tint": true, "open": ["cursor"], "app": "Cursor"},
     "vscode": {"name": "VS Code", "icon": "icons/external-link.svg", "tint": true, "open": ["code"], "app": "Visual Studio Code"},
-    "claude": {"name":"Claude Code","icon":"icons/claude.svg","run":["claude"],"flags":["--settings","{\"hooks\":{\"SubagentStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{canopy} hook sub-start\"}]}],\"SubagentStop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{canopy} hook sub-stop\"}]}]}}","--append-system-prompt","{note}"],"match":["claude-code"],"tint":false,"tile":"#1c1d21","color":"#ffffff"},
+    "claude": {"name":"Claude Code","icon":"icons/claude.svg","run":["claude"],"flags":["--settings","{\"hooks\":{\"SubagentStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{canopy} hook sub-start\"}]}],\"SubagentStop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{canopy} hook sub-stop\"}]}],\"SessionEnd\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"{canopy} hook session-end\"}]}]}}","--append-system-prompt","{note}"],"match":["claude-code"],"tint":false,"tile":"#1c1d21","color":"#ffffff"},
     "codex": {"name":"Codex","icon":"icons/codex.svg","run":["codex","--no-daemon"],"flags":["-c","developer_instructions={note_json}"],"tint":false,"tile":"#1c1d21","color":"#ffffff"},
     "pi": {"name":"Pi","icon":"icons/pi.svg","run":["pi"],"tint":true,"tile":"#1c1d21","color":"#ffffff"},
     "pig": {"name":"PiG","icon":"icons/pig.svg","run":["pig"],"tint":false,"tile":"#1c1d21","color":"#ffffff"},

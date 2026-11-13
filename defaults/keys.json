@@ -79,6 +79,8 @@
     "ctrl-shift-f": "canvas.fit",
     "ctrl-shift-1": "view.agents",
     "ctrl-shift-2": "view.all",
-    "ctrl-shift-3": "view.terminals"
+    "ctrl-shift-3": "view.terminals",
+    "backspace": "canvas.close",
+    "delete": "canvas.close"
   }
 }

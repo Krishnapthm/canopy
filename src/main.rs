@@ -3,6 +3,7 @@
 #![cfg_attr(all(windows, not(test)), windows_subsystem = "windows")]
 
 mod bench;
+mod app_menu;
 mod commands;
 mod control;
 mod core_bin;
@@ -50,7 +51,7 @@ Usage:
   canopy commands               every command, its arguments, what it does
   canopy status                 what the window shows, and any errors
   canopy shot [file.png]        save the last window frame (default: herdr-shot.png)
-  canopy hook sub-start|sub-stop  report a session hook (JSON on stdin, best effort)
+  canopy hook sub-start|sub-stop|session-end  report a session hook (JSON on stdin, best effort)
   canopy check <mod folder>     load a mod once and report what's wrong
   canopy --skill                Agent Skill: driving the window, and where hc fits
   canopy --version
