@@ -1,5 +1,12 @@
 # Sub-agents
 
+There are two kinds. Real helpers are agents another agent started with
+`canopy spawn <program> --name <n> [--model <m>] [-- <task>]` when you asked it
+for sub-agents, helpers or peers: each is a full terminal in its parent's folder
+and space, wired to the parent, that you can open and type into. The parent talks
+to it with `canopy wire`, and gets `"<name>" is idle: <last answer>` when the
+child's turn ends (see wire.md). The rest of this page is about the other kind.
+
 In-process helpers appear as named cells beside their parent, joined by an
 edge. They show working, then done; done cells dim. They are observations,
 not independent terminals.
