@@ -2903,7 +2903,7 @@ impl AppWindow {
             "app.menu" => {
                 let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
                 let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
-                    groups.into_iter().find(|(name, _)| *name == group).map(|(_, rows)| rows.into_iter().map(|mut row| {
+                    groups.into_iter().find(|(name, _)| *name == group).map(|(_, rows)| rows.into_iter().filter(|row| !row.is_null()).map(|mut row| {
                         if row[3] == true { row[0] = json!(format!("✓ {}", row[0].as_str().unwrap())); }
                         row.as_array_mut().unwrap().truncate(3);
                         row

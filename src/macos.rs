@@ -43,6 +43,7 @@ pub fn set_menus(cx: &mut App) {
     ];
     menus.extend(crate::app_menu::groups(&view).into_iter().map(|(name, rows)| {
         let mut items: Vec<_> = rows.into_iter().map(|row| {
+            if row.is_null() { return MenuItem::separator(); }
             let label = row[0].as_str().unwrap().to_owned();
             let command = row[1].as_str().unwrap();
             let item = if row[2].as_object().is_some_and(|args| !args.is_empty()) {
@@ -59,7 +60,7 @@ pub fn set_menus(cx: &mut App) {
             };
             item.checked(row[3] == true)
         }).collect();
-        if name == "View" { items.push(MenuItem::action("Toggle Full Screen", ToggleFullScreen)); }
+        if name == "View" { items.extend([MenuItem::separator(), MenuItem::action("Toggle Full Screen", ToggleFullScreen)]); }
         Menu::new(name).items(items)
     }));
     // Keep Help last; macOS also lists open windows in the Window menu.
