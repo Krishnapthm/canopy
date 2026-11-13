@@ -27,6 +27,7 @@ test("every canvas menu item passes only declared args, with the required ones",
     { tab: "canvas-editors", target: { path: "/tmp/file.rs", editors: [{ key: "vscode", name: "VS Code", icon: "icons/program.svg" }] } },
     { tab: "canvas-space", target: { id: "s1" } },
     { tab: "canvas-colors", target: { id: "s1" } },
+    { tab: "canvas-arrange", target: { space: "s1" } },
     { tab: "canvas-sub", target: { terminal: "t1", id: "abc" } },
     { tab: "canvas-card", target: card },
     { tab: "canvas-card", target: { ...card, popped: true } },
@@ -65,4 +66,10 @@ test("hook children only offer Message", () => {
   expect(items({ tab: "canvas-sub", target: { terminal: "t1", id: "abc" } })).toEqual([
     ["Message", "canvas.sub_message", { terminal: "t1", id: "abc" }],
   ]);
+});
+
+test("arrange picker lists the four layouts and preserves its space target", () => {
+  expect(items({ tab: "canvas-arrange", target: { space: "s1" } }).map(([,command,args])=>[command,args])).toEqual(
+    ["tidy","row","column","wires"].map(layout=>["canvas.arrange",{space:"s1",layout}])
+  );
 });

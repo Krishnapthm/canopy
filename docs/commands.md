@@ -35,6 +35,22 @@ Reset canvas zoom.
 
 No arguments.
 
+## `canvas.arrange`
+
+Arrange selected cells or the current space: tidy, row, column or wires. Omit layout to repeat the last; picker opens the layout menu.
+
+| Argument | Required |
+|---|---|
+| `layout` | no |
+| `picker` | no |
+| `space` | no |
+
+## `canvas.undo`
+
+Restore geometry before the last canvas move, resize or arrange.
+
+No arguments.
+
 ## `canvas.fit`
 
 Fit all spaces and cards.
@@ -52,6 +68,15 @@ Open the quote popover listing running agents, at point or the pointer.
 | `end` | no |
 | `text` | yes |
 | `point` | no |
+
+## `canvas.sub_message`
+
+Paste a message addressed to a sub-agent into its parent without Enter.
+
+| Argument | Required |
+|---|---|
+| `terminal` | yes |
+| `id` | yes |
 
 ## `quote.send`
 
@@ -107,6 +132,16 @@ Set a space color or toggle its frame.
 |---|---|
 | `id` | yes |
 | `color` | no |
+
+## `panel.editor`
+
+Choose a file panel editor, or return to the read-only view after saving.
+
+| Argument | Required |
+|---|---|
+| `choice` | no |
+| `done` | no |
+| `path` | no |
 
 ## `preview.open`
 

@@ -2890,6 +2890,8 @@ impl AppWindow {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
+            "canvas.arrange" => self.arrange_canvas(a, window, cx),
+            "canvas.undo" => self.undo_canvas(window, cx),
             "canvas.sub_message" => self.message_sub(a, window, cx),
             "quote.menu" | "quote.send" => self.quote_command(name, a, window, cx),
             "panel.open" => {
@@ -3894,7 +3896,7 @@ impl AppWindow {
                 self.looked.clear();
                 // A key-up lost to another app would leave Space pan stuck on.
                 self.canvas_state.space_down = false;
-                self.canvas_state.end_drag();
+                if self.canvas_state.end_drag() { self.canvas_changed(cx); }
             }
             // Tell mods now: render publishes window() too, but a mod it refreshes
             // waits for another frame, which an idle window that just lost focus
@@ -4829,6 +4831,14 @@ impl Render for AppWindow {
             // A focused terminal (side panel) still gets its own space.
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
                 let k = &e.keystroke;
+                let undo = if cfg!(target_os = "macos") { k.modifiers.platform && !k.modifiers.shift && !k.modifiers.control && !k.modifiers.alt }
+                    else { k.modifiers.control && k.modifiers.shift && !k.modifiers.alt && !k.modifiers.platform };
+                let undo_key = if cfg!(target_os = "macos") { "z" } else { "u" };
+                if k.key == undo_key && undo && this.has_canvas() && this.focus.is_focused(window) {
+                    this.undo_canvas(window,cx);
+                    cx.stop_propagation();
+                    return;
+                }
                 if k.key == "space" && !k.modifiers.modified() && !this.canvas_state.space_down
                     && this.has_canvas() && this.focus.is_focused(window)
                 {

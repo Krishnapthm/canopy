@@ -35,19 +35,28 @@ function items(p, git, agents) {
     case "canvas-empty": return [
       ["New terminal", "canvas.create", at],
       ["Open file...", "preview.open", { point: tg.point }],
+      ["Arrange", "canvas.arrange", {}],
+      ["Arrange >", "canvas.arrange", { picker: true }],
+      ["Undo layout", "canvas.undo", {}],
       ...(!tg.space ? [["New space here", "canvas.create", { ...at, kind: "space" }]] : []),
       ["Agents", null, { label: true }],
       ...agentItems(agents, at),
     ];
     case "canvas-space": return [
+      ["Arrange", "canvas.arrange", { space: tg.id }],
+      ["Arrange >", "canvas.arrange", { space: tg.id, picker: true }],
+      ["Undo layout", "canvas.undo", {}],
       ["Rename", "space.rename", { id: tg.id }],
       ["Color >", "canvas-colors", tg],
       ["Show frame", "canvas.space_style", { id: tg.id }],
       ["Delete space", "space.close", { id: tg.id }],
     ];
+    case "canvas-arrange": return [["Tidy", "tidy"], ["Row", "row"], ["Column", "column"], ["By wires", "wires"]].map(([name, layout]) => [name, "canvas.arrange", { ...tg, layout }]);
     case "canvas-colors": return ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"].map(color => [color, "canvas.space_style", { id: tg.id, color }]);
     case "canvas-sub": return [["Message", "canvas.sub_message", { terminal: tg.terminal, id: tg.id }]];
     case "canvas-card": return [
+      ["Arrange", "canvas.arrange", {}],
+      ["Arrange >", "canvas.arrange", { picker: true }],
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],
       ...(!tg.popped ? [["Open in panel", "panel.open", { terminal: tg.terminal }]] : []),

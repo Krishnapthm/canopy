@@ -5,6 +5,12 @@ use gpui::AnimationExt as _;
 
 pub(super) struct State {
     pub doc: Document,
+    rest: Option<canvas::Rest>,
+    undo: Option<canvas::Rest>,
+    shown: Option<Document>,
+    layout_motion: Option<(Document, std::time::Instant)>,
+    layout_frame: bool,
+    selected: Vec<String>,
     pub subs: HashMap<String, Vec<crate::subs::Sub>>,
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
     preview_drag: Option<(String, bool, Point<Pixels>)>,
@@ -62,6 +68,12 @@ impl State {
         };
         Self {
             doc,
+            rest: None,
+            undo: None,
+            shown: None,
+            layout_motion: None,
+            layout_frame: false,
+            selected: vec![],
             subs: HashMap::new(),
             previews: HashMap::new(),
             preview_drag: None,
@@ -91,12 +103,18 @@ impl State {
             closed: None,
         }
     }
-    /// Ends any pan, card, space or panel-resize drag.
-    pub(super) fn end_drag(&mut self) {
+    /// End any drag, returning whether geometry was committed.
+    pub(super) fn end_drag(&mut self) -> bool {
+        let mut changed = false;
+        if let Some(rest) = self.rest.take() {
+            if rest != canvas::Rest::capture(&self.doc) { self.undo = Some(rest); self.save.dirty = true; changed = true; }
+            if self.layout_motion.is_none() { self.shown = None; }
+        }
         self.preview_drag = None;
         self.drag = None;
         self.space_drag = None;
         self.resizing = false;
+        changed
     }
     pub fn flush(&mut self) {
         self.save_task = None;
@@ -130,6 +148,371 @@ impl Render for PopOut {
     }
 }
 impl AppWindow {
+    fn begin_layout(&mut self) {
+        self.canvas_state.motion.target = None;
+        self.canvas_state.motion.velocity = [0.; 2];
+        if self.canvas_state.rest.is_none() {
+            self.canvas_state.rest = Some(canvas::Rest::capture(&self.canvas_state.doc));
+        }
+    }
+
+    fn canvas_members(&self) -> Vec<Option<String>> {
+        self.canvas_state.doc.cards.iter().map(|c| {
+            cell_space(&self.model,&self.live,&c.terminal).filter(|s|!root_space(s)).map(|s|s.id.clone())
+        }).collect()
+    }
+
+    fn solve_layout(&mut self, pin: Option<&str>, space_pin: Option<&str>, cx: &App) {
+        let mut members = self.canvas_members();
+        let sizes: Vec<_> = self
+            .canvas_state
+            .doc
+            .cards
+            .iter()
+            .map(|c| self.pill_rect(c, cx))
+            .collect();
+        let state = &mut self.canvas_state;
+        let old_spaces = state.doc.spaces.clone();
+        let count = state.doc.cards.len();
+        let pinned = pin.and_then(|id| {
+            state
+                .doc
+                .cards
+                .iter()
+                .position(|c| c.terminal == id)
+                .or_else(|| {
+                    state
+                        .doc
+                        .previews
+                        .iter()
+                        .position(|p| p.path == id)
+                        .map(|i| count + i)
+                })
+        });
+        let current: Vec<_> = state
+            .doc
+            .cards
+            .iter()
+            .map(|c| c.rect)
+            .chain(state.doc.previews.iter().map(|p| p.rect))
+            .collect();
+        if let Some(rest) = &state.rest {
+            rest.restore(&mut state.doc);
+        }
+        for p in &state.doc.previews {
+            let center = [p.rect[0] + p.rect[2] / 2., p.rect[1] + p.rect[3] / 2.];
+            members.push(canvas::space_at(&state.doc.spaces, center).map(|s| s.space.clone()));
+        }
+        let doc = &mut state.doc;
+        let mut cells: Vec<_> = doc
+            .cards
+            .iter()
+            .zip(&sizes)
+            .map(|(c, r)| [c.rect[0], c.rect[1], r[2], r[3]])
+            .chain(doc.previews.iter().map(|p| p.rect))
+            .collect();
+        if let Some(i) = pinned {
+            cells[i] = current[i];
+            if i < count {
+                cells[i][2] = sizes[i][2];
+                cells[i][3] = sizes[i][3];
+            }
+        }
+        if let Some(id) = space_pin
+            && let (Some(old), Some(space)) = (
+                doc.spaces.iter_mut().find(|s| s.space == id),
+                old_spaces.iter().find(|s| s.space == id),
+            ) {
+                let d = [space.rect[0] - old.rect[0], space.rect[1] - old.rect[1]];
+                old.rect = space.rect;
+                for (r, m) in cells.iter_mut().zip(&members) {
+                    if m.as_deref() == Some(id) {
+                        r[0] += d[0];
+                        r[1] += d[1];
+                    }
+                }
+        }
+        if let Some(i) = pinned {
+            let indices: Vec<_> = (0..cells.len())
+                .filter(|j| members[*j] == members[i])
+                .collect();
+            let rects: Vec<_> = indices.iter().map(|j| cells[*j]).collect();
+            let solved = canvas::solve(
+                &rects,
+                indices.iter().position(|j| *j == i).unwrap(),
+                cells[i],
+                canvas::GAP,
+            );
+            for (j, r) in indices.into_iter().zip(solved) {
+                cells[j] = r;
+            }
+        }
+        for space in &mut doc.spaces {
+            let rects: Vec<_> = cells
+                .iter()
+                .zip(&members)
+                .filter(|(_, m)| m.as_deref() == Some(&space.space))
+                .map(|(r, _)| *r)
+                .collect();
+            space.rect = canvas::grow(space.rect, &rects);
+            if pinned.is_some_and(|i| members[i].as_deref() == Some(&space.space))
+                && let Some(old) = old_spaces.iter().find(|s| s.space == space.space) {
+                space.rect = canvas::union(&[space.rect, old.rect]).unwrap();
+            }
+        }
+        let active = space_pin.or_else(|| pinned.and_then(|i| members[i].as_deref()));
+        // Root cells occupy the same level as spaces, so neither can cover the other.
+        let roots: Vec<_> = (0..cells.len()).filter(|i|members[*i].is_none()).collect();
+        let rects: Vec<_> = doc.spaces.iter().map(|s|s.rect).chain(roots.iter().map(|i|cells[*i])).collect();
+        let top_pin = doc.spaces.iter().position(|s|Some(s.space.as_str())==active)
+            .or_else(||pinned.and_then(|i|roots.iter().position(|j|*j==i)).map(|i|doc.spaces.len()+i));
+        if let Some(i) = top_pin {
+            let solved = canvas::solve(&rects,i,rects[i],canvas::GAP);
+            for ((space,r),old) in doc.spaces.iter_mut().zip(&solved).zip(&rects) {
+                for (cell,m) in cells.iter_mut().zip(&members) {
+                    if m.as_deref()==Some(&space.space) { cell[0]+=r[0]-old[0]; cell[1]+=r[1]-old[1]; }
+                }
+                space.rect = *r;
+            }
+            for (i,r) in roots.iter().zip(&solved[doc.spaces.len()..]) { cells[*i] = *r; }
+        }
+        for (r, to) in doc
+            .cards
+            .iter_mut()
+            .map(|c| &mut c.rect)
+            .chain(doc.previews.iter_mut().map(|p| &mut p.rect))
+            .zip(cells)
+        {
+            *r = to;
+        }
+    }
+
+    fn animate_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = &mut self.canvas_state;
+        let from = state.shown.clone().unwrap_or_else(|| state.doc.clone());
+        if canvas::Rest::capture(&from) == canvas::Rest::capture(&state.doc) {
+            state.shown = None;
+            state.layout_motion = None;
+            self.canvas_changed(cx);
+            cx.notify();
+            return;
+        }
+        state.layout_motion = Some((from, std::time::Instant::now()));
+        self.layout_frame(window, cx);
+    }
+
+    fn layout_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.canvas_state.layout_frame {
+            return;
+        }
+        self.canvas_state.layout_frame = true;
+        let entity = cx.entity().downgrade();
+        window.on_next_frame(move |window, cx| {
+            let _ = entity.update(cx, |this, cx| {
+                let members = this.canvas_members();
+                let state = &mut this.canvas_state;
+                state.layout_frame = false;
+                let Some((from, start)) = &state.layout_motion else {
+                    return;
+                };
+                let t = start.elapsed().as_secs_f32() / 0.12;
+                let a = canvas::ease_out(t);
+                let mut shown = state.doc.clone();
+                canvas::Rest::capture(from).restore(&mut shown);
+                for (r, to) in shown
+                    .cards
+                    .iter_mut()
+                    .map(|c| &mut c.rect)
+                    .zip(state.doc.cards.iter().map(|c| c.rect))
+                    .chain(
+                        shown
+                            .spaces
+                            .iter_mut()
+                            .map(|s| &mut s.rect)
+                            .zip(state.doc.spaces.iter().map(|s| s.rect)),
+                    )
+                    .chain(
+                        shown
+                            .previews
+                            .iter_mut()
+                            .map(|p| &mut p.rect)
+                            .zip(state.doc.previews.iter().map(|p| p.rect)),
+                    )
+                {
+                    for k in 0..4 {
+                        r[k] += (to[k] - r[k]) * a;
+                    }
+                }
+                if let Some((Some(id), _)) = &state.drag
+                    && let (Some(c), Some(target)) = (
+                        shown.cards.iter_mut().find(|c| &c.terminal == id),
+                        state.doc.cards.iter().find(|c| &c.terminal == id),
+                    ) {
+                    c.rect = target.rect;
+                }
+                if let Some((id, _, _)) = &state.preview_drag
+                    && let (Some(p), Some(target)) = (
+                        shown.previews.iter_mut().find(|p| &p.path == id),
+                        state.doc.previews.iter().find(|p| &p.path == id),
+                    ) {
+                    p.rect = target.rect;
+                }
+                if let Some((id, _, _)) = &state.space_drag {
+                    for ((c, target), member) in
+                        shown.cards.iter_mut().zip(&state.doc.cards).zip(&members)
+                    {
+                        if member.as_deref() == Some(id) {
+                            c.rect = target.rect;
+                        }
+                    }
+                    for (preview, target) in shown.previews.iter_mut().zip(&state.doc.previews) {
+                        let center = [target.rect[0]+target.rect[2]/2., target.rect[1]+target.rect[3]/2.];
+                        if canvas::space_at(&state.doc.spaces,center).is_some_and(|s|&s.space==id) { preview.rect = target.rect; }
+                    }
+                    if let (Some(s), Some(target)) = (
+                        shown.spaces.iter_mut().find(|s| &s.space == id),
+                        state.doc.spaces.iter().find(|s| &s.space == id),
+                    ) {
+                        s.rect = target.rect;
+                    }
+                }
+                state.shown = Some(shown);
+                if t < 1. {
+                    this.layout_frame(window, cx);
+                } else {
+                    state.layout_motion = None;
+                    state.shown = None;
+                    if state.rest.is_none() {
+                        this.canvas_changed(cx);
+                    }
+                }
+                cx.notify();
+            });
+        });
+        cx.notify();
+    }
+
+    /// Arrange selected cells or the current space, remembering the layout choice.
+    pub(super) fn arrange_canvas(
+        &mut self,
+        args: &Value,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if args["picker"] == true {
+            self.open_menu(
+                "canvas-arrange",
+                json!({"space":args["space"]}),
+                None,
+                window,
+                cx,
+            );
+            return;
+        }
+        let layout = args["layout"]
+            .as_str()
+            .unwrap_or(if self.canvas_state.doc.arrange_layout.is_empty() {
+                "tidy"
+            } else {
+                &self.canvas_state.doc.arrange_layout
+            })
+            .to_owned();
+        if !["tidy", "row", "column", "wires"].contains(&layout.as_str()) {
+            self.command_error("Arrange", "Use tidy, row, column or wires", window, cx);
+            return;
+        }
+        self.canvas_state.end_drag();
+        let mut members = self.canvas_members();
+        let doc = &self.canvas_state.doc;
+        let count = doc.cards.len();
+        let ids: Vec<_> = doc
+            .cards
+            .iter()
+            .map(|c| c.terminal.clone())
+            .chain(doc.previews.iter().map(|p| p.path.clone()))
+            .collect();
+        let all: Vec<_> = doc
+            .cards
+            .iter()
+            .map(|c| self.pill_rect(c, cx))
+            .chain(doc.previews.iter().map(|p| p.rect))
+            .collect();
+        for p in &doc.previews {
+            members.push(
+                canvas::space_at(
+                    &doc.spaces,
+                    [p.rect[0] + p.rect[2] / 2., p.rect[1] + p.rect[3] / 2.],
+                )
+                .map(|s| s.space.clone()),
+            );
+        }
+        let space = args["space"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| doc.panel.space.clone().filter(|id|self.model.space(id).is_some()))
+            .or_else(|| self.model.active.clone())
+            .filter(|id| self.model.space(id).is_none_or(|s| !root_space(s)));
+        let indices: Vec<_> = (0..ids.len())
+            .filter(|i| {
+                if args["space"].as_str().is_none() && !self.canvas_state.selected.is_empty() {
+                    self.canvas_state.selected.contains(&ids[*i])
+                } else {
+                    members[*i] == space
+                }
+            })
+            .collect();
+        if indices.is_empty() {
+            return;
+        }
+        let rects: Vec<_> = indices.iter().map(|i| all[*i]).collect();
+        let parents: Vec<_> = indices
+            .iter()
+            .map(|i| {
+                self.live
+                    .get(&ids[*i])
+                    .and_then(|r| r["parent"].as_str())
+                    .and_then(|p| indices.iter().position(|j| ids[*j] == p))
+            })
+            .collect();
+        let arranged = canvas::arrange(&rects, &parents, &layout);
+        let before = self.canvas_state.doc.clone();
+        self.canvas_state.undo = Some(canvas::Rest::capture(&before));
+        for (i, r) in indices.iter().zip(arranged) {
+            if *i < count {
+                self.canvas_state.doc.cards[*i].rect = r;
+            } else {
+                self.canvas_state.doc.previews[*i - count].rect = r;
+            }
+        }
+        let doc = &mut self.canvas_state.doc;
+        for s in &mut doc.spaces {
+            let rects: Vec<_> = doc
+                .cards
+                .iter()
+                .map(|c| c.rect)
+                .chain(doc.previews.iter().map(|p| p.rect))
+                .zip(&members)
+                .filter(|(_, m)| m.as_deref() == Some(&s.space))
+                .map(|(r, _)| r)
+                .collect();
+            s.rect = canvas::grow(s.rect, &rects);
+        }
+        self.solve_layout(Some(&ids[indices[0]]), space.as_deref(), cx);
+        self.canvas_state.doc.arrange_layout = layout;
+        self.canvas_state.shown = Some(before);
+        self.animate_layout(window, cx);
+    }
+
+    /// Restore the one geometry snapshot without changing terminal state.
+    pub(super) fn undo_canvas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.canvas_state.end_drag();
+        if let Some(rest) = self.canvas_state.undo.take() {
+            let before = self.canvas_state.doc.clone();
+            rest.restore(&mut self.canvas_state.doc);
+            self.canvas_state.shown = Some(before);
+            self.animate_layout(window, cx);
+        }
+    }
     pub(super) fn refresh_sub_hooks(&mut self) {
         self.canvas_state.subs = self.live.iter().filter(|(_, record)| record["state"] == "live")
             .map(|(addr, record)| (addr.clone(), crate::subs::hooks(record))).collect();
@@ -326,11 +709,12 @@ impl AppWindow {
             card.rect[1] = point[1];
         } else {
             self.canvas_state.doc.previews.push(canvas::Preview {
-                path,
+                path: path.clone(),
                 rect: [point[0], point[1], 560., 420.],
             });
         }
         self.load_previews(cx);
+        self.solve_layout(Some(&path),None,cx);
         self.canvas_changed(cx);
         cx.notify();
     }
@@ -649,7 +1033,7 @@ impl AppWindow {
         self.canvas_state.save_task = None;
         self.canvas_state.save.pending = false;
         // Debounced: each change restarts the 500 ms timer. Camera animation saves once from its last frame.
-        if self.canvas_state.motion.target.is_some() || self.canvas_state.motion.frame { return; }
+        if self.canvas_state.rest.is_some() || self.canvas_state.layout_motion.is_some() || self.canvas_state.motion.target.is_some() || self.canvas_state.motion.frame { return; }
         if !self.canvas_state.writable || !self.canvas_state.save.changed() {
             return;
         }
@@ -759,12 +1143,13 @@ impl AppWindow {
                     .iter()
                     .find(|g| g.space == s.id)
             });
-        if let Some(space) = space {
+        if let Some(space) = space.filter(|_| self.canvas_state.rest.is_none()) {
             r = canvas::clamp(r, space.rect);
         }
         self.canvas_state
             .doc
             .place(terminal, [r[0], r[1]], [card.rect[2], card.rect[3]]);
+        if self.canvas_state.rest.is_none() { self.solve_layout(Some(terminal),None,cx); }
         self.canvas_changed(cx);
         Ok(())
     }
@@ -903,6 +1288,7 @@ impl AppWindow {
             self.live.contains_key(&c.terminal) || self.born.borrow().contains_key(&c.terminal)
         });
         changed |= before != state.doc.cards.len();
+        state.selected.retain(|id|state.doc.cards.iter().any(|c|&c.terminal==id) || state.doc.previews.iter().any(|p|&p.path==id));
         let mut addresses: Vec<_> = self.live.keys().cloned().collect();
         addresses.sort_by_key(|a| (self.live[a]["created_ms"].as_u64().unwrap_or(0), a.clone()));
         // Parents are placed first even when a snapshot arrives out of order.
@@ -969,6 +1355,13 @@ impl AppWindow {
             }
         }
         if changed {
+            if self.canvas_state.rest.is_none() {
+                let members = self.canvas_members();
+                let mut groups = std::collections::HashSet::new();
+                let pins: Vec<_> = self.canvas_state.doc.cards.iter().zip(members)
+                    .filter(|(_,space)|groups.insert(space.clone())).map(|(c,_)|c.terminal.clone()).collect();
+                for pin in pins { self.solve_layout(Some(&pin),None,cx); }
+            }
             self.canvas_changed(cx);
         }
     }
@@ -1210,6 +1603,9 @@ impl AppWindow {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(div().flex().items_center().gap(px(8.)).px(px(12.)).h(px(36. * camera.zoom)).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                        this.begin_layout();
+                        this.canvas_state.selected = vec![drag.clone()];
+                        this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                         this.canvas_state.preview_drag = Some((drag.clone(), false, e.position)); cx.stop_propagation();
                     }))
                     .child(svg().path("mods/files/file.svg").size(px(16.)).text_color(c("foreground")))
@@ -1220,6 +1616,7 @@ impl AppWindow {
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.canvas_state.doc.previews.retain(|p| p.path != close);
                             this.canvas_state.previews.remove(&close);
+                            this.canvas_state.selected.retain(|id|id!=&close);
                             this.canvas_changed(cx); cx.notify();
                         }))))
                 .child(div().flex_1().min_h_0().overflow_hidden().px(px(16.)).py(px(12.)).child(gpui_base::TextView::new(view).scrollable(true)
@@ -1233,11 +1630,14 @@ impl AppWindow {
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
                     .hover(|d| d.border_color(c("foreground")))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                        this.begin_layout();
+                        this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                         this.canvas_state.preview_drag = Some((resize.clone(), true, e.position)); cx.stop_propagation();
                     })))).into_any_element()
     }
     pub(super) fn render_canvas(&self, cx: &mut Context<Self>) -> AnyElement {
         let state = &self.canvas_state;
+        let shown_doc = state.shown.as_ref().unwrap_or(&state.doc);
         let camera = state.doc.camera;
         let bounds = self.bounds.borrow().get("canopy-canvas").copied();
         let viewport = bounds
@@ -1391,19 +1791,24 @@ impl AppWindow {
                 // A click without movement just focuses the canvas; moving pans.
                 cx.listener(|this, e: &MouseDownEvent, window, cx| {
                     this.focus.focus(window, cx);
+                    this.canvas_state.selected.clear();
                     this.canvas_state.drag = Some((None, e.position));
                     this.canvas_state.pan_moved = false;
                     cx.notify();
                 }),
             )
-            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
                 // The button came up outside the window: end any drag instead of panning on hover.
                 if e.pressed_button.is_none()
-                    && (this.canvas_state.drag.is_some() || this.canvas_state.space_drag.is_some())
+                    && (this.canvas_state.drag.is_some() || this.canvas_state.space_drag.is_some() || this.canvas_state.preview_drag.is_some())
                 {
                     this.canvas_state.end_drag();
+                    this.canvas_changed(cx);
                     cx.notify();
                     return;
+                }
+                if this.canvas_state.rest.is_some() && this.canvas_state.shown.is_none() {
+                    this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                 }
                 if let Some((path, resize, previous)) = this.canvas_state.preview_drag.clone() {
                     if e.pressed_button.is_none() {
@@ -1430,6 +1835,8 @@ impl AppWindow {
                             card.rect[1] += d[1];
                         }
                     }
+                    this.solve_layout(Some(&path),None,cx);
+                    this.animate_layout(window,cx);
                     this.canvas_state.preview_drag = Some((path, resize, e.position));
                     this.canvas_changed(cx);
                     cx.notify();
@@ -1472,6 +1879,8 @@ impl AppWindow {
                             canvas::move_space(space, &mut doc.cards, &members, delta);
                         }
                     }
+                    this.solve_layout(None,Some(&id),cx);
+                    this.animate_layout(window,cx);
                     this.canvas_state.space_drag = Some((id, resize, e.position));
                     this.canvas_changed(cx);
                     cx.notify();
@@ -1497,6 +1906,8 @@ impl AppWindow {
                         if let Err(error) = this.place_canvas_card(&id, point, cx) {
                             this.canvas_state.error = Some(error);
                         }
+                        this.solve_layout(Some(&id),None,cx);
+                        this.animate_layout(window,cx);
                     }
                 } else {
                     let now = std::time::Instant::now();
@@ -1531,7 +1942,7 @@ impl AppWindow {
                     cx.notify();
                 }),
             );
-        for space in &state.doc.spaces {
+        for space in &shown_doc.spaces {
             if self
                 .model
                 .spaces
@@ -1588,6 +1999,8 @@ impl AppWindow {
                                             this.rename_canvas_space(id.clone(), window, cx);
                                             cx.stop_propagation(); return;
                                         }
+                                        this.begin_layout();
+                                        this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                                         this.canvas_state.space_drag =
                                             Some((id.clone(), false, e.position));
                                         this.show_space_files(id.clone(), window, cx);
@@ -1628,6 +2041,8 @@ impl AppWindow {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                                        this.begin_layout();
+                                        this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                                         this.canvas_state.space_drag =
                                             Some((resize_id.clone(), true, e.position));
                                         cx.stop_propagation();
@@ -1640,15 +2055,14 @@ impl AppWindow {
                         }),
                 );
         }
-        for card in &state.doc.previews {
+        for card in &shown_doc.previews {
             if canvas::visible(camera, card.rect, viewport) {
                 if let Some((view, _)) = state.previews.get(&card.path) {
                     area = area.child(self.preview_card(card, view, camera, cx));
                 }
             }
         }
-        let cards: HashMap<_, _> = state
-            .doc
+        let cards: HashMap<_, _> = shown_doc
             .cards
             .iter()
             .filter(|card| {
@@ -1872,6 +2286,7 @@ impl AppWindow {
             pill = pill.on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    if !this.canvas_state.selected.contains(&menu_addr) { this.canvas_state.selected = vec![menu_addr.clone()]; }
                     this.open_menu(
                         "canvas-card",
                         json!({"terminal":menu_addr,"id":tab,"popped":this.canvas_state.popped.contains_key(&menu_addr)}),
@@ -1882,6 +2297,7 @@ impl AppWindow {
                     cx.stop_propagation();
                 }),
             );
+            if state.selected.contains(&addr) { pill = pill.border_color(c("foreground")); }
             area = area.child(pill.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
@@ -1890,6 +2306,11 @@ impl AppWindow {
                         cx.stop_propagation();
                         return;
                     }
+                    this.begin_layout();
+                    if e.modifiers.shift {
+                        if this.canvas_state.selected.contains(&drag_addr) { this.canvas_state.selected.retain(|id|id!=&drag_addr); }
+                        else { this.canvas_state.selected.push(drag_addr.clone()); }
+                    } else if !this.canvas_state.selected.contains(&drag_addr) { this.canvas_state.selected = vec![drag_addr.clone()]; }
                     this.canvas_state.drag = Some((Some(drag_addr.clone()), e.position));
                     cx.stop_propagation();
                     if e.click_count == 2 {
@@ -2412,6 +2833,16 @@ fn canvas_agent(rec: &Value) -> bool {
 }
 
 /// The home "Canvas" space holds root terminals; it has no frame on the canvas.
+// Unkept children have no pane of their own, but share their ancestor's space.
+fn cell_space<'a>(model: &'a model::Model, live: &HashMap<String,Value>, terminal: &str) -> Option<&'a model::Space> {
+    let mut address = terminal;
+    for _ in 0..=live.len() {
+        if let Some(space) = model.pane_of(address).and_then(|p|model.space_of(&p)) { return Some(space); }
+        address = live.get(address)?["parent"].as_str()?;
+    }
+    None
+}
+
 fn root_space(s: &model::Space) -> bool {
     s.name == "Canvas" && s.folder == home() && s.machine.is_none()
 }
@@ -2556,5 +2987,26 @@ mod pill_label_tests {
         assert_eq!(pill_label(None, &uv), "uv run main.py");
         let wrapped = json!({"foreground":{"argv":["/bin/zsh","-lic","\"$@\"; exec \"$0\" -li","/bin/zsh","claude"]},"program":{"key":"zsh","name":"zsh","shell":false}});
         assert_eq!(pill_label(None, &wrapped), "claude");
+    }
+}
+
+#[cfg(test)]
+mod spacing_membership_tests {
+    use super::{cell_space, model};
+    use std::collections::HashMap;
+    use serde_json::json;
+    #[test]
+    fn children_inherit_spaces_without_looping_on_bad_parent_edges() {
+        let mut model = model::Model::default();
+        model.spaces.push(model::Space { id:"s".into(),name:"work".into(),folder:"/tmp".into(),machine:None,
+            tabs:vec![model::Tab::new("tab","parent","pane","parent")],active:None,rest:Default::default() });
+        let live = HashMap::from([
+            ("child".into(),json!({"parent":"parent"})),
+            ("grandchild".into(),json!({"parent":"child"})),
+            ("cycle".into(),json!({"parent":"cycle"})),
+        ]);
+        assert_eq!(cell_space(&model,&live,"grandchild").unwrap().id,"s");
+        assert!(cell_space(&model,&live,"cycle").is_none());
+        assert!(cell_space(&model,&live,"missing").is_none());
     }
 }

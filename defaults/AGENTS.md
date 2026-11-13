@@ -1053,6 +1053,11 @@ Canvas keys: Cmd (Ctrl on Linux) +=, +-, +0, +Shift+F.
 
 Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor.
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
+`canvas.arrange {layout?: "tidy" | "row" | "column" | "wires", space?, picker?}`
+arranges selected cells or the current space; no layout repeats the last choice.
+`canvas.undo` restores geometry before the last move, resize or arrange.
+Spacing, growing spaces and canvas-only undo keys are described in `docs/canvas.md`.
+
 Empty-canvas left-drag and middle-mouse drag also pan; an empty click focuses the canvas.
 Focused terminals still receive Space. Right-click keeps the canvas menus.
 Canvas space labels drag the space and its cards; bottom-right handles resize with card padding.

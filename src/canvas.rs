@@ -108,6 +108,199 @@ pub fn intersects(a: Rect, b: Rect) -> bool {
 pub fn space_at(spaces: &[Space], p: Point) -> Option<&Space> {
     spaces.iter().rev().find(|s| p[0] >= s.rect[0] && p[1] >= s.rect[1] && p[0] <= s.rect[0] + s.rect[2] && p[1] <= s.rect[1] + s.rect[3])
 }
+/// The fixed spacing between cells and spaces, in world pixels.
+pub const GAP: f32 = 24.;
+
+/// Resolve from rest positions, fixing the pinned rect first and then its nearest neighbours.
+pub fn solve(rest: &[Rect], pinned: usize, rect: Rect, gap: f32) -> Vec<Rect> {
+    if pinned >= rest.len() {
+        return rest.to_vec();
+    }
+    let mut out = rest.to_vec();
+    out[pinned] = rect;
+    let mut order: Vec<_> = (0..rest.len()).filter(|i| *i != pinned).collect();
+    let distance = |r: Rect| {
+        (r[0] + r[2] / 2. - rect[0] - rect[2] / 2.).powi(2)
+            + (r[1] + r[3] / 2. - rect[1] - rect[3] / 2.).powi(2)
+    };
+    order.sort_by(|a, b| {
+        distance(rest[*a])
+            .total_cmp(&distance(rest[*b]))
+            .then(a.cmp(b))
+    });
+    let mut fixed = vec![pinned];
+    for i in order {
+        let r = rest[i];
+        let clear = |r: Rect| fixed.iter().all(|j| separated(r, out[*j], gap));
+        if !clear(r) {
+            let mut best = None;
+            let mut cost = f32::INFINITY;
+            for j in &fixed {
+                let b = out[*j];
+                for (axis, value) in [
+                    (0, b[0] - gap - r[2]),
+                    (0, b[0] + b[2] + gap),
+                    (1, b[1] - gap - r[3]),
+                    (1, b[1] + b[3] + gap),
+                ] {
+                    let d = (value - r[axis]).abs();
+                    if d < cost {
+                        let mut candidate = r;
+                        candidate[axis] = value;
+                        if clear(candidate) {
+                            best = Some(candidate);
+                            cost = d;
+                        }
+                    }
+                }
+            }
+            out[i] = best.expect("an outer obstacle boundary is always free");
+        }
+        fixed.push(i);
+    }
+    out
+}
+fn separated(a: Rect, b: Rect, gap: f32) -> bool {
+    a[0] + a[2] + gap <= b[0]
+        || b[0] + b[2] + gap <= a[0]
+        || a[1] + a[3] + gap <= b[1]
+        || b[1] + b[3] + gap <= a[1]
+}
+
+/// Grow a space to contain its cells with padding, preserving its previous extent.
+pub fn grow(space: Rect, cells: &[Rect]) -> Rect {
+    let Some(b) = union(cells) else { return space };
+    union(&[
+        space,
+        [b[0] - GAP, b[1] - GAP, b[2] + 2. * GAP, b[3] + 2. * GAP],
+    ])
+    .unwrap()
+}
+
+/// Arrange cells in reading order, or breadth-first parent layers, preserving their sizes.
+pub fn arrange(rects: &[Rect], parents: &[Option<usize>], layout: &str) -> Vec<Rect> {
+    let Some(bounds) = union(rects) else {
+        return vec![];
+    };
+    let mut order: Vec<_> = (0..rects.len()).collect();
+    order.sort_by(|a, b| {
+        rects[*a][1]
+            .total_cmp(&rects[*b][1])
+            .then(rects[*a][0].total_cmp(&rects[*b][0]))
+            .then(a.cmp(b))
+    });
+    let mut layers = vec![None; rects.len()];
+    let mut queue = std::collections::VecDeque::new();
+    if layout == "wires" {
+        for i in &order {
+            if parents
+                .get(*i)
+                .copied()
+                .flatten()
+                .is_none_or(|p| p >= rects.len())
+            {
+                layers[*i] = Some(0);
+                queue.push_back(*i);
+            }
+        }
+        // Cycles have no root: seed each remaining component once.
+        for seed in &order {
+            if queue.is_empty() && layers[*seed].is_none() {
+                layers[*seed] = Some(0);
+                queue.push_back(*seed);
+            }
+            while let Some(i) = queue.pop_front() {
+                for j in &order {
+                    if layers[*j].is_none() && parents.get(*j) == Some(&Some(i)) {
+                        layers[*j] = Some(layers[i].unwrap() + 1);
+                        queue.push_back(*j);
+                    }
+                }
+            }
+        }
+    }
+    let columns = match layout {
+        "row" => rects.len(),
+        "column" => 1,
+        _ => (rects.len() as f32).sqrt().ceil() as usize,
+    };
+    let slots: Vec<_> = order
+        .iter()
+        .enumerate()
+        .map(|(n, i)| {
+            if layout == "wires" {
+                (layers[*i].unwrap(), 0)
+            } else {
+                (n % columns, n / columns)
+            }
+        })
+        .collect();
+    let mut widths = vec![0_f32; rects.len()];
+    for (i, (col, _)) in order.iter().zip(&slots) {
+        widths[*col] = widths[*col].max(rects[*i][2]);
+    }
+    let mut out = rects.to_vec();
+    let mut bottoms = vec![bounds[1]; rects.len()];
+    let height = rects.iter().map(|r| r[3]).fold(0_f32, f32::max);
+    for (i, (col, row)) in order.iter().zip(slots) {
+        out[*i][0] = bounds[0] + widths[..col].iter().map(|w| w + GAP).sum::<f32>();
+        out[*i][1] = if layout == "wires" {
+            bottoms[col]
+        } else {
+            bounds[1] + row as f32 * (height + GAP)
+        };
+        bottoms[col] = out[*i][1] + rects[*i][3] + GAP;
+    }
+    out
+}
+
+/// One layout snapshot; restoring ignores deleted objects and leaves new objects alone.
+#[derive(Clone, Default, PartialEq)]
+pub struct Rest {
+    cards: Vec<(String, Rect)>,
+    spaces: Vec<(String, Rect)>,
+    previews: Vec<(String, Rect)>,
+}
+impl Rest {
+    /// Capture only geometry, without terminal or panel state.
+    pub fn capture(doc: &Document) -> Self {
+        Self {
+            cards: doc
+                .cards
+                .iter()
+                .map(|c| (c.terminal.clone(), c.rect))
+                .collect(),
+            spaces: doc
+                .spaces
+                .iter()
+                .map(|s| (s.space.clone(), s.rect))
+                .collect(),
+            previews: doc
+                .previews
+                .iter()
+                .map(|p| (p.path.clone(), p.rect))
+                .collect(),
+        }
+    }
+    /// Restore geometry of objects that still exist.
+    pub fn restore(&self, doc: &mut Document) {
+        for c in &mut doc.cards {
+            if let Some((_, r)) = self.cards.iter().find(|(id, _)| *id == c.terminal) {
+                c.rect = *r;
+            }
+        }
+        for s in &mut doc.spaces {
+            if let Some((_, r)) = self.spaces.iter().find(|(id, _)| *id == s.space) {
+                s.rect = *r;
+            }
+        }
+        for p in &mut doc.previews {
+            if let Some((_, r)) = self.previews.iter().find(|(id, _)| *id == p.path) {
+                p.rect = *r;
+            }
+        }
+    }
+}
 pub fn clamp(mut r: Rect, space: Rect) -> Rect {
     r[0] = r[0].clamp(
         space[0] + 24.,
@@ -278,6 +471,9 @@ pub struct Document {
     pub previews: Vec<Preview>,
     #[serde(default)]
     pub recent_folders: Vec<String>,
+    /// Last arrange layout, defaulting to tidy for older documents.
+    #[serde(default)]
+    pub arrange_layout: String,
 }
 impl Default for Document {
     fn default() -> Self {
@@ -290,6 +486,7 @@ impl Default for Document {
             panel: Panel::default(),
             previews: vec![],
             recent_folders: vec![],
+            arrange_layout: String::new(),
         }
     }
 }
@@ -410,6 +607,82 @@ pub fn view_allows(view: &View, agent: bool) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn spacing_is_deterministic_pinned_and_returns_to_rest() {
+        let rest = [[0.,0.,100.,50.],[124.,0.,100.,50.],[248.,0.,100.,50.],[124.,74.,100.,50.]];
+        let pin = [100.,0.,100.,50.];
+        let result = solve(&rest,0,pin,GAP);
+        assert_eq!(result,solve(&rest,0,pin,GAP));
+        assert_eq!(result[0],pin);
+        for i in 0..result.len() { for j in 0..i { assert!(separated(result[i],result[j],GAP)); } }
+        assert_eq!(solve(&rest,0,rest[0],GAP),rest);
+        assert_eq!(solve(&[],0,pin,GAP),Vec::<Rect>::new());
+    }
+
+    #[test]
+    fn growth_pushes_the_next_space_and_carries_cells() {
+        let spaces = [[0.,0.,200.,200.],[224.,0.,200.,200.]];
+        let grown = grow(spaces[0],&[[180.,24.,100.,50.]]);
+        assert_eq!(grown,[0.,0.,304.,200.]);
+        let result = solve(&spaces,0,grown,GAP);
+        assert!(separated(result[0],result[1],GAP));
+        let delta = [result[1][0]-spaces[1][0],result[1][1]-spaces[1][1]];
+        let mut space = Space { space:"b".into(),rect:spaces[1],color:"red".into(),frame:true };
+        let mut cards = [Card { terminal:"b".into(),rect:[248.,24.,100.,50.],z:0 }];
+        move_space(&mut space,&mut cards,&["b".into()],delta);
+        assert_eq!(cards[0].rect[0]-space.rect[0],24.);
+        assert_eq!(cards[0].rect[1]-space.rect[1],24.);
+        assert_eq!(grow(grown,&[[24.,24.,10.,10.]]),grown);
+    }
+
+    #[test]
+    fn arrange_layouts_keep_gap_sizes_and_parent_layers() {
+        let rects = [[80.,30.,100.,40.],[0.,0.,70.,90.],[0.,50.,150.,60.],[0.,50.,30.,100.]];
+        let parents = [None,Some(0),Some(0),Some(1)];
+        for layout in ["tidy","row","column","wires"] {
+            let result = arrange(&rects,&parents,layout);
+            assert_eq!(result,arrange(&rects,&parents,layout));
+            for i in 0..result.len() {
+                assert_eq!(&result[i][2..],&rects[i][2..]);
+                for j in 0..i { assert!(separated(result[i],result[j],GAP),"{layout}: {result:?}"); }
+            }
+            if layout == "wires" { assert!(result[0][0]<result[1][0] && result[1][0]<result[3][0]); assert_eq!(result[1][0],result[2][0]); }
+        }
+        let cycle = arrange(&rects,&[Some(1),Some(0),Some(2),None],"wires");
+        for i in 0..cycle.len() { for j in 0..i { assert!(separated(cycle[i],cycle[j],GAP)); } }
+    }
+
+    #[test]
+    fn undo_restores_geometry_without_resurrecting_deleted_cells() {
+        let mut doc = Document::default();
+        doc.place("a",[0.,0.],[100.,50.]);
+        doc.spaces.push(Space { space:"s".into(),rect:[0.,0.,200.,200.],color:"blue".into(),frame:true });
+        doc.previews.push(Preview { path:"/tmp/plan.md".into(),rect:[24.,24.,100.,80.] });
+        let rest = Rest::capture(&doc);
+        doc.spaces[0].rect = [500.,500.,900.,900.];
+        doc.previews[0].rect[0] = 600.;
+        doc.cards[0].rect[0] = 600.;
+        doc.place("new",[500.,0.],[100.,50.]);
+        rest.restore(&mut doc);
+        assert_eq!(doc.cards[0].rect,[0.,0.,100.,50.]);
+        assert_eq!(doc.spaces[0].rect,[0.,0.,200.,200.]);
+        assert_eq!(doc.previews[0].rect,[24.,24.,100.,80.]);
+        assert_eq!(doc.cards[1].rect[0],500.);
+        doc.cards.remove(0);
+        rest.restore(&mut doc);
+        assert_eq!(doc.cards.len(),1);
+    }
+
+    #[test]
+    fn fifty_cells_solve_quickly() {
+        let rest: Vec<_> = (0..50).map(|i|[(i%10) as f32*124.,(i/10) as f32*74.,100.,50.]).collect();
+        let start = std::time::Instant::now();
+        for _ in 0..100 { std::hint::black_box(solve(&rest,0,[124.,74.,100.,50.],GAP)); }
+        eprintln!("50-cell solve: {:?} per pass",start.elapsed()/100);
+        let result = solve(&rest,0,[124.,74.,100.,50.],GAP);
+        for i in 0..result.len() { for j in 0..i { assert!(separated(result[i],result[j],GAP)); } }
+    }
+
+    #[test]
     fn space_at_picks_the_topmost_space_holding_the_point() {
         let space = |id: &str, rect| Space { space: id.into(), rect, color: "red".into(), frame: true };
         let spaces = [space("a", [0., 0., 100., 100.]), space("b", [50., 50., 100., 100.])];
@@ -431,6 +704,7 @@ mod tests {
         let path = dir.join("canvas.json");
         let mut value = serde_json::to_value(Document::default()).unwrap();
         value.as_object_mut().unwrap().remove("previews");
+        value.as_object_mut().unwrap().remove("arrange_layout");
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
         assert!(Document::load(&path).unwrap().0.previews.is_empty());
         value["previews"] = serde_json::json!([{"path":"/missing.md", "rect":[1,2,400,300]}]);
@@ -643,12 +917,14 @@ mod tests {
             std::env::temp_dir().join(format!("canopy-roundtrip-{}.json", std::process::id()));
         let doc = Document {
             view: View::Agents,
+            arrange_layout: "wires".into(),
             ..Document::default()
         };
         doc.save(&path).unwrap();
         let (loaded, bad) = Document::load(&path).unwrap();
         assert!(!bad);
         assert_eq!(loaded.view, View::Agents);
+        assert_eq!(loaded.arrange_layout, "wires");
         std::fs::remove_file(path).unwrap();
     }
     #[test]

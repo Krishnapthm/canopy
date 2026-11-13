@@ -32,6 +32,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.zoom_in", &[], "Zoom the canvas in one step."),
     cmd("canvas.zoom_out", &[], "Zoom the canvas out one step."),
     cmd("canvas.zoom_reset", &[], "Reset canvas zoom."),
+    cmd("canvas.arrange", &[opt("layout"), opt("picker"), opt("space")], "Arrange selected cells or the current space: tidy, row, column or wires. Omit layout to repeat the last; picker opens the layout menu."),
+    cmd("canvas.undo", &[], "Restore geometry before the last canvas move, resize or arrange."),
     cmd("canvas.fit", &[], "Fit all spaces and cards."),
     cmd("quote.menu", &[req("path"), opt("start"), opt("end"), req("text"), opt("point")], "Open the quote popover listing running agents, at point or the pointer."),
     cmd("canvas.sub_message", &[req("terminal"), req("id")], "Paste a message addressed to a sub-agent into its parent without Enter."),
