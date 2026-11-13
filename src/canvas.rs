@@ -87,13 +87,17 @@ impl Camera {
         self.y = bounds[1] + bounds[3] / 2. - viewport[1] / self.zoom / 2.;
     }
 }
-/// Toggle a space fit using the visible canvas size, remembering the camera only once.
-pub fn focus_fit(camera: &mut Camera, previous: &mut Option<Camera>, rects: &[Rect], visible: Point) {
-    if let Some(saved) = previous.take() {
-        *camera = saved;
-    } else if !rects.is_empty() {
-        *previous = Some(*camera);
-        camera.fit(rects, visible);
+/// Toggle a space fit in the visible canvas: a second press restores the camera from before
+/// the fit, unless the camera moved since, in which case it fits again.
+pub fn focus_fit(camera: &mut Camera, previous: &mut Option<(Camera, Camera)>, rects: &[Rect], visible: Point) {
+    match previous.take() {
+        Some((before, fitted)) if *camera == fitted => *camera = before,
+        _ if !rects.is_empty() => {
+            let before = *camera;
+            camera.fit(rects, visible);
+            *previous = Some((before, *camera));
+        }
+        _ => {}
     }
 }
 
@@ -1335,7 +1339,7 @@ mod keyboard_tests {
         let space = [500., 200., 900., 600.];
         let visible = [800., 700.]; // A 1200 px window with a 400 px file panel.
         focus_fit(&mut camera, &mut previous, &[space], visible);
-        assert_eq!(previous, Some(original));
+        assert_eq!(previous.map(|p| p.0), Some(original));
         let center = camera.to_screen([space[0] + space[2] / 2., space[1] + space[3] / 2.]);
         assert!((center[0] - visible[0] / 2.).abs() < 0.001);
         assert!((center[1] - visible[1] / 2.).abs() < 0.001);
@@ -1346,5 +1350,11 @@ mod keyboard_tests {
         assert_eq!(previous, None);
         focus_fit(&mut camera, &mut previous, &[], visible);
         assert_eq!(previous, None);
+        // Moved after a fit: the next press fits again instead of jumping back.
+        focus_fit(&mut camera, &mut previous, &[space], visible);
+        let fitted = camera;
+        camera.x += 50.;
+        focus_fit(&mut camera, &mut previous, &[space], visible);
+        assert_eq!(camera, fitted);
     }
 }

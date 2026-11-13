@@ -329,8 +329,8 @@ the active view is checked. `view.agents`, `view.all`, `view.terminals` and
 their keys still work. The canvas toolbar has file and focus-fit buttons.
 
 Canvas mode: Cmd+J / Ctrl+Shift+J runs `canvas.mode`. A window flag gives the
-`canvas-mode` key section first refusal; unbound keys are swallowed, with no
-idle timer. The hint mod reads the bindings with `keys()`. Dialogs and menus
+`canvas-mode` key section first refusal; unbound keys without Ctrl, Alt or
+Cmd are swallowed. No idle timer. The hint mod reads the bindings with `keys()`. Dialogs and menus
 keep their own keys. `canvas.leave` cancels a pending connection or leaves
 mode; `canvas.enter` connects or expands the selection and leaves mode.
 `canvas.go {direction: "left" | "right" | "up" | "down"}` selects without

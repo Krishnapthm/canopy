@@ -70,11 +70,12 @@ and sub-agent transcripts only.
 
 Press Cmd+Shift+F (Ctrl+Shift+F with canvas focus), mode `f`, or the focus icon
 beside the folder icon to fit the current space. The canvas bounds already
-exclude the file panel, so the space centres in the visible area. The first
-press remembers the camera; the second restores it exactly, even if the first
-animation is still moving. With no current space, it fits the root cells.
+exclude the file panel, so the space centres in the visible area. The second
+press restores the camera from before the fit; if you moved the camera in
+between, it fits again instead. With no current space, it fits the cells
+outside spaces.
 
-Keyboard arrows select by centre distance in the requested half-plane. Ties
-keep document order; no cell in that direction leaves selection unchanged.
-Shift+arrows move one `canvas::GAP`, run the same solver as dragging, save once,
-and replace the single undo snapshot.
+In canvas mode, arrows select the cell whose centre is nearest in that
+direction (ties keep document order; nothing there, nothing changes).
+Shift+arrows move the selection one gap through the same solver as a drag,
+saved once, as one undo step.

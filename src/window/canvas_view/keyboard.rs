@@ -9,7 +9,9 @@ fn direction(value: &str) -> Option<canvas::Point> {
 }
 
 impl AppWindow {
-    /// Intercept mode keys before GPUI actions or terminal input can consume them.
+    /// Intercept mode keys before GPUI actions or terminal input can consume them. Unbound keys
+    /// are swallowed unless they carry ctrl, alt or cmd: those go on to the normal keymap (quit,
+    /// the reset key), and the canvas holds the focus, so no terminal sees them.
     pub(in crate::window) fn canvas_key(&mut self, key: &gpui::Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.canvas_state.mode || !self.has_canvas() || self.overlays.iter().any(|o| o.kind.modal_keys()) { return false; }
         self.focus.focus(window, cx);
@@ -22,8 +24,10 @@ impl AppWindow {
                     Err(error) => self.command_error("Key binding", &error, window, cx),
                 }
             } else { window.dispatch_action(action, cx); }
+            return true;
         }
-        true
+        let m = key.modifiers;
+        !(m.control || m.alt || m.platform)
     }
 
     /// The space of the selection, otherwise the current canvas space.

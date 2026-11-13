@@ -10,7 +10,8 @@ pub(super) struct State {
     pub doc: Document,
     pub(super) mode: bool,
     connecting: Option<String>,
-    previous_camera: Option<canvas::Camera>,
+    /// The camera before a focus fit and the camera that fit produced.
+    previous_camera: Option<(canvas::Camera, canvas::Camera)>,
     rest: Option<canvas::Rest>,
     undo: Option<canvas::Rest>,
     shown: Option<Document>,
@@ -1110,7 +1111,7 @@ impl AppWindow {
                     let world = to.to_world(anchor);
                     state.doc.camera = canvas::Camera { x: f[0]+(world[0]-f[0])*a-anchor[0]/zoom, y: f[1]+(world[1]-f[1])*a-anchor[1]/zoom, zoom };
                     active = t < 1.;
-                    if !active { state.motion.target = None; }
+                    if !active { state.doc.camera = to; state.motion.target = None; }
                 } else if state.drag.is_none() {
                     let dt = state.motion.sample.map(|t| now.duration_since(t).as_secs_f32()).unwrap_or(0.016).min(0.05);
                     state.motion.sample = Some(now);

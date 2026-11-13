@@ -5608,6 +5608,7 @@ mod tests {
             assert!(this.canvas_state.mode);
             assert_eq!(this.canvas_state.selected, ["t1"]);
             assert!(this.canvas_key(&gpui::Keystroke::parse("q").unwrap(), window, cx), "unbound keys are swallowed");
+            assert!(!this.canvas_key(&gpui::Keystroke::parse("ctrl-alt-shift-escape").unwrap(), window, cx), "modified keys reach the keymap");
         }));
         cx.simulate_keystrokes("q l");
         cx.update(|window, cx| view.update(cx, |this, cx| {

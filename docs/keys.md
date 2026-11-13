@@ -33,14 +33,15 @@ A connection stays in mode after Enter; Esc cancels a pending connection first.
 | Zoom in / out / 100% | Cmd+= / Cmd+- / Cmd+0 | Ctrl+= / Ctrl+- / Ctrl+0 |
 | Agents / All / Terminals | Cmd+Shift+1/2/3 | Ctrl+Shift+1/2/3 |
 
-Existing bindings take precedence over proposed replacements:
-Cmd+T / Ctrl+Shift+T stays `tab.new`; Cmd+N / Ctrl+Shift+N stays `space.new`;
-Cmd+B / Ctrl+Shift+B stays `layout.toggle:sidebar`.
-Linux and Windows Ctrl+Shift+F stays terminal search when a terminal has focus.
-Use mode `n` for a canvas terminal and the folder icon for the file panel.
+Cmd+T / Ctrl+Shift+T is `tab.new`, Cmd+N / Ctrl+Shift+N `space.new` and
+Cmd+B / Ctrl+Shift+B `layout.toggle:sidebar`. On Linux and Windows,
+Ctrl+Shift+F is terminal search while a terminal has focus. For a canvas
+terminal use mode `n`; for the file panel, the folder icon.
 
 Edit app-home `keys.json` to rebind. Mode is one window flag: while it is set,
-the `canvas-mode` section is consulted before normal bindings, and every unbound
-key is swallowed. Its bindings must be single keys, never sequences. Outside
+the `canvas-mode` section is consulted before normal bindings, and an unbound
+key is swallowed unless it carries Ctrl, Alt or Cmd (those reach the normal
+bindings, so quit and the reset key still work; the canvas holds the focus, so
+no terminal sees them). Its bindings must be single keys, never sequences. Outside
 mode, plain Ctrl+letters and Esc belong to the terminal. Backspace, Delete and
 undo also reach a focused terminal unchanged.
