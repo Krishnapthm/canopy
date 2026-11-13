@@ -29,6 +29,42 @@ Read AGENTS.local.md too when present.
 - Keep defaults/AGENTS.md and src/SKILL.md current with agent-facing behavior.
   The generated .d.ts files describe the full mod API.
 - Do not edit CHANGELOG.md. Preserve LICENSE and THIRD-PARTY-NOTICES.
+- Docs travel with the change. Whoever touches a feature updates its page in
+  docs/ (or adds one) and the doc comments in the same change: what it is,
+  how to use it, how it works, in that order. Short and exact, no filler, no
+  restating code. The orchestrator reviews docs for accuracy and brevity
+  before a phase is done and fixes what falls short. Document what you
+  touch, not the whole app.
+
+## Principles
+
+- Priorities: correctness of agent control (a message, approval or stop does
+  exactly what it says), then smoothness, then the smallest design that works.
+- Idle costs nothing: no polling, periodic timers or token spend while nothing
+  happens. A timer may exist only while work is pending.
+- Agent output is untrusted. Render it as text, never as markup or commands.
+- Every error a user causes or can see reaches them as a toast
+  (defaults/mods/toast), never only in a log.
+- UIs list only installed agent CLIs and never name a missing one.
+- Write each verified harness fact, with the CLI version, into
+  docs/canopy/harness-notes/.
+- Every dependency is a cost: say what it replaces, its size and its license
+  (MIT, Apache-2.0, BSD, ISC or public domain) before adding it.
+
+## Core vs mods
+
+The core (model, layout documents, commands, shared mod APIs) stays small;
+everything else is a mod. Before growing the core, check: does the app itself
+act on it, can only the app see it, and can mods not do it correctly? If all
+three are no, it belongs in a mod. Otherwise ask Krishna first.
+
+## Shipped defaults
+
+defaults/ is built into the app. Shipped layouts and mods are replaced on
+start; edited ones move to personal copies. keys.json (keys.macos.json on Mac)
+is installed when missing and upgraded only if it matches an earlier shipped
+original byte for byte. Keep those originals in src/keys/shipped/ when
+changing default keys.
 
 ## Build and checks
 

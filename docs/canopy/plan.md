@@ -539,13 +539,19 @@ the shim called, with which file, did the CLI see the edit, what did the model r
 - Terminal pills activate a panel tab. Files open in panel tabs by default through
   `preview.open {path}`; `place: "canvas"` or a world `point` pins a card.
 - Keep Open file... picker and Finder drops placing cards. File tabs offer Pin to canvas.
-- Panel tabs are read-only, with a breadcrumb, terminal pop-out, close and file-tree toggle.
+- File panel tabs have an editor split button: Open here edits with highlighted source
+  (including markdown), Save/cmd+s keeps editing, and Done saves then returns to read-only.
+  The menu also offers installed external editors for local files; its last choice is saved
+  as `panel.editor` in canvas.json. Conflicts keep the draft with an inline error; Unsaved
+  marks pending edits, which switching tabs or closing drops without a dialog.
+  Headers retain the breadcrumb, terminal pop-out, close and file-tree toggle.
   Closing a terminal tab leaves the core terminal running.
 - Reuse the Files mod for the bounded lazy tree and highlighted code. The tree shows the
   folder of the space last clicked on the canvas (a plain click inside it or on its label;
   a pan drag or a pill click does not switch it), saved as `panel.space`.
 - Markdown uses the existing inert document renderer. Never load remote images or execute content.
-- Folder watches refresh previews. Canvas cards retain their existing numbered text viewer.
+- Folder watches refresh previews without replacing editing drafts. Canvas preview cards stay
+  read-only, with their existing numbered text viewer and no card-header Edit button.
 - Panel width and tree visibility are saved in canvas.json.
 
 ### 8.3 Quote to agent
@@ -704,3 +710,5 @@ Write here when the code disproves something above (date, what, new decision).
 - 2026-11-12: Krishna accepted live: the quote popover header, side panel restore, the New space dialog with "Choose space", two-line 220 px pills and no crash on pan release.
 - 2026-11-12: sub-agent trial in the scratch core (Krishna approved Haiku and gpt-6-luna only). Claude Haiku ran `hc run --bg --name helper -- codex exec -m gpt-6-luna '...'` from its Bash tool: the core made child t1d with `parent: t1c`, and `hc wait --children all` returned at its exit (code 0). The reverse worked too: Codex (gpt-6-luna) started `claude --model haiku -p` as t1g with `parent: t1f`. So sub-agents already reach the canvas with no app code when an agent starts them through `hc run`; the gap is only that agents do not know to. Not yet seen on screen (the display was asleep, so the child pill and edge are unverified). In-process sub-agents (Claude's own Agent tool) stay invisible, by design (no terminal).
 - 2026-11-12: Krishna asked for an installation-aware agent list in the canvas right-click menu, shadcn style, instead of "New agent >". The empty-canvas menu now shows an "Agents" label (separator above, dim, not selectable) and one row per installed agent with its program icon, straight from knownAgents() (programs.json), so agents added there later appear with no code change. The check starts when the menu opens; until it answers a dim "Checking installed agents..." row shows, and "No agents installed" when none are. The canvas-agents submenu is gone.
+
+- 2026-11-13: Krishna chose hc plus a per-session note as the agent bridge. `programs.json` uses `flags` (formerly `hooks`) and a top-level overridable `note`, with `{canopy}`, `{note}` and `{note_json}` placeholders. Local menu launches add flags directly; plain local zsh/fish terminals use generated shell functions, restoring the inherited startup environment. Codex session flags replace configured `developer_instructions` for those sessions only. Helpers should start through `hc run --bg` and communicate through `hc send/read/wait`; process polling is removed. Hook pills still show in-process helpers and their working/idle state.

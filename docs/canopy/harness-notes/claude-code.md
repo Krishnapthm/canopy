@@ -14,3 +14,45 @@
 11. **Herdr integration - verified source mismatch; installation behavior needs live run/source follow-up.** Upstream master at `7edc5dfbe3f54ac23ad22313ce32f552f219ff44` lacks both requested directories. Current source consumes OSC 7501 status reports ([core evidence](herdr-core-evidence.md:8)); it is not proof that installed hc installs no hooks. No hc command or config mutation was performed. Do not enable any integration installer.
 
 Limits: static inspection only. Neither plan-edit acceptance nor paste safety is signed off. The existing user's credentials, sessions and configuration were never opened. Help startup itself is not proven side-effect-free.
+
+## Live checks for Wire, 2026-11-13 (2.1.322, Haiku, scratch core, hc 0.1.20)
+
+Launched as `claude --model haiku --setting-sources '' --strict-mcp-config --settings <file>`
+through `hc run` in a separate core session, with hooks that log their payload and print
+`hookSpecificOutput.additionalContext`. Clean environment (`env -i`); a launch that inherits
+another Claude session's `CLAUDE_CODE_*` variables turns transcript saving off.
+
+1. **Hook context reaches the model - verified.** `SessionStart` and `UserPromptSubmit`
+   `additionalContext` were both quoted back by the model on a fresh start.
+2. **Resume gets fresh hook context - verified.** After `--resume <id>` with a changed
+   marker the model saw the new value; `SessionStart` payload has `source: "resume"`
+   (`"startup"` on a new session).
+3. **A system prompt passed on resume is ignored - verified.** `--append-system-prompt`
+   added on the resumed launch was not visible to the model. Dynamic facts must come
+   from hooks or commands, never the launch note.
+4. **Typed line while idle - verified.** `hc send <t> '<wire from=... kind="ask">...</wire>'`
+   is taken as a prompt and answered. The model answered in its reply, as it had not been
+   told about `canopy wire reply`.
+5. **Typed line mid-turn is queued, not an interrupt - verified.** Sent 9 s into a 25 s
+   tool call: the TUI showed it as a queued message ("Press up to edit queued messages",
+   "ctrl+enter to send now"), the running tool finished, then the model handled both.
+   `hc send` returned `status: "working"`.
+6. **Core status works without any installed integration - verified.** `hc get` showed
+   `status.state` `working` then `done`, with `app: "claude-code"`.
+7. **Sub-agent hook payloads - verified.** `SubagentStart`: `agent_id`, `agent_type`,
+   `session_id`, `transcript_path`, `cwd`, `prompt_id`; no description. `SubagentStop`
+   adds `agent_transcript_path`, `last_assistant_message` and `background_tasks`
+   (id, description, agent_type). Resuming a finished sub-agent fires `SubagentStart`
+   again with the same `agent_id`.
+8. **A parent relays to a finished sub-agent - verified.** Asked to pass a message to
+   "the same sub-agent", the parent used `SendMessage`; the sub-agent resumed and
+   answered with its earlier context.
+9. **Standalone `sleep` is refused by the Bash tool** in this version; use another
+   long command when a test needs a long turn.
+
+10. **Typed line during a permission dialog is refused - verified.** With a Bash
+    approval up, core status was `blocked` (`kind: permission`, `msg: "approve Bash:
+    ..."`) and `hc send` exited 9: "typing would answer its dialog". Needs `USER` in the
+    `env -i` launch, or Claude reports "Not logged in".
+
+Not checked: the live pill repro in the app (folded into the phase 1 hand check).

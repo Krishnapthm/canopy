@@ -14,3 +14,44 @@
 11. **Herdr integration - verified source mismatch; installation behavior needs live run/source follow-up.** Requested integration/assets and detect/manifests paths are absent at upstream master `7edc5dfbe3f54ac23ad22313ce32f552f219ff44` ([core evidence](herdr-core-evidence.md:1)). OSC 7501 consumer exists; no installed-binary/source match proven. Do not infer config writes or run an installer from obsolete notes.
 
 Observed CLI warning: version/help attempted to create PATH aliases and were denied by the sandbox. No config was deliberately written. This research does not certify all startup side effects.
+
+## Live checks for Wire, 2026-11-13 (0.167.2, gpt-6-luna low, scratch core, hc 0.1.20)
+
+Launched through `hc run` in a separate core with `env -i`, per-run `-c` overrides only
+(project trust, hooks, approvals), so `~/.codex/config.toml` was never written.
+
+- **Hooks can be passed per session - verified.**
+  `-c 'hooks.SessionStart=[{hooks=[{type="command",command="..."}]}]'` is accepted.
+- **New hooks need the person's trust - verified.** On start the TUI shows "Hooks need
+  review: 2 hooks are new or changed", with Review, Trust all, or Continue without
+  trusting (hooks will not run). Trust is stored as `hooks.state.<key>.trusted_hash` in
+  `config.toml` (binary strings), so it persists, but only by writing the person's config.
+  `--dangerously-bypass-hook-trust` runs all enabled hooks for one launch without review.
+- **Hook context does not reach the model - verified, fails.** `SessionStart`
+  (`source: "startup"`, and `"resume"` after `codex resume <id>`) and `UserPromptSubmit`
+  ran, and their output (JSON `additionalContext` or plain stdout) was stored in the
+  rollout as a developer message (`hooks.additional_context`). Asked five ways, fresh and
+  resumed, the model answered NONE/UNKNOWN every time. So Codex gets the static note and
+  the pull path (`canopy wire`) only, no hooks.
+- **Typed line while idle - verified.** A `<wire ...>` line is taken as a prompt and
+  answered.
+- **Typed line mid-turn steers, it does not queue - verified.** Sent 9 s into a 25 s
+  command: Codex added it to the running turn as a user message after the current tool
+  call yielded; the command kept running and finished. `hc send` returned `working`.
+  Unlike Claude, the line enters the current turn, so Codex is not a `"wire": "queue"`
+  CLI.
+- **Typed line during a dialog is refused - verified.** With an approval dialog up, core
+  status was `blocked` (`kind: permission`) and `hc send` exited 9: "typing would
+  answer its dialog".
+- **Allow rule for one prefix - verified.** `~/.codex/rules/*.rules` with
+  `prefix_rule(pattern=["canopy", "wire"], decision="allow")` matches
+  `canopy wire tell x "hi"` and not `canopy wired` (`codex execpolicy check`). Rules live
+  in the person's Codex home; there is no per-launch flag, so Canopy cannot add one. The
+  approval dialog's "don't ask again for commands that start with" option writes the
+  same kind of rule.
+- `codex queue --thread <id> --message <text>` exists (help); needs the daemon.
+- Feature flags: `hooks` stable; `agent_message_board` and `wake_on_agent_messages`
+  under development, off.
+
+Not checked: whether `canopy wire` (app home and core socket outside the workspace)
+runs inside Codex's `workspace-write` sandbox without escalation.
