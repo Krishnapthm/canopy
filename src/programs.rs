@@ -50,6 +50,9 @@ struct Entry {
     flags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     app: Option<String>,
+    /// `"queue"`: the CLI queues a line typed mid-turn itself, so Wire may ring it while it works.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    wire: Option<String>,
 }
 
 impl Entry {
@@ -64,6 +67,7 @@ impl Entry {
         }
         if !mine.flags.is_empty() { self.flags = mine.flags; }
         self.app = mine.app.or(self.app.take());
+        self.wire = mine.wire.or(self.wire.take());
         if !mine.open.is_empty() {
             self.open = mine.open;
         }
@@ -92,6 +96,11 @@ pub fn startable() -> Vec<Value> {
             })
             .collect()
     })
+}
+
+/// Whether this program's CLI queues a line typed while it works (`"wire": "queue"` in programs.json).
+pub fn queues(program: &Value) -> bool {
+    TABLE.with(|t| program["key"].as_str().is_some_and(|key| t.borrow().programs.get(key).is_some_and(|e| e.wire.as_deref() == Some("queue"))))
 }
 
 pub fn agent_program(program: &Value) -> bool {
@@ -529,6 +538,17 @@ mod tests {
     fn key(app: Option<&str>, argv: &[&str]) -> String {
         let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
         resolve(&t(), app, &argv)["key"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn wire_is_data_a_queueing_cli_the_note_and_the_hooks() {
+        assert!(queues(&of(Some("claude-code"), &[])));
+        assert!(!queues(&of(Some("codex"), &[])) && !queues(&of(None, &["zsh".into()])));
+        let table = t();
+        assert!(table.note.as_deref().unwrap().contains("canopy wire wait <n>") && table.note.as_deref().unwrap().contains("hc run --bg"));
+        let flags = table.programs["claude"].flags.join(" ");
+        assert!(flags.contains("\"UserPromptSubmit\"") && flags.contains("hook wire") && flags.contains("Bash(canopy wire:*)"));
+        assert!(!table.programs["codex"].flags.join(" ").contains("hook"), "Codex ignores hook context: note and pull only");
     }
 
     #[test]

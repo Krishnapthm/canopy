@@ -54,6 +54,11 @@ function items(p, git, agents) {
     ];
     case "canvas-arrange": return [["Tidy", "tidy"], ["Row", "row"], ["Column", "column"], ["By wires", "wires"]].map(([name, layout]) => [name, "canvas.arrange", { ...tg, layout }]);
     case "canvas-colors": return ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"].map(color => [color, "canvas.space_style", { id: tg.id, color }]);
+    case "canvas-wire": return [
+      ["Open thread", "wire.open", { a: tg.a, b: tg.b }],
+      ["Reset", "wire.reset", { a: tg.a, b: tg.b }],
+      ...(tg.born ? [] : [["Remove", "wire.remove", { a: tg.a, b: tg.b }]]),
+    ];
     case "canvas-sub": return [["Message through parent", "canvas.sub_message", { terminal: tg.terminal, id: tg.id }]];
     case "canvas-card": return [
       ["Arrange", "canvas.arrange", {}],

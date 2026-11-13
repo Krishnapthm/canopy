@@ -383,6 +383,12 @@ pub struct Person {
     #[serde(skip_serializing_if = "is_true")]
     pub confirm_close_terminal: bool,
     pub canvas_color: Option<String>,
+    /// Wire postcard length in characters. Hand-edited only: never written back, never in Settings.
+    #[serde(skip_serializing_if = "is_default_wire_limit")]
+    pub wire_limit: usize,
+    /// Agent postcards a wire carries before it trips (0: never). Hand-edited only.
+    #[serde(skip_serializing_if = "is_default_wire_budget")]
+    pub wire_budget: u32,
     /// How big the whole app is drawn (1 = as designed). The zoom keys change it.
     pub zoom: f32,
     pub sounds: Sounds,
@@ -459,11 +465,21 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
+fn is_default_wire_limit(n: &usize) -> bool {
+    *n == crate::wire::DEFAULT_LIMIT
+}
+
+fn is_default_wire_budget(n: &u32) -> bool {
+    *n == crate::wire::DEFAULT_BUDGET
+}
+
 impl Default for Person {
     fn default() -> Self {
         Person {
             confirm_close_terminal: true,
             canvas_color: None,
+            wire_limit: crate::wire::DEFAULT_LIMIT,
+            wire_budget: crate::wire::DEFAULT_BUDGET,
             zoom: 1.0,
             sounds: Sounds::default(),
             core: None,
@@ -988,7 +1004,7 @@ mod tests {
     /// settings.json key.
     #[test]
     fn the_guide_explains_every_setting() {
-        let all = Person { confirm_close_terminal: false, core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), ui_font: Some(String::new()), clipboard_write: false, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
+        let all = Person { wire_limit: 1, wire_budget: 1, confirm_close_terminal: false, core: Some(String::new()), font: Some(String::new()), font_size: Some(1.0), ui_font: Some(String::new()), clipboard_write: false, appearance: Appearance::Light, theme: Some(crate::layout::ThemeChoice::One(String::new())), colors: [("text".into(), String::new())].into(), ..Person::default() };
         let keys: Vec<String> = serde_json::to_value(&all).unwrap().as_object().unwrap().keys().cloned().collect();
         let guide = include_str!("../defaults/AGENTS.md");
         let section = guide.split("## The person").nth(1).and_then(|s| s.split("\n## ").next()).unwrap_or_default();

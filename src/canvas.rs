@@ -507,6 +507,9 @@ pub struct Document {
     /// Last arrange layout, defaulting to tidy for older documents.
     #[serde(default)]
     pub arrange_layout: String,
+    /// Drawn Wire edges between cells of one space. Born edges are computed, never stored.
+    #[serde(default)]
+    pub wires: Vec<Wire>,
 }
 impl Default for Document {
     fn default() -> Self {
@@ -520,10 +523,51 @@ impl Default for Document {
             previews: vec![],
             recent_folders: vec![],
             arrange_layout: String::new(),
+            wires: vec![],
         }
     }
 }
+
+/// An undirected Wire edge between two cells, addressed by `Card::key()`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Wire {
+    pub a: String,
+    pub b: String,
+    #[serde(default)]
+    pub born: bool,
+}
+impl Wire {
+    /// Whether this edge joins these two cells, in either order.
+    pub fn joins(&self, a: &str, b: &str) -> bool {
+        (self.a == a && self.b == b) || (self.a == b && self.b == a)
+    }
+}
+
 impl Document {
+    /// The space frame holding a cell's center; None for cells in the unframed root space.
+    pub fn space_of(&self, key: &str) -> Option<&Space> {
+        let r = self.cards.iter().find(|c| c.key() == key)?.rect;
+        space_at(&self.spaces, [r[0] + r[2] / 2., r[1] + r[3] / 2.])
+    }
+    /// Whether both cells exist and share a space (or both sit in the root space).
+    pub fn same_space(&self, a: &str, b: &str) -> bool {
+        let has = |k: &str| self.cards.iter().any(|c| c.key() == k);
+        has(a) && has(b) && self.space_of(a).map(|s| &s.space) == self.space_of(b).map(|s| &s.space)
+    }
+    /// Draws an edge between two cells of one space; false when it exists or is refused.
+    pub fn connect(&mut self, a: &str, b: &str) -> bool {
+        if a == b || !self.same_space(a, b) || self.wires.iter().any(|w| w.joins(a, b)) { return false; }
+        self.wires.push(Wire { a: a.into(), b: b.into(), born: false });
+        true
+    }
+    /// Drops wires of cells that no longer exist (closing a cell removes its wires); true when any went.
+    pub fn prune_wires(&mut self) -> bool {
+        let before = self.wires.len();
+        let cards = &self.cards;
+        let has = |k: &String| cards.iter().any(|c| &c.key() == k);
+        self.wires.retain(|w| has(&w.a) && has(&w.b));
+        before != self.wires.len()
+    }
     pub fn place(&mut self, terminal: &str, point: Point, size: Point) {
         let z = self
             .cards

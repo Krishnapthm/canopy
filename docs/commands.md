@@ -90,12 +90,49 @@ Clear finished sub-agent cells and their labels, optionally one id.
 
 ## `canvas.sub_message`
 
-Paste a message addressed to a sub-agent into its parent without Enter.
+Send a Wire postcard from you to a sub-agent cell (its parent agent relays it); without text, open the thread to type it.
 
 | Argument | Required |
 |---|---|
 | `terminal` | yes |
 | `id` | yes |
+| `text` | no |
+
+## `wire.connect`
+
+Draw a Wire edge between two cells of one space (cell keys: a terminal address, or sub:<parent>:<id>). Cells in different spaces are refused.
+
+| Argument | Required |
+|---|---|
+| `a` | yes |
+| `b` | yes |
+
+## `wire.remove`
+
+Remove a drawn Wire edge between two cells.
+
+| Argument | Required |
+|---|---|
+| `a` | yes |
+| `b` | yes |
+
+## `wire.reset`
+
+Reset a tripped Wire edge so its agents can send postcards again.
+
+| Argument | Required |
+|---|---|
+| `a` | yes |
+| `b` | yes |
+
+## `wire.open`
+
+Open the Wire thread of a cell's space in the file panel; typing there writes a postcard from you to a and b.
+
+| Argument | Required |
+|---|---|
+| `a` | yes |
+| `b` | no |
 
 ## `quote.send`
 

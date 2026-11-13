@@ -29,6 +29,8 @@ test("every canvas menu item passes only declared args, with the required ones",
     { tab: "canvas-colors", target: { id: "s1" } },
     { tab: "canvas-arrange", target: { space: "s1" } },
     { tab: "canvas-sub", target: { terminal: "t1", id: "abc" } },
+    { tab: "canvas-wire", target: { a: "t1", b: "t2", born: false } },
+    { tab: "canvas-wire", target: { a: "t1", b: "sub:t1:abc", born: true } },
     { tab: "canvas-card", target: card },
     { tab: "canvas-card", target: { ...card, popped: true, finished: true } },
   ];
@@ -66,6 +68,12 @@ test("hook children offer Message through parent", () => {
   expect(items({ tab: "canvas-sub", target: { terminal: "t1", id: "abc" } })).toEqual([
     ["Message through parent", "canvas.sub_message", { terminal: "t1", id: "abc" }],
   ]);
+});
+
+test("a drawn wire can be removed, a born one cannot", () => {
+  const labels = (born: boolean) => items({ tab: "canvas-wire", target: { a: "t1", b: "t2", born } }).map(([label]) => label);
+  expect(labels(false)).toEqual(["Open thread", "Reset", "Remove"]);
+  expect(labels(true)).toEqual(["Open thread", "Reset"]);
 });
 
 test("arrange picker lists the four layouts and preserves its space target", () => {

@@ -3,6 +3,8 @@ use super::*;
 use crate::canvas::{self, Document, PILL_WIDTH};
 use gpui::AnimationExt as _;
 
+mod wire_view;
+
 pub(super) struct State {
     pub doc: Document,
     rest: Option<canvas::Rest>,
@@ -45,6 +47,7 @@ pub(super) struct State {
     quote_chip: Option<(Value, Option<Entity<gpui_base::TextViewState>>)>,
     /// The panel's terminal, file and tabs when it was closed, for the folder button to bring back.
     closed: Option<(Option<String>, Option<String>, Vec<String>)>,
+    wire: wire_view::WireUi,
 }
 #[derive(Default)]
 struct Motion {
@@ -103,6 +106,7 @@ impl State {
             quote_mark: None,
             quote_chip: None,
             closed: None,
+            wire: Default::default(),
         }
     }
     /// End any drag, returning whether geometry was committed.
@@ -569,6 +573,7 @@ impl AppWindow {
 
     /// Closes the selected cell with confirmation appropriate to its current kind.
     pub(super) fn close_canvas_cell(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        if a["terminal"].is_null() && self.wire_delete_selected(window, cx) { return; }
         let key = a["terminal"].as_str().map(str::to_owned).or_else(|| {
             self.focus.is_focused(window).then(|| self.canvas_state.selected.last().cloned()).flatten()
         });
@@ -603,12 +608,16 @@ impl AppWindow {
         }
     }
 
+    /// `canvas.sub_message`: a Wire postcard from you to a sub-agent cell (its parent relays it);
+    /// without `text` it opens the thread, where you type it.
     pub(super) fn message_sub(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(addr) = a["terminal"].as_str() else { return };
-        let Some(sub) = self.canvas_state.subs.get(addr).into_iter().flatten()
-            .find(|s| s.transcript.is_some() && Some(s.id.as_str()) == a["id"].as_str()) else { return };
-        let text = format!("Message your sub-agent {} ({}): ", sub.name, sub.id);
-        self.paste_agent(addr.to_owned(), Value::String(text), window, cx);
+        let (Some(parent), Some(id)) = (a["terminal"].as_str(), a["id"].as_str()) else { return };
+        let key = format!("sub:{parent}:{id}");
+        if !self.canvas_state.doc.cards.iter().any(|c| c.key() == key) { return self.fail("No such sub-agent cell"); }
+        match a["text"].as_str() {
+            Some(text) => self.wire_say(&[key], text, window, cx),
+            None => self.wire_open(vec![key], window, cx),
+        }
     }
 
     pub(super) fn check_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1115,6 +1124,8 @@ impl AppWindow {
     }
 
     pub(super) fn canvas_changed(&mut self, cx: &mut Context<Self>) {
+        // Closing a cell removes its wires.
+        self.canvas_state.doc.prune_wires();
         self.canvas_state.save.dirty = true;
         self.canvas_state.save_task = None;
         self.canvas_state.save.pending = false;
@@ -1500,6 +1511,8 @@ impl AppWindow {
                     let Some(term) = this.terms.get("canvas-panel").filter(|t| t.address == addr) else { return false };
                     if !term.view.read(cx).paste_quote(&text) { return false; }
                     term.focus.focus(window, cx);
+                    // A quote is a postcard from you that was pasted, not submitted.
+                    if !quote.is_string() { this.wire_log_quote(&addr, &quote, &text, window, cx); }
                     true
                 });
                 if !matches!(done, Ok(false)) { break; }
@@ -1855,6 +1868,7 @@ impl AppWindow {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    if this.wire_menu(e.position, window, cx) { cx.stop_propagation(); return; }
                     let origin = this
                         .bounds
                         .borrow()
@@ -1885,6 +1899,7 @@ impl AppWindow {
                 // Reached only on empty canvas: pills, space labels and controls stop propagation.
                 // A click without movement just focuses the canvas; moving pans.
                 cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                    if this.wire_click(e.position, window, cx) { return; }
                     this.focus.focus(window, cx);
                     this.canvas_state.selected.clear();
                     this.canvas_state.drag = Some((None, e.position));
@@ -1893,6 +1908,7 @@ impl AppWindow {
                 }),
             )
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
+                if this.wire_pointer(e, cx) { return; }
                 // The button came up outside the window: end any drag instead of panning on hover.
                 if e.pressed_button.is_none()
                     && (this.canvas_state.drag.is_some() || this.canvas_state.space_drag.is_some() || this.canvas_state.preview_drag.is_some())
@@ -2019,6 +2035,7 @@ impl AppWindow {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, e: &MouseUpEvent, window, cx| {
+                    if this.wire_release(e.position, window, cx) { return; }
                     // A click that did not pan, inside a space: its files go to the panel tree.
                     let click = matches!(this.canvas_state.drag, Some((None, _))) && !this.canvas_state.pan_moved;
                     this.canvas_state.end_drag();
@@ -2190,58 +2207,16 @@ impl AppWindow {
                 card
             })
             .collect();
-        let mut edges: Vec<_> = cards
-            .values()
-            .filter_map(|(child, rect)| {
-                let parent = self.live.get(&child.terminal)?["parent"].as_str()?;
-                let (_, parent_rect) = cards.get(parent)?;
-                let ends = canvas::edge_ends(*parent_rect, *rect);
-                canvas::edge_visible(camera, ends, viewport).then_some(ends)
-            })
-            .collect();
         let mut sub_pills = Vec::new();
         if state.doc.view != canvas::View::Terminals {
             for card in state.doc.cards.iter().filter(|c| c.sub.is_some()) {
                 let Some(parent) = card.parent.as_ref() else { continue };
                 let Some(sub) = state.subs.get(parent).into_iter().flatten().find(|s| Some(&s.id) == card.sub.as_ref()) else { continue };
-                if let Some((_, parent_rect)) = cards.get(parent.as_str()) {
-                    let ends = canvas::edge_ends(*parent_rect, card.rect);
-                    if canvas::edge_visible(camera, ends, viewport) { edges.push(ends); }
-                }
                 if canvas::visible(camera, card.rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), card.clone())); }
             }
         }
-        area = area.child(
-            canvas(
-                |_, _, _| {},
-                move |b, _, window, _| {
-                    for (a, z) in &edges {
-                        let a = camera.to_screen(*a);
-                        let z = camera.to_screen(*z);
-                        let p = |v: [f32; 2]| point(b.origin.x + px(v[0]), b.origin.y + px(v[1]));
-                        let mut path = PathBuilder::stroke(px(1.));
-                        path.move_to(p(a));
-                        path.cubic_bezier_to(
-                            p(z),
-                            p([(a[0] + z[0]) / 2., a[1]]),
-                            p([(a[0] + z[0]) / 2., z[1]]),
-                        );
-                        if let Ok(path) = path.build() {
-                            window.paint_path(path, c("muted-foreground").opacity(0.5));
-                        }
-                        window.paint_quad(
-                            fill(
-                                Bounds::new(p([z[0] - 3., z[1] - 3.]), size(px(6.), px(6.))),
-                                c("muted-foreground"),
-                            )
-                            .corner_radii(px(3.)),
-                        );
-                    }
-                },
-            )
-            .absolute()
-            .size_full(),
-        );
+        let (edge_layer, edge_marks) = self.wire_layer(viewport, cx);
+        area = area.child(edge_layer).children(edge_marks);
         let mut pills = Vec::new();
         for (parent, sub, card) in sub_pills {
             let rect = card.rect;
@@ -2446,6 +2421,7 @@ impl AppWindow {
         }
         pills.sort_by_key(|(z, _)| *z);
         for (_, pill) in pills { area = area.child(pill); }
+        area = area.children(self.wire_handles(cx));
         let mut tabs = div()
             .absolute()
             .top(px(12.))
@@ -2820,6 +2796,7 @@ impl AppWindow {
                 );
             }
             panel = panel.child(body);
+            if let Some(footer) = self.wire_footer() { panel = panel.child(footer); }
             row = row.child(panel);
         }
         row.into_any_element()
@@ -2918,6 +2895,8 @@ fn rendered(path: &str) -> bool {
 
 fn preview_source(path: &str) -> String {
     match canvas::read_preview(std::path::Path::new(path)) {
+        // Wire postcards: a conversation, every word of it plain text.
+        Ok(text) if crate::wire::is_thread(path) => numbered_code(&crate::wire::thread_markdown(&text, &crate::wire::name_of).unwrap_or_else(|| "No postcards yet. Type below to write on this space's wires.".into())),
         Ok(text) if std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl")) => {
             numbered_code(&crate::subs::transcript_markdown(&text, path).unwrap_or(text))
         }

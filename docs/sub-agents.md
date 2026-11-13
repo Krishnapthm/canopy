@@ -6,8 +6,8 @@ not independent terminals.
 
 Drag a cell to keep it somewhere else. Click to follow its read-only
 transcript in the side panel, including when the file appears later.
-"Message through parent" pastes an addressed message into the parent's
-prompt without Enter. Pick "Clear finished" on the parent to remove its
+"Message through parent" opens the Wire thread: what you type there reaches the
+sub-agent through its parent, addressed to it (see wire.md). Pick "Clear finished" on the parent to remove its
 done cells, or select a done cell and press Backspace or Delete. Working
 cells refuse deletion with a toast. Ending the parent session clears all
 its sub-agent cells.

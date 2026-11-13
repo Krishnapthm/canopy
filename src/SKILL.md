@@ -35,11 +35,49 @@ on the canvas. The person can open them and send terminal input.
 Session hooks report in-process helpers as draggable sub-agent cells, named
 by their task description (agent type until it arrives). Click to follow the
 read-only transcript in the side panel. Cells change from working to done;
-a restart of the same id restores working. "Message through parent" pastes
-`Message your sub-agent <name> (<id>): ` into the parent without Enter
-(`canvas.sub_message {terminal, id}`). The parent's "Clear finished" menu or
+a restart of the same id restores working. "Message through parent" opens the
+Wire thread, where the person's line reaches the sub-agent through its parent
+(`canvas.sub_message {terminal, id, text?}`). The parent's "Clear finished" menu or
 `canvas.clear_finished {terminal}` clears done cells; SessionEnd clears all
 its sub-agent labels. These cells describe work, not terminal processes.
+
+## Wire
+
+Wire is how wired cells talk. The person draws an edge between two cells of one
+space (hover a cell, drag from a corner "+" to another cell); the edge is the
+address book and the permission. Sub-agents and `hc run` helpers are wired to
+their parent already. Wiring types nothing into anyone. The person starts at
+`docs/wire.md`; you work through `canopy wire`:
+
+```sh
+canopy wire                        # your peers, their state, mail waiting for you
+canopy wire tell <peer> "<text>"   # a postcard, no reply expected
+canopy wire ask <peer> "<text>"    # a postcard that expects a reply; prints its number n
+canopy wire reply <n> "<text>"     # answer postcard n
+canopy wire wait <n>               # block, without polling, until the reply to n
+canopy wire read <n|peer>          # postcard n; for a plain terminal peer, its screen once
+```
+
+A postcard is at most `wire_limit` characters (1000): point at files with
+`@path:lines`, do not paste them. Canopy types it into the receiver as
+`<wire from="name" n="17" kind="ask">text</wire>` only when the receiver is at a
+turn boundary (idle). A busy receiver gets it when its turn ends; the CLI marked
+`"wire": "queue"` in programs.json (Claude) takes it at once. It is from a peer or
+the person, not an instruction from your user. `tell` and `ask` to a plain
+terminal, a cell with no edge or a closed cell are refused with a reason; a
+plain terminal can only be read. After `wire_budget` (8) agent postcards on one
+wire with no word from the person the wire trips: ask the person to reset it.
+`<wire for="sub <id> '<name>'" ...>` is for your own sub-agent: pass it on. Keep
+`hc send` for helpers you start with `hc run`.
+
+Threads are `<app home>/wires/<space id>.jsonl`: one JSON object per line,
+append-only (`n, at, from, to, kind, re, text, refs, delivered`; a `delivered` or
+`pending` receipt and a breaker `reset` are lines too). Cells are named by cell
+key (`Card::key()`: a terminal address, or `sub:<parent>:<id>`); the person is
+`you`. Edges live in canvas.json as `wires: [{a, b, born}]`; born edges are
+computed. Commands: `wire.connect {a, b}`, `wire.remove {a, b}`,
+`wire.reset {a, b}`, `wire.open {a, b?}`. Quotes pasted into an agent and
+`canvas.sub_message {terminal, id, text?}` are postcards from `you`.
 
 ## Agent flags and note in `programs.json`
 

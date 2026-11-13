@@ -2050,12 +2050,15 @@ impl AppWindow {
         if let Some(error)=self.canvas_state.error.take() { self.layout_notice("Canvas", &error, window, cx); }
         let visible: HashSet<String> = self.visible_addresses().into_iter().collect();
         let mut alerts = Vec::new();
+        // Terminals that reached a turn boundary (idle, or an agent just started): Wire's postman rings them.
+        let mut rings = Vec::new();
         for (addr, rec) in &self.live {
             let word = rec.get("status").and_then(Value::as_str).map(str::to_owned);
             let app = rec.get("report").and_then(|r| r.get("app")).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
             let looking = visible.contains(addr) && self.window_active;
             let prev = self.model.agents.get(addr).and_then(|a| a.word.clone());
             let child = rec.get("parent").and_then(Value::as_str).is_some_and(|p| !p.is_empty());
+            if prev.as_deref() != word.as_deref() && matches!(word.as_deref(), Some("idle" | "done")) { rings.push(addr.clone()); }
             if let Some(alert) = self.model.alert_for(addr, child, prev.as_deref(), word.as_deref(), looking) {
                 alerts.push((addr.clone(), alert, looking));
             }
@@ -2072,6 +2075,8 @@ impl AppWindow {
                 self.alert(&addr, alert, looking, window, cx);
             }
         }
+        for addr in rings { self.wire_postman(&addr, window, cx); }
+        if !self.listed_once { self.refresh_wires(window, cx); }
         self.track_folders(cx);
         for (address, view) in self.terminal_views(cx) {
             if self.live.get(&address).is_some_and(|r| r["pid"].as_u64().is_some()) {
@@ -2898,6 +2903,7 @@ impl AppWindow {
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
             "canvas.sub_message" => self.message_sub(a, window, cx),
+            "wire.connect" | "wire.remove" | "wire.reset" | "wire.open" => self.wire_command(name, a, window, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
             "app.menu" => {
