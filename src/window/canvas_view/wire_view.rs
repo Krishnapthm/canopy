@@ -75,7 +75,11 @@ impl AppWindow {
             return (*view != canvas::View::Terminals).then_some(card.rect);
         }
         if !canvas::view_allows(view, self.live.get(&card.terminal).is_some_and(canvas_agent)) { return None; }
-        let size = self.canvas_state.pill_sizes.borrow().get(&card.terminal).map(|v| v.3).unwrap_or([240., 36.]);
+        // Match the drawn cell: an expanded one has its own size, a pill its measured one.
+        let size = match card.size {
+            Some(_) => [card.rect[2].max(canvas::PILL_WIDTH), card.rect[3].max(canvas::HEADER)],
+            None => self.canvas_state.pill_sizes.borrow().get(&card.terminal).map(|v| v.3).unwrap_or([240., 36.]),
+        };
         Some([card.rect[0], card.rect[1], size[0], size[1]])
     }
 

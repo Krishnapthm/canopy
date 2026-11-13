@@ -1751,12 +1751,13 @@ impl AppWindow {
         let current = self.keyboard_space();
         let fit_rects = if name == "canvas.fit" {
             let doc = &self.canvas_state.doc;
-            match current.as_deref().and_then(|id| doc.spaces.iter().find(|s| s.space == id)) {
+            let picked: Vec<_> = doc.cards.iter().filter(|c| self.canvas_state.selected.contains(&c.key())).map(|c| self.pill_rect(c, cx)).collect();
+            if !picked.is_empty() { picked } else { match current.as_deref().and_then(|id| doc.spaces.iter().find(|s| s.space == id)) {
                 Some(space) => vec![space.rect],
                 None => doc.cards.iter().filter(|c| doc.space_of(&c.key()).is_none()).map(|c| self.pill_rect(c, cx))
                     .chain(doc.previews.iter().filter(|p| canvas::space_at(&doc.spaces,
                         [p.rect[0] + p.rect[2] / 2., p.rect[1] + p.rect[3] / 2.]).is_none()).map(|p| p.rect)).collect(),
-            }
+            } }
         } else { vec![] };
         let from = self.canvas_state.doc.camera;
         let state = &mut self.canvas_state;
@@ -2401,13 +2402,9 @@ impl AppWindow {
             let [x, y] = camera.to_screen([card.rect[0], card.rect[1]]);
             let z = camera.zoom;
             let rename_addr = addr.clone();
-            // An expanded cell is a pill (its header) over a live terminal; below half zoom it is just the pill.
-            let expanded = card.size.is_some() && z >= canvas::EXPANDED_MIN_ZOOM;
-            let [cw, ch] = if card.size.is_some() && !expanded {
-                state.pill_sizes.borrow().get(&addr).map(|v| v.3).unwrap_or([240., 36.])
-            } else {
-                [card.rect[2], card.rect[3]]
-            };
+            // An expanded cell is a pill (its header) over a terminal; it keeps its world size at every zoom.
+            let expanded = card.size.is_some();
+            let [cw, ch] = [card.rect[2], card.rect[3]];
             let frame_color = c(if state.selected.contains(&addr) { "ring" } else { "border" });
             let mut pill = div()
                 .id(SharedString::from(format!("canvas-{addr}")))
@@ -2523,26 +2520,8 @@ impl AppWindow {
                     this.canvas_state.drag = Some((Some(drag_addr.clone()), e.position));
                     cx.stop_propagation();
                     if e.click_count == 2 {
-                        let center = this
-                            .bounds
-                            .borrow()
-                            .get("canopy-canvas")
-                            .map(|b| [f32::from(b.size.width) / 2., f32::from(b.size.height) / 2.])
-                            .unwrap_or([400., 300.]);
-                        if let Some(c) = this
-                            .canvas_state
-                            .doc
-                            .cards
-                            .iter()
-                            .find(|c| c.terminal == drag_addr)
-                        {
-                            this.canvas_state.doc.camera = canvas::Camera {
-                                x: c.rect[0] + this.pill_rect(c, cx)[2] / 2. - center[0],
-                                y: c.rect[1] + 18. - center[1],
-                                zoom: 1.,
-                            };
-                            this.canvas_changed(cx);
-                        }
+                        // Fit the selection; the fit key or another double-click returns to the view before.
+                        this.canvas_command("canvas.fit", window, cx);
                     }
                     if let Some(p) = this.model.pane_of(&addr) {
                         this.model.focus_pane(&p);
@@ -2555,9 +2534,9 @@ impl AppWindow {
                 pills.push((card.z, pill.into_any_element()));
                 continue;
             }
-            // The body: the terminal, or a flat stand-in while the zoom moves (live text at every pinch step would fill the glyph cache).
+            // The body: the terminal, or a flat stand-in while the zoom moves or is too far out to read (live text at every pinch step would fill the glyph cache).
             let slot = cell_slot(&card.terminal);
-            let live = self.terms.get(&slot).filter(|_| self.camera_rested());
+            let live = self.terms.get(&slot).filter(|_| self.camera_rested() && z >= canvas::EXPANDED_MIN_ZOOM);
             let body_size = size(px(card.rect[2] - 2.), px(card.rect[3] - canvas::HEADER - 2.));
             if let Some(t) = self.terms.get(&slot) {
                 let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.terminal);

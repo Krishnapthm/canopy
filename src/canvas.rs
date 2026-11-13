@@ -23,7 +23,7 @@ impl SaveSchedule {
 pub const PILL_WIDTH: f32 = 220.;
 /// The header strip of an expanded cell at zoom 1: the pill's one-line height.
 pub const HEADER: f32 = 36.;
-/// Below this camera zoom an expanded cell is drawn as its pill.
+/// Below this camera zoom an expanded cell shows a flat stand-in instead of live text.
 pub const EXPANDED_MIN_ZOOM: f32 = 0.5;
 
 pub const ZOOMS: [f32; 12] = [
