@@ -8,7 +8,8 @@ pixels from its neighbours, and spaces keep the same gap from each other.
 - Drag a cell, or resize a preview: neighbours step aside and return when you
   move on. Drag toward a space's edge: the space grows and pushes the spaces
   next to it, with their cells. Spaces never shrink by themselves.
-- Click a cell to select it. Shift-click adds or removes cells. Click empty
+- Enter [canvas mode](keys.md) to select a collapsed cell without expanding it.
+  Click a cell to select it. Shift-click adds or removes cells. Click empty
   canvas to clear the selection.
 - Right-click a space, a cell or empty canvas: **Arrange** repeats the last
   layout, **Arrange >** picks one. **Tidy** is a grid in reading order, **Row**
@@ -64,3 +65,16 @@ and sub-agent transcripts only.
   moving (and 160 ms after) the body is a flat fill and the header stays; text
   returns once it rests. Below 0.5 zoom the cell draws as its pill. No timer
   runs while nothing moves.
+
+## Focus fit
+
+Press Cmd+Shift+F (Ctrl+Shift+F with canvas focus), mode `f`, or the focus icon
+beside the folder icon to fit the current space. The canvas bounds already
+exclude the file panel, so the space centres in the visible area. The first
+press remembers the camera; the second restores it exactly, even if the first
+animation is still moving. With no current space, it fits the root cells.
+
+Keyboard arrows select by centre distance in the requested half-plane. Ties
+keep document order; no cell in that direction leaves selection unchanged.
+Shift+arrows move one `canvas::GAP`, run the same solver as dragging, save once,
+and replace the single undo snapshot.

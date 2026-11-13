@@ -33,6 +33,7 @@ function items(p, git, agents) {
     case "primary": return tg.items ?? [];
     case "canvas-editors": return [["Open here", "panel.editor", { choice: "here", path: tg.path }, { icon: "mods/workspace-chrome/square-pen.svg", tint: true }],
       ...(tg.editors ?? []).map(e => [`Open in ${e.name}`, "panel.editor", { choice: e.key, path: tg.path }, e])];
+    case "canvas-agents": return agentItems(agents, at);
     case "canvas-empty": return [
       ["New terminal", "canvas.create", at],
       ["Open file...", "preview.open", { point: tg.point }],
@@ -151,7 +152,7 @@ export default class Menu extends View {
     this.handle.focus();
     const p = props();
     // Checked when the menu opens: it runs a login shell, so it can take seconds.
-    if (p?.tab === "canvas-empty")
+    if (["canvas-empty", "canvas-agents"].includes(p?.tab))
       cx.spawn(async (cx) => {
         this.agents = await knownAgents({ on: p.target?.machine }).catch(() => []);
         cx.notify();

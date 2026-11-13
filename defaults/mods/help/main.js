@@ -15,6 +15,12 @@ const GROUPS = [
 ];
 
 function label(action) {
+  if (action.startsWith("{")) {
+    const binding = JSON.parse(action);
+    if (typeof binding.command !== "string") return "invalid binding";
+    if (binding.command === "canvas.arrange" && binding.args?.picker) return "choose canvas layout";
+    return label(binding.command) + (binding.args ? ` ${JSON.stringify(binding.args)}` : "");
+  }
   if (action.startsWith("send:")) return "type " + JSON.stringify(action.slice(5));
   const [name, arg] = action.split(":");
   const words = name.replace(/[._]/g, " ");

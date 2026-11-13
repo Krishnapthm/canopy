@@ -316,8 +316,8 @@ is present (an empty string means no folder); omitting it opens the Choose space
 
 ## Canvas selection and views
 
-Click a cell to select it. The canvas keeps the keyboard until an expanded
-terminal is clicked. `canvas.close` (Backspace or Delete) closes the selection: running agents
+Click a pill to expand it. Canvas mode selects cells without expanding them;
+Enter focuses the selected terminal, and Esc leaves with selection unchanged. `canvas.close` (Backspace or Delete) closes the selection: running agents
 always ask "Terminate <name> and close?"; plain terminals ask "Close this
 terminal?" with "Don't ask again". That choice writes
 `confirm_close_terminal: false` to settings.json (default true). Done
@@ -326,4 +326,19 @@ sub-agent cells clear; working ones refuse with a toast.
 Views are in the macOS View menu or the Linux titlebar's primary menu
 (`app.menu`, optionally with a `group`);
 the active view is checked. `view.agents`, `view.all`, `view.terminals` and
-their keys still work. The canvas toolbar keeps the file button.
+their keys still work. The canvas toolbar has file and focus-fit buttons.
+
+Canvas mode: Cmd+J / Ctrl+Shift+J runs `canvas.mode`. A window flag gives the
+`canvas-mode` key section first refusal; unbound keys are swallowed, with no
+idle timer. The hint mod reads the bindings with `keys()`. Dialogs and menus
+keep their own keys. `canvas.leave` cancels a pending connection or leaves
+mode; `canvas.enter` connects or expands the selection and leaves mode.
+`canvas.go {direction: "left" | "right" | "up" | "down"}` selects without
+expanding; `canvas.space {direction: "next" | "prev"}` changes space.
+`canvas.collapse` collapses; `canvas.connect` starts choosing a peer;
+`canvas.thread` opens the selected wire or the cell's first wire.
+`canvas.nudge {direction}` moves one gap with one undo step; `canvas.new`
+creates a terminal here and `canvas.agents` lists installed agents here.
+`canvas.fit` toggles between fitting the current space in the visible canvas
+(excluding the file panel) and the previous camera. The focus icon beside the
+folder icon does the same. See docs/keys.md for keys and preserved collisions.

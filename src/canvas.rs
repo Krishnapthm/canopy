@@ -87,6 +87,25 @@ impl Camera {
         self.y = bounds[1] + bounds[3] / 2. - viewport[1] / self.zoom / 2.;
     }
 }
+/// Toggle a space fit using the visible canvas size, remembering the camera only once.
+pub fn focus_fit(camera: &mut Camera, previous: &mut Option<Camera>, rects: &[Rect], visible: Point) {
+    if let Some(saved) = previous.take() {
+        *camera = saved;
+    } else if !rects.is_empty() {
+        *previous = Some(*camera);
+        camera.fit(rects, visible);
+    }
+}
+
+/// The nearest centre in a strict half-plane; equal distances keep document order.
+pub fn nearest(rects: &[Rect], from: Rect, direction: Point) -> Option<usize> {
+    let center = [from[0] + from[2] / 2., from[1] + from[3] / 2.];
+    rects.iter().enumerate().filter_map(|(i, r)| {
+        let d = [r[0] + r[2] / 2. - center[0], r[1] + r[3] / 2. - center[1]];
+        (d[0] * direction[0] + d[1] * direction[1] > 0.).then_some((i, d[0] * d[0] + d[1] * d[1]))
+    }).min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0))).map(|(i, _)| i)
+}
+
 pub fn zoom_factor(delta: f32) -> f32 { delta.clamp(-10., 10.).exp() }
 pub fn ease_out(t: f32) -> f32 { 1. - (1. - t.clamp(0., 1.)).powi(3) }
 pub fn friction(dt: f32) -> f32 { 0.92_f32.powf(dt / 0.016) }
@@ -1290,5 +1309,42 @@ mod cell_tests {
         assert!(person.confirm_close_terminal);
         let person: crate::settings::Person = serde_json::from_str(r#"{"confirm_close_terminal":false}"#).unwrap();
         assert!(!person.confirm_close_terminal);
+    }
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use super::*;
+
+    #[test]
+    fn nearest_cell_uses_strict_direction_distance_and_document_order_for_ties() {
+        let from = [0., 0., 10., 10.];
+        let rects = [[20., 10., 10., 10.], [20., -10., 10., 10.], [-1., 0., 10., 10.], [0., 20., 10., 10.]];
+        assert_eq!(nearest(&rects, from, [1., 0.]), Some(0));
+        assert_eq!(nearest(&rects, from, [-1., 0.]), Some(2));
+        assert_eq!(nearest(&rects, from, [0., 1.]), Some(3));
+        assert_eq!(nearest(&[from, [0., -20., 10., 10.]], from, [1., 0.]), None);
+        assert_eq!(nearest(&[], from, [1., 0.]), None);
+    }
+
+    #[test]
+    fn focus_fit_centres_in_visible_canvas_and_returns_to_exact_camera() {
+        let original = Camera { x: -123., y: 99., zoom: 1.25 };
+        let mut camera = original;
+        let mut previous = None;
+        let space = [500., 200., 900., 600.];
+        let visible = [800., 700.]; // A 1200 px window with a 400 px file panel.
+        focus_fit(&mut camera, &mut previous, &[space], visible);
+        assert_eq!(previous, Some(original));
+        let center = camera.to_screen([space[0] + space[2] / 2., space[1] + space[3] / 2.]);
+        assert!((center[0] - visible[0] / 2.).abs() < 0.001);
+        assert!((center[1] - visible[1] / 2.).abs() < 0.001);
+        assert!(space[2] * camera.zoom <= visible[0] - 48.);
+        assert!(space[3] * camera.zoom <= visible[1] - 48.);
+        focus_fit(&mut camera, &mut previous, &[space], visible);
+        assert_eq!(camera, original);
+        assert_eq!(previous, None);
+        focus_fit(&mut camera, &mut previous, &[], visible);
+        assert_eq!(previous, None);
     }
 }

@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 /// The reserved shortcut that restores the default layout and keys.
 pub const ESCAPE_HATCH: &str = "ctrl-alt-shift-escape";
 
-/// The shipped keys: prefix-free; plain ctrl+letter always stays with the
+/// The shipped keys: plain ctrl+letter always stays with the
 /// program. Canopy uses ctrl+shift (defaults/keys.json), or cmd on macOS
 /// (defaults/keys.macos.json, with Mac terminal editing keys).
 #[cfg(not(target_os = "macos"))]
@@ -36,6 +36,7 @@ pub const DEFAULTS: &str = include_str!("../defaults/keys.macos.json");
 // Keep these when defaults change: only untouched shipped files may migrate.
 #[cfg(any(not(target_os = "macos"), test))]
 const SHIPPED_KEYS: &[&str] = &[
+    include_str!("keys/shipped/v0.1.15-dev3-keys.json"),
     include_str!("keys/shipped/v0.1.15-dev2-keys.json"),
     include_str!("keys/shipped/v0.1.15-dev-keys.json"),
     include_str!("keys/shipped/v0.1.4-keys.json"),
@@ -44,6 +45,7 @@ const SHIPPED_KEYS: &[&str] = &[
 ];
 #[cfg(any(target_os = "macos", test))]
 const SHIPPED_MACOS_KEYS: &[&str] = &[
+    include_str!("keys/shipped/v0.1.15-dev3-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-dev2-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-dev-keys.macos.json"),
     include_str!("keys/shipped/v0.1.4-keys.macos.json"),
@@ -124,11 +126,12 @@ fn tab(section: &str) -> Result<String, String> {
     match section {
         "global" => Ok("Canopy".into()),
         "terminal" => Ok("Terminal".into()),
+        "canvas-mode" => Ok("CanvasMode".into()),
         s => match (s.strip_prefix("mod:"), s.strip_prefix("layout:")) {
             (Some(p), _) if !p.is_empty() => Ok(format!("mod == {p}")),
             // While layouts/<name>.json is shown (the window's tab says which).
             (_, Some(l)) if !l.is_empty() => Ok(format!("layout == {l}")),
-            _ => Err(format!("unknown section {s:?}: use \"global\", \"terminal\", \"layout:<name>\" or \"mod:<name>\"")),
+            _ => Err(format!("unknown section {s:?}: use \"global\", \"terminal\", \"canvas-mode\", \"layout:<name>\" or \"mod:<name>\"")),
         },
     }
 }
@@ -245,6 +248,10 @@ pub fn parse(text: &str) -> Result<Vec<KeyBinding>, String> {
                 let native: Option<Box<dyn gpui::Action>> = None;
                 native.unwrap_or_else(|| Box::new(ShellAction::new(action.clone())))
             };
+            if section == "canvas-mode" && keys.split_whitespace().count() != 1 {
+                problems.push(format!("canvas-mode.{keys}: use one key, not a sequence"));
+                continue;
+            }
             let binding = KeyBinding::load(keys, action, predicate, false, None, &gpui::DummyKeyboardMapper);
             match binding {
                 Ok(b) => out.push(b),
@@ -258,6 +265,21 @@ pub fn parse(text: &str) -> Result<Vec<KeyBinding>, String> {
 /// The UI kit's own keys (text editing in inputs, lists): bound at its init,
 /// kept across every reload of keys.json.
 struct KitKeys(Vec<KeyBinding>);
+
+struct CanvasKeys(Vec<KeyBinding>);
+impl gpui::Global for CanvasKeys {}
+
+fn is_canvas(binding: &KeyBinding) -> bool {
+    binding.predicate().as_deref() == Some(&KeyBindingContextPredicate::parse("CanvasMode").unwrap())
+}
+
+/// Resolve only the mode section; no match still belongs to the mode, never the terminal.
+pub fn canvas_action(key: &gpui::Keystroke, cx: &App) -> Option<Box<dyn gpui::Action>> {
+    cx.try_global::<CanvasKeys>()?.0.iter().rev()
+        .find(|b| b.match_keystrokes(&[key.clone()]) == Some(false))
+        .map(|b| b.action().boxed_clone())
+}
+
 impl gpui::Global for KitKeys {}
 
 /// Restores kit bindings, installs user bindings, then adds reserved bindings.
@@ -269,6 +291,8 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
     let kit = cx.global::<KitKeys>().0.clone();
     cx.clear_key_bindings();
     cx.bind_keys(kit);
+    let (mode, bindings): (Vec<_>, Vec<_>) = bindings.into_iter().partition(is_canvas);
+    cx.set_global(CanvasKeys(mode));
     cx.bind_keys(bindings);
     cx.bind_keys([
         KeyBinding::new(ESCAPE_HATCH, ShellAction::new("app.reset"), None),
@@ -430,6 +454,19 @@ mod tests {
             assert_eq!(crate::commands::shorthand(crate::commands::find(name).unwrap(), payload), json!({"name":value}));
         }
         assert_eq!(crate::commands::shorthand(crate::commands::find("tab.select").unwrap(), "3"), json!({"index":3}));
+    }
+
+    #[gpui::test]
+    fn canvas_section_is_separate_from_normal_keymap(cx: &mut gpui::TestAppContext) {
+        let bindings = super::parse(r#"{"global":{"x":"app.help"},"terminal":{"x":"terminal.copy"},"canvas-mode":{"x":"canvas.collapse","escape":"canvas.leave"}}"#).unwrap();
+        cx.update(|cx| {
+            super::install(bindings, cx);
+            let action = super::canvas_action(&gpui::Keystroke::parse("x").unwrap(), cx).unwrap();
+            assert_eq!(action.as_any().downcast_ref::<gpui_shell::action::ShellAction>().unwrap().id(), "canvas.collapse");
+            assert!(super::canvas_action(&gpui::Keystroke::parse("q").unwrap(), cx).is_none());
+            assert!(!cx.key_bindings().borrow().bindings().any(super::is_canvas));
+        });
+        assert!(super::parse(r#"{"canvas-mode":{"g g":"canvas.mode"}}"#).is_err());
     }
 
     #[test]

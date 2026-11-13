@@ -452,6 +452,7 @@ pub struct AppWindow {
     _tasks: Vec<Task<()>>,
     /// Gives the keyboard back when what had it leaves the screen (`restore_focus`).
     _focus_lost: Option<Subscription>,
+    _canvas_keys: Option<Subscription>,
     /// Remembers where the window is (`place.rs`); the write waiting to settle.
     _place: Option<Subscription>,
     place_write: Option<Task<()>>,
@@ -539,9 +540,17 @@ impl AppWindow {
             focus: cx.focus_handle(),
             _tasks: Vec::new(),
             _focus_lost: None,
+            _canvas_keys: None,
             _place: None,
             place_write: None,
         };
+        let owner = cx.weak_entity();
+        let owner_window = window.window_handle();
+        w._canvas_keys = Some(cx.intercept_keystrokes(move |event, window, cx| {
+            if window.window_handle() != owner_window { return; }
+            let swallowed = owner.update(cx, |this, cx| this.canvas_key(&event.keystroke, window, cx)).unwrap_or(false);
+            if swallowed { cx.stop_propagation(); }
+        }));
         w._focus_lost = Some(cx.on_focus_lost(window, |this, window, cx| this.restore_focus(window, cx)));
         w._place = Some(cx.observe_window_bounds(window, |this, window, cx| {
             if let Some(t) = crate::place::changed(window, cx) {
@@ -836,6 +845,7 @@ impl AppWindow {
             match crate::keys::load() {
                 Ok(bindings) => {
                     crate::keys::install(bindings, cx);
+                    self.refresh_mods(cx);
                     let _ = std::fs::remove_file(file("keys.error"));
                 }
                 Err(e) => {
@@ -1449,8 +1459,8 @@ impl AppWindow {
         let tab_shown = self.shows_tab();
         let revealed = tab_shown && !self.tab_shown;
         self.tab_shown = tab_shown;
-        if self.has_canvas() && let Some(t) = self.focused_cell() {
-            if no_dialog { t.focus.focus(window, cx); }
+        if self.has_canvas() && !self.canvas_state.mode && let Some(t) = self.focused_cell() {
+            if no_dialog && !self.focus.is_focused(window) { t.focus.focus(window, cx); }
         } else if terminal_block(&self.chrome, focused.as_deref()).is_some() {
             if pane_changed && no_dialog && let Some(f) = focused.as_deref().and_then(|p| self.pane_focus(p, cx)) {
                 f.focus(window, cx);
@@ -1534,7 +1544,7 @@ impl AppWindow {
             return self.hand_keyboard();
         }
         let shown = if self.has_canvas() {
-            self.focused_cell().map(|t| t.focus.clone())
+            self.focused_cell().filter(|_| !self.canvas_state.mode).map(|t| t.focus.clone())
         } else if terminal_block(&self.chrome, self.focused_pane.as_deref()).is_some() {
             self.focused_pane.as_deref().and_then(|p| self.pane_focus(p, cx))
         } else if let Some(block) = self.agent_block() {
@@ -2898,6 +2908,7 @@ impl AppWindow {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
+            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.collapse" | "canvas.connect" | "canvas.thread" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
             "canvas.sub_message" => self.message_sub(a, window, cx),
@@ -4856,7 +4867,7 @@ impl Render for AppWindow {
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
                 let k = &e.keystroke;
                 if k.key == "space" && !k.modifiers.modified() && !this.canvas_state.space_down
-                    && this.has_canvas() && this.focus.is_focused(window)
+                    && this.has_canvas() && !this.canvas_state.mode && this.focus.is_focused(window)
                 {
                     this.canvas_state.space_down = true;
                     cx.notify();
@@ -5570,6 +5581,101 @@ mod tests {
         let (view, cx) = cx.add_window_view(|window, cx| super::AppWindow::new(crate::hc::offline(), requests, window, cx));
         assert_eq!(view.update(cx, |this, _| this.layout_name.clone()), "test");
         (view, cx)
+    }
+
+    #[test]
+    fn canvas_keyboard_routing_and_geometry() {
+        in_own_process("keyboard_routing_and_geometry");
+    }
+
+    #[gpui::test]
+    fn keyboard_routing_and_geometry(cx: &mut TestAppContext) {
+        use serde_json::json;
+        if !running_alone("keyboard_routing_and_geometry") { return; }
+        let (view, cx) = open_window(cx, "canvas-keys", "", json!({"id":"root", "type":"canvas"}));
+        cx.run_until_parked();
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.model.add_space("root", "Canvas", &super::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
+            this.model.space_mut("root").unwrap().tabs.push(crate::model::Tab::new("tab2", "", "pane2", "t2"));
+            this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
+            this.live.insert("t2".into(), json!({"state":"live", "pid":2}));
+            this.canvas_state.doc.cards = serde_json::from_value(json!([
+                {"terminal":"t1", "rect":[0,0,220,36], "z":0},
+                {"terminal":"t2", "rect":[500,0,220,36], "z":1}
+            ])).unwrap();
+            crate::keys::install(crate::keys::parse(r#"{"global":{"l":"canvas.close"},"canvas-mode":{"l":"canvas.go:right","escape":"canvas.leave"}}"#).unwrap(), cx);
+            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
+            assert!(this.canvas_state.mode);
+            assert_eq!(this.canvas_state.selected, ["t1"]);
+            assert!(this.canvas_key(&gpui::Keystroke::parse("q").unwrap(), window, cx), "unbound keys are swallowed");
+        }));
+        cx.simulate_keystrokes("q l");
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            assert_eq!(this.canvas_state.selected, ["t2"]);
+            assert!(!this.overlays.iter().any(|o| o.kind.modal_keys()), "global close did not take the mode key");
+            assert!(this.canvas_state.doc.cards.iter().all(|c| c.size.is_none()));
+            this.canvas_keyboard("canvas.nudge", &json!({"direction":"right"}), window, cx);
+            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 500. + crate::canvas::GAP);
+            this.undo_canvas(window, cx);
+            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 500.);
+            this.undo_canvas(window, cx);
+            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 500., "only one undo step");
+            this.canvas_keyboard("canvas.connect", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            assert_eq!(this.canvas_state.doc.wires.len(), 1);
+            assert!(this.canvas_state.mode);
+            this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
+            assert!(!this.canvas_state.mode);
+            assert!(!this.canvas_key(&gpui::Keystroke::parse("q").unwrap(), window, cx));
+            assert!(this.focus.is_focused(window));
+            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.connect", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
+            assert!(this.canvas_state.mode, "Escape cancels the connection before leaving mode");
+            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            assert!(!this.canvas_state.mode);
+            assert!(this.focused_cell().unwrap().focus.is_focused(window));
+            this.model.focus_pane("pane2");
+            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            assert_eq!(this.model.focused_pane().as_deref(), Some("pane1"));
+            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
+            this.sync(window, cx);
+            assert!(this.focus.is_focused(window), "Escape keeps canvas focus across later syncs");
+            this.set_expanded("t1", false, window, cx);
+        }));
+        // The panel takes layout width; focus fit uses that measured area, not the window.
+        let home = crate::mods::app_dir();
+        std::fs::create_dir_all(home.join("mods/files")).unwrap();
+        std::fs::write(home.join("mods/files/mod.json"), r#"{"place":"none"}"#).unwrap();
+        std::fs::write(home.join("mods/files/main.js"), "").unwrap();
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.model.spaces.push(crate::model::Space { id:"work".into(), name:"work".into(), folder:"/tmp".into(), machine:None, tabs:vec![], active:None, rest:Default::default() });
+            this.canvas_state.files = true;
+            this.canvas_state.doc.panel.width = Some(400.);
+            this.canvas_state.doc.spaces = serde_json::from_value(json!([
+                {"space":"work", "rect":[0,0,900,600], "color":"blue", "frame":true}
+            ])).unwrap();
+            this.canvas_state.doc.panel.space = Some("work".into());
+            this.sync(window, cx);
+            cx.notify();
+        }));
+        cx.run_until_parked();
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            let bounds = this.bounds.borrow()["canopy-canvas"];
+            let visible = [f32::from(bounds.size.width), f32::from(bounds.size.height)];
+            assert!(visible[0] < f32::from(window.viewport_size().width));
+            let original = this.canvas_state.doc.camera;
+            this.canvas_command("canvas.fit", window, cx);
+            let target = this.canvas_state.motion_target_for_test();
+            let center = target.to_screen([450., 300.]);
+            assert!((center[0] - visible[0] / 2.).abs() < 0.001);
+            assert!((center[1] - visible[1] / 2.).abs() < 0.001);
+            this.canvas_command("canvas.fit", window, cx);
+            assert_eq!(this.canvas_state.motion_target_for_test(), original);
+        }));
     }
 
     #[test]
