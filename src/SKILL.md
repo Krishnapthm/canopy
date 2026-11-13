@@ -320,7 +320,7 @@ execute content or load remote images.
 
 Preview quotes: finishing a selection in a preview opens the quote popover, also opened by `quote.menu {path, start?, end?, text, point?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv}` expands an agent's cell and pastes the quote, then a blank line and the trimmed message when given, without Enter. New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.
 
-Canvas space titles rename inline on double-click or Rename. Person-invoked local
+Space cards rename inline from their menu's Rename (double-click goes inside). Person-invoked local
 `space.new` without a folder opens New space; explicit command arguments remain supported.
 `canvas.create {kind: "space", name, folder, point?}` creates directly when `folder`
 is present (an empty string means no folder); omitting it opens the Choose space dialog.

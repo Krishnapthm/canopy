@@ -144,6 +144,12 @@ impl State {
     pub(super) fn motion_target_for_test(&self) -> canvas::Camera {
         self.motion.target.unwrap().1
     }
+    /// Finish a layout ease at once: test windows draw no frames, so it would never end.
+    #[cfg(test)]
+    pub(super) fn settle_for_test(&mut self) {
+        self.layout_motion = None;
+        self.shown = None;
+    }
 
     /// End any drag, returning whether geometry was committed.
     pub(super) fn end_drag(&mut self) -> bool {
@@ -694,6 +700,16 @@ impl AppWindow {
             f32::from(position.y - origin.y),
         ]);
         canvas::space_at(&self.canvas_state.doc.spaces, p).map(|s| s.space.clone())
+    }
+    /// Option alone, while the canvas has the keyboard, shows each cell's actions (the window
+    /// root forwards modifier changes: they only reach the focused element's ancestors).
+    pub(in crate::window) fn canvas_modifiers(&mut self, m: gpui::Modifiers, window: &mut Window, cx: &mut Context<Self>) {
+        let held = self.has_canvas() && m.alt && !m.platform && !m.control && self.canvas_state.mode && self.focus.is_focused(window);
+        if held != self.canvas_state.actions.is_some() {
+            self.canvas_state.actions = held.then(crate::keys::listing);
+            self.sync(window, cx);
+            cx.notify();
+        }
     }
     /// While Option is held: under each selected cell (else the hovered one) its actions, each
     /// with the key bound to it. A click selects that cell and runs the action.
@@ -1930,16 +1946,6 @@ impl AppWindow {
                     this.open_preview(json!({"path":path,"point":point}), window, cx);
                 }
             }))
-            .on_modifiers_changed(cx.listener(|this, e: &ModifiersChangedEvent, window, cx| {
-                // Option alone, while the canvas has the keyboard, shows each cell's actions.
-                let m = e.modifiers;
-                let held = m.alt && !m.platform && !m.control && this.canvas_state.mode && this.focus.is_focused(window);
-                if held != this.canvas_state.actions.is_some() {
-                    this.canvas_state.actions = held.then(crate::keys::listing);
-                    this.sync(window, cx);
-                    cx.notify();
-                }
-            }))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| {
                 this.canvas_state.motion.target = None;
                 this.canvas_state.motion.velocity = [0.; 2];
@@ -2392,7 +2398,6 @@ impl AppWindow {
             let name = self.pill_name(&addr);
             let [x, y] = camera.to_screen([card.rect[0], card.rect[1]]);
             let z = camera.zoom;
-            let rename_addr = addr.clone();
             // An expanded cell is a pill (its header) over a terminal; it keeps its world size at every zoom.
             let expanded = card.size.is_some();
             let [cw, ch] = [card.rect[2], card.rect[3]];
@@ -2421,23 +2426,7 @@ impl AppWindow {
                     .line_clamp(if expanded { 1 } else { 2 })
                     .text_ellipsis()
                     .child(name)
-                    .id(SharedString::from(format!("canvas-name-{addr}")))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                            if e.click_count == 2 {
-                                if let Some(tab) = this
-                                    .model
-                                    .pane_of(&rename_addr)
-                                    .and_then(|p| this.model.tab_of(&p))
-                                    .map(|t| t.id.clone())
-                                {
-                                    this.run("tab.rename", json!({"id":tab}), window, cx);
-                                }
-                                cx.stop_propagation();
-                            }
-                        }),
-                    ),
+                    .id(SharedString::from(format!("canvas-name-{addr}"))),
             );
             if agent && rec["status"] == "working" {
                 pill = pill.child(
@@ -2532,7 +2521,9 @@ impl AppWindow {
             }
             // The body: the terminal, or a flat stand-in while the zoom moves or is too far out to read (live text at every pinch step would fill the glyph cache).
             let slot = cell_slot(&card.terminal);
-            let live = self.terms.get(&slot).filter(|_| self.camera_rested() && z >= canvas::EXPANDED_MIN_ZOOM);
+            // The entered cell always draws live: its terminal holds the keyboard, Cmd+Esc included.
+            let entered = !state.mode && state.selected.last() == Some(&card.terminal);
+            let live = self.terms.get(&slot).filter(|_| entered || (self.camera_rested() && z >= canvas::EXPANDED_MIN_ZOOM));
             let body_size = size(px(card.rect[2] - 2.), px(card.rect[3] - canvas::HEADER - 2.));
             if let Some(t) = self.terms.get(&slot) {
                 let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.terminal);

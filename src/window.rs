@@ -4887,6 +4887,7 @@ impl Render for AppWindow {
                     cx.notify();
                 }
             }))
+            .on_modifiers_changed(cx.listener(|this, e: &ModifiersChangedEvent, window, cx| this.canvas_modifiers(e.modifiers, window, cx)))
             .on_key_up(cx.listener(|this, e: &KeyUpEvent, _, cx| {
                 if e.keystroke.key == "space" {
                     this.canvas_state.space_down = false;
@@ -5595,6 +5596,96 @@ mod tests {
         let (view, cx) = cx.add_window_view(|window, cx| super::AppWindow::new(crate::hc::offline(), requests, window, cx));
         assert_eq!(view.update(cx, |this, _| this.layout_name.clone()), "test");
         (view, cx)
+    }
+
+    #[test]
+    fn canvas_mouse_works_like_figma() {
+        in_own_process("figma_mouse");
+    }
+
+    /// Real pointer events through hit testing: box select, group drag, double-click to enter,
+    /// click out to leave, Option to show actions.
+    #[gpui::test]
+    fn figma_mouse(cx: &mut TestAppContext) {
+        use gpui::{point, px, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent};
+        use serde_json::json;
+        if !running_alone("figma_mouse") { return; }
+        let (view, cx) = open_window(cx, "canvas-mouse", "", json!({"id":"root", "type":"canvas"}));
+        cx.run_until_parked();
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.model.add_space("root", "Canvas", &super::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
+            this.model.space_mut("root").unwrap().tabs.push(crate::model::Tab::new("tab2", "", "pane2", "t2"));
+            this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
+            this.live.insert("t2".into(), json!({"state":"live", "pid":2}));
+            this.canvas_state.doc.cards = serde_json::from_value(json!([
+                {"terminal":"t1", "rect":[100,200,220,36], "z":0},
+                {"terminal":"t2", "rect":[500,200,220,36], "z":1}
+            ])).unwrap();
+            this.sync(window, cx);
+            cx.notify();
+        }));
+        cx.run_until_parked();
+        let origin = view.update(cx, |this, _| this.bounds.borrow()["canopy-canvas"].origin);
+        let at = |x: f32, y: f32| origin + point(px(x), px(y));
+        let none = Modifiers::default();
+        let state = |cx: &mut gpui::VisualTestContext| view.update(cx, |this, _| (
+            this.canvas_state.selected.clone(), this.canvas_state.mode,
+            this.canvas_state.doc.cards.iter().map(|c| [c.rect[0], c.rect[1]]).collect::<Vec<_>>()));
+
+        cx.simulate_mouse_down(at(50., 150.), MouseButton::Left, none);
+        cx.simulate_mouse_move(at(800., 300.), MouseButton::Left, none);
+        cx.simulate_mouse_up(at(800., 300.), MouseButton::Left, none);
+        let (mut selected, mode, _) = state(cx);
+        selected.sort();
+        assert_eq!((selected, mode), (vec!["t1".to_owned(), "t2".to_owned()], true), "a box on empty canvas selects what it touches");
+
+        cx.simulate_mouse_down(at(210., 218.), MouseButton::Left, none);
+        cx.simulate_mouse_move(at(260., 268.), MouseButton::Left, none);
+        cx.simulate_mouse_up(at(260., 268.), MouseButton::Left, none);
+        let (_, _, rects) = state(cx);
+        assert_eq!(rects, [[150., 250.], [550., 250.]], "the whole selection moves together");
+        cx.run_until_parked();
+
+        let target = at(260., 268.);
+        cx.simulate_mouse_move(target, None, none);
+        view.update(cx, |this, _| this.canvas_state.settle_for_test());
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        cx.simulate_event(MouseDownEvent { position: target, modifiers: none, button: MouseButton::Left, click_count: 2, first_mouse: false });
+        cx.simulate_event(MouseUpEvent { position: target, modifiers: none, button: MouseButton::Left, click_count: 2 });
+        cx.run_until_parked();
+        let (selected, mode, _) = state(cx);
+        assert_eq!(selected, ["t1"]);
+        assert!(!mode, "double-click enters the cell");
+        assert!(view.update(cx, |this, _| this.canvas_state.doc.cards[0].size.is_some()), "entering expands it");
+
+        cx.simulate_click(at(60., 700.), none);
+        cx.run_until_parked();
+        assert!(state(cx).1, "a click on empty canvas leaves the cell");
+        assert!(cx.update(|window, cx| view.read(cx).focus.is_focused(window)));
+
+        cx.simulate_modifiers_change(Modifiers { alt: true, ..Default::default() });
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_some()), "Option shows actions");
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        cx.simulate_modifiers_change(none);
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_none()), "releasing Option hides them");
+
+        // The shipped keys: Shift+1 fits everything; the platform's leave key leaves an entered cell.
+        // This window's layout is "test", so the shipped `layout:main` keys apply to it here.
+        let keys = crate::keys::DEFAULTS.replace("\"layout:main\"", "\"layout:test\"");
+        cx.update(|_, cx| crate::keys::install(crate::keys::parse(&keys).unwrap(), cx));
+        cx.simulate_keystrokes("shift-1");
+        assert!(view.update(cx, |this, _| this.canvas_state.motion_target_for_test().zoom > 0.), "Shift+1 starts a fit");
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.canvas_state.selected = vec!["t2".into()];
+            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_state.settle_for_test();
+        }));
+        assert!(!state(cx).1);
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") { "cmd-escape" } else { "ctrl-escape" });
+        assert!(state(cx).1, "Cmd+Esc leaves the entered cell");
+        assert!(cx.update(|window, cx| view.read(cx).focus.is_focused(window)));
     }
 
     #[test]

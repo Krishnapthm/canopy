@@ -16,6 +16,9 @@ impl AppWindow {
         if !self.canvas_state.mode || !self.has_canvas() || self.overlays.iter().any(|o| o.kind.modal_keys()) { return false; }
         // Something else on the canvas has the keyboard (a rename, the thread input, the files panel).
         if !self.focus.is_focused(window) { return false; }
+        // A lone modifier tap (GPUI sends releasing Option as an "alt" key) is never swallowed:
+        // its release must still reach the modifier listeners.
+        if matches!(key.key.as_str(), "shift" | "control" | "alt" | "platform" | "function") { return false; }
         // Space held: drag pans (the key-up clears it).
         if key.key == "space" && !key.modifiers.modified() {
             if !self.canvas_state.space_down { self.canvas_state.space_down = true; cx.notify(); }
