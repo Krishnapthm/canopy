@@ -10,7 +10,8 @@ anyone when you connect, and nothing costs a token until somebody writes.
   of the same space and let go; release on empty canvas cancels, and a cell in
   another space says "Same space only for now". Sub-agents and `hc run` helpers
   are wired to their parent already (the edge ends in a dot at the child).
-- Agents use `canopy wire` (their note says how): `tell`, `ask`, `reply`,
+- Agents use `canopy wire` (their note says how; `canopy` on their PATH must be
+  this app, which the installed app's `~/.local/bin/canopy` link provides): `tell`, `ask`, `reply`,
   `wait`, `read`; with no arguments it lists peers and waiting mail. A plain
   terminal is a peer that can only be read, once, on demand.
 - An edge glows once when a postcard is typed into its end, shows a count while

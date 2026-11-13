@@ -800,7 +800,7 @@ mod tests {
         wires.push(Wire { a: "t3".into(), b: "t1".into(), born: false });
         assert_eq!(neighbors(&wires, "t1"), ["t2", "t3"]);
         assert_eq!(neighbors(&wires, "t2"), ["t1"]);
-        d.cards.push(crate::canvas::Card { terminal: String::new(), sub: Some("a".into()), parent: Some("t1".into()), rect: [0., 100., 220., 36.], z: 4 });
+        d.cards.push(crate::canvas::Card { terminal: String::new(), sub: Some("a".into()), parent: Some("t1".into()), rect: [0., 100., 220., 36.], z: 4, size: None });
         let edges = born(&d, |k| (k == "t3").then(|| "t2".to_owned()));
         assert_eq!(edges, [Wire { a: "t2".into(), b: "t3".into(), born: true }, Wire { a: "t1".into(), b: "sub:t1:a".into(), born: true }]);
         // Closing a cell removes its wires.

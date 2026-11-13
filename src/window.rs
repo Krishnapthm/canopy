@@ -1112,8 +1112,10 @@ impl AppWindow {
     /// Visible slots: terminal blocks (id → address) and mod slots (key → instance).
     fn visible(&self) -> (Vec<(String, String)>, Vec<(String, Instance)>) {
         let mut terms = Vec::new();
-        if self.has_canvas() && let Some(addr) = &self.canvas_state.panel {
-            terms.push(("canvas-panel".into(), addr.clone()));
+        if self.has_canvas() {
+            for card in self.canvas_state.doc.cards.iter().filter(|c| c.size.is_some() && self.live.contains_key(&c.terminal)) {
+                terms.push((canvas_view::cell_slot(&card.terminal), card.terminal.clone()));
+            }
         }
         let mut mods = self.panel_mods();
         let visit = |n: &Node, terms: &mut Vec<(String, String)>, mods: &mut Vec<(String, Instance)>| match n.content() {
@@ -1348,10 +1350,6 @@ impl AppWindow {
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
         self.swapped.retain(|p, a| model.address_of(p).is_some() && live.contains_key(a));
-        if let Some(addr) = &self.canvas_state.panel {
-            if self.canvas_state.file.is_none() { crate::canvas::open_panel_tab(&mut self.canvas_state.tabs, addr); }
-        }
-        self.canvas_state.tabs.retain(|t| std::path::Path::new(t).is_absolute() || self.live.contains_key(t));
         let (mut terms, mods_visible) = self.visible();
         let covered: HashSet<&str> = terms.iter().filter_map(|(slot, _)| slot.strip_suffix(SWAP)).collect();
         let mut displayed: HashSet<String> = terms.iter().filter(|(slot, _)| !covered.contains(slot.as_str())).map(|(slot, _)| slot.clone()).collect();
@@ -1451,8 +1449,8 @@ impl AppWindow {
         let tab_shown = self.shows_tab();
         let revealed = tab_shown && !self.tab_shown;
         self.tab_shown = tab_shown;
-        if self.has_canvas() && self.canvas_state.panel.is_some() && self.canvas_state.file.is_none() {
-            if no_dialog && let Some(t)=self.terms.get("canvas-panel") {t.focus.focus(window,cx);}
+        if self.has_canvas() && let Some(t) = self.focused_cell() {
+            if no_dialog { t.focus.focus(window, cx); }
         } else if terminal_block(&self.chrome, focused.as_deref()).is_some() {
             if pane_changed && no_dialog && let Some(f) = focused.as_deref().and_then(|p| self.pane_focus(p, cx)) {
                 f.focus(window, cx);
@@ -1536,7 +1534,7 @@ impl AppWindow {
             return self.hand_keyboard();
         }
         let shown = if self.has_canvas() {
-            self.terms.get("canvas-panel").map(|t| t.focus.clone())
+            self.focused_cell().map(|t| t.focus.clone())
         } else if terminal_block(&self.chrome, self.focused_pane.as_deref()).is_some() {
             self.focused_pane.as_deref().and_then(|p| self.pane_focus(p, cx))
         } else if let Some(block) = self.agent_block() {
@@ -2909,7 +2907,7 @@ impl AppWindow {
             "app.menu" => {
                 let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
                 let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
-                    groups.into_iter().find(|(name, _)| *name == group).map(|(_, rows)| rows.into_iter().map(|mut row| {
+                    groups.into_iter().find(|(name, _)| *name == group).map(|(_, rows)| rows.into_iter().filter(|row| !row.is_null()).map(|mut row| {
                         if row[3] == true { row[0] = json!(format!("✓ {}", row[0].as_str().unwrap())); }
                         row.as_array_mut().unwrap().truncate(3);
                         row
@@ -2921,12 +2919,12 @@ impl AppWindow {
             "panel.open" => {
                 let Some(addr)=Self::arg(a,"terminal").filter(|a|self.live.contains_key(*a)) else {return self.fail("no running terminal")};
                 if self.canvas_state.popped.contains_key(addr) { self.pop_canvas(addr.to_owned(), false, window, cx); return; }
-                if let Some(p)=self.model.pane_of(addr) {self.model.focus_pane(&p);}
-                self.canvas_state.panel=Some(addr.to_owned());
-                self.canvas_state.file=None;
+                self.set_expanded(addr, true, window, cx);
             }
+            "canvas.expand" => self.expand_canvas_cell(a, window, cx),
             "panel.pop_out" | "panel.bring_back" => {
-                if let Some(addr) = Self::owned(a, "terminal").or_else(|| self.canvas_state.panel.clone()) {
+                let selected = self.canvas_state.selected.last().cloned();
+                if let Some(addr) = Self::owned(a, "terminal").or(selected) {
                     self.pop_canvas(addr, name == "panel.bring_back", window, cx);
                 }
             }
@@ -5601,7 +5599,6 @@ mod tests {
             assert!(terminal.read(cx).ended.is_none());
             this.pop_canvas("t1".into(), true, window, cx);
             assert!(this.canvas_state.popped.is_empty());
-            assert_eq!(this.canvas_state.panel.as_deref(), Some("t1"));
             assert!(pop.read(cx).is_err());
             this.pop_canvas("t1".into(), false, window, cx);
             this.canvas_state.popped["t1"]
@@ -5612,7 +5609,6 @@ mod tests {
         popped.update(|window, _| window.remove_window());
         cx.update(|window, cx| view.update(cx, |this, cx| {
             assert!(this.canvas_state.popped.is_empty());
-            assert_eq!(this.canvas_state.panel.as_deref(), Some("t1"));
             assert!(pop.read(cx).is_err());
             this.pop_canvas("t1".into(), false, window, cx);
         }));

@@ -12,12 +12,11 @@ pub(super) struct State {
     shown: Option<Document>,
     layout_motion: Option<(Document, std::time::Instant)>,
     layout_frame: bool,
-    selected: Vec<String>,
+    pub(super) selected: Vec<String>,
     pub subs: HashMap<String, Vec<crate::subs::Sub>>,
     sub_watches: HashMap<String, Task<()>>,
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
     preview_drag: Option<(String, bool, Point<Pixels>)>,
-    pub panel: Option<String>,
     pub file: Option<String>,
     pub(super) editing: Option<String>,
     editors: Vec<crate::programs::Editor>,
@@ -45,8 +44,15 @@ pub(super) struct State {
     /// A finished selection waiting behind a small quote icon: the quote (with its
     /// window `point`) and the TextView it came from, None for the Files code viewer.
     quote_chip: Option<(Value, Option<Entity<gpui_base::TextViewState>>)>,
-    /// The panel's terminal, file and tabs when it was closed, for the folder button to bring back.
-    closed: Option<(Option<String>, Option<String>, Vec<String>)>,
+    /// The panel's file and tabs when it was closed, for the folder button to bring back.
+    closed: Option<(Option<String>, Vec<String>)>,
+    /// Per expanded cell: the layout before it grew, and what growing moved. Collapse puts those back.
+    moves: HashMap<String, (canvas::Rest, canvas::Rest)>,
+    /// The expanded cell's corner being dragged, and the pointer where it was last seen.
+    cell_resize: Option<(String, Point<Pixels>)>,
+    /// When the camera zoom last moved by gesture: expanded cells draw flat until it has rested.
+    zoomed_at: Option<std::time::Instant>,
+    zoom_task: Option<Task<()>>,
     wire: wire_view::WireUi,
 }
 #[derive(Default)]
@@ -82,7 +88,6 @@ impl State {
             sub_watches: HashMap::new(),
             previews: HashMap::new(),
             preview_drag: None,
-            panel: None,
             file: None,
             editing: None,
             editors: Vec::new(),
@@ -106,14 +111,27 @@ impl State {
             quote_mark: None,
             quote_chip: None,
             closed: None,
+            moves: HashMap::new(),
+            cell_resize: None,
+            zoomed_at: None,
+            zoom_task: None,
             wire: Default::default(),
         }
     }
     /// End any drag, returning whether geometry was committed.
     pub(super) fn end_drag(&mut self) -> bool {
         let mut changed = false;
+        let resized = self.cell_resize.take();
         if let Some(rest) = self.rest.take() {
-            if rest != canvas::Rest::capture(&self.doc) { self.undo = Some(rest); self.save.dirty = true; changed = true; }
+            if rest != canvas::Rest::capture(&self.doc) {
+                // Undo would put neighbours back over a cell that stays big, so a corner drag is not undoable.
+                match resized {
+                    Some((key, _)) => if let Some((base, moved)) = self.moves.get_mut(&key) { *moved = base.changed(&canvas::Rest::capture(&self.doc)); },
+                    None => self.undo = Some(rest),
+                }
+                self.save.dirty = true;
+                changed = true;
+            }
             if self.layout_motion.is_none() { self.shown = None; }
         }
         self.preview_drag = None;
@@ -350,6 +368,14 @@ impl AppWindow {
                     }
                 }
                 if let Some((Some(id), _)) = &state.drag
+                    && let (Some(c), Some(target)) = (
+                        shown.cards.iter_mut().find(|c| &c.key() == id),
+                        state.doc.cards.iter().find(|c| &c.key() == id),
+                    ) {
+                    c.rect = target.rect;
+                }
+                // The corner follows the pointer; the cells it pushes ease away.
+                if let Some((id, _)) = &state.cell_resize
                     && let (Some(c), Some(target)) = (
                         shown.cards.iter_mut().find(|c| &c.key() == id),
                         state.doc.cards.iter().find(|c| &c.key() == id),
@@ -694,7 +720,7 @@ impl AppWindow {
     }
     pub(super) fn panel_mods(&self) -> Vec<(String, Instance)> {
         if !self.has_canvas()
-            || (self.canvas_state.panel.is_none() && self.canvas_state.file.is_none() && !self.canvas_state.files)
+            || (self.canvas_state.file.is_none() && !self.canvas_state.files)
         {
             return vec![];
         }
@@ -891,8 +917,7 @@ impl AppWindow {
             if bring_back {
                 self.canvas_state.popped.remove(&addr);
                 let _ = handle.update(cx, |_, window, _| window.remove_window());
-                self.canvas_state.panel = Some(addr);
-                self.sync(window, cx);
+                self.set_expanded(&addr, true, window, cx);
             } else {
                 let _ = handle.update(cx, |_, window, _| window.activate_window());
             }
@@ -915,9 +940,7 @@ impl AppWindow {
             window.on_window_should_close(cx, move |_, cx| {
                 let _ = owner.update(cx, |this, window, cx| {
                     this.canvas_state.popped.remove(&closed_addr);
-                    if this.live.contains_key(&closed_addr) {
-                        this.canvas_state.panel = Some(closed_addr.clone());
-                    }
+                    this.set_expanded(&closed_addr, true, window, cx);
                     this.sync(window, cx);
                     cx.notify();
                 });
@@ -947,12 +970,88 @@ impl AppWindow {
                     .unwrap_or_else(|| "canvas-panel".into());
                 let sub = self.setup_term(&terminal, &block, &addr, window, cx);
                 let _ = handle.update(cx, |pop, _, _| pop._sub = Some(sub));
-                self.canvas_state.popped.insert(addr, handle);
-                self.canvas_state.panel = None;
+                self.canvas_state.popped.insert(addr.clone(), handle);
+                self.set_expanded(&addr, false, window, cx);
                 self.sync(window, cx);
             }
             Err(error) => self.fail(error.to_string()),
         }
+    }
+
+    /// Grows a terminal cell into a live terminal in place (neighbours give way), or shrinks it back to a pill.
+    pub(super) fn set_expanded(&mut self, addr: &str, expand: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let state = &mut self.canvas_state;
+        let Some(i) = state.doc.cards.iter().position(|c| c.sub.is_none() && c.terminal == addr) else { return };
+        if state.doc.cards[i].size.is_some() == expand || (expand && (!self.live.contains_key(addr) || state.popped.contains_key(addr))) { return; }
+        state.end_drag();
+        if state.shown.is_none() { state.shown = Some(state.doc.clone()); }
+        if expand {
+            let before = canvas::Rest::capture(&state.doc);
+            let body = crate::terminal::size_of_grid(EXPANDED_COLS, EXPANDED_ROWS, window);
+            let z = state.doc.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
+            // The 2 px is the frame around the body.
+            state.doc.cards[i].size = Some([f32::from(body.width) + 2., f32::from(body.height) + canvas::HEADER + 2.]);
+            state.doc.cards[i].z = z;
+            state.selected = vec![addr.to_owned()];
+            self.solve_layout(Some(addr), None, cx);
+            let state = &mut self.canvas_state;
+            let moved = before.changed(&canvas::Rest::capture(&state.doc));
+            state.moves.insert(addr.to_owned(), (before, moved));
+        } else {
+            if let Some((base, moved)) = state.moves.remove(addr) { base.put_back(&moved, &mut state.doc); }
+            state.doc.cards[i].size = None;
+            self.solve_layout(Some(addr), None, cx);
+        }
+        self.animate_layout(window, cx);
+        self.canvas_changed(cx);
+        if expand && let Some(p) = self.model.pane_of(addr) { self.model.focus_pane(&p); }
+        self.sync(window, cx);
+        match self.terms.get(&cell_slot(addr)).filter(|_| expand) {
+            Some(t) => t.focus.focus(window, cx),
+            None => self.focus.focus(window, cx),
+        }
+        cx.notify();
+    }
+
+    /// `canvas.expand {terminal?}`: toggles the named cell, else the one selected last.
+    pub(super) fn expand_canvas_cell(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(addr) = a["terminal"].as_str().map(str::to_owned).or_else(|| self.canvas_state.selected.last().cloned()) else {
+            return self.fail("select a terminal cell first");
+        };
+        let Some(card) = self.canvas_state.doc.cards.iter().find(|c| c.sub.is_none() && c.terminal == addr) else {
+            return self.fail("no such terminal cell");
+        };
+        if self.canvas_state.popped.contains_key(&addr) {
+            return self.pop_canvas(addr, true, window, cx);
+        }
+        let expand = card.size.is_none();
+        self.set_expanded(&addr, expand, window, cx);
+    }
+
+    /// The camera zoom moved by a gesture: expanded cells draw flat until it has rested for a moment.
+    fn zoom_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let state = &mut self.canvas_state;
+        if !state.doc.cards.iter().any(|c| c.size.is_some()) { return; }
+        state.zoomed_at = Some(std::time::Instant::now());
+        state.zoom_task = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(ZOOM_REST).await;
+            let _ = this.update(cx, |this, cx| {
+                this.canvas_state.zoomed_at = None;
+                cx.notify();
+            });
+        }));
+    }
+
+    /// Whether the camera has rested, so expanded cells may draw live text at its zoom.
+    fn camera_rested(&self) -> bool {
+        let state = &self.canvas_state;
+        state.motion.target.is_none() && state.zoomed_at.is_none()
+    }
+
+    /// The view of the expanded cell last selected, for the keyboard to return to.
+    pub(super) fn focused_cell(&self) -> Option<&Term> {
+        let addr = self.canvas_state.selected.last()?;
+        self.terms.get(&cell_slot(addr))
     }
 
     pub(super) fn rename_canvas_space(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -1173,6 +1272,7 @@ impl AppWindow {
     }
     fn pill_rect(&self, card: &canvas::Card, cx: &App) -> canvas::Rect {
         if card.sub.is_some() { return card.rect; }
+        if let Some(size) = card.size { return [card.rect[0], card.rect[1], size[0], size[1]]; }
         let rec = self.live.get(&card.terminal).unwrap_or(&Value::Null);
         // Room taken by the trailing status and pop-out glyphs (12 px each plus the gap).
         let trailing = 20 * (canvas_agent(rec) as u8 + self.canvas_state.popped.contains_key(&card.terminal) as u8);
@@ -1228,7 +1328,7 @@ impl AppWindow {
                 terminal: terminal.into(),
                 sub: None, parent: None,
                 rect: [point[0], point[1], 240., 36.],
-                z: 0,
+                z: 0, size: None,
             });
         let mut r = self.pill_rect(&card, cx);
         r[0] = point[0];
@@ -1328,7 +1428,7 @@ impl AppWindow {
                         terminal: a.clone(),
                         sub: None, parent: None,
                         rect: [0., 0., 240., 36.],
-                        z: 0,
+                        z: 0, size: None,
                     },
                     cx,
                 );
@@ -1336,19 +1436,9 @@ impl AppWindow {
             })
             .collect();
         let effective = |c: &canvas::Card| {
-            let size = sizes.get(&c.terminal).copied().unwrap_or([240., 36.]);
+            let size = c.size.or_else(|| sizes.get(&c.terminal).copied()).unwrap_or([240., 36.]);
             [c.rect[0], c.rect[1], size[0], size[1]]
         };
-        if self.canvas_state.panel.as_ref().is_some_and(|a| {
-            !self.live.contains_key(a)
-                || !canvas::view_allows(
-                    &self.canvas_state.doc.view,
-                    self.live.get(a).is_some_and(canvas_agent),
-                )
-        }) {
-            self.canvas_state.panel = None;
-            self.focus.focus(window, cx);
-        }
         self.canvas_state
             .pill_sizes
             .borrow_mut()
@@ -1391,6 +1481,7 @@ impl AppWindow {
         });
         changed |= before != state.doc.cards.len();
         state.selected.retain(|id|state.doc.cards.iter().any(|c|&c.key()==id) || state.doc.previews.iter().any(|p|&p.path==id));
+        state.moves.retain(|key, _| state.doc.cards.iter().any(|c| &c.key() == key));
         let mut addresses: Vec<_> = self.live.keys().cloned().collect();
         addresses.sort_by_key(|a| (self.live[a]["created_ms"].as_u64().unwrap_or(0), a.clone()));
         // Parents are placed first even when a snapshot arrives out of order.
@@ -1500,15 +1591,15 @@ impl AppWindow {
                     }
                     let Some(rec) = this.live.get(&addr).filter(|rec| canvas_agent(rec) || crate::programs::agent_program(&rec["program"])) else { return false };
                     let text = quote.as_str().map(str::to_owned).unwrap_or_else(|| format_quote(&quote, rec.pointer("/foreground/cwd").and_then(Value::as_str).or_else(|| rec["cwd"].as_str())));
-                    // Open once: the person may close the panel or pick another pill while the agent starts.
+                    // Open once: the person may collapse the cell or pick another pill while the agent starts.
                     if !opened {
                         opened = true;
                         if this.canvas_state.popped.contains_key(&addr) { this.pop_canvas(addr.clone(), true, window, cx); }
                         this.dispatch("panel.open", &json!({"terminal":addr}), true, window, cx);
                         this.sync(window, cx);
                     }
-                    // Paste only into the target's own view, never whatever the panel shows now.
-                    let Some(term) = this.terms.get("canvas-panel").filter(|t| t.address == addr) else { return false };
+                    // Paste only into the target's own view.
+                    let Some(term) = this.terms.get(&cell_slot(&addr)) else { return false };
                     if !term.view.read(cx).paste_quote(&text) { return false; }
                     term.focus.focus(window, cx);
                     // A quote is a postcard from you that was pasted, not submitted.
@@ -1648,23 +1739,14 @@ impl AppWindow {
                     "view.terminals" => canvas::View::Terminals,
                     _ => canvas::View::All,
                 };
-                let agent = state
-                    .panel
-                    .as_ref()
-                    .and_then(|a| self.live.get(a))
-                    .is_some_and(canvas_agent);
-                canvas::clear_hidden_focus(&state.doc.view, &mut state.panel, agent);
                 state.selected.retain(|key| state.doc.cards.iter().any(|card|
                     card.key() == *key && canvas::view_allows(&state.doc.view, card.sub.is_some() || self.live.get(key).is_some_and(canvas_agent))));
-                if state.panel.is_none() {
-                    self.focus.focus(window, cx);
-                }
+                self.focus.focus(window, cx);
             }
             "panel.close" => {
                 if !state.tabs.is_empty() {
-                    state.closed = Some((state.panel.take(), state.file.take(), std::mem::take(&mut state.tabs)));
+                    state.closed = Some((state.file.take(), std::mem::take(&mut state.tabs)));
                 }
-                state.panel = None;
                 state.file = None;
                 state.files = false;
                 self.focus.focus(window, cx);
@@ -1833,6 +1915,7 @@ impl AppWindow {
                             f32::from(e.position.y - origin.y),
                         ],
                     );
+                    this.zoom_moved(window, cx);
                 } else {
                     this.canvas_state.doc.camera.pan([d.x.into(), d.y.into()]);
                 }
@@ -1859,6 +1942,7 @@ impl AppWindow {
                         (e.position.y - origin.y).into(),
                     ],
                 );
+                this.zoom_moved(window, cx);
                 if matches!(e.phase, TouchPhase::Ended | TouchPhase::Cancelled) {
                     this.settle_zoom([(e.position.x-origin.x).into(), (e.position.y-origin.y).into()], window, cx);
                 }
@@ -1911,7 +1995,7 @@ impl AppWindow {
                 if this.wire_pointer(e, cx) { return; }
                 // The button came up outside the window: end any drag instead of panning on hover.
                 if e.pressed_button.is_none()
-                    && (this.canvas_state.drag.is_some() || this.canvas_state.space_drag.is_some() || this.canvas_state.preview_drag.is_some())
+                    && (this.canvas_state.drag.is_some() || this.canvas_state.space_drag.is_some() || this.canvas_state.preview_drag.is_some() || this.canvas_state.cell_resize.is_some())
                 {
                     this.canvas_state.end_drag();
                     this.canvas_changed(cx);
@@ -1920,6 +2004,20 @@ impl AppWindow {
                 }
                 if this.canvas_state.rest.is_some() && this.canvas_state.shown.is_none() {
                     this.canvas_state.shown = Some(this.canvas_state.doc.clone());
+                }
+                if let Some((key, previous)) = this.canvas_state.cell_resize.clone() {
+                    let z = this.canvas_state.doc.camera.zoom;
+                    let d = [f32::from(e.position.x - previous.x) / z, f32::from(e.position.y - previous.y) / z];
+                    if let Some(size) = this.canvas_state.doc.cards.iter_mut().find(|c| c.key() == key).and_then(|c| c.size.as_mut()) {
+                        size[0] = (size[0] + d[0]).max(canvas::PILL_WIDTH * 1.5);
+                        size[1] = (size[1] + d[1]).max(canvas::HEADER * 3.);
+                    }
+                    this.solve_layout(Some(&key), None, cx);
+                    this.animate_layout(window, cx);
+                    this.canvas_state.cell_resize = Some((key, e.position));
+                    this.canvas_changed(cx);
+                    cx.notify();
+                    return;
                 }
                 if let Some((path, resize, previous)) = this.canvas_state.preview_drag.clone() {
                     if e.pressed_button.is_none() {
@@ -2004,6 +2102,7 @@ impl AppWindow {
                     f32::from(e.position.x - previous.x),
                     f32::from(e.position.y - previous.y),
                 ];
+                this.canvas_state.pan_moved |= d != [0., 0.];
                 if let Some(id) = card {
                     if let Some(card) = this
                         .canvas_state
@@ -2038,8 +2137,17 @@ impl AppWindow {
                     if this.wire_release(e.position, window, cx) { return; }
                     // A click that did not pan, inside a space: its files go to the panel tree.
                     let click = matches!(this.canvas_state.drag, Some((None, _))) && !this.canvas_state.pan_moved;
+                    // A click on a pill expands it; a click on an expanded cell's header collapses it.
+                    let toggled = match &this.canvas_state.drag {
+                        Some((Some(key), _)) if !this.canvas_state.pan_moved && !e.modifiers.shift
+                            && this.canvas_state.doc.cards.iter().any(|c| c.sub.is_none() && &c.terminal == key) => Some(key.clone()),
+                        _ => None,
+                    };
                     this.canvas_state.end_drag();
                     this.animate_camera(window, cx);
+                    if let Some(key) = toggled {
+                        this.expand_canvas_cell(&json!({"terminal":key}), window, cx);
+                    }
                     if let Some(space) = click.then(|| this.space_at(e.position)).flatten() {
                         this.show_space_files(space, window, cx);
                     }
@@ -2186,12 +2294,13 @@ impl AppWindow {
                 )
             })
             .map(|card| {
-                let size = state
+                // An expanded cell has its own size, eased by the layout motion.
+                let size = card.size.map(|_| [card.rect[2].max(PILL_WIDTH), card.rect[3].max(canvas::HEADER)]).unwrap_or_else(|| state
                     .pill_sizes
                     .borrow()
                     .get(&card.terminal)
                     .map(|v| v.3)
-                    .unwrap_or([240., 36.]);
+                    .unwrap_or([240., 36.]));
                 (
                     card.terminal.as_str(),
                     (card, [card.rect[0], card.rect[1], size[0], size[1]]),
@@ -2252,7 +2361,7 @@ impl AppWindow {
                 }
                 cx.stop_propagation();
             }));
-            pills.push((card.z, pill));
+            pills.push((card.z, pill.into_any_element()));
         }
         let mut shown = shown;
         shown.sort_by_key(|c| c.z);
@@ -2265,21 +2374,19 @@ impl AppWindow {
             let [x, y] = camera.to_screen([card.rect[0], card.rect[1]]);
             let z = camera.zoom;
             let rename_addr = addr.clone();
+            // An expanded cell is a pill (its header) over a live terminal; below half zoom it is just the pill.
+            let expanded = card.size.is_some() && z >= canvas::EXPANDED_MIN_ZOOM;
+            let [cw, ch] = if card.size.is_some() && !expanded {
+                state.pill_sizes.borrow().get(&addr).map(|v| v.3).unwrap_or([240., 36.])
+            } else {
+                [card.rect[2], card.rect[3]]
+            };
+            let frame_color = c(if state.selected.contains(&addr) { "ring" } else { "border" });
             let mut pill = div()
                 .id(SharedString::from(format!("canvas-{addr}")))
-                .absolute()
-                .left(px(x))
-                .top(px(y))
-                .w(px(card.rect[2] * z))
-                .h(px(card.rect[3] * z))
-                .rounded(px(8. * z))
-                .border_1()
-                .border_color(c(if state.selected.contains(&addr) {
-                    "ring"
-                } else {
-                    "border"
-                }))
-                .bg(c("surface"))
+                .when(!expanded, |d| d.absolute().left(px(x)).top(px(y)).rounded(px(8. * z)).border_1().border_color(frame_color).bg(c("surface")))
+                .w(px(cw * z))
+                .h(px(if expanded { canvas::HEADER } else { ch } * z))
                 .flex()
                 .items_start()
                 .px(px(12. * z))
@@ -2296,7 +2403,7 @@ impl AppWindow {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .line_clamp(2)
+                    .line_clamp(if expanded { 1 } else { 2 })
                     .text_ellipsis()
                     .child(name)
                     .id(SharedString::from(format!("canvas-name-{addr}")))
@@ -2363,6 +2470,7 @@ impl AppWindow {
                     this.open_menu(
                         "canvas-card",
                         json!({"terminal":menu_addr,"id":tab,"popped":this.canvas_state.popped.contains_key(&menu_addr),
+                            "expanded":this.canvas_state.doc.cards.iter().any(|c| c.terminal == menu_addr && c.size.is_some()),
                             "finished":this.canvas_state.subs.get(&menu_addr).is_some_and(|subs| subs.iter().any(|s| s.done))}),
                         Some(e.position),
                         window,
@@ -2371,7 +2479,7 @@ impl AppWindow {
                     cx.stop_propagation();
                 }),
             );
-            pills.push((card.z, pill.on_mouse_down(
+            let pill = pill.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     if this.canvas_state.popped.contains_key(&addr) {
@@ -2379,6 +2487,7 @@ impl AppWindow {
                         cx.stop_propagation();
                         return;
                     }
+                    this.canvas_state.pan_moved = false;
                     this.begin_layout();
                     if e.modifiers.shift {
                         if this.canvas_state.selected.contains(&drag_addr) { this.canvas_state.selected.retain(|id|id!=&drag_addr); }
@@ -2411,13 +2520,74 @@ impl AppWindow {
                     if let Some(p) = this.model.pane_of(&addr) {
                         this.model.focus_pane(&p);
                     }
-                    this.canvas_state.panel = Some(addr.clone());
-                    this.canvas_state.file = None;
-                    this.sync(window, cx);
                     this.focus.focus(window, cx);
                     cx.notify();
                 }),
-            )));
+            );
+            if !expanded {
+                pills.push((card.z, pill.into_any_element()));
+                continue;
+            }
+            // The body: the terminal, or a flat stand-in while the zoom moves (live text at every pinch step would fill the glyph cache).
+            let slot = cell_slot(&card.terminal);
+            let live = self.terms.get(&slot).filter(|_| self.camera_rested());
+            let body_size = size(px(card.rect[2] - 2.), px(card.rect[3] - canvas::HEADER - 2.));
+            if let Some(t) = self.terms.get(&slot) {
+                let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.terminal);
+                t.view.update(cx, |v, cx| v.set_scale(z, (!resizing).then_some(body_size), cx));
+            }
+            let (select_addr, resize_addr) = (card.terminal.clone(), card.terminal.clone());
+            let body = div()
+                .id(SharedString::from(format!("canvas-body-{}", card.terminal)))
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .overflow_hidden()
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                    // The terminal took the focus; the cell is the one selected, and the canvas does not pan.
+                    this.canvas_state.selected = vec![select_addr.clone()];
+                    if let Some(p) = this.model.pane_of(&select_addr) { this.model.focus_pane(&p); }
+                    cx.stop_propagation();
+                    cx.notify();
+                }))
+                .child(match live {
+                    Some(t) => shown_terminal(&t.view, cx),
+                    None => div().size_full().bg(crate::terminal::hsla(crate::vt::theme().bg)).into_any_element(),
+                });
+            let handle = div()
+                .id(SharedString::from(format!("canvas-resize-{}", card.terminal)))
+                .absolute()
+                .right_0()
+                .bottom_0()
+                .size(px(14. * z))
+                .cursor(CursorStyle::ResizeUpLeftDownRight)
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                    this.begin_layout();
+                    this.canvas_state.shown = Some(this.canvas_state.doc.clone());
+                    this.canvas_state.selected = vec![resize_addr.clone()];
+                    this.canvas_state.cell_resize = Some((resize_addr.clone(), e.position));
+                    cx.stop_propagation();
+                    cx.notify();
+                }));
+            pills.push((card.z, div()
+                .id(SharedString::from(format!("canvas-cell-{}", card.terminal)))
+                .absolute()
+                .left(px(x))
+                .top(px(y))
+                .w(px(card.rect[2] * z))
+                .h(px(card.rect[3] * z))
+                .rounded(px(8. * z))
+                .border_1()
+                .border_color(frame_color)
+                .bg(c("surface"))
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(pill)
+                .child(body)
+                .child(handle)
+                .into_any_element()));
         }
         pills.sort_by_key(|(z, _)| *z);
         for (_, pill) in pills { area = area.child(pill); }
@@ -2433,7 +2603,7 @@ impl AppWindow {
             .bg(c("hover"))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         // Like Claude's toolbar: the folder opens or closes the files pane (tree and preview).
-        let open = state.panel.is_some() || state.file.is_some() || state.files;
+        let open = state.file.is_some() || state.files;
         tabs = tabs.child(
             div()
                 .id("canvas-files")
@@ -2453,12 +2623,9 @@ impl AppWindow {
                         this.canvas_state.files = true;
                         this.canvas_state.doc.panel.tree_hidden = false;
                         // Bring back the tabs it closed with; files and terminals closed since are gone.
-                        if let Some((panel, file, tabs)) = this.canvas_state.closed.take() {
-                            let live = &this.live;
-                            let state = &mut this.canvas_state;
-                            state.tabs = tabs.into_iter().filter(|t| std::path::Path::new(t).is_absolute() || live.contains_key(t)).collect();
-                            state.file = file;
-                            state.panel = panel.filter(|p| live.contains_key(p));
+                        if let Some((file, tabs)) = this.canvas_state.closed.take() {
+                            this.canvas_state.tabs = tabs;
+                            this.canvas_state.file = file;
                         }
                         this.sync(window, cx);
                         cx.notify();
@@ -2489,7 +2656,7 @@ impl AppWindow {
                     this.canvas_state.space_drag = None;
                 }),
             );
-        if state.panel.is_some() || state.file.is_some() || state.files {
+        if state.file.is_some() || state.files {
             let full_width = self
                 .bounds
                 .borrow()
@@ -2531,8 +2698,6 @@ impl AppWindow {
                         }),
                     ),
             );
-            let addr = state.panel.as_deref().unwrap_or("");
-            let name = self.pill_name(addr);
             let mut tabs = div()
                 .id("canvas-tabs")
                 .flex()
@@ -2546,22 +2711,8 @@ impl AppWindow {
                 .border_color(c("border"));
             for tab in &state.tabs {
                 let tab = tab.clone();
-                let is_file = std::path::Path::new(&tab).is_absolute();
-                let active = if is_file {
-                    state.file.as_ref() == Some(&tab)
-                } else {
-                    state.file.is_none() && state.panel.as_ref() == Some(&tab)
-                };
-                let label = if is_file {
-                    crate::subs::transcript_title(&tab).unwrap_or_else(|| std::path::Path::new(&tab).file_name().unwrap_or_default().to_string_lossy().into_owned())
-                } else {
-                    self.pill_name(&tab)
-                };
-                let (icon, tint) = if is_file {
-                    ("mods/files/file.svg".to_owned(), true)
-                } else {
-                    program_icon(self.live.get(&tab).unwrap_or(&Value::Null))
-                };
+                let active = state.file.as_ref() == Some(&tab);
+                let label = crate::subs::transcript_title(&tab).unwrap_or_else(|| std::path::Path::new(&tab).file_name().unwrap_or_default().to_string_lossy().into_owned());
                 let activate = tab.clone();
                 let close = tab.clone();
                 tabs = tabs.child(
@@ -2576,17 +2727,12 @@ impl AppWindow {
                         .when(active, |d| d.bg(c("hover")))
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _, window, cx| {
-                            if is_file {
-                                this.canvas_state.file = Some(activate.clone());
-                                this.focus.focus(window, cx);
-                            } else {
-                                this.canvas_state.panel = Some(activate.clone());
-                                this.canvas_state.file = None;
-                            }
+                            this.canvas_state.file = Some(activate.clone());
+                            this.focus.focus(window, cx);
                             this.sync(window, cx);
                             cx.notify();
                         }))
-                        .child(icon_element(&icon, tint, px(14.), c("muted-foreground")))
+                        .child(icon_element("mods/files/file.svg", true, px(14.), c("muted-foreground")))
                         .child(div().text_size(px(12.)).child(label))
                         .child(
                             panel_button(
@@ -2598,28 +2744,12 @@ impl AppWindow {
                             .on_click(cx.listener(
                                 move |this, _, window, cx| {
                                     cx.stop_propagation();
-                                    let active = this
-                                        .canvas_state
-                                        .file
-                                        .as_ref()
-                                        .or(this.canvas_state.panel.as_ref())
-                                        .cloned();
                                     let next = canvas::close_panel_tab(
                                         &mut this.canvas_state.tabs,
-                                        active.as_deref(),
+                                        this.canvas_state.file.as_deref(),
                                         &close,
                                     );
-                                    this.canvas_state.file = next
-                                        .as_ref()
-                                        .filter(|p| std::path::Path::new(p).is_absolute())
-                                        .cloned();
-                                    if let Some(next) =
-                                        next.filter(|p| !std::path::Path::new(p).is_absolute())
-                                    {
-                                        this.canvas_state.panel = Some(next);
-                                    } else if this.canvas_state.tabs.is_empty() {
-                                        this.canvas_state.panel = None;
-                                    }
+                                    this.canvas_state.file = next;
                                     this.sync(window, cx);
                                     cx.notify();
                                 },
@@ -2628,11 +2758,8 @@ impl AppWindow {
                 );
             }
             panel = panel.child(tabs);
-            let path = state
-                .file
-                .as_deref()
-                .unwrap_or_else(|| self.cwds.get(addr).map(String::as_str).unwrap_or(&name));
             let root = self.panel_root();
+            let path = state.file.as_deref().or(root.as_deref()).unwrap_or("");
             // Outside the tree's folder, paths read from home.
             // A sub-agent reads as itself, not as a file in its agent's data folder.
             let breadcrumb = match crate::subs::transcript_title(path) {
@@ -2706,23 +2833,6 @@ impl AppWindow {
                             )),
                         )
                     })
-                    .when(state.file.is_none(), |d| {
-                        d.child(
-                            panel_button(
-                                "canvas-panel-pop",
-                                "icons/external-link.svg",
-                                c("muted-foreground"),
-                                c("hover"),
-                            )
-                            .on_click(cx.listener(
-                                |this, _, window, cx| {
-                                    if let Some(addr) = this.canvas_state.panel.clone() {
-                                        this.pop_canvas(addr, false, window, cx);
-                                    }
-                                },
-                            )),
-                        )
-                    })
                     .child(
                         panel_button(
                             "panel-tree",
@@ -2776,8 +2886,6 @@ impl AppWindow {
                         .h_full()
                         .child(self.render_slot("canvas-file", cx)),
                 );
-            } else if let Some(t) = self.terms.get("canvas-panel").filter(|_| state.panel.is_some()) {
-                body = body.child(div().flex_1().min_w_0().child(shown_terminal(&t.view, cx)));
             } else {
                 body = body.child(
                     div().flex_1().flex().items_center().justify_center().text_size(px(12.))
@@ -2801,6 +2909,17 @@ impl AppWindow {
         }
         row.into_any_element()
     }
+}
+
+/// The default columns and rows of a cell when it expands.
+const EXPANDED_COLS: u16 = 100;
+const EXPANDED_ROWS: u16 = 30;
+/// How long the zoom must be still before an expanded cell draws live text again.
+const ZOOM_REST: Duration = Duration::from_millis(160);
+
+/// The window slot of an expanded cell's terminal view.
+pub(super) fn cell_slot(addr: &str) -> String {
+    format!("canvas:{addr}")
 }
 
 /// A 24 px icon button for the side panel header.
