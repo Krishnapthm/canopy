@@ -99,7 +99,7 @@ Paste a message addressed to a sub-agent into its parent without Enter.
 
 ## `quote.send`
 
-Open an agent in the panel and paste a quote and optional message without Enter, waiting up to 30 seconds for bracketed paste.
+Expand an agent's cell and paste a quote and optional message without Enter, waiting up to 30 seconds for bracketed paste.
 
 | Argument | Required |
 |---|---|
@@ -111,9 +111,17 @@ Open an agent in the panel and paste a quote and optional message without Enter,
 | `terminal` | no |
 | `argv` | no |
 
+## `canvas.expand`
+
+Expand the named or last selected terminal cell into a live terminal in place, or collapse it.
+
+| Argument | Required |
+|---|---|
+| `terminal` | no |
+
 ## `panel.open`
 
-Open a terminal in the canvas side panel.
+Expand a terminal's cell in the canvas, as canvas.expand does (it no longer opens the side panel).
 
 | Argument | Required |
 |---|---|
@@ -121,7 +129,7 @@ Open a terminal in the canvas side panel.
 
 ## `panel.close`
 
-Close the canvas panel, keeping its terminal running.
+Close the canvas file panel.
 
 No arguments.
 
@@ -187,7 +195,7 @@ Create a canvas terminal or space at a world point (default: the middle of the v
 
 ## `panel.pop_out`
 
-Pop the panel terminal into its own window.
+Pop a terminal cell into its own window (default: the last selected cell).
 
 | Argument | Required |
 |---|---|

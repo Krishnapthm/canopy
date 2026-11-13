@@ -60,7 +60,7 @@ function items(p, git, agents) {
       ["Arrange >", "canvas.arrange", { picker: true }],
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],
-      ...(!tg.popped ? [["Open in panel", "panel.open", { terminal: tg.terminal }]] : []),
+      ...(!tg.popped ? [[tg.expanded ? "Collapse" : "Expand", "canvas.expand", { terminal: tg.terminal }]] : []),
       ...(tg.finished ? [["Clear finished", "canvas.clear_finished", { terminal: tg.terminal }]] : []),
       ["Close terminal", "canvas.close", { terminal: tg.terminal }],
     ];
