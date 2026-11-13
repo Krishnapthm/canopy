@@ -51,6 +51,12 @@ Restore geometry before the last canvas move, resize or arrange.
 
 No arguments.
 
+## `canvas.tile`
+
+Tile view: fit every expanded cell of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed cells line up below. Repeat to put everything back.
+
+No arguments.
+
 ## `canvas.fit`
 
 Fit the selection, else everything in the current space or Home; repeat to restore the previous camera.

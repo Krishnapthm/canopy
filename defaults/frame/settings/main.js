@@ -3,7 +3,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, InputState, Input, Popup } from "gpui-base";
-import { hc, run, theme, themes, fonts, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window } from "herdr";
+import { hc, run, theme, themes, fonts, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, ui } from "herdr";
 
 const I = (name) => `frame/settings/${name}.svg`;
 
@@ -152,7 +152,7 @@ export default class Settings extends View {
       .id(id)
       .px(12)
       .py(5)
-      .rounded(7)
+      .rounded(ui.size.radiusSm)
       .border_1()
       .border_color(t.border)
       .bg(t.raised)
@@ -182,7 +182,7 @@ export default class Settings extends View {
         .child(label);
     return h_flex()
       .items_center()
-      .rounded(7)
+      .rounded(ui.size.radiusSm)
       .border_1()
       .border_color(t.border)
       .bg(t.raised)
@@ -204,7 +204,7 @@ export default class Settings extends View {
       .flex()
       .when(on, (el) => el.justify_end())
       .on_click(onClick)
-      .child(div().w(16).h(16).rounded(8).bg(on ? t.accent_foreground : t.muted));
+      .child(div().w(16).h(16).rounded(ui.size.radius).bg(on ? t.accent_foreground : t.muted));
   }
 
   // Look -----------------------------------------------------------------
@@ -295,7 +295,7 @@ export default class Settings extends View {
     return h_flex()
       .p(2)
       .gap(2)
-      .rounded(8)
+      .rounded(ui.size.radius)
       .border_1()
       .border_color(t.border)
       .bg(t.background)
@@ -384,7 +384,7 @@ export default class Settings extends View {
       .w(220)
       .px(12)
       .py(6)
-      .rounded(7)
+      .rounded(ui.size.radiusSm)
       .border_1()
       .border_color(open ? t.accent : t.border)
       .bg(t.raised)
@@ -433,7 +433,7 @@ export default class Settings extends View {
         this.handle.focus();
         cx.notify();
       })
-      .rounded(8)
+      .rounded(ui.size.radius)
       .border_1()
       .border_color(t.border)
       .bg(t.background)
@@ -542,7 +542,7 @@ export default class Settings extends View {
           .gap(10)
           .px(12)
           .py(10)
-          .rounded(7)
+          .rounded(ui.size.radiusSm)
           .items_center()
           .cursor_pointer()
           .hover((s) => s.bg(t.hover))
@@ -650,7 +650,7 @@ export default class Settings extends View {
       else row.child(v_flex().gap(6)
         .child(div().text_size(12).text_color(t.dim).child("New name (addresses using the old name stop working)"))
         .child(h_flex().gap(6).items_center()
-          .child(Input.new(this.renameInput).flex_1().min_w(0).h(32).px(10).rounded(7).border_1().border_color(this.renameFocused ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground))
+          .child(Input.new(this.renameInput).flex_1().min_w(0).h(32).px(10).rounded(ui.size.radiusSm).border_1().border_color(this.renameFocused ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground))
           .child(cancel).child(this.button(t, `st-m-save-${m.name}`, "Save", (_e, cx) => this.machineAction(m.name, "rename", cx, edit.name)))));
     }
     if (result) row.child(div().text_size(12.5).text_color(result.ok ? t.ansi2 : t.blocked).child(result.message));
@@ -713,7 +713,7 @@ export default class Settings extends View {
             .px(10)
             .py(7)
             .items_center()
-            .rounded(7)
+            .rounded(ui.size.radiusSm)
             .cursor_pointer()
             .bg(on ? t.raised : "#00000000")
             .hover((st) => st.bg(t.raised))

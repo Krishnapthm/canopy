@@ -38,6 +38,7 @@ Enter on a sub-agent opens its transcript; on a file card it opens the file.
 | Go into space 1..9 | Cmd+1..9 | Ctrl+1..9 |
 | Home | Cmd+Shift+H | Ctrl+Shift+H |
 | Focus fit toggle | Cmd+Shift+F | Ctrl+Shift+F on canvas |
+| Tile view toggle | Cmd+Shift+G | Ctrl+Shift+G |
 | Expand / collapse | Cmd+Enter | Ctrl+Shift+Enter |
 | Arrange | Cmd+Shift+A | Ctrl+Shift+A |
 | Zoom in / out / 100% | Cmd+= / Cmd+- / Cmd+0 | Ctrl+= / Ctrl+- / Ctrl+0 |

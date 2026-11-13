@@ -3,7 +3,7 @@
 // quote and the optional message into it, never pressing Enter.
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea } from "gpui-base";
-import { run, props, closeOverlay, theme } from "herdr";
+import { run, props, closeOverlay, theme, ui } from "herdr";
 
 export default class Quote extends View {
   init() {
@@ -22,7 +22,7 @@ export default class Quote extends View {
     const agents = props().agents ?? [];
     const { path = "", start, end } = props().quote ?? {};
     const where = path.split("/").pop() + (start ? `:${start}${end && end !== start ? `-${end}` : ""}` : "");
-    return v_flex().id("quote").w_full().p(5).gap(4).bg(t.popover).text_size(12.8).text_color(t.foreground)
+    return v_flex().id("quote").w_full().p(5).gap(4).bg(t.popover).text_size(ui.size.text).text_color(t.foreground)
       .on_key_down((e, cx) => {
         if (e.key !== "escape") return;
         closeOverlay(props().overlay);
@@ -36,10 +36,10 @@ export default class Quote extends View {
         .child(agents.length ? `${where} · pasted into the prompt, not sent` : where))
       .child(div().mx(3).h(1).bg(t.border))
       .when(!agents.length, el => el.child(div().px(8).py(7).text_color(t.dim).child("No running agents")))
-      .children(agents.map((a, i) => h_flex().id(`quote-${i}`).h(31).px(8).gap(9).rounded(7).items_center().cursor_pointer()
+      .children(agents.map((a, i) => h_flex().id(`quote-${i}`).h(ui.size.control).px(8).gap(9).rounded(ui.size.radiusSm).items_center().cursor_pointer()
         .hover(s => s.bg(t.hover)).on_click(() => this.send(a.terminal))
         .child(a.tint ? svg(a.icon).size(16).flex_none().text_color(t.muted) : image(a.icon).w(16).h(16).flex_none())
         .child(div().flex_1().min_w(0).truncate().child(a.name))))
-      .when(agents.length > 0, el => el.child(div().p(3).child(Textarea.new(this.message).w_full().px(8).py(6).rounded(7).border_1().border_color(t.border).bg(t.background).text_size(12))));
+      .when(agents.length > 0, el => el.child(div().p(3).child(Textarea.new(this.message).w_full().px(8).py(6).rounded(ui.size.radiusSm).border_1().border_color(t.border).bg(t.background).text_size(12))));
   }
 }

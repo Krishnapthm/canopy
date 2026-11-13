@@ -63,6 +63,7 @@ impl AppWindow {
             self.canvas_state.doc.panel.space = Some(id);
         }
         self.focus.focus(window, cx);
+        self.tile_canvas(false, window, cx);
         cx.notify();
     }
 

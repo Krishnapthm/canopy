@@ -67,6 +67,16 @@ pub(super) struct State {
     group: Vec<String>,
     /// Option (Alt) held on the canvas: each target cell shows its actions, with keys from keys.json.
     pub(super) actions: Option<Vec<(String, String, String)>>,
+    /// Tile view is on (`canvas.tile`): what it fills, and the geometry to put back.
+    pub(super) tile: Option<Tile>,
+}
+
+/// Tile view of the current place (leaving it calls `State::untile`): the camera from before
+/// (its top-left is where the tiles start, at zoom 1) and each object's rect and expanded size
+/// from before, by key (cell, preview path or space id).
+pub(super) struct Tile {
+    camera: canvas::Camera,
+    before: Vec<(String, canvas::Rect, Option<canvas::Point>)>,
 }
 #[derive(Default)]
 struct Motion {
@@ -137,6 +147,7 @@ impl State {
             marquee: None,
             group: vec![],
             actions: None,
+            tile: None,
         }
     }
     /// The requested camera before animation finishes, for keyboard integration tests.
@@ -149,6 +160,25 @@ impl State {
     pub(super) fn settle_for_test(&mut self) {
         self.layout_motion = None;
         self.shown = None;
+    }
+
+    /// Turns tile view off, putting back the camera and geometry from before it. A cell expanded or
+    /// collapsed while tiled keeps that and only goes back to its spot; their keys are
+    /// returned so the caller can make room for their new size. Call before leaving a place.
+    pub(super) fn untile(&mut self) -> Vec<String> {
+        let Some(tile) = self.tile.take() else { return vec![] };
+        self.doc.camera = tile.camera;
+        self.motion = Motion::default();
+        let back = |key: &str| tile.before.iter().find(|(k, ..)| k == key);
+        let mut flipped = vec![];
+        for c in &mut self.doc.cards {
+            let Some((_, r, size)) = back(&c.key()) else { continue };
+            if c.size.is_some() == size.is_some() { c.rect = *r; c.size = *size; }
+            else { c.rect[0] = r[0]; c.rect[1] = r[1]; flipped.push(c.key()); }
+        }
+        for p in &mut self.doc.previews { if let Some((_, r, _)) = back(&p.path) { p.rect = *r; } }
+        for s in &mut self.doc.spaces { if let Some((_, r, _)) = back(&s.space) { s.rect = *r; } }
+        flipped
     }
 
     /// End any drag, returning whether geometry was committed.
@@ -533,6 +563,83 @@ impl AppWindow {
             self.animate_layout(window, cx);
         }
     }
+    /// `canvas.tile` (`toggle`): turns tile view on, fitting the current place's expanded cells
+    /// and previews into the visible canvas at zoom 1, or off, putting everything back. With
+    /// `toggle` false it only re-tiles when tile view is on and the layout would change: the
+    /// active (last selected) tile, the members or the visible size moved, or a tile was dragged.
+    pub(super) fn tile_canvas(&mut self, toggle: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let state = &mut self.canvas_state;
+        if toggle && state.tile.is_some() {
+            self.end_canvas_drag(cx);
+            let state = &mut self.canvas_state;
+            let (before, from) = (state.doc.clone(), state.doc.camera);
+            let flipped = state.untile();
+            state.shown = Some(before);
+            // Ease the camera back too.
+            let to = std::mem::replace(&mut state.doc.camera, from);
+            let visible = self.bounds.borrow().get("canopy-canvas").map_or([0., 0.], |b| [f32::from(b.size.width), f32::from(b.size.height)]);
+            self.canvas_state.motion.target = Some((from, to, std::time::Instant::now(), [visible[0] / 2., visible[1] / 2.]));
+            self.animate_camera(window, cx);
+            for key in flipped { self.solve_layout(Some(&key), None, cx); }
+            self.animate_layout(window, cx);
+            return cx.notify();
+        }
+        if !toggle && state.tile.is_none() { return; }
+        if state.drag.is_some() || state.cell_resize.is_some() || state.preview_drag.is_some() || state.space_drag.is_some() { return; }
+        let visible = self.bounds.borrow().get("canopy-canvas").map(|b| [f32::from(b.size.width), f32::from(b.size.height)])
+            .unwrap_or([f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)]);
+        let doc = &self.canvas_state.doc;
+        let camera = self.canvas_state.motion.target.map_or(doc.camera, |t| t.1);
+        let area = self.canvas_state.tile.as_ref().map_or(camera, |t| t.camera);
+        let area = [area.x, area.y];
+        // What the place shows: expanded cells and previews tile; pills (and space cards on Home) line up.
+        let shown = |c: &canvas::Card| doc.shows(c.space.as_ref())
+            && (c.sub.is_some() || canvas::view_allows(&doc.view, self.live.get(&c.terminal).is_some_and(canvas_agent)));
+        let cards: Vec<usize> = (0..doc.cards.len()).filter(|i| shown(&doc.cards[*i])).collect();
+        let (tiled, pilled): (Vec<usize>, Vec<usize>) = cards.into_iter().partition(|i| doc.cards[*i].size.is_some());
+        let previews: Vec<usize> = (0..doc.previews.len()).filter(|i| doc.shows(doc.previews[*i].space.as_ref())).collect();
+        let spaces: Vec<usize> = (0..doc.spaces.len()).filter(|i| doc.room.is_none()
+            && !self.model.spaces.iter().any(|s| s.id == doc.spaces[*i].space && root_space(s))).collect();
+        let keys: Vec<String> = tiled.iter().map(|i| doc.cards[*i].key()).chain(previews.iter().map(|i| doc.previews[*i].path.clone())).collect();
+        let rects: Vec<_> = tiled.iter().map(|i| doc.cards[*i].rect).chain(previews.iter().map(|i| doc.previews[*i].rect)).collect();
+        let pills: Vec<_> = pilled.iter().map(|i| self.pill_rect(&doc.cards[*i], cx)).chain(spaces.iter().map(|i| doc.spaces[*i].rect)).collect();
+        let active = self.canvas_state.selected.iter().rev().find_map(|k| keys.iter().position(|t| t == k));
+        // Tiles start below the toolbar (12 px from the top, 32 px tall) so it never covers one.
+        const TOOLBAR: f32 = 44.;
+        let (placed, lined) = canvas::tile([area[0], area[1] + TOOLBAR, visible[0], visible[1] - TOOLBAR], &rects, active, &pills, self.person.canvas_gap);
+        let state = &mut self.canvas_state;
+        let unchanged = rects == placed && pilled.iter().map(|i| state.doc.cards[*i].rect).chain(spaces.iter().map(|i| state.doc.spaces[*i].rect))
+            .zip(&lined).all(|(a, b)| a[0] == b[0] && a[1] == b[1]);
+        if !toggle && unchanged { return; }
+        if state.tile.is_none() {
+            let doc = &state.doc;
+            let before = doc.cards.iter().map(|c| (c.key(), c.rect, c.size))
+                .chain(doc.previews.iter().map(|p| (p.path.clone(), p.rect, None)))
+                .chain(doc.spaces.iter().map(|s| (s.space.clone(), s.rect, None))).collect();
+            state.tile = Some(Tile { camera, before });
+        }
+        if state.shown.is_none() { state.shown = Some(state.doc.clone()); }
+        let doc = &mut state.doc;
+        let n = tiled.len();
+        for (j, r) in placed.into_iter().enumerate() {
+            if j < n { let c = &mut doc.cards[tiled[j]]; c.rect = r; c.size = Some([r[2], r[3]]); }
+            else { doc.previews[previews[j - n]].rect = r; }
+        }
+        let m = pilled.len();
+        for (j, r) in lined.into_iter().enumerate() {
+            let rect = if j < m { &mut doc.cards[pilled[j]].rect } else { &mut doc.spaces[spaces[j - m]].rect };
+            rect[0] = r[0];
+            rect[1] = r[1];
+        }
+        let to = canvas::Camera { x: area[0], y: area[1], zoom: 1. };
+        if camera != to {
+            state.motion.target = Some((doc.camera, to, std::time::Instant::now(), [visible[0] / 2., visible[1] / 2.]));
+            self.animate_camera(window, cx);
+        }
+        self.animate_layout(window, cx);
+        cx.notify();
+    }
+
     pub(super) fn refresh_sub_hooks(&mut self) {
         self.canvas_state.subs = self.live.iter().filter(|(_, record)| record["state"] == "live")
             .map(|(addr, record)| (addr.clone(), crate::subs::hooks(record))).collect();
@@ -609,9 +716,13 @@ impl AppWindow {
                 self.clear_subs(&args, window, cx);
             }
             canvas::CloseChoice::ConfirmAgent | canvas::CloseChoice::ConfirmTerminal if a["confirmed"] != if agent { "agent" } else { "terminal" } => {
-                let title = if agent { format!("Terminate {} and close?", self.pill_name(&key)) } else { "Close this terminal?".into() };
+                let (title, detail) = if agent {
+                    ("Terminate agent?", format!("{} stops and its cell closes.", self.pill_name(&key)))
+                } else {
+                    ("Close this terminal?", "This ends the terminal and its running programs.".into())
+                };
                 self.open_overlay(mods::new_overlay_id(), json!({"mod":"confirm","kind":"dialog","width":400,
-                    "props":{"title":title,"detail":"This ends the terminal and its running programs.",
+                    "props":{"title":title,"detail":detail,"destructive":true,
                     "accept":if agent {"Terminate"} else {"Close"},"dontAsk":!agent,
                     "command":{"name":"canvas.close","args":{"terminal":key,"confirmed":if agent {"agent"} else {"terminal"}}}}}), window, cx);
             }
@@ -733,13 +844,13 @@ impl AppWindow {
                 ("Close", "canvas.close"),
             ];
             let mut row = div().absolute().left(px(x)).top(px(y + 6.)).flex().gap(px(2.)).p(px(3.))
-                .rounded(px(8.)).bg(c("popover")).border_1().border_color(c("border")).shadow_md()
+                .rounded(px(ui::RADIUS)).bg(c("popover")).border_1().border_color(c("border")).shadow_md()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
             for (label, command) in items {
                 let (target, hint) = (key.clone(), key_of(command));
                 row = row.child(
                     div().id(SharedString::from(format!("action-{key}-{command}"))).flex().items_center().gap(px(6.))
-                        .px(px(8.)).py(px(4.)).rounded(px(6.)).cursor_pointer().text_size(px(12.)).text_color(c("foreground"))
+                        .px(px(8.)).py(px(4.)).rounded(px(ui::RADIUS_SM)).cursor_pointer().text_size(px(12.)).text_color(c("foreground"))
                         .hover(|d| d.bg(c("hover")))
                         .child(label)
                         .when(!hint.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("muted-foreground")).child(hint)))
@@ -758,6 +869,8 @@ impl AppWindow {
         if room == self.canvas_state.doc.room { return; }
         let first = !self.canvas_state.doc.cameras.contains_key(&room.clone().unwrap_or_default());
         self.end_canvas_drag(cx);
+        // Leaving a tiled place puts its geometry back at once (no ease into the next place).
+        self.canvas_state.untile();
         self.canvas_state.motion = Motion::default();
         self.canvas_state.doc.go(room.clone());
         self.canvas_state.selected.clear();
@@ -1072,6 +1185,8 @@ impl AppWindow {
         }
         self.animate_layout(window, cx);
         self.canvas_changed(cx);
+        // In tile view an expanded cell joins the tiles and a collapsed one the pills.
+        self.tile_canvas(false, window, cx);
         if expand && let Some(p) = self.model.pane_of(addr) { self.model.focus_pane(&p); }
         self.sync(window, cx);
         match self.terms.get(&cell_slot(addr)).filter(|_| expand && !self.canvas_state.mode) {
@@ -1235,6 +1350,7 @@ impl AppWindow {
             let color = canvas::unused_color(&self.canvas_state.doc.spaces, self.canvas_state.doc.spaces.len());
             // A new space is a card on Home; you go straight inside it.
             self.canvas_state.doc.spaces.push(canvas::Space { space: id.clone(), rect: [point[0], point[1], canvas::SPACE_CARD[0], canvas::SPACE_CARD[1]], color: color.into(), frame: true });
+            self.canvas_state.untile();
             self.canvas_state.doc.go(Some(id));
             self.canvas_changed(cx);
             self.flush_documents(false, window, cx);
@@ -1531,6 +1647,7 @@ impl AppWindow {
             }
         }
         if state.doc.room.as_ref().is_some_and(|id| !state.doc.spaces.iter().any(|s| &s.space == id)) {
+            state.untile();
             state.doc.go(None);
             changed = true;
         }
@@ -1618,6 +1735,8 @@ impl AppWindow {
                 for pin in pins { self.solve_layout(Some(&pin),None,cx); }
             }
             self.canvas_changed(cx);
+            // A cell that opened or closed in a tiled place joins or leaves the tiles.
+            self.tile_canvas(false, window, cx);
         }
     }
     pub(super) fn quote_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
@@ -1718,7 +1837,7 @@ impl AppWindow {
     pub(super) fn quote_chip_element(&self) -> Option<AnyElement> {
         let bounds = Self::quote_chip_bounds(&self.canvas_state.quote_chip.as_ref()?.0)?;
         Some(div().id("quote-chip").absolute().left(bounds.origin.x).top(bounds.origin.y).size(bounds.size.width)
-            .flex().items_center().justify_center().rounded(px(7.)).border_1().border_color(c("border")).bg(c("surface"))
+            .flex().items_center().justify_center().rounded(px(ui::RADIUS_SM)).border_1().border_color(c("border")).bg(c("surface"))
             .shadow_sm().cursor_pointer().hover(|d| d.bg(c("hover")))
             // The press itself opens the menu (quote_press); nothing under the icon takes it.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1840,7 +1959,7 @@ impl AppWindow {
         let quote_view = view.clone();
         (div().id(SharedString::from(format!("preview-{}", card.path))).absolute().left(px(p[0])).top(px(p[1]))
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
-                .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(8.)).overflow_hidden()
+                .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).overflow_hidden()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(div().flex().items_center().gap(px(8.)).px(px(12.)).h(px(36. * camera.zoom)).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -1867,7 +1986,7 @@ impl AppWindow {
                     })
                     .on_link_click(|_, _, _, _| {}))
                     .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, &quote_view, e.position, window, cx))))
-                .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(8.))
+                .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(ui::RADIUS))
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
                     .hover(|d| d.border_color(c("foreground")))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -2188,6 +2307,13 @@ impl AppWindow {
                     cx.notify();
                 }),
             )
+            // Tile view follows any click, wherever it lands (terminals keep their mouse-up):
+            // once the event is done, a new selection becomes the large tile and drags snap back.
+            .capture_any_mouse_up(cx.listener(|this, _: &MouseUpEvent, window, cx| {
+                if this.canvas_state.tile.is_some() {
+                    cx.defer_in(window, |this, window, cx| this.tile_canvas(false, window, cx));
+                }
+            }))
             .on_mouse_up(
                 MouseButton::Middle,
                 cx.listener(|this, _, window, cx| {
@@ -2216,6 +2342,28 @@ impl AppWindow {
             let z = camera.zoom;
             let [x, y] = camera.to_screen([space.rect[0], space.rect[1]]);
             let selected = state.selected.contains(&id);
+            let rename_id = id.clone();
+            let color = c(&space.color);
+            // Like a Figma frame: the name sits above a rounded box tinted with the space's color.
+            let name = div()
+                .id(SharedString::from(format!("space-label-{id}")))
+                .absolute().top(px(-24.)).left_0().w_full().h(px(20.))
+                .flex().items_center().gap(px(6.))
+                .text_size(px(12.)).text_color(c(if selected { "foreground" } else { "muted-foreground" }))
+                .child(div().flex_none().size(px(8.)).rounded_full().bg(color))
+                .child(div().flex_1().min_w_0().truncate().map(|d| {
+                    if let Some((editing, input, _)) = &state.rename {
+                        if editing == &id { return d.child(gpui_base::Input::new(input)); }
+                    }
+                    d.child(label)
+                }))
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    // Double-click the name to rename, as in Figma; the box's double-click goes inside.
+                    if e.click_count == 2 {
+                        this.rename_canvas_space(rename_id.clone(), window, cx);
+                        cx.stop_propagation();
+                    }
+                }));
             area = area.child(
                 div()
                     .id(SharedString::from(format!("space-card-{id}")))
@@ -2224,44 +2372,24 @@ impl AppWindow {
                     .top(px(y))
                     .w(px(space.rect[2] * z))
                     .h(px(space.rect[3] * z))
-                    .rounded(px(10. * z))
+                    .rounded(px(ui::RADIUS_LG * z))
                     .border_1()
-                    .border_color(if selected { c("ring") } else { c("border") })
-                    .bg(c("surface"))
-                    .overflow_hidden()
+                    .border_color(if selected { c("ring") } else { color.opacity(0.35) })
+                    .bg(color.opacity(self.person.space_fill))
+                    .p(px(12. * z))
                     .flex()
                     .flex_col()
-                    .child(div().h(px(4. * z)).w_full().bg(c(&space.color)))
+                    .justify_end()
+                    .child(name)
                     .child(
                         div()
-                            .flex_1()
-                            .bg(c(&space.color).opacity(self.person.space_fill))
-                            .p(px(12. * z))
                             .flex()
-                            .flex_col()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_size(px(14. * z))
-                                    .text_color(c("foreground"))
-                                    .truncate()
-                                    .map(|d| {
-                                        if let Some((editing, input, _)) = &state.rename {
-                                            if editing == &id { return d.child(gpui_base::Input::new(input)); }
-                                        }
-                                        d.child(label)
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(6. * z))
-                                    .text_size(px(12. * z))
-                                    .text_color(c("muted-foreground"))
-                                    .when(blocked, |d| d.child(svg().path("frame/settings/bell.svg").size(px(12. * z)).text_color(c("muted-foreground"))))
-                                    .child(summary),
-                            ),
+                            .items_center()
+                            .gap(px(6. * z))
+                            .text_size(px(12. * z))
+                            .text_color(c("muted-foreground"))
+                            .when(blocked, |d| d.child(svg().path("frame/settings/bell.svg").size(px(12. * z)).text_color(c("muted-foreground"))))
+                            .child(summary),
                     )
                     .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
                         if e.keystroke.key == "escape" && this.canvas_state.rename.is_some() {
@@ -2360,7 +2488,7 @@ impl AppWindow {
             let (icon, tint) = program_icon(&json!({"program":sub.program}));
             let mut pill = div().id(SharedString::from(format!("canvas-sub-{parent}-{}", sub.id)))
                 .absolute().left(px(x)).top(px(y)).w(px(rect[2] * z)).h(px(rect[3] * z))
-                .rounded(px(8. * z)).border_1().border_color(c(if state.selected.contains(&key) { "ring" } else { "border" })).bg(c("surface"))
+                .rounded(px(ui::RADIUS * z)).border_1().border_color(c(if state.selected.contains(&key) { "ring" } else { "border" })).bg(c("surface"))
                 .when(sub.done, |d| d.opacity(0.5))
                 .flex().items_start().px(px(12. * z)).py(px(9. * z)).gap(px(8. * z))
                 .text_size(px(13. * z)).line_height(px(18. * z)).text_color(c("foreground")).overflow_hidden()
@@ -2404,7 +2532,7 @@ impl AppWindow {
             let frame_color = c(if state.selected.contains(&addr) { "ring" } else { "border" });
             let mut pill = div()
                 .id(SharedString::from(format!("canvas-{addr}")))
-                .when(!expanded, |d| d.absolute().left(px(x)).top(px(y)).rounded(px(8. * z)).border_1().border_color(frame_color).bg(c("surface")))
+                .when(!expanded, |d| d.absolute().left(px(x)).top(px(y)).rounded(px(ui::RADIUS * z)).border_1().border_color(frame_color).bg(c("surface")))
                 .w(px(cw * z))
                 .h(px(if expanded { canvas::HEADER } else { ch } * z))
                 .flex()
@@ -2425,7 +2553,7 @@ impl AppWindow {
                     .min_w_0()
                     .line_clamp(if expanded { 1 } else { 2 })
                     .text_ellipsis()
-                    .child(name)
+                    .child(name.clone())
                     .id(SharedString::from(format!("canvas-name-{addr}"))),
             );
             if agent && rec["status"] == "working" {
@@ -2525,9 +2653,13 @@ impl AppWindow {
             let entered = !state.mode && state.selected.last() == Some(&card.terminal);
             let live = self.terms.get(&slot).filter(|_| entered || (self.camera_rested() && z >= canvas::EXPANDED_MIN_ZOOM));
             let body_size = size(px(card.rect[2] - 2.), px(card.rect[3] - canvas::HEADER - 2.));
+            // A tile squeezed below readable size shows who it is instead, and its program keeps its grid.
+            let compact = state.tile.is_some() && !entered && (cw < canvas::TILE_COMPACT[0] || ch < canvas::TILE_COMPACT[1]);
             if let Some(t) = self.terms.get(&slot) {
                 let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.terminal);
-                t.view.update(cx, |v, cx| v.set_scale(z, (!resizing).then_some(body_size), cx));
+                // The grid follows the cell only once the zoom rests, else a pinch resizes the program every frame.
+                let settled = !resizing && !compact && self.camera_rested();
+                t.view.update(cx, |v, cx| v.set_scale(z, settled.then_some(body_size), cx));
             }
             let (select_addr, resize_addr, mode_addr) = (card.terminal.clone(), card.terminal.clone(), card.terminal.clone());
             let body = div()
@@ -2566,8 +2698,13 @@ impl AppWindow {
                     cx.stop_propagation();
                     cx.notify();
                 }))
-                .child(match live {
+                .child(match live.filter(|_| !compact) {
                     Some(t) => shown_terminal(&t.view, cx),
+                    None if compact => div().size_full().flex().flex_col().items_center().justify_center().gap(px(8. * z)).p(px(8. * z))
+                        .bg(c("surface")).text_size(px(13. * z)).text_color(c("foreground"))
+                        .child(icon_element(&icon, tint, px(28. * z), c("foreground")))
+                        .child(div().max_w_full().truncate().child(name.clone()))
+                        .into_any_element(),
                     None => div().size_full().bg(crate::terminal::hsla(crate::vt::theme().bg)).into_any_element(),
                 });
             let handle = div()
@@ -2592,7 +2729,7 @@ impl AppWindow {
                 .top(px(y))
                 .w(px(card.rect[2] * z))
                 .h(px(card.rect[3] * z))
-                .rounded(px(8. * z))
+                .rounded(px(ui::RADIUS * z))
                 .border_1()
                 .border_color(frame_color)
                 .bg(c("surface"))
@@ -2625,7 +2762,7 @@ impl AppWindow {
             .flex()
             .gap(px(4.))
             .p(px(4.))
-            .rounded(px(8.))
+            .rounded(px(ui::RADIUS))
             .bg(c("hover"))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         // Inside a space: Home, then the space's name (a breadcrumb), before the files and fit buttons.
@@ -2639,7 +2776,7 @@ impl AppWindow {
                     .items_center()
                     .gap(px(6.))
                     .px(px(8.))
-                    .rounded(px(6.))
+                    .rounded(px(ui::RADIUS_SM))
                     .cursor_pointer()
                     .text_size(px(12.))
                     .text_color(c("muted-foreground"))
@@ -2670,7 +2807,7 @@ impl AppWindow {
                 .items_center()
                 .px(px(10.))
                 .py(px(6.))
-                .rounded(px(6.))
+                .rounded(px(ui::RADIUS_SM))
                 .cursor_pointer()
                 .hover(|d| d.bg(c("surface")))
                 .when(open, |d| d.bg(c("surface")))
@@ -2693,6 +2830,9 @@ impl AppWindow {
         );
         tabs = tabs.child(panel_button("canvas-focus", "mods/pane/zoom.svg", c("foreground"), c("surface"))
             .on_click(cx.listener(|this, _, window, cx| this.canvas_command("canvas.fit", window, cx))));
+        tabs = tabs.child(panel_button("canvas-tile", "icons/layout-grid.svg", c("foreground"), c("surface"))
+            .when(state.tile.is_some(), |d| d.bg(c("surface")))
+            .on_click(cx.listener(|this, _, window, cx| this.tile_canvas(true, window, cx))));
         area = area.child(tabs);
         if state.actions.is_some() || state.connecting.is_some() {
             area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(72.))
@@ -2789,7 +2929,7 @@ impl AppWindow {
                         .items_center()
                         .gap(px(7.))
                         .px(px(8.))
-                        .rounded(px(7.))
+                        .rounded(px(ui::RADIUS_SM))
                         .when(active, |d| d.bg(c("hover")))
                         .cursor_pointer()
                         .on_click(cx.listener(move |this, _, window, cx| {
@@ -2864,7 +3004,7 @@ impl AppWindow {
                         let choice = choice.to_owned();
                         let path = state.file.clone().unwrap();
                         let menu_path = path.clone();
-                        d.child(div().flex().items_center().h(px(26.)).border_1().border_color(c("border")).rounded(px(7.)).overflow_hidden()
+                        d.child(div().flex().items_center().h(px(26.)).border_1().border_color(c("border")).rounded(px(ui::RADIUS_SM)).overflow_hidden()
                             .child(div().id("panel-editor").flex().items_center().gap(px(6.)).px(px(8.)).h_full().cursor_pointer()
                                 .text_size(px(12.)).text_color(c("foreground")).hover(|s| s.bg(c("hover")))
                                 .on_click(cx.listener(move |this, _, window, cx| this.panel_editor(&json!({"choice":choice,"path":path}), window, cx)))
@@ -2993,7 +3133,7 @@ fn panel_button(id: &'static str, icon: &'static str, fg: Hsla, hover: Hsla) -> 
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(6.))
+        .rounded(px(ui::RADIUS_SM))
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
         .child(svg().path(icon).size(px(14.)).text_color(fg))
@@ -3293,6 +3433,55 @@ mod settings_tests {
             let body = crate::terminal::size_of_grid(140,45,window);
             assert_eq!(this.canvas_state.doc.cards[0].size, Some([f32::from(body.width)+2., f32::from(body.height)+canvas::HEADER+2.]));
             assert!(this.canvas_state.pending_layout.is_none());
+        });
+    }
+}
+
+#[cfg(test)]
+mod tile_tests {
+    use super::{TestAppContext, json};
+    use super::super::tests::{in_own_process, open_window, running_alone};
+    const TEST: &str = "window::canvas_view::tile_tests::tile_toggles";
+
+    #[test]
+    fn tile_view_fills_the_view_and_puts_everything_back() { in_own_process(TEST); }
+
+    #[gpui::test]
+    fn tile_toggles(cx: &mut TestAppContext) {
+        if !running_alone(TEST) { return; }
+        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
+        view.update_in(cx, |this, window, cx| {
+            this.canvas_state.doc.cards = serde_json::from_value(json!([
+                {"terminal":"t1","rect":[0,0,600,400],"z":0,"size":[600,400]},
+                {"terminal":"t2","rect":[700,0,600,400],"z":1,"size":[600,400]},
+                {"terminal":"t3","rect":[0,500,600,400],"z":2,"size":[600,400]},
+                {"terminal":"t4","rect":[2000,2000,220,36],"z":3}
+            ])).unwrap();
+            for t in ["t1", "t2", "t3", "t4"] { this.live.insert(t.into(), json!({})); }
+            let before: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| (c.rect, c.size)).collect();
+            this.canvas_state.doc.camera = crate::canvas::Camera { x: 300., y: -40., zoom: 0.5 };
+            this.canvas_state.selected = vec!["t2".into()];
+            this.tile_canvas(true, window, cx);
+            this.canvas_state.settle_for_test();
+            let cards = &this.canvas_state.doc.cards;
+            let area = |i: usize| cards[i].rect[2] * cards[i].rect[3];
+            assert!(this.canvas_state.tile.is_some());
+            assert!(area(1) > area(0) && area(1) > area(2), "the selected tile is the largest: {:?}", cards.iter().map(|c| c.rect).collect::<Vec<_>>());
+            assert!(cards.iter().take(3).all(|c| c.size == Some([c.rect[2], c.rect[3]])), "tiles stay expanded at their tile size");
+            assert!(cards.iter().take(3).all(|c| c.rect[1] + c.rect[3] < cards[3].rect[1]), "the pill lines up below the tiles");
+            // Selecting another tile makes it the large one.
+            this.canvas_state.selected = vec!["t1".into()];
+            this.tile_canvas(false, window, cx);
+            this.canvas_state.settle_for_test();
+            let cards = &this.canvas_state.doc.cards;
+            assert!(cards[0].rect[2] * cards[0].rect[3] > cards[1].rect[2] * cards[1].rect[3]);
+            // Off: everything is back where it was.
+            this.tile_canvas(true, window, cx);
+            this.canvas_state.settle_for_test();
+            assert!(this.canvas_state.tile.is_none());
+            assert_eq!(this.canvas_state.motion_target_for_test(), crate::canvas::Camera { x: 300., y: -40., zoom: 0.5 }, "the camera goes back too");
+            let after: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| (c.rect, c.size)).collect();
+            assert_eq!(after, before);
         });
     }
 }

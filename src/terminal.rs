@@ -72,10 +72,12 @@ fn pad() -> (f32, f32) {
     (p[0] * zoom, p[1] * zoom)
 }
 
-/// The columns and rows of a pane `bounds` big at scale 1, however the canvas is zoomed.
-pub fn grid_at_rest(bounds: Size<Pixels>, window: &Window) -> (u16, u16) {
-    let _rest = Scaled::new(1.0);
-    grid_size(bounds, cell_size(window))
+/// The columns and rows that fill a pane `rest` big in world pixels, drawn at `scale`.
+/// Measured with the cell as drawn (glyph advances round to whole pixels per scale), so
+/// the grid fills the body at every zoom instead of leaving a strip on the right.
+fn grid_at_scale(rest: Size<Pixels>, scale: f32, window: &Window) -> (u16, u16) {
+    let _drawn = Scaled::new(scale);
+    grid_size(size(rest.width * scale, rest.height * scale), cell_size(window))
 }
 
 /// The pane size that holds `cols` x `rows` at scale 1.
@@ -173,8 +175,8 @@ pub struct TerminalView {
     grid: Rc<RefCell<Grid>>,
     /// The canvas zoom this terminal is drawn at (see `Scaled`).
     scale: f32,
-    /// The pane size at scale 1 that sets the PTY's columns and rows; None fits the PTY to what is drawn.
-    rest: Option<Size<Pixels>>,
+    /// None fits the PTY to what is drawn. Some: the canvas body (world px) and the scale its PTY grid was measured at.
+    rest: Option<(Size<Pixels>, f32)>,
     /// The wheel only scrolls this terminal while it has the keyboard (the canvas pans otherwise).
     pub wheel_needs_focus: bool,
     focus: FocusHandle,
@@ -528,11 +530,14 @@ impl TerminalView {
         &self.focus
     }
 
-    /// Draws at `scale` (the canvas zoom), with a PTY of the columns and rows `rest` holds at scale 1.
+    /// Draws at `scale` (the canvas zoom). `rest` is the body size (world px) whose PTY grid is
+    /// measured at this scale; None keeps the last grid, so a zoom gesture or a corner drag
+    /// changes the program's size once, when it settles.
     pub fn set_scale(&mut self, scale: f32, rest: Option<Size<Pixels>>, cx: &mut Context<Self>) {
-        if self.scale != scale || (rest.is_some() && self.rest != rest) {
+        let rest = rest.map(|r| (r, scale)).or(self.rest);
+        if self.scale != scale || self.rest != rest {
             self.scale = scale;
-            self.rest = rest.or(self.rest);
+            self.rest = rest;
             cx.notify();
         }
     }
@@ -1943,11 +1948,12 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
     let cell = g.cell;
     let metrics = cell_metrics(window);
     let (pad_x, pad_y) = pad();
-    // Rows rarely fill the height exactly: split what's left above and below.
+    // The grid rarely fills the pane exactly: split what's left on both sides, so padding is even.
+    let spare_x = (f32::from(bounds.size.width) - 2.0 * pad_x - f32::from(cell.width) * g.vt.cols as f32).max(0.0);
     let spare = (f32::from(bounds.size.height) - 2.0 * pad_y - f32::from(cell.height) * g.vt.rows as f32).max(0.0);
     let scale = window.scale_factor();
     let snap = |v: Pixels| px((f32::from(v) * scale).round() / scale);
-    let origin = bounds.origin + point(px(pad_x), px(pad_y + (spare / 2.0).floor()));
+    let origin = bounds.origin + point(px(pad_x + (spare_x / 2.0).floor()), px(pad_y + (spare / 2.0).floor()));
     let origin = point(snap(origin.x), snap(origin.y));
     g.origin = origin;
     let frame = g.vt.frame();
@@ -2392,7 +2398,7 @@ impl Render for TerminalView {
                 canvas(
                     move |bounds, window, _cx| {
                         let _scaled = Scaled::new(scale);
-                        let (cols, rows) = rest.map_or_else(|| grid_size(bounds.size, cell), |rest| grid_at_rest(rest, window));
+                        let (cols, rows) = rest.map_or_else(|| grid_size(bounds.size, cell), |(rest, at)| grid_at_scale(rest, at, window));
                         grid.borrow_mut().fit(cols, rows, cell, window.scale_factor());
                     },
                     move |bounds, _, window, cx| {
@@ -4364,15 +4370,32 @@ mod tests {
         let rest = super::grid_size(bounds, cell);
         for zoom in [0.5, 1.5, 2.0] {
             let _outer = super::Scaled::new(zoom);
-            // The PTY size is taken at scale 1 from the cell's size at rest, whatever is drawn.
-            let at_rest = { let _one = super::Scaled::new(1.0); super::grid_size(bounds, cell) };
-            assert_eq!(at_rest, rest);
+            // With a cell that scales exactly, the drawn body holds the same grid as at scale 1.
+            let drawn_grid = super::grid_size(gpui::size(bounds.width * zoom, bounds.height * zoom), gpui::size(cell.width * zoom, cell.height * zoom));
+            assert_eq!(drawn_grid, rest);
             assert_eq!(super::pad().0, crate::settings::get().terminal_padding[0] * crate::settings::zoom() * zoom);
             // Drawn at `zoom`, the cell is `zoom` times bigger and so is the pixel under the pointer.
             let drawn = gpui::size(cell.width * zoom, cell.height * zoom);
             assert_eq!(super::cell_at((8.0 * zoom * 3.0 + 1.0, 16.0 * zoom * 2.0 + 1.0), drawn), (3, 2));
         }
         assert_eq!(super::pad().0, crate::settings::get().terminal_padding[0] * crate::settings::zoom());
+    }
+
+    #[test]
+    fn the_grid_is_measured_with_the_cell_as_drawn() {
+        // Glyph advances round to whole device pixels per scale: 8.4 px at 1x draws 7.5 px at 0.9x (2x screen).
+        let body = gpui::size(gpui::px(1000.0), gpui::px(600.0));
+        let (at_one, drawn) = (gpui::size(gpui::px(8.4), gpui::px(17.0)), gpui::size(gpui::px(7.5), gpui::px(15.5)));
+        let wide = |cols: u16| 7.5 * cols as f32;
+        let drawn_body = gpui::size(body.width * 0.9, body.height * 0.9);
+        let _scaled = super::Scaled::new(0.9);
+        let pad = 2.0 * super::pad().0;
+        // Measured at scale 1, the grid leaves more than a cell empty on screen (the old strip).
+        let (old, _) = { let _one = super::Scaled::new(1.0); super::grid_size(body, at_one) };
+        assert!(900.0 - pad - wide(old) > 7.5);
+        // Measured as drawn, it fills the body to within one cell.
+        let (cols, _) = super::grid_size(drawn_body, drawn);
+        assert!((0.0..7.5).contains(&(900.0 - pad - wide(cols))));
     }
 
     #[test]

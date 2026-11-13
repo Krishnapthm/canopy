@@ -22,7 +22,7 @@ const source = await readFile(new URL("../defaults/frame/palette/main.js", impor
 const element = () => new Element();
 let platform = "linux";
 const icons: string[] = [];
-const values = { View: class {}, div: element, svg: (path: string) => { icons.push(path); return element(); }, v_flex: element, h_flex: element, Input: { new: element }, theme: () => ({}), keys: () => [], win: () => ({ platform }) };
+const values = { ui: { size: { radius: 8, radiusSm: 6, radiusLg: 10, control: 32, gap: 8, pad: 20, text: 13, small: 12, title: 15 } }, View: class {}, div: element, svg: (path: string) => { icons.push(path); return element(); }, v_flex: element, h_flex: element, Input: { new: element }, theme: () => ({}), keys: () => [], win: () => ({ platform }) };
 const Palette = new Function(...Object.keys(values), source.replace(/^import .*;\n/gm, "").replace("export default class Palette", "return class Palette"))(...Object.values(values));
 function find(root: Element, id: string): Element | undefined {
   if (root?.calls?.id?.[0] === id) return root;

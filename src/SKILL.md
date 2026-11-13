@@ -264,7 +264,9 @@ home, core and display: `up`, `do`, `status`, `shot`, then `down` when done.
 Never stop a server or session you didn't start.
 
 Canopy main layout is a canvas. `canvas.zoom_in`, `canvas.zoom_out`,
-`canvas.zoom_reset`, `canvas.fit` control its camera. `panel.close` closes the
+`canvas.zoom_reset`, `canvas.fit` control its camera. `canvas.tile` toggles tile
+view: the current space's expanded cells fill the view, the selected one largest.
+`panel.close` closes the
 file panel. Geometry is in app-home canvas.json;
 `canvas_color` in settings.json overrides the theme background (null resets).
 Hand-edited canvas settings reload live: `canvas_gap` (24, 0..1024 world pixels),
@@ -345,7 +347,7 @@ is present (an empty string means no folder); omitting it opens the Choose space
 
 Double-click a cell to enter it; a click only selects it.
 Enter enters the selected cell; Esc clears the selection, then goes Home. `canvas.close` (Backspace or Delete) closes the selection: running agents
-always ask "Terminate <name> and close?"; plain terminals ask "Close this
+always ask "Terminate agent?" (naming it in the detail); plain terminals ask "Close this
 terminal?" with "Don't ask again". That choice writes
 `confirm_close_terminal: false` to settings.json (default true). Done
 sub-agent cells clear; working ones refuse with a toast.

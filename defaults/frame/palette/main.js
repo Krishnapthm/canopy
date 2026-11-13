@@ -7,7 +7,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { commands, layouts, keys, run, theme, props, closeOverlay, openOverlay, shared, window as win } from "herdr";
+import { commands, layouts, keys, run, theme, props, closeOverlay, openOverlay, shared, window as win, ui } from "herdr";
 
 // The list keeps one height while you move: rows and group titles have fixed
 // heights, and the window shows as many as fit in LIST_H.
@@ -251,9 +251,9 @@ export default class Palette extends View {
           .px(10)
           .gap(10)
           .items_center()
-          .rounded(7)
+          .rounded(ui.size.radiusSm)
           .cursor_pointer()
-          .text_size(12.8)
+          .text_size(ui.size.text)
           .when(on, (el) => el.bg(t.selected))
           .hover((s) => s.bg(t.hover))
           .on_click(() => this.go(r.e))
@@ -284,17 +284,17 @@ export default class Palette extends View {
       })
       .child(
         h_flex()
-          .h(36)
+          .h(ui.size.control)
           .flex_none()
           .px(10)
           .gap(10)
           .items_center()
-          .rounded(9)
+          .rounded(ui.size.radius)
           .border_1()
           .border_color(t.accent)
           .bg(t.background)
           .child(svg(win()?.platform === "macos" ? "frame/palette/command.svg" : "mods/workspace-chrome/search.svg").size(16).text_color(t.dim))
-          .child(Input.new(this.input).flex_1().h_full().text_size(12.8).text_color(t.foreground))
+          .child(Input.new(this.input).flex_1().h_full().text_size(ui.size.text).text_color(t.foreground))
           .child(div().text_size(11).text_color(t.dim).child("Esc")),
       )
       .child(

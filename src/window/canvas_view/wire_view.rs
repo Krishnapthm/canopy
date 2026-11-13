@@ -26,7 +26,7 @@ pub(in crate::window) struct WireUi {
     thread: Option<(Vec<String>, Entity<InputState>, Subscription)>,
 }
 
-/// One edge as drawn: its cells in the order stored (a is the parent of a born edge), and its route.
+/// One edge as drawn: its cells in the order stored (a is the parent of a born edge), and its smoothed route.
 struct Edge {
     key: (String, String),
     born: bool,
@@ -82,7 +82,7 @@ impl AppWindow {
         for w in all.iter().filter(|w| w.born).chain(all.iter().filter(|w| !w.born)) {
             if out.iter().any(|e| (e.key.0 == w.a && e.key.1 == w.b) || (e.key.0 == w.b && e.key.1 == w.a)) { continue; }
             if let (Some(a), Some(b)) = (self.wire_cell(doc, &w.a), self.wire_cell(doc, &w.b)) {
-                out.push(Edge { key: (w.a.clone(), w.b.clone()), born: w.born, path: canvas::route(a, b, &cells) });
+                out.push(Edge { key: (w.a.clone(), w.b.clone()), born: w.born, path: canvas::smooth(&canvas::route(a, b, &cells)) });
             }
         }
         out
@@ -430,18 +430,11 @@ impl AppWindow {
                         if let Ok(piece) = piece.build() { window.paint_path(piece, color); }
                     }
                 } else {
-                    // Straight runs with rounded bends.
+                    // The smoothed route: soft curves around cells (canvas::smooth).
                     let mut line = PathBuilder::stroke(px(width));
-                    line.move_to(p(screen[0]));
-                    for w in screen.windows(3) {
-                        let (o, v, q) = (w[0], w[1], w[2]);
-                        let (din, dout) = (((v[0] - o[0]).abs() + (v[1] - o[1]).abs()), ((q[0] - v[0]).abs() + (q[1] - v[1]).abs()));
-                        let r = (8. * camera.zoom).min(din / 2.).min(dout / 2.);
-                        let towards = |from: [f32; 2], d: f32| if d > 0. { [v[0] + (from[0] - v[0]) * r / d, v[1] + (from[1] - v[1]) * r / d] } else { v };
-                        line.line_to(p(towards(o, din)));
-                        line.curve_to(p(towards(q, dout)), p(v));
-                    }
-                    if let Some(last) = screen.last() { line.line_to(p(*last)); }
+                    let Some((first, rest)) = screen.split_first() else { continue };
+                    line.move_to(p(*first));
+                    for v in rest { line.line_to(p(*v)); }
                     if let Ok(line) = line.build() { window.paint_path(line, color); }
                 }
                 let dot = |window: &mut Window, v: [f32; 2], r: f32| window.paint_quad(fill(Bounds::new(p([v[0] - r, v[1] - r]), size(px(2. * r), px(2. * r))), c("muted-foreground")).corner_radii(px(r)));

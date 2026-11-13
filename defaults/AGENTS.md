@@ -991,6 +991,14 @@ All of it is in `herdr.d.ts`. In short:
   `panes()` still lists only model panes; none is focused while a terminal block is.
   For composition navigation: `run("pane.focus", {terminal: nextAddress})`.
   Terminal copy/paste and implicit right-click routing follow the focused block.
+- Look: `ui`, the shared pieces every shipped mod uses, so a new mod looks like
+  the app without restyling: `ui.button(id, label, "primary" | "secondary" |
+  "ghost" | "destructive")`, `ui.iconButton(id, svgPath)`, `ui.checkbox(id,
+  checked, label, onChange)`, `ui.input(inputState, focused)`, `ui.panel(id)`
+  (a dialog body), `ui.title(text, hint?)`, `ui.description`, `ui.label`,
+  `ui.footer(...buttons)`, `ui.kbd(text)`, `ui.row(id, selected?)`, and
+  `ui.size` (radius 8, radiusSm 6, radiusLg 10, control 32, text 13, ...).
+  Each returns an ordinary element: keep chaining (`.on_click(...)`).
 - Floating: `placement()` (null unless this copy floats).
 - Act: `run(command, args)`.
 - Overlays: `openOverlay({ mod, props, kind: "dialog" | "popup" | "window", width, height, at, frame })`
@@ -1067,8 +1075,8 @@ including a small herdr-core skill you can install with the user's permission.
   needs it.
 
 Canvas settings: `canvas_color` is null for theme default or a hex color.
-Canvas commands: `canvas.zoom_in`, `canvas.zoom_out`, `canvas.zoom_reset`, `canvas.fit`, `canvas.expand`, `panel.close`.
-Canvas keys: Cmd (Ctrl on Linux) +=, +-, +0, +Shift+F.
+Canvas commands: `canvas.zoom_in`, `canvas.zoom_out`, `canvas.zoom_reset`, `canvas.fit`, `canvas.tile`, `canvas.expand`, `panel.close`.
+Canvas keys: Cmd (Ctrl on Linux) +=, +-, +0, +Shift+F, +Shift+G (tile view).
 
 Canvas mouse (Figma style): click selects, drag moves the selection, a drag on empty canvas draws a
 selection box (Shift adds), double-click enters a cell (expands it, focuses its terminal). Clicking
@@ -1251,7 +1259,7 @@ remote and Windows menu launches also omit these flags.
 
 Double-click a cell to enter it; a click only selects it.
 Enter enters the selected cell; Esc clears the selection, then goes Home. `canvas.close` (Backspace or Delete) closes the selection: running agents
-always ask "Terminate <name> and close?"; plain terminals ask "Close this
+always ask "Terminate agent?" (naming it in the detail); plain terminals ask "Close this
 terminal?" with "Don't ask again". That choice writes
 `confirm_close_terminal: false` to settings.json (default true). Done
 sub-agent cells clear; working ones refuse with a toast.

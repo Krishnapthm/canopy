@@ -8,6 +8,7 @@
 use crate::hc::Core;
 mod floats;
 mod canvas_view;
+mod ui;
 mod movable;
 mod pane_drag;
 mod pane_size;
@@ -2934,6 +2935,7 @@ impl AppWindow {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "canvas.fit_all" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
             "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.select_all" | "canvas.collapse" | "canvas.connect" | "canvas.thread" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
+            "canvas.tile" => self.tile_canvas(true, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
             "canvas.sub_message" => self.message_sub(a, window, cx),
             "wire.connect" | "wire.remove" | "wire.reset" | "wire.open" => self.wire_command(name, a, window, cx),
@@ -2990,8 +2992,8 @@ impl AppWindow {
                         return self.fail("space.close ends its terminals: pass confirmed: true");
                     }
                     let panes: usize = p.tabs.iter().map(|c| c.root.panes().len()).sum();
-                    let detail = format!("{} \u{2014} {} tabs, {} terminals", self.model.space_name(p, &home()), p.tabs.len(), panes);
-                    self.confirm("Close space?", &detail, "space.close", json!({ "id": id, "confirmed": true }), window, cx);
+                    let detail = format!("{} and its {panes} terminal{} close. This cannot be undone.", self.model.space_name(p, &home()), if panes == 1 { "" } else { "s" });
+                    self.confirm("Delete space?", &detail, "Delete", "space.close", json!({ "id": id, "confirmed": true }), window, cx);
                     return;
                 }
                 let addrs = self.model.remove_space(&id);
@@ -3596,9 +3598,11 @@ impl AppWindow {
 
     // ---- overlays ----------------------------------------------------------
 
-    fn confirm(&mut self, title: &str, detail: &str, command: &str, args: Value, window: &mut Window, cx: &mut Context<Self>) {
-        let spec = json!({ "mod": "confirm", "kind": "dialog", "width": 380,
-            "props": { "title": title, "detail": detail, "command": { "name": command, "args": args } } });
+    /// A destructive confirmation: `accept` (in red) runs `command`.
+    #[allow(clippy::too_many_arguments)]
+    fn confirm(&mut self, title: &str, detail: &str, accept: &str, command: &str, args: Value, window: &mut Window, cx: &mut Context<Self>) {
+        let spec = json!({ "mod": "confirm", "kind": "dialog", "width": 400,
+            "props": { "title": title, "detail": detail, "accept": accept, "destructive": true, "command": { "name": command, "args": args } } });
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
     }
 

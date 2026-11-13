@@ -9,7 +9,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, knownAgents } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, knownAgents, ui } from "herdr";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s) {
@@ -41,6 +41,7 @@ function items(p, git, agents) {
       ["Open file...", "preview.open", { point: tg.point }],
       ["Arrange", "canvas.arrange", {}],
       ["Arrange as", "sub:canvas-arrange", {}],
+      ["Tile view", "canvas.tile", {}],
       ["Undo layout", "canvas.undo", {}],
       ...(!tg.space ? [["New space here", "canvas.create", { ...at, kind: "space" }]] : []),
       ["Agents", null, { label: true }],
@@ -134,7 +135,7 @@ function agentItems(agents, at) {
 }
 
 // One menu box's width and row heights, so a submenu can line up with its row.
-const WIDTH = 220, ROW = 31, LABEL = 25;
+const WIDTH = 220, ROW = 32, LABEL = 25;
 
 // A rule above row i: before closing, help and the first theme.
 function rule(list, i) {
@@ -194,7 +195,7 @@ export default class Menu extends View {
 
   // One menu box: the rows of `list`, `at` highlighted.
   box(t, list, at, row) {
-    return v_flex().w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(8).shadow_lg().text_size(12.8)
+    return v_flex().w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(ui.size.radius).shadow_lg().text_size(ui.size.text)
       // Clicks inside the box never reach the root, which closes the menu.
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .children(list.map((it, i) => !it[1]
@@ -207,7 +208,7 @@ export default class Menu extends View {
           .when(rule(list, i), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
           .child(row(h_flex()
             .id(`mi-${list === this.list ? "" : "s"}${i}`)
-            .h(ROW).px(8).gap(9).rounded(7).items_center().justify_between()
+            .h(ROW).px(8).gap(9).rounded(ui.size.radiusSm).items_center().justify_between()
             .text_color(t.foreground)
             .when(i === at, (el) => el.bg(t.selected))
             .hover((s) => s.bg(t.hover))

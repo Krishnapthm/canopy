@@ -12,7 +12,7 @@ Source inspection for plan steps 0.4 and 0.5, 2026-11-12. No app, core session, 
 
 ## Terminal drawing and zoom
 
-**Independent per-terminal scale: yes, since phase 4.** `TerminalView::set_scale` (`src/terminal.rs`) draws one terminal at a multiple of the global font size, cell size and padding. Every size read in the renderer goes through `font_px()` and `pad()`, which multiply the global value (`Look.font_size` composed in `src/window.rs`, `settings::font_size()` in `src/settings.rs`) by a thread-local scale set with the `Scaled` guard around render, prepaint and paint. Pointer coordinates need no division: `Grid::cell` and `Grid::origin` are the drawn ones, so `local()` and `cell_at()` map directly. A `rest` size at scale 1 (`grid_at_rest`) fixes the PTY's columns and rows apart from the drawn size. `Vt` is untouched. Panes in tabs and pop-outs stay at scale 1.
+**Independent per-terminal scale: yes, since phase 4.** `TerminalView::set_scale` (`src/terminal.rs`) draws one terminal at a multiple of the global font size, cell size and padding. Every size read in the renderer goes through `font_px()` and `pad()`, which multiply the global value (`Look.font_size` composed in `src/window.rs`, `settings::font_size()` in `src/settings.rs`) by a thread-local scale set with the `Scaled` guard around render, prepaint and paint. Pointer coordinates need no division: `Grid::cell` and `Grid::origin` are the drawn ones, so `local()` and `cell_at()` map directly. A `rest` body size in world pixels fixes the PTY's columns and rows: what fits it at the drawn scale (`grid_at_scale`), frozen during a corner drag. `Vt` is untouched. Panes in tabs and pop-outs stay at scale 1.
 
 ## Model and core ownership
 
