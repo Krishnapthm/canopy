@@ -27,10 +27,8 @@ fn with_window(cx: &mut App, f: fn(&Window)) {
 /// The menu bar. Items run app commands, so they show the keys bound to them;
 /// call again after the keymap changes.
 pub fn set_menus(cx: &mut App) {
-    let run = |name: &str, command: &str| MenuItem::action(name.to_owned(), ShellAction::new(command.to_owned()));
-    let edit = |name: &str, command: &str, os: OsAction| MenuItem::os_action(name.to_owned(), ShellAction::new(command.to_owned()), os);
-    let new_space = CommandBinding { value: serde_json::json!({"command": "canvas.create", "args": {"kind": "space"}}).as_object().unwrap().clone() };
-    cx.set_menus([
+    let view = cx.try_global::<ActiveView>().map(|v| &v.0).cloned().unwrap_or_default();
+    let mut menus = vec![
         Menu::new("Canopy").items([
             MenuItem::action("Settings…", Settings),
             MenuItem::separator(),
@@ -42,38 +40,41 @@ pub fn set_menus(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action("Quit Canopy", Quit),
         ]),
-        Menu::new("File").items([
-            run("New Terminal", "canvas.create"),
-            run("Open File...", "preview.open"),
-            MenuItem::action("New Space…", new_space),
-            MenuItem::separator(),
-            run("Pop Out Panel", "panel.pop_out"),
-            run("Close Panel", "panel.close"),
-        ]),
-        Menu::new("Edit").items([
-            edit("Copy", "terminal.copy", OsAction::Copy),
-            edit("Paste", "terminal.paste", OsAction::Paste),
-            edit("Select All", "terminal.select_all", OsAction::SelectAll),
-            MenuItem::separator(),
-            run("Find", "terminal.search"),
-        ]),
-        Menu::new("View").items([
-            run("Agents", "view.agents"),
-            run("All", "view.all"),
-            run("Terminals", "view.terminals"),
-            MenuItem::separator(),
-            run("Zoom In", "canvas.zoom_in"),
-            run("Zoom Out", "canvas.zoom_out"),
-            run("Actual Size", "canvas.zoom_reset"),
-            run("Fit All", "canvas.fit"),
-            MenuItem::separator(),
-            run("Command Palette", "app.palette"),
-            MenuItem::action("Toggle Full Screen", ToggleFullScreen),
-        ]),
-        // Named "Window", macOS also lists the open windows here.
-        Menu::new("Window").items([MenuItem::action("Minimize", Minimize), MenuItem::action("Zoom", Zoom)]),
-        Menu::new("Help").items([run("Keyboard Shortcuts", "app.help"), run("Welcome", "app.welcome")]),
-    ]);
+    ];
+    menus.extend(crate::app_menu::groups(&view).into_iter().map(|(name, rows)| {
+        let mut items: Vec<_> = rows.into_iter().map(|row| {
+            let label = row[0].as_str().unwrap().to_owned();
+            let command = row[1].as_str().unwrap();
+            let item = if row[2].as_object().is_some_and(|args| !args.is_empty()) {
+                let binding = CommandBinding { value: serde_json::json!({"command":command,"args":row[2]}).as_object().unwrap().clone() };
+                MenuItem::action(label, binding)
+            } else {
+                let action = ShellAction::new(command.to_owned());
+                match command {
+                    "terminal.copy" => MenuItem::os_action(label, action, OsAction::Copy),
+                    "terminal.paste" => MenuItem::os_action(label, action, OsAction::Paste),
+                    "terminal.select_all" => MenuItem::os_action(label, action, OsAction::SelectAll),
+                    _ => MenuItem::action(label, action),
+                }
+            };
+            item.checked(row[3] == true)
+        }).collect();
+        if name == "View" { items.push(MenuItem::action("Toggle Full Screen", ToggleFullScreen)); }
+        Menu::new(name).items(items)
+    }));
+    // Keep Help last; macOS also lists open windows in the Window menu.
+    menus.insert(menus.len() - 1, Menu::new("Window").items([MenuItem::action("Minimize", Minimize), MenuItem::action("Zoom", Zoom)]));
+    cx.set_menus(menus);
+}
+
+struct ActiveView(crate::canvas::View);
+impl Global for ActiveView {}
+
+/// Updates the native view checkmark when a canvas view is loaded or changed.
+pub fn set_view(view: &crate::canvas::View, cx: &mut App) {
+    if cx.try_global::<ActiveView>().is_some_and(|v| &v.0 == view) { return; }
+    cx.set_global(ActiveView(view.clone()));
+    set_menus(cx);
 }
 
 pub fn action(name: &str) -> Option<Box<dyn Action>> {

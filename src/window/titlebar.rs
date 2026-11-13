@@ -147,7 +147,17 @@ impl AppWindow {
         }
         #[cfg(not(any(target_os = "macos", windows)))]
         {
-            let _ = cx;
+            let tree = if self.has_canvas() {
+                let button = gpui_base::Button::new("primary-menu").accessibility_label("Primary menu").w(px(36.)).h(px(32.)).flex().items_center().justify_center()
+                    .hover(|s| s.bg(c("hover"))).child(svg().path("icons/menu.svg").size(px(16.)).text_color(c("foreground")))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
+                        this.pointer = e.position();
+                        this.dispatch("app.menu", &json!({}), true, window, cx);
+                    }));
+                let strip = self.window_drag(div().flex().flex_none().h(px(32.)).w_full().child(button), cx);
+                div().size_full().flex().flex_col().child(strip).child(div().flex_1().min_h_0().flex().child(tree)).into_any_element()
+            } else { tree };
             let Decorations::Client { tiling } = window.window_decorations() else { return tree };
             if window.is_maximized() || window.is_fullscreen() {
                 return tree;

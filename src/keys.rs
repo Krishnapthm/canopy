@@ -36,12 +36,16 @@ pub const DEFAULTS: &str = include_str!("../defaults/keys.macos.json");
 // Keep these when defaults change: only untouched shipped files may migrate.
 #[cfg(any(not(target_os = "macos"), test))]
 const SHIPPED_KEYS: &[&str] = &[
+    include_str!("keys/shipped/v0.1.15-dev2-keys.json"),
+    include_str!("keys/shipped/v0.1.15-dev-keys.json"),
     include_str!("keys/shipped/v0.1.4-keys.json"),
     include_str!("keys/shipped/v0.1.5-keys.json"),
     include_str!("keys/shipped/v0.1.12-keys.json"),
 ];
 #[cfg(any(target_os = "macos", test))]
 const SHIPPED_MACOS_KEYS: &[&str] = &[
+    include_str!("keys/shipped/v0.1.15-dev2-keys.macos.json"),
+    include_str!("keys/shipped/v0.1.15-dev-keys.macos.json"),
     include_str!("keys/shipped/v0.1.4-keys.macos.json"),
     include_str!("keys/shipped/v0.1.5-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-keys.macos.json"),

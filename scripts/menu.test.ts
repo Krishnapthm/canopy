@@ -30,7 +30,7 @@ test("every canvas menu item passes only declared args, with the required ones",
     { tab: "canvas-arrange", target: { space: "s1" } },
     { tab: "canvas-sub", target: { terminal: "t1", id: "abc" } },
     { tab: "canvas-card", target: card },
-    { tab: "canvas-card", target: { ...card, popped: true } },
+    { tab: "canvas-card", target: { ...card, popped: true, finished: true } },
   ];
   let checked = 0;
   for (const menu of menus) {
@@ -62,9 +62,9 @@ test("the canvas menu lists installed agents under a label, with a note while ch
 });
 
 
-test("hook children only offer Message", () => {
+test("hook children offer Message through parent", () => {
   expect(items({ tab: "canvas-sub", target: { terminal: "t1", id: "abc" } })).toEqual([
-    ["Message", "canvas.sub_message", { terminal: "t1", id: "abc" }],
+    ["Message through parent", "canvas.sub_message", { terminal: "t1", id: "abc" }],
   ]);
 });
 
@@ -72,4 +72,20 @@ test("arrange picker lists the four layouts and preserves its space target", () 
   expect(items({ tab: "canvas-arrange", target: { space: "s1" } }).map(([,command,args])=>[command,args])).toEqual(
     ["tidy","row","column","wires"].map(layout=>["canvas.arrange",{space:"s1",layout}])
   );
+});
+
+test("confirm forwards the terminal opt-out only when the dialog offers it", async () => {
+  const source = (await readFile(new URL("../defaults/mods/confirm/main.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\n/gm, "").replace("export default class Confirm", "class Confirm");
+  let current: Record<string, unknown> = {};
+  const sent: unknown[] = [];
+  const Confirm = new Function("View", "props", "closeOverlay", "run", `${source}; return Confirm;`)(class {}, () => current, () => {}, (...args: unknown[]) => sent.push(args));
+  const confirm = new Confirm();
+  confirm.dontAsk = true;
+  current = { dontAsk: true, command: { name: "canvas.close", args: { terminal: "t1", confirmed: "terminal" } } };
+  confirm.yes();
+  expect(sent.pop()).toEqual(["canvas.close", { terminal: "t1", confirmed: "terminal", dont_ask: true }]);
+  current = { command: { name: "canvas.close", args: { terminal: "t1", confirmed: "agent" } } };
+  confirm.yes();
+  expect(sent.pop()).toEqual(["canvas.close", { terminal: "t1", confirmed: "agent" }]);
 });

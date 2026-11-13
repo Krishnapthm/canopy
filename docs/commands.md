@@ -69,6 +69,25 @@ Open the quote popover listing running agents, at point or the pointer.
 | `text` | yes |
 | `point` | no |
 
+## `canvas.close`
+
+Close the selected canvas cell or terminal, asking before termination; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
+
+| Argument | Required |
+|---|---|
+| `terminal` | no |
+| `confirmed` | no |
+| `dont_ask` | no |
+
+## `canvas.clear_finished`
+
+Clear finished sub-agent cells and their labels, optionally one id.
+
+| Argument | Required |
+|---|---|
+| `terminal` | yes |
+| `id` | no |
+
 ## `canvas.sub_message`
 
 Paste a message addressed to a sub-agent into its parent without Enter.
@@ -668,6 +687,14 @@ No arguments.
 Back to normal size.
 
 No arguments.
+
+## `app.menu`
+
+Open the shared primary command menu, optionally a named group.
+
+| Argument | Required |
+|---|---|
+| `group` | no |
 
 ## `app.quit`
 

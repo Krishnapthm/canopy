@@ -7,24 +7,29 @@ use std::time::Duration;
 
 const PAYLOAD_LIMIT: u64 = 512 * 1024;
 
+/// A sub-agent lifecycle label supplied by a session hook.
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Hook {
     pub name: String,
     pub transcript: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Its turn ended (SubagentStop). It may still be on standby for messages, so it stays.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub idle: bool,
+    #[serde(default, alias = "idle", skip_serializing_if = "std::ops::Not::not")]
+    pub done: bool,
 }
 
+/// A labelled sub-agent and its read-only transcript.
 #[derive(Clone)]
 pub struct Sub {
     pub id: String,
     pub name: String,
     pub program: Value,
     pub transcript: Option<PathBuf>,
-    pub idle: bool,
+    pub done: bool,
 }
 
+/// Accepts hook identifiers safe to use as label keys and transcript basenames.
 pub fn valid_id(id: &str) -> bool {
     (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
@@ -39,14 +44,27 @@ fn payload(bytes: &[u8], stop: bool) -> Option<(String, Hook)> {
     })?;
     if !transcript.is_absolute() { return None; }
     let name = value["agent_type"].as_str().filter(|s| !s.is_empty() && s.len() <= 256)?.to_owned();
-    Some((id, Hook { name, transcript, idle: stop }))
+    let description = value["background_tasks"].as_array().into_iter().flatten()
+        .find(|task| task["id"].as_str() == Some(&id))
+        .and_then(|task| task["description"].as_str()).and_then(label_text);
+    Some((id, Hook { name, transcript, description, done: stop }))
 }
 
+/// Publishes lifecycle labels to the hook terminal's existing core socket.
 pub fn hook(action: Option<&str>) {
-    let stop = match action { Some("sub-start") => false, Some("sub-stop") => true, _ => return };
+    let stop = match action { Some("sub-start") => false, Some("sub-stop") => true, Some("session-end") => false, _ => return };
     let Ok(terminal) = std::env::var("HC_TERMINAL_ID") else { return };
     // A hook must never fall back to a different core or start one without its terminal's socket.
     if terminal.is_empty() || std::env::var_os("HC_SOCKET").is_none_or(|s| s.is_empty() || !std::path::Path::new(&s).exists()) { return; }
+    if action == Some("session-end") {
+        let args = vec!["get".into(), terminal.clone(), "--json".into()];
+        let Ok((0, output, _)) = crate::mods::run_blocking("hc", &args, None, Duration::from_millis(800)) else { return };
+        let Ok(record) = serde_json::from_str::<Value>(&output) else { return };
+        let mut args = vec!["label".into(), terminal];
+        args.extend(sub_labels(&record).map(|key| format!("{key}=")));
+        if args.len() > 2 { let _ = crate::mods::run_blocking("hc", &args, None, Duration::from_millis(800)); }
+        return;
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     let _ = std::thread::Builder::new().spawn(move || {
         let mut bytes = Vec::new();
@@ -61,12 +79,32 @@ pub fn hook(action: Option<&str>) {
     let _ = crate::mods::run_blocking("hc", &args, None, Duration::from_millis(800));
 }
 
+/// The sub-agent label keys on a terminal, including malformed old values.
+pub fn sub_labels(record: &Value) -> impl Iterator<Item = &String> {
+    record["labels"].as_object().into_iter().flatten().map(|(key, _)| key)
+        .filter(|key| key.strip_prefix("canopy.sub.").is_some_and(valid_id))
+}
+
+/// Selects finished sub-agent labels without touching working siblings.
+pub fn finished_ids(subs: &[Sub], id: Option<&str>) -> Vec<String> {
+    subs.iter().filter(|s| s.done && id.is_none_or(|id| id == s.id)).map(|s| s.id.clone()).collect()
+}
+
+fn label_text(text: &str) -> Option<String> {
+    let text: String = text.chars().filter(|c| !c.is_control()).take(256).collect();
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// Resolves lifecycle labels, preferring a bounded plain-text sidecar description.
 pub fn hooks(record: &Value) -> Vec<Sub> {
     record["labels"].as_object().into_iter().flatten().filter_map(|(key, value)| {
         let id = key.strip_prefix("canopy.sub.").filter(|id| valid_id(id))?;
         let hook: Hook = serde_json::from_str(value.as_str()?).ok()?;
         if !hook.transcript.is_absolute() || hook.name.is_empty() || hook.name.len() > 256 { return None; }
-        Some(Sub { id: id.into(), name: hook.name, program: record["program"].clone(), transcript: Some(hook.transcript), idle: hook.idle })
+        let name = transcript_meta(&hook.transcript).and_then(|m| m["description"].as_str().and_then(label_text))
+            .or(hook.description.as_deref().and_then(label_text)).or_else(|| label_text(&hook.name))?;
+        Some(Sub { id: id.into(), name, program: record["program"].clone(), transcript: Some(hook.transcript), done: hook.done })
     }).collect()
 }
 
@@ -74,14 +112,14 @@ pub fn hooks(record: &Value) -> Vec<Sub> {
 fn transcript_meta(path: &std::path::Path) -> Option<Value> {
     let name = path.file_name()?.to_str()?.strip_suffix(".jsonl")?;
     (name.starts_with("agent-") && path.parent()?.file_name()? == "subagents").then_some(())?;
-    serde_json::from_str(&std::fs::read_to_string(path.with_file_name(format!("{name}.meta.json"))).ok()?).ok()
+    serde_json::from_str(&crate::canvas::read_preview(&path.with_file_name(format!("{name}.meta.json"))).ok()?).ok()
 }
 
 /// A sub-agent transcript's panel title: its type and description, "· done" once it ended.
 pub fn transcript_title(path: &str) -> Option<String> {
     let meta = transcript_meta(std::path::Path::new(path))?;
     let mut title = [meta["agentType"].as_str(), meta["description"].as_str()].into_iter().flatten()
-        .filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+        .filter_map(label_text).collect::<Vec<_>>().join(" · ");
     if title.is_empty() { title = "Sub-agent".into(); }
     if meta["finished"] == true { title.push_str(" · done"); }
     Some(title)
@@ -174,6 +212,42 @@ mod tests {
     }
 
     #[test]
+    fn labels_resolve_names_and_restart_and_clear_finished() {
+        let dir = std::env::temp_dir().join(format!("canopy-sub-labels-{}", std::process::id())).join("subagents");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("agent-one.jsonl");
+        let mut input = json!({"agent_id":"one","agent_type":"review","agent_transcript_path":path});
+        let record = |hook: &Hook| json!({"labels":{"canopy.sub.one":serde_json::to_string(hook).unwrap()}});
+        let start = payload(&serde_json::to_vec(&input).unwrap(), false).unwrap().1;
+        let working = hooks(&record(&start));
+        assert_eq!(working[0].name, "review");
+        assert!(!working[0].done);
+        assert!(finished_ids(&working, None).is_empty());
+        input["background_tasks"] = json!([{"id":"other","description":"wrong"},{"id":"one","description":"Audit task"}]);
+        let stop = payload(&serde_json::to_vec(&input).unwrap(), true).unwrap().1;
+        let done = hooks(&record(&stop));
+        assert!(done[0].done);
+        assert_eq!(done[0].name, "Audit task");
+        let mut mixed = done.clone();
+        let mut sibling = working[0].clone();
+        sibling.id = "two".into();
+        mixed.push(sibling);
+        assert_eq!(finished_ids(&mixed, None), ["one"]);
+        let legacy = serde_json::to_string(&stop).unwrap().replace("\"done\":true", "\"idle\":true");
+        assert!(hooks(&json!({"labels":{"canopy.sub.one":legacy}}))[0].done);
+        assert!(finished_ids(&done, Some("other")).is_empty());
+        assert!(!hooks(&record(&start))[0].done);
+        std::fs::write(path.with_extension("meta.json"), json!({"description":format!("Sidecar\n{}", "x".repeat(400))}).to_string()).unwrap();
+        let named = hooks(&record(&start));
+        assert!(named[0].name.starts_with("Sidecar"));
+        assert_eq!(named[0].name.chars().count(), 256);
+        assert!(!named[0].name.contains('\n'));
+        assert_eq!(sub_labels(&record(&start)).count(), 1);
+        assert!(hooks(&json!({"labels":{}})).is_empty());
+        std::fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+    }
+
+    #[test]
     fn hook_payload_and_ids() {
         let bytes = serde_json::to_vec(&json!({"agent_id":"abc_1-Z","agent_type":"review","transcript_path":"/tmp/session.jsonl"})).unwrap();
         let (id, data) = payload(&bytes, false).unwrap();
@@ -183,7 +257,7 @@ mod tests {
         assert_eq!(children[0].program["icon"], "icons/agent.svg");
         assert_eq!(data.name, "review");
         assert_eq!(data.transcript, PathBuf::from("/tmp/session/subagents/agent-abc_1-Z.jsonl"));
-        assert!(payload(&bytes, true).unwrap().1.idle, "a stopped sub-agent stays, idle");
+        assert!(payload(&bytes, true).unwrap().1.done, "a stopped sub-agent stays, done");
         for id in ["", "../escape", "a/b", "a b", "é", &"x".repeat(65)] { assert!(!valid_id(id)); }
         let stop = json!({"agent_id":"abc", "agent_transcript_path":"/tmp/done.jsonl", "agent_type":"helper"});
         assert_eq!(payload(&serde_json::to_vec(&stop).unwrap(), false).unwrap().1.transcript, PathBuf::from("/tmp/done.jsonl"));

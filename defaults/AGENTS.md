@@ -669,6 +669,8 @@ canopy commands    # every command and its arguments
 
 ## The person
 
+- `confirm_close_terminal`: true asks before closing a plain terminal cell; "Don't ask again" writes false. Running agents always ask.
+
 - `canvas_color`: null follows the theme; a hex color overrides the canvas background.
 : `settings.json`
 
@@ -1055,8 +1057,9 @@ Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
 `canvas.arrange {layout?: "tidy" | "row" | "column" | "wires", space?, picker?}`
 arranges selected cells or the current space; no layout repeats the last choice.
-`canvas.undo` restores geometry before the last move, resize or arrange.
-Spacing, growing spaces and canvas-only undo keys are described in `docs/canvas.md`.
+`canvas.undo` (Cmd+Z / Ctrl+Shift+U while the canvas has focus) restores
+geometry before the last move, resize or arrange. Cells keep a 24 px gap;
+spaces grow to hold them and push other spaces.
 
 Empty-canvas left-drag and middle-mouse drag also pan; an empty click focuses the canvas.
 Focused terminals still receive Space. Right-click keeps the canvas menus.
@@ -1114,12 +1117,14 @@ per-session flags, without editing harness configuration.
 
 Helpers started through hc are real child terminals, joined to their parent
 on the canvas. The person can open them and send terminal input.
-Session hooks also report in-process helpers as child pills. A hook pill
-turns "idle" when its turn ends (it may still take messages) and goes with its
-parent terminal. Click it to open its transcript when the file exists. Its
-Message menu pastes `Message your sub-agent <agent_type> (<agent_id>): ` into
-the parent without Enter (`canvas.sub_message {terminal, id}`). Hook pills
-are observations, not terminals.
+Session hooks report in-process helpers as draggable sub-agent cells, named
+by their task description (agent type until it arrives). Click to follow the
+read-only transcript in the side panel. Cells change from working to done;
+a restart of the same id restores working. "Message through parent" pastes
+`Message your sub-agent <name> (<id>): ` into the parent without Enter
+(`canvas.sub_message {terminal, id}`). The parent's "Clear finished" menu or
+`canvas.clear_finished {terminal}` clears done cells; SessionEnd clears all
+its sub-agent labels. These cells describe work, not terminal processes.
 
 ## Agent flags and note in `programs.json`
 
@@ -1148,3 +1153,17 @@ children run; zsh sources the person's `.zshenv` and reads their remaining
 startup files normally. Canopy never edits the person's shell files.
 Remote terminals, bash, other shells and Windows have no typed-agent wrapper;
 remote and Windows menu launches also omit these flags.
+
+## Canvas selection and views
+
+Click a cell to select it. The canvas keeps the keyboard until the terminal
+panel is clicked. `canvas.close` (Backspace or Delete) closes the selection: running agents
+always ask "Terminate <name> and close?"; plain terminals ask "Close this
+terminal?" with "Don't ask again". That choice writes
+`confirm_close_terminal: false` to settings.json (default true). Done
+sub-agent cells clear; working ones refuse with a toast.
+
+Views are in the macOS View menu or the Linux titlebar's primary menu
+(`app.menu`, optionally with a `group`);
+the active view is checked. `view.agents`, `view.all`, `view.terminals` and
+their keys still work. The canvas toolbar keeps the file button.

@@ -1,27 +1,38 @@
 # Canvas layout
 
-Cells keep 24 world pixels of spacing. Dragging a cell or resizing a preview
-pushes neighbours aside. Moving away lets them return. Spaces grow to contain
-their cells with 24 pixels of padding, pushing other spaces and their cells.
-Spaces do not shrink automatically. Cells outside spaces also push spaces aside.
+Cells never overlap. Every cell, sub-agent cell and file preview keeps 24 world
+pixels from its neighbours, and spaces keep the same gap from each other.
 
-Right-click a space, a terminal cell or empty canvas and choose **Arrange** to
-repeat the last layout, or **Arrange >** to pick Tidy, Row, Column or By wires. Tidy keeps rough reading
-order. By wires puts parents left of children using terminal parent edges.
-Click a cell to select it; Shift-click terminal cells to add or remove them.
-Click empty canvas to clear the selection. A space menu always arranges that
-space. `canvas.arrange` uses selected cells, otherwise the current space;
-`{ "space": "id" }` explicitly arranges a space. Add `layout` to choose a
-layout, or `picker: true` to open the picker. The last layout survives restart.
+## Use
 
-**Undo layout** in the space menu or `canvas.undo` restores geometry before the
-last move, resize or arrange. With the canvas focused, Cmd+Z on macOS or
-Ctrl+Shift+U on Linux does the same. Focused terminals keep their keys.
-Undo has one level and lasts until the window closes.
+- Drag a cell, or resize a preview: neighbours step aside and return when you
+  move on. Drag toward a space's edge: the space grows and pushes the spaces
+  next to it, with their cells. Spaces never shrink by themselves.
+- Click a cell to select it. Shift-click adds or removes cells. Click empty
+  canvas to clear the selection.
+- Right-click a space, a cell or empty canvas: **Arrange** repeats the last
+  layout, **Arrange >** picks one. **Tidy** is a grid in reading order, **Row**
+  and **Column** line cells up, **By wires** puts parents left of their
+  children and sub-agents. The choice is saved in `canvas.json`.
+- Arrange works on the selected cells of one space (the space of the cell you
+  selected last), otherwise on the current space. A space menu always arranges
+  that space.
+- **Undo layout** (space menu, `canvas.undo`, Cmd+Z on macOS, Ctrl+Shift+U on
+  Linux) puts geometry back as it was before the last move, resize or arrange.
+  One level, kept until the window closes. The keys act only while the canvas
+  has focus; a focused terminal gets them as usual.
 
-The solver starts from rest rectangles on each pointer sample, fixes the
-moved rectangle, then places neighbours nearest first. The same function
-separates spaces. Display rectangles ease toward targets over 120 ms and
-request frames only until settled. Releasing commits the resolved layout;
-`canvas.json` saves once after motion settles. Undo stores geometry only,
-so it never restores a closed terminal.
+`canvas.arrange` takes `layout` (`tidy`, `row`, `column`, `wires`), `space`
+(a space id) or `picker: true` (open the layout menu).
+
+## How it works
+
+`canvas::solve` starts from rest rectangles (where the person left things),
+fixes the moved rectangle, then places the others nearest first, each moved
+along the shorter axis until it is one gap clear. Because each pointer sample
+solves from rest again, nothing drifts and pushed cells return. The same
+function separates spaces after `canvas::grow` widens a space around its cells.
+Shown rectangles ease toward the result over 120 ms and frames are requested
+only while they move. On release the result becomes the new rest, and
+`canvas.json` is saved once. Undo keeps one snapshot of rectangles by cell key,
+so it never brings back a closed cell.

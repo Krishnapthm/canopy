@@ -79,6 +79,9 @@
     "cmd-shift-f": "canvas.fit",
     "cmd-shift-1": "view.agents",
     "cmd-shift-2": "view.all",
-    "cmd-shift-3": "view.terminals"
+    "cmd-shift-3": "view.terminals",
+    "backspace": "canvas.close",
+    "delete": "canvas.close",
+    "cmd-z": "canvas.undo"
   }
 }
