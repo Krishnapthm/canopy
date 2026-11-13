@@ -209,12 +209,20 @@ home, core and display: `up`, `do`, `status`, `shot`, then `down` when done.
 Never stop a server or session you didn't start.
 
 Canopy main layout is a canvas. `canvas.zoom_in`, `canvas.zoom_out`,
-`canvas.zoom_reset`, `canvas.fit` control its camera. `panel.close` hides the
-terminal panel without ending the terminal. Geometry is in app-home canvas.json;
+`canvas.zoom_reset`, `canvas.fit` control its camera. `panel.close` closes the
+file panel. Geometry is in app-home canvas.json;
 `canvas_color` in settings.json overrides the theme background (null resets).
-`panel.open {terminal}` selects the terminal shown in the canvas panel. The
+`panel.open {terminal}` expands a terminal cell like `canvas.expand`. The
 `classic` layout preserves the previous sidebar and tabs. Canvas zoom bindings
 apply to the `main` layout; other layouts retain app zoom.
+
+Expanded cells: click a terminal pill to expand it in place into a live terminal
+(100 x 30 cells, neighbours give way); click its header to collapse it, which
+puts the neighbours back. Drag the bottom-right corner to resize; the terminal
+is resized on release. Several can be open. The wheel scrolls a focused expanded
+terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
+the named or last selected cell; `panel.open {terminal}` only expands. Below 0.5 zoom an expanded cell draws as its
+pill. The side panel shows files and sub-agent transcripts only.
 
 Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor.
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
@@ -233,16 +241,16 @@ and root spaces through the Choose space dialog (previously used space folders, 
 `point` (default: the middle of the view), optional `space` (default: the space under the point, else the root), `argv`, or `kind: "space"`; `canvas.space_style` takes
 `id` and optional palette `color` (without color it toggles the frame).
 `view.agents`, `view.all`, `view.terminals` select the saved canvas view, bound to
-Cmd+Shift+1/2/3 on macOS and Ctrl+Shift+1/2/3 elsewhere. Hidden cards lose panel focus.
-`panel.pop_out` takes an optional `terminal` (defaults to the panel); `panel.bring_back`
+Cmd+Shift+1/2/3 on macOS and Ctrl+Shift+1/2/3 elsewhere. Hidden cards are deselected.
+`panel.pop_out` takes an optional `terminal` (defaults to the last selected cell); `panel.bring_back`
 takes `terminal`. Pop-outs last only for the current run and keep the terminal alive.
 
 Canvas file previews: `preview.open {path?, point?, place?}` opens an absolute local
 path in a read-only panel tab by default. Reopening activates the tab. Omit path for
 the native picker, which places a canvas card. `place: "canvas"` or an explicit
 world `point` also places a card. Open file... and Finder drops keep placing cards.
-Clicking a pill opens or activates its terminal tab. Closing a tab keeps its terminal
-running; the panel close button closes all panel tabs. Terminal pop-out is unchanged.
+Clicking a pill expands it in place; the panel holds files and sub-agent transcripts only.
+The panel close button closes all panel tabs. Terminal pop-out is unchanged.
 The header shows a breadcrumb and a folder button toggles the right file tree,
 saved as `panel.tree_hidden` in canvas.json. The tree shows the folder of the space last
 clicked on the canvas (`panel.space`); clicking pills does not change it. File tabs have a pin
@@ -261,7 +269,7 @@ there is no card-header Edit button.
 Files follow folder watcher changes, show File deleted when missing, and never
 execute content or load remote images.
 
-Preview quotes: finishing a selection in a preview opens the quote popover, also opened by `quote.menu {path, start?, end?, text, point?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv}` opens an agent in the canvas panel and pastes the quote, then a blank line and the trimmed message when given, without Enter. New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.
+Preview quotes: finishing a selection in a preview opens the quote popover, also opened by `quote.menu {path, start?, end?, text, point?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv}` expands an agent's cell and pastes the quote, then a blank line and the trimmed message when given, without Enter. New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.
 
 Canvas space titles rename inline on double-click or Rename. Person-invoked local
 `space.new` without a folder opens New space; explicit command arguments remain supported.
@@ -270,8 +278,8 @@ is present (an empty string means no folder); omitting it opens the Choose space
 
 ## Canvas selection and views
 
-Click a cell to select it. The canvas keeps the keyboard until the terminal
-panel is clicked. `canvas.close` (Backspace or Delete) closes the selection: running agents
+Click a cell to select it. The canvas keeps the keyboard until an expanded
+terminal is clicked. `canvas.close` (Backspace or Delete) closes the selection: running agents
 always ask "Terminate <name> and close?"; plain terminals ask "Close this
 terminal?" with "Don't ask again". That choice writes
 `confirm_close_terminal: false` to settings.json (default true). Done

@@ -21,6 +21,10 @@ impl SaveSchedule {
 
 /// The shared width of terminal and sub-agent cells at zoom 1.
 pub const PILL_WIDTH: f32 = 220.;
+/// The header strip of an expanded cell at zoom 1: the pill's one-line height.
+pub const HEADER: f32 = 36.;
+/// Below this camera zoom an expanded cell is drawn as its pill.
+pub const EXPANDED_MIN_ZOOM: f32 = 0.5;
 
 pub const ZOOMS: [f32; 12] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1., 1.1, 1.25, 1.5, 1.75, 2.,
@@ -285,6 +289,24 @@ impl Rest {
                 .collect(),
         }
     }
+    /// The entries of `later` whose geometry differs from this snapshot's.
+    pub fn changed(&self, later: &Rest) -> Rest {
+        let diff = |before: &[(String, Rect)], after: &[(String, Rect)]| -> Vec<(String, Rect)> {
+            after.iter().filter(|(id, r)| before.iter().any(|(b, was)| b == id && was != r)).cloned().collect()
+        };
+        Rest { cards: diff(&self.cards, &later.cards), spaces: diff(&self.spaces, &later.spaces), previews: diff(&self.previews, &later.previews) }
+    }
+    /// Put each object in `moved` back where this snapshot had it, unless it has been moved again since.
+    pub fn put_back(&self, moved: &Rest, doc: &mut Document) {
+        let back = |home: &[(String, Rect)], left: &[(String, Rect)], at: &mut Rect, id: &str| {
+            if left.iter().any(|(l, r)| l == id && r == at) && let Some((_, r)) = home.iter().find(|(h, _)| h == id) {
+                *at = *r;
+            }
+        };
+        for c in &mut doc.cards { let key = c.key(); back(&self.cards, &moved.cards, &mut c.rect, &key); }
+        for s in &mut doc.spaces { back(&self.spaces, &moved.spaces, &mut s.rect, &s.space); }
+        for p in &mut doc.previews { back(&self.previews, &moved.previews, &mut p.rect, &p.path); }
+    }
     /// Restore geometry of objects that still exist.
     pub fn restore(&self, doc: &mut Document) {
         for c in &mut doc.cards {
@@ -436,6 +458,9 @@ pub struct Card {
     pub parent: Option<String>,
     pub rect: Rect,
     pub z: u64,
+    /// Set while the cell is expanded into a live terminal: its size in world px at zoom 1, header included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<Point>,
 }
 impl Card {
     /// The canvas identity, distinct from every real terminal address.
@@ -541,6 +566,7 @@ impl Document {
                 sub: None, parent: None,
                 rect: [point[0], point[1], size[0], size[1]],
                 z,
+                size: None,
             });
         }
     }
@@ -569,7 +595,7 @@ impl Document {
                     space.rect[2] = space.rect[2].max(minimum[0]);
                     space.rect[3] = space.rect[3].max(minimum[1]);
                 }
-                self.cards.push(Card { terminal: String::new(), sub: Some(sub.id.clone()), parent: Some(parent.clone()), rect: child, z });
+                self.cards.push(Card { terminal: String::new(), sub: Some(sub.id.clone()), parent: Some(parent.clone()), rect: child, z, size: None });
                 changed = true;
             }
         }
@@ -594,7 +620,7 @@ impl Document {
             if doc.camera.x.is_finite()
                 && doc.camera.y.is_finite()
                 && doc.camera.zoom.is_finite()
-                && doc.cards.iter().all(|c| valid_rect(c.rect))
+                && doc.cards.iter().all(|c| valid_rect(c.rect) && c.size.is_none_or(|s| valid_rect([0., 0., s[0], s[1]])))
                 && doc.previews.iter().all(|p| valid_rect(p.rect))
                 && doc.spaces.iter().all(|s| valid_rect(s.rect))
                 && doc.panel.width.is_none_or(|w| w.is_finite() && w > 0.)
@@ -655,12 +681,6 @@ pub fn move_space(space: &mut Space, cards: &mut [Card], members: &[String], del
     }
 }
 
-pub fn clear_hidden_focus(view: &View, focus: &mut Option<String>, agent: bool) {
-    if !view_allows(view, agent) {
-        *focus = None;
-    }
-}
-
 pub fn view_allows(view: &View, agent: bool) -> bool {
     match view {
         View::All => true,
@@ -693,7 +713,7 @@ mod tests {
         assert!(separated(result[0],result[1],GAP));
         let delta = [result[1][0]-spaces[1][0],result[1][1]-spaces[1][1]];
         let mut space = Space { space:"b".into(),rect:spaces[1],color:"red".into(),frame:true };
-        let mut cards = [Card { terminal:"b".into(),sub:None,parent:None,rect:[248.,24.,100.,50.],z:0 }];
+        let mut cards = [Card { terminal:"b".into(),sub:None,parent:None,rect:[248.,24.,100.,50.],z:0,size:None }];
         move_space(&mut space,&mut cards,&["b".into()],delta);
         assert_eq!(cards[0].rect[0]-space.rect[0],24.);
         assert_eq!(cards[0].rect[1]-space.rect[1],24.);
@@ -739,8 +759,49 @@ mod tests {
     }
 
     #[test]
+    fn expanding_pins_the_cell_and_collapsing_puts_neighbours_back() {
+        let pill = |x, y| [x, y, 220., 36.];
+        let mut doc = Document::default();
+        for (name, r) in [("a", pill(0., 0.)), ("b", pill(244., 0.)), ("c", pill(0., 60.))] {
+            doc.place(name, [r[0], r[1]], [r[2], r[3]]);
+        }
+        let rects = |doc: &Document| doc.cards.iter().map(|c| c.rect).collect::<Vec<_>>();
+        let base = Rest::capture(&doc);
+        // What solving with "a" expanded to 600 x 400 does to its neighbours.
+        let expanded = [0., 0., 600., 400.];
+        let mut rest = rects(&doc);
+        rest[0] = expanded;
+        let solved = solve(&rest, 0, expanded, GAP);
+        assert_eq!(solved[0], expanded);
+        for (card, r) in doc.cards.iter_mut().zip(&solved) { card.rect = *r; }
+        doc.cards[0].size = Some([600., 400.]);
+        for i in 1..3 { assert!(separated(solved[0], solved[i], GAP)); }
+        let moved = base.changed(&Rest::capture(&doc));
+        // A neighbour dragged since is left where the person put it.
+        doc.cards[2].rect[0] += 500.;
+        let dragged = doc.cards[2].rect;
+        doc.cards[0].size = None;
+        base.put_back(&moved, &mut doc);
+        assert_eq!(doc.cards[1].rect, pill(244., 0.));
+        assert_eq!(doc.cards[2].rect, dragged);
+        assert_eq!(doc.cards[0].rect[..2], [0., 0.]);
+    }
+
+    #[test]
+    fn expanded_size_loads_from_old_and_new_files() {
+        let mut doc = Document::default();
+        doc.place("a", [0., 0.], [220., 36.]);
+        let old = serde_json::to_string(&doc).unwrap();
+        assert!(!old.contains("size"));
+        assert_eq!(serde_json::from_str::<Document>(&old).unwrap().cards[0].size, None);
+        doc.cards[0].size = Some([600., 400.]);
+        let saved = serde_json::to_string(&doc).unwrap();
+        assert_eq!(serde_json::from_str::<Document>(&saved).unwrap().cards[0].size, Some([600., 400.]));
+    }
+
+    #[test]
     fn undo_keeps_each_sub_agent_cell_apart() {
-        let sub = |id: &str, x| Card { terminal: String::new(), sub: Some(id.into()), parent: Some("t1".into()), rect: [x, 0., 100., 36.], z: 0 };
+        let sub = |id: &str, x| Card { terminal: String::new(), sub: Some(id.into()), parent: Some("t1".into()), rect: [x, 0., 100., 36.], z: 0, size: None };
         let mut doc = Document { cards: vec![sub("a", 0.), sub("b", 200.)], ..Document::default() };
         let rest = Rest::capture(&doc);
         doc.cards[0].rect[0] = 50.;
@@ -823,12 +884,14 @@ mod tests {
                 sub: None, parent: None,
                 rect: [24., 24., 160., 36.],
                 z: 0,
+                size: None,
             },
             Card {
                 terminal: "b".into(),
                 sub: None, parent: None,
                 rect: [1., 2., 160., 36.],
                 z: 0,
+                size: None,
             },
         ];
         move_space(&mut space, &mut cards, &["a".into()], [10., -5.]);
@@ -857,12 +920,6 @@ mod tests {
         for seed in 0..32 {
             assert_eq!(unused_color(&spaces, seed), "purple");
         }
-    }
-    #[test]
-    fn hiding_focused_card_clears_focus() {
-        let mut focus = Some("shell".into());
-        clear_hidden_focus(&View::Agents, &mut focus, false);
-        assert_eq!(focus, None);
     }
     #[test]
     fn changes_share_one_pending_save() {
@@ -1091,12 +1148,12 @@ mod panel_tests {
     #[test]
     fn tabs_activate_without_duplicates_and_close_to_neighbor() {
         let mut tabs = vec![];
-        open_panel_tab(&mut tabs, "terminal");
+        open_panel_tab(&mut tabs, "/tmp/b.rs");
         open_panel_tab(&mut tabs, "/tmp/a.rs");
-        open_panel_tab(&mut tabs, "terminal");
-        assert_eq!(tabs, ["terminal", "/tmp/a.rs"]);
+        open_panel_tab(&mut tabs, "/tmp/b.rs");
+        assert_eq!(tabs, ["/tmp/b.rs", "/tmp/a.rs"]);
         assert_eq!(
-            close_panel_tab(&mut tabs, Some("/tmp/a.rs"), "terminal").as_deref(),
+            close_panel_tab(&mut tabs, Some("/tmp/a.rs"), "/tmp/b.rs").as_deref(),
             Some("/tmp/a.rs")
         );
         assert_eq!(

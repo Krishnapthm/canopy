@@ -43,10 +43,46 @@ fn output_turn(
     })
 }
 
+thread_local! {
+    /// How much the terminal being drawn is scaled (the canvas zoom of an expanded cell), 1 elsewhere.
+    static SCALE: Cell<f32> = const { Cell::new(1.0) };
+}
+
+/// Draws and measures terminals at `scale` times their size (font, cell, padding) until dropped.
+pub struct Scaled(f32);
+impl Scaled {
+    pub fn new(scale: f32) -> Self {
+        Self(SCALE.replace(scale))
+    }
+}
+impl Drop for Scaled {
+    fn drop(&mut self) {
+        SCALE.set(self.0);
+    }
+}
+
+/// The terminal font size in px, at the app zoom and the scale being drawn.
+fn font_px() -> f32 {
+    crate::settings::font_size() * SCALE.get()
+}
+
 fn pad() -> (f32, f32) {
     let p = crate::settings::get().terminal_padding;
-    let zoom = crate::settings::zoom();
+    let zoom = crate::settings::zoom() * SCALE.get();
     (p[0] * zoom, p[1] * zoom)
+}
+
+/// The columns and rows of a pane `bounds` big at scale 1, however the canvas is zoomed.
+pub fn grid_at_rest(bounds: Size<Pixels>, window: &Window) -> (u16, u16) {
+    let _rest = Scaled::new(1.0);
+    grid_size(bounds, cell_size(window))
+}
+
+/// The pane size that holds `cols` x `rows` at scale 1.
+pub fn size_of_grid(cols: u16, rows: u16, window: &Window) -> Size<Pixels> {
+    let _rest = Scaled::new(1.0);
+    let (cell, (px_, py_)) = (cell_size(window), pad());
+    size(cell.width * cols as f32 + px(2.0 * px_), cell.height * rows as f32 + px(2.0 * py_))
 }
 
 pub(crate) fn grid_size(bounds: Size<Pixels>, cell: Size<Pixels>) -> (u16, u16) {
@@ -135,6 +171,12 @@ pub struct TerminalView {
     /// Right-clicks go to the program when it takes the mouse (Shift: the menu).
     pub right_click_to_program: bool,
     grid: Rc<RefCell<Grid>>,
+    /// The canvas zoom this terminal is drawn at (see `Scaled`).
+    scale: f32,
+    /// The pane size at scale 1 that sets the PTY's columns and rows; None fits the PTY to what is drawn.
+    rest: Option<Size<Pixels>>,
+    /// The wheel only scrolls this terminal while it has the keyboard (the canvas pans otherwise).
+    pub wheel_needs_focus: bool,
     focus: FocusHandle,
     was_focused: bool,
     /// The window frame this terminal was last put on screen in (`FRAME`).
@@ -296,6 +338,9 @@ impl TerminalView {
                 painted: Vec::new(),
                 painted_with: (0, Size::default(), String::new(), 0, false),
             })),
+            scale: 1.0,
+            rest: None,
+            wheel_needs_focus: false,
             focus: cx.focus_handle(),
             was_focused: false,
             shown_in: Cell::new(0),
@@ -481,6 +526,15 @@ impl TerminalView {
 
     pub fn focus_handle(&self) -> &FocusHandle {
         &self.focus
+    }
+
+    /// Draws at `scale` (the canvas zoom), with a PTY of the columns and rows `rest` holds at scale 1.
+    pub fn set_scale(&mut self, scale: f32, rest: Option<Size<Pixels>>, cx: &mut Context<Self>) {
+        if self.scale != scale || (rest.is_some() && self.rest != rest) {
+            self.scale = scale;
+            self.rest = rest.or(self.rest);
+            cx.notify();
+        }
     }
 
     /// The focused terminal remains the action target while its local find
@@ -888,7 +942,12 @@ impl TerminalView {
         }
     }
 
-    fn scroll(&mut self, ev: &ScrollWheelEvent, _w: &mut Window, cx: &mut Context<Self>) {
+    fn scroll(&mut self, ev: &ScrollWheelEvent, w: &mut Window, cx: &mut Context<Self>) {
+        // On the canvas an unfocused terminal, or any Cmd/Ctrl wheel (zoom), is the canvas's.
+        let zoom = if cfg!(target_os = "macos") { ev.modifiers.platform } else { ev.modifiers.control };
+        if self.wheel_needs_focus && (zoom || !self.owns_keyboard_focus(w, cx)) {
+            return;
+        }
         cx.stop_propagation();
         let mut g = self.grid.borrow_mut();
         let steps = scroll_delta_steps(&mut self.scrolled, ev.delta, ev.touch_phase, g.cell, g.vt.cols, g.vt.rows, crate::settings::get().terminal_scroll_speed);
@@ -972,9 +1031,9 @@ impl TerminalView {
     fn link_at(&self, pos: Point<Pixels>) -> Option<(LinkTarget, vt::Spans)> {
         let g = self.grid.borrow();
         let (x, y) = local(&g, pos);
-        let (col, row) = (x / f32::from(g.cell.width), y / f32::from(g.cell.height));
+        let (col, row) = cell_at((x, y), g.cell);
         let mut target = None;
-        let hit = g.vt.link_at(col as u16, row as u16, |text, at, joined| {
+        let hit = g.vt.link_at(col, row, |text, at, joined| {
             // In lines joined back together only a file that exists proves the join right.
             if let Some(range) = links::find(text, at)
                 && let Some(link) = links::resolve(&text[range.clone()], self.cwd.as_deref())
@@ -1300,6 +1359,11 @@ fn link_mods(m: &Modifiers) -> bool {
     key && !m.alt && !m.shift
 }
 
+/// The grid cell under a pane-local pixel position, given the cell as drawn (already scaled).
+fn cell_at((x, y): (f32, f32), cell: Size<Pixels>) -> (u16, u16) {
+    ((x / f32::from(cell.width)) as u16, (y / f32::from(cell.height)) as u16)
+}
+
 fn local(g: &Grid, p: Point<Pixels>) -> (f32, f32) {
     (f32::from(p.x - g.origin.x).max(0.0), f32::from(p.y - g.origin.y).max(0.0))
 }
@@ -1409,7 +1473,7 @@ fn is_icon(text: &str) -> bool {
 fn fallback_icon(text: &str, font: &Font, ts: &gpui::TextSystem) -> Option<IconGlyph> {
     let c = text.chars().next().filter(|_| is_icon(text))?;
     let id = ts.resolve_font(font);
-    if ts.advance(id, px(crate::settings::font_size()), c).is_ok() {
+    if ts.advance(id, px(font_px()), c).is_ok() {
         return None;
     }
     icon_glyph(c)
@@ -1609,16 +1673,20 @@ struct CellMetrics {
 fn cell_metrics(window: &Window) -> CellMetrics {
     let ts = window.text_system();
     let id = ts.resolve_font(&cell_font(false, false));
-    let (fs, scale) = (crate::settings::font_size(), window.scale_factor());
+    let (fs, scale) = (font_px(), window.scale_factor());
     // Asked for on every frame; changes with the font, size, scale or line height.
-    thread_local!(static LAST: Cell<Option<((FontId, u32, u32, u32), CellMetrics)>> = const { Cell::new(None) });
+    // A few are kept: canvas terminals alternate zoom 1 (their PTY size) with the shown zoom.
+    thread_local!(static LAST: RefCell<Vec<((FontId, u32, u32, u32), CellMetrics)>> = const { RefCell::new(Vec::new()) });
     let line_height = crate::settings::get().terminal_line_height;
     let key = (id, fs.to_bits(), scale.to_bits(), line_height.to_bits());
-    if let Some((_, metrics)) = LAST.get().filter(|(last, _)| *last == key) {
+    if let Some((_, metrics)) = LAST.with_borrow(|last| last.iter().find(|(k, _)| *k == key).copied()) {
         return metrics;
     }
     let metrics = font_cell_metrics(ts, id, fs, scale, line_height);
-    LAST.set(Some((key, metrics)));
+    LAST.with_borrow_mut(|last| {
+        last.truncate(3);
+        last.insert(0, (key, metrics));
+    });
     metrics
 }
 
@@ -1732,7 +1800,7 @@ fn fallback_size(c: &vt::Cell, font: &Font, width: Pixels, ts: &gpui::WindowText
         return None;
     }
     let first = c.text.chars().next()?;
-    let size = px(crate::settings::font_size());
+    let size = px(font_px());
     let primary = ts.resolve_font(font);
     if ts.advance(primary, size, first).is_ok() {
         return None;
@@ -1846,7 +1914,7 @@ fn row_ops(row: &[vt::Cell], cell: Size<Pixels>, cursor: Option<usize>, window: 
             strikethrough: None,
         };
         let width = cell.width * if c.wide { 2.0 } else { (x - start) as f32 };
-        let line = window.text_system().shape_line(text.into(), fitted_size.unwrap_or_else(|| px(crate::settings::font_size())), &[run], None)
+        let line = window.text_system().shape_line(text.into(), fitted_size.unwrap_or_else(|| px(font_px())), &[run], None)
             .with_cell_positions(&positions, width);
         ops.push(RowOp::Text { x: start, line });
         if c.underline || c.strike {
@@ -1935,7 +2003,7 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
     // line rebuilds one row, not the whole screen.
     let ligatures = crate::settings::get().font_ligatures;
     let cursor = frame.cursor_cell.filter(|_| ligatures);
-    let with = (crate::settings::font_size().to_bits(), cell, crate::settings::terminal_font(), crate::settings::fonts_added(), ligatures);
+    let with = (font_px().to_bits(), cell, crate::settings::terminal_font(), crate::settings::fonts_added(), ligatures);
     // When every row changed (output scrolling), nothing is kept: the next
     // frame would find none of them the same.
     let mut painted = std::mem::take(&mut grid.borrow_mut().painted);
@@ -2039,7 +2107,7 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
                         underline: None,
                         strikethrough: None,
                     };
-                    let line = window.text_system().shape_line(c.text.clone().into(), px(crate::settings::font_size()), &[run], None);
+                    let line = window.text_system().shape_line(c.text.clone().into(), px(font_px()), &[run], None);
                     paint_cell_text(&line, p, metrics, window, cx);
                 }
             }
@@ -2065,7 +2133,7 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
             underline: None,
             strikethrough: None,
         };
-        let line = window.text_system().shape_line(text.into(), px(crate::settings::font_size()), &[run], None);
+        let line = window.text_system().shape_line(text.into(), px(font_px()), &[run], None);
         window.paint_quad(fill(snap_box(Bounds::new(p, size(line.width, cell.height))), hsla(frame.bg)));
         paint_cell_text(&line, p, metrics, window, cx);
         let underline = Bounds::new(p + point(px(0.0), metrics.underline), size(line.width, metrics.underline_thickness));
@@ -2183,7 +2251,11 @@ impl Render for TerminalView {
                 g.core.focus(ch, focused);
             }
         }
-        let cell = cell_size(window);
+        let (scale, rest) = (self.scale, self.rest);
+        let cell = {
+            let _scaled = Scaled::new(scale);
+            cell_size(window)
+        };
         let hover = self.grid.borrow().hover;
         let found = hover.filter(|_| link_mods(&window.modifiers())).and_then(|pos| self.link_at(pos));
         let (link, spans) = found.unzip();
@@ -2319,10 +2391,12 @@ impl Render for TerminalView {
             .child(
                 canvas(
                     move |bounds, window, _cx| {
-                        let (cols, rows) = grid_size(bounds.size, cell);
+                        let _scaled = Scaled::new(scale);
+                        let (cols, rows) = rest.map_or_else(|| grid_size(bounds.size, cell), |rest| grid_at_rest(rest, window));
                         grid.borrow_mut().fit(cols, rows, cell, window.scale_factor());
                     },
                     move |bounds, _, window, cx| {
+                        let _scaled = Scaled::new(scale);
                         paint_grid(bounds, &grid_paint, focused, window, cx);
                         let view = selection_view.clone();
                         window.on_mouse_event(move |ev: &MouseMoveEvent, phase, _, cx| {
@@ -4282,6 +4356,23 @@ mod tests {
             vt.write(output);
             assert_eq!(key_bytes(&mut vt, &press("shift-enter", None)).as_deref(), Some(expected), "output={output:?}");
         }
+    }
+
+    #[test]
+    fn scaled_drawing_keeps_the_pty_grid_and_maps_the_pointer_by_the_drawn_cell() {
+        let (bounds, cell) = (gpui::size(gpui::px(800.0), gpui::px(480.0)), gpui::size(gpui::px(8.0), gpui::px(16.0)));
+        let rest = super::grid_size(bounds, cell);
+        for zoom in [0.5, 1.5, 2.0] {
+            let _outer = super::Scaled::new(zoom);
+            // The PTY size is taken at scale 1 from the cell's size at rest, whatever is drawn.
+            let at_rest = { let _one = super::Scaled::new(1.0); super::grid_size(bounds, cell) };
+            assert_eq!(at_rest, rest);
+            assert_eq!(super::pad().0, crate::settings::get().terminal_padding[0] * crate::settings::zoom() * zoom);
+            // Drawn at `zoom`, the cell is `zoom` times bigger and so is the pixel under the pointer.
+            let drawn = gpui::size(cell.width * zoom, cell.height * zoom);
+            assert_eq!(super::cell_at((8.0 * zoom * 3.0 + 1.0, 16.0 * zoom * 2.0 + 1.0), drawn), (3, 2));
+        }
+        assert_eq!(super::pad().0, crate::settings::get().terminal_padding[0] * crate::settings::zoom());
     }
 
     #[test]
