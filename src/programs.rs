@@ -377,9 +377,9 @@ pub fn load() -> Result<(), String> {
         },
     };
     result?;
-    install_shell_files(&table)?;
+    let installed = install_shell_files(&table);
     TABLE.with(|t| *t.borrow_mut() = table);
-    Ok(())
+    installed
 }
 
 /// How a terminal shows: from the agent's own report (`app`), else the

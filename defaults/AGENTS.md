@@ -672,8 +672,8 @@ canopy commands    # every command and its arguments
 Run `canopy config` for every setting's default and explanation. Edit settings.json
 and save to apply live (except `core`, read at startup). Invalid settings, keys or
 programs keep their last good values and raise an error toast; JSON errors include
-file:line:column. Settings also reject unknown top-level keys, suggesting a unique
-close spelling. The corresponding `.error` file remains until a successful reload.
+file:line:column. An unknown settings key is a warning toast (with a close spelling
+when there is one); the rest of the file still applies. The corresponding `.error` file remains until a successful reload.
 
 - `confirm_close_terminal`: true asks before closing a plain terminal cell; "Don't ask again" writes false. Running agents always ask.
 

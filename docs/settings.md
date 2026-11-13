@@ -21,9 +21,9 @@ The following are hand-edited only and never appear in Settings:
 checkbox writes false; edit it back to true to restore prompts.
 
 A JSON error in settings.json, keys.json or programs.json raises a toast naming
-file:line:column and keeps the last good values. Invalid ranges also reject the
-settings file. An unknown top-level setting rejects the file with its key name
-and, when one known key is uniquely close, a “did you mean” suggestion. For example:
+file:line:column and keeps the last good values. A value out of range
+rejects settings.json the same way. An unknown key is a warning toast, and the
+rest of the file still applies; when one known key is close, it is suggested:
 ``settings.json: unknown key `canvas_gab`, did you mean `canvas_gap`?``.
 The matching `.error` file records the problem until the next successful reload.
 On first start, with no good values yet, Canopy uses defaults.

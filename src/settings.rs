@@ -722,18 +722,6 @@ pub fn load_person() -> Result<Person, String> {
 
 fn parse_person(text: &str) -> Result<Person, String> {
     let person: Person = serde_json::from_str(text).map_err(|e| json_error("settings.json", e))?;
-    let value: serde_json::Value = serde_json::from_str(text).map_err(|e| json_error("settings.json", e))?;
-    if let Some(object) = value.as_object() {
-        for key in object.keys().filter(|key| !SETTING_KEYS.contains(&key.as_str())) {
-            let mut close: Vec<_> = SETTING_KEYS.iter().map(|known| (distance(key, known), known)).filter(|(d, _)| *d <= 2).collect();
-            close.sort();
-            let hint = match close.as_slice() {
-                [(d, known), rest @ ..] if rest.first().is_none_or(|(next, _)| next > d) => format!(", did you mean `{known}`?"),
-                _ => String::new(),
-            };
-            return Err(format!("settings.json: unknown key `{key}`{hint}"));
-        }
-    }
     for (valid, problem) in [
         ((ZOOM_MIN..=ZOOM_MAX).contains(&person.zoom), "zoom must be in 0.5..3"),
         ((0.0..=1024.0).contains(&person.canvas_gap), "canvas_gap must be in 0..1024"),
@@ -743,6 +731,21 @@ fn parse_person(text: &str) -> Result<Person, String> {
         if !valid { return Err(format!("settings.json: {problem}")); }
     }
     Ok(person)
+}
+
+/// The keys of settings.json that no setting reads, each with a close spelling when there is
+/// exactly one. A warning only: the rest of the file still applies.
+pub fn unknown_keys(text: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    let found: Vec<String> = value.as_object()?.keys().filter(|key| !SETTING_KEYS.contains(&key.as_str())).map(|key| {
+        let mut close: Vec<_> = SETTING_KEYS.iter().map(|known| (distance(key, known), known)).filter(|(d, _)| *d <= 2).collect();
+        close.sort();
+        match close.as_slice() {
+            [(d, known), rest @ ..] if rest.first().is_none_or(|(next, _)| next > d) => format!("unknown key `{key}`, did you mean `{known}`?"),
+            _ => format!("unknown key `{key}`"),
+        }
+    }).collect();
+    (!found.is_empty()).then(|| format!("settings.json: {}", found.join("; ")))
 }
 
 /// JSON diagnostics shared by the three hand-edited config files.
@@ -1059,10 +1062,12 @@ mod tests {
             assert!(parse_person(invalid).unwrap_err().starts_with("settings.json:"), "{invalid}");
         }
         assert_eq!(parse_person(r#"{"canvas_push":"drop"}"#).unwrap().canvas_push, CanvasPush::Drop);
-        assert_eq!(parse_person(r#"{"canvas_gab":24}"#).unwrap_err(),
+        assert_eq!(parse_person(r#"{"canvas_gab":24,"zoom":2}"#).unwrap().zoom, 2., "an unknown key never drops the rest");
+        assert_eq!(unknown_keys(r#"{"canvas_gab":24}"#).unwrap(),
             "settings.json: unknown key `canvas_gab`, did you mean `canvas_gap`?");
-        assert_eq!(parse_person(r#"{"unrelated":24}"#).unwrap_err(), "settings.json: unknown key `unrelated`");
-        assert_eq!(parse_person(r#"{"fome":24}"#).unwrap_err(), "settings.json: unknown key `fome`");
+        assert_eq!(unknown_keys(r#"{"unrelated":24}"#).unwrap(), "settings.json: unknown key `unrelated`");
+        assert_eq!(unknown_keys(r#"{"fome":24}"#).unwrap(), "settings.json: unknown key `fome`");
+        assert_eq!(unknown_keys(r#"{"zoom":1}"#), None);
         assert_eq!(distance("", "font"), 4);
         assert_eq!(distance("fönt", "font"), 1);
         let reference = config();

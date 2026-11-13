@@ -27,8 +27,7 @@ pixels from its neighbours (default 24). Spaces keep the same gap from each othe
 
 The hand-edited [settings](settings.md) reload live: `canvas_gap` changes spacing,
 `canvas_push: "drop"` leaves neighbours still until a drag or resize is released.
-Release outside completes when the pointer returns. Click expansion solves on the
-completed click. `space_fill` controls space opacity (default 0.04; 0 removes fill).
+`space_fill` controls space opacity (default 0.04; 0 removes fill).
 
 ## How it works
 

@@ -827,6 +827,9 @@ impl AppWindow {
                 Ok(p) => {
                     self.person = p;
                     let _ = std::fs::remove_file(file("settings.error"));
+                    if let Some(warning) = std::fs::read_to_string(settings::path()).ok().and_then(|t| settings::unknown_keys(&t)) {
+                        self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast", "notification":{"title":"settings.json", "body":warning, "level":"warning"}}), window, cx);
+                    }
                 }
                 Err(e) => self.report("settings", &e, window, cx),
             }
@@ -5639,12 +5642,14 @@ mod tests {
                 .map(|b| b.keystrokes().to_vec()).collect();
                 assert_eq!(keys_after, keys_before);
             }
-            std::fs::write(settings, r#"{"canvas_gab":24}"#).unwrap();
+            std::fs::write(settings, r#"{"canvas_gab":24,"canvas_gap":40}"#).unwrap();
             this.watched.settings = None;
             this.reload_config(window, cx);
-            assert_eq!(this.person.canvas_gap, 60.);
+            assert_eq!(this.person.canvas_gap, 40., "the known keys still apply");
             let toast = this.overlays.last().unwrap();
-            assert!(this.copies[&format!("overlay:{}", toast.id)].inst.props["body"].as_str().unwrap().contains("did you mean `canvas_gap`?"));
+            let props = &this.copies[&format!("overlay:{}", toast.id)].inst.props;
+            assert_eq!(props["level"], "warning");
+            assert!(props["body"].as_str().unwrap().contains("did you mean `canvas_gap`?"));
         });
     }
 

@@ -256,9 +256,9 @@ Hand-edited canvas settings reload live: `canvas_gap` (24, 0..1024 world pixels)
 and `terminal_size` ([100, 30], columns 20..500 and rows 5..200 for new expansions).
 They do not appear in Settings. `canopy config` prints all defaults and explanations.
 Invalid settings.json, keys.json or programs.json keeps the last good values and
-raises a toast with file:line:column for JSON errors. Unknown settings keys are
-rejected with a close spelling suggestion when unambiguous; `.error` files remain
-until the next successful reload.
+raises a toast with file:line:column for JSON errors. An unknown settings key is a
+warning toast (with a close spelling when there is one) and the rest still applies;
+`.error` files remain until the next successful reload.
 `panel.open {terminal}` expands a terminal cell like `canvas.expand`. The
 `classic` layout preserves the previous sidebar and tabs. Canvas zoom bindings
 apply to the `main` layout; other layouts retain app zoom.
