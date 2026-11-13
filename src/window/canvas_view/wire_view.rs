@@ -4,7 +4,7 @@ use super::*;
 use crate::wire::{self, Line, Stat};
 use gpui_base::input::{InputEvent, InputState};
 
-/// Diameter of the round "+" shown at a hovered cell's corners.
+/// Diameter of the round "+" shown at the middle of each side of a hovered cell.
 const HANDLE: f32 = 10.;
 /// How long an edge glows after a postcard is typed into its end.
 const PULSE: Duration = Duration::from_millis(700);
@@ -14,7 +14,7 @@ const GRAB: f32 = 6.;
 /// What the canvas remembers about Wire between frames.
 #[derive(Default)]
 pub(in crate::window) struct WireUi {
-    /// The cell whose corner "+" handles show.
+    /// The cell whose side "+" handles show.
     hover: Option<String>,
     /// A wire being drawn: the cell it starts at, where it starts (world) and the pointer (window).
     drag: Option<(String, canvas::Point, Point<Pixels>)>,
@@ -364,9 +364,10 @@ impl AppWindow {
         let Some(rect) = key.and_then(|k| self.wire_cell(doc, k).map(|r| (k.clone(), r))) else { return vec![] };
         let (key, r) = rect;
         let mut out = vec![];
-        for (i, corner) in [[r[0], r[1]], [r[0] + r[2], r[1]], [r[0], r[1] + r[3]], [r[0] + r[2], r[1] + r[3]]].into_iter().enumerate() {
-            let [x, y] = camera.to_screen(corner);
-            let (key, start) = (key.clone(), corner);
+        let (mid_x, mid_y) = (r[0] + r[2] / 2., r[1] + r[3] / 2.);
+        for (i, side) in [[mid_x, r[1]], [r[0] + r[2], mid_y], [mid_x, r[1] + r[3]], [r[0], mid_y]].into_iter().enumerate() {
+            let [x, y] = camera.to_screen(side);
+            let (key, start) = (key.clone(), side);
             let line = |w: f32, h: f32| div().absolute().left(px((HANDLE - w) / 2. - 1.)).top(px((HANDLE - h) / 2. - 1.)).w(px(w)).h(px(h)).bg(c("foreground"));
             out.push(div().id(SharedString::from(format!("wire-handle-{key}-{i}"))).absolute().left(px(x - HANDLE / 2.)).top(px(y - HANDLE / 2.))
                 .size(px(HANDLE)).rounded_full().bg(c("surface")).border_1().border_color(c("muted-foreground")).cursor_pointer()

@@ -44,7 +44,7 @@ its sub-agent labels. These cells describe work, not terminal processes.
 ## Wire
 
 Wire is how wired cells talk. The person draws an edge between two cells of one
-space (hover a cell, drag from a corner "+" to another cell); the edge is the
+space (hover a cell, drag from a side "+" to another cell); the edge is the
 address book and the permission. Sub-agents and `hc run` helpers are wired to
 their parent already. Wiring types nothing into anyone. The person starts at
 `docs/wire.md`; you work through `canopy wire`:

@@ -6,7 +6,7 @@ anyone when you connect, and nothing costs a token until somebody writes.
 
 ## Use it
 
-- Hover a cell: a round "+" shows at each corner. Drag from one to another cell
+- Hover a cell: a round "+" shows at the middle of each side. Drag from one to another cell
   of the same space and let go; release on empty canvas cancels, and a cell in
   another space says "Same space only for now". Sub-agents and `hc run` helpers
   are wired to their parent already (the edge ends in a dot at the child).
