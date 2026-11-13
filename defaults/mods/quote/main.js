@@ -30,7 +30,7 @@ export default class Quote extends View {
       })
       // Says what the popover does: the selection goes to an agent's prompt.
       .child(h_flex().px(8).pt(4).pb(2).gap(8).items_center()
-        .child(svg("mods/quote/text-quote.svg").size(14).flex_none().text_color(t.muted))
+        .child(svg("icons/quote.svg").size(14).flex_none().text_color(t.muted))
         .child(div().font_semibold().child("Send quote to an agent")))
       .child(div().px(8).pb(4).text_size(11).text_color(t.dim).truncate()
         .child(agents.length ? `${where} · pasted into the prompt, not sent` : where))

@@ -19,6 +19,9 @@ impl SaveSchedule {
     }
 }
 
+/// The shared width of terminal and sub-agent cells at zoom 1.
+pub const PILL_WIDTH: f32 = 220.;
+
 pub const ZOOMS: [f32; 12] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1., 1.1, 1.25, 1.5, 1.75, 2.,
 ];
@@ -200,6 +203,21 @@ pub fn visible(camera: Camera, rect: Rect, viewport: Point) -> bool {
         ],
     )
 }
+/// The action required before a selected canvas cell can close.
+#[derive(Debug, PartialEq)]
+pub enum CloseChoice { RefuseSub, ClearSub, ConfirmAgent, ConfirmTerminal, CloseTerminal }
+
+/// Sub-agents never terminate a process; agent confirmation cannot be silenced.
+pub fn close_choice(sub_done: Option<bool>, agent: bool, confirm_terminal: bool) -> CloseChoice {
+    match sub_done {
+        Some(false) => CloseChoice::RefuseSub,
+        Some(true) => CloseChoice::ClearSub,
+        None if agent => CloseChoice::ConfirmAgent,
+        None if confirm_terminal => CloseChoice::ConfirmTerminal,
+        None => CloseChoice::CloseTerminal,
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum View {
@@ -217,10 +235,25 @@ pub struct Space {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Card {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub terminal: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     pub rect: Rect,
     pub z: u64,
 }
+impl Card {
+    /// The canvas identity, distinct from every real terminal address.
+    pub fn key(&self) -> String {
+        match (&self.sub, &self.parent) {
+            (Some(id), Some(parent)) => format!("sub:{parent}:{id}"),
+            _ => self.terminal.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Panel {
     #[serde(default)]
@@ -302,17 +335,50 @@ impl Document {
             .max()
             .unwrap_or(0)
             .saturating_add(1);
-        if let Some(card) = self.cards.iter_mut().find(|c| c.terminal == terminal) {
+        if let Some(card) = self.cards.iter_mut().find(|c| c.key() == terminal) {
             card.rect[0] = point[0];
             card.rect[1] = point[1];
         } else {
             self.cards.push(Card {
                 terminal: terminal.into(),
+                sub: None, parent: None,
                 rect: [point[0], point[1], size[0], size[1]],
                 z,
             });
         }
     }
+    /// Adds labelled children once and drops cells whose labels were cleared.
+    pub fn sync_subs(&mut self, subs: &std::collections::HashMap<String, Vec<crate::subs::Sub>>) -> bool {
+        let before = self.cards.len();
+        self.cards.retain(|c| c.sub.as_ref().is_none_or(|id| c.parent.as_ref()
+            .and_then(|p| subs.get(p)).is_some_and(|children| children.iter().any(|s| &s.id == id))));
+        let mut changed = before != self.cards.len();
+        let mut parents: Vec<_> = subs.keys().collect();
+        parents.sort();
+        for parent in parents {
+            let Some(rect) = self.cards.iter().find(|c| &c.terminal == parent && c.sub.is_none()).map(|c| c.rect) else { continue };
+            let mut children: Vec<_> = subs[parent].iter().collect();
+            children.sort_by_key(|s| &s.id);
+            for sub in children {
+                if self.cards.iter().any(|c| c.parent.as_ref() == Some(parent) && c.sub.as_ref() == Some(&sub.id)) { continue; }
+                let siblings: Vec<_> = self.cards.iter().filter(|c| c.parent.as_ref() == Some(parent)).map(|c| c.rect).collect();
+                let z = self.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
+                let child = child_position(rect, &siblings, [PILL_WIDTH, 36.]);
+                // The cell belongs to its parent's space: grow that space to hold it.
+                let center = [rect[0] + rect[2] / 2., rect[1] + rect[3] / 2.];
+                if let Some(space) = self.spaces.iter_mut().find(|s| center[0] >= s.rect[0] && center[0] <= s.rect[0] + s.rect[2]
+                    && center[1] >= s.rect[1] && center[1] <= s.rect[1] + s.rect[3]) {
+                    let minimum = min_size(space.rect, &[child]);
+                    space.rect[2] = space.rect[2].max(minimum[0]);
+                    space.rect[3] = space.rect[3].max(minimum[1]);
+                }
+                self.cards.push(Card { terminal: String::new(), sub: Some(sub.id.clone()), parent: Some(parent.clone()), rect: child, z });
+                changed = true;
+            }
+        }
+        changed
+    }
+
     pub fn load(path: &Path) -> io::Result<(Self, bool)> {
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
@@ -386,7 +452,7 @@ pub fn unused_color(spaces: &[Space], seed: usize) -> &'static str {
 pub fn move_space(space: &mut Space, cards: &mut [Card], members: &[String], delta: Point) {
     space.rect[0] += delta[0];
     space.rect[1] += delta[1];
-    for card in cards.iter_mut().filter(|c| members.contains(&c.terminal)) {
+    for card in cards.iter_mut().filter(|c| members.contains(&c.key())) {
         card.rect[0] += delta[0];
         card.rect[1] += delta[1];
     }
@@ -469,11 +535,13 @@ mod tests {
         let mut cards = vec![
             Card {
                 terminal: "a".into(),
+                sub: None, parent: None,
                 rect: [24., 24., 160., 36.],
                 z: 0,
             },
             Card {
                 terminal: "b".into(),
+                sub: None, parent: None,
                 rect: [1., 2., 160., 36.],
                 z: 0,
             },
@@ -785,5 +853,54 @@ mod motion_tests {
         remember_folder(&mut recent, "/5"); remember_folder(&mut recent, "");
         assert_eq!(recent.len(), 10); assert_eq!(recent[0], "/5");
         assert_eq!(recent.iter().filter(|p| *p == "/5").count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod cell_tests {
+    use super::*;
+    use std::collections::HashMap;
+    #[test]
+    fn old_cards_load_and_sub_cards_keep_their_position_until_labels_clear() {
+        let card: Card = serde_json::from_str(r#"{"terminal":"t1","rect":[0,0,320,36],"z":1}"#).unwrap();
+        assert!(card.sub.is_none());
+        let mut doc: Document = serde_json::from_value(serde_json::json!({
+            "version":1,"camera":{"x":0,"y":0,"zoom":1},"view":"all","spaces":[],
+            "cards":[{"terminal":"t1","rect":[0,0,320,36],"z":1}],"panel":{"width":null}
+        })).unwrap();
+        assert_eq!(doc.cards[0].key(), card.key());
+        let mut subs = HashMap::from([("t1".into(), vec![crate::subs::Sub { id:"a".into(), name:"task".into(), program:serde_json::Value::Null, transcript:None, done:false }])]);
+        doc.spaces.push(Space { space: "s".into(), rect: [-24., -24., 368., 84.], color: "gray".into(), frame: true });
+        assert!(doc.sync_subs(&subs));
+        assert_eq!(doc.cards.len(), 2);
+        let (space, child) = (doc.spaces[0].rect, doc.cards[1].rect);
+        assert!(child[0] + child[2] <= space[0] + space[2] && child[1] + child[3] <= space[1] + space[3], "the parent's space grows to hold its sub cell");
+        let key = doc.cards[1].key();
+        doc.place(&key, [600., 200.], [320., 36.]);
+        subs.get_mut("t1").unwrap()[0].done = true;
+        assert!(!doc.sync_subs(&subs));
+        assert_eq!(&doc.cards[1].rect[..2], &[600., 200.]);
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert_eq!(saved["cards"][1]["sub"], "a");
+        assert_eq!(saved["cards"][1]["parent"], "t1");
+        assert!(saved["cards"][1].get("terminal").is_none());
+        let mut loaded: Document = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded.cards[1].key(), key);
+        subs.clear();
+        assert!(loaded.sync_subs(&subs));
+        assert_eq!(loaded.cards.len(), 1);
+    }
+    #[test]
+    fn closing_distinguishes_processes_from_observations() {
+        assert_eq!(close_choice(Some(false), true, false), CloseChoice::RefuseSub);
+        assert_eq!(close_choice(Some(true), true, true), CloseChoice::ClearSub);
+        assert_eq!(close_choice(None, true, false), CloseChoice::ConfirmAgent);
+        assert_eq!(close_choice(None, true, true), CloseChoice::ConfirmAgent);
+        assert_eq!(close_choice(None, false, true), CloseChoice::ConfirmTerminal);
+        assert_eq!(close_choice(None, false, false), CloseChoice::CloseTerminal);
+        let person: crate::settings::Person = serde_json::from_str("{}").unwrap();
+        assert!(person.confirm_close_terminal);
+        let person: crate::settings::Person = serde_json::from_str(r#"{"confirm_close_terminal":false}"#).unwrap();
+        assert!(!person.confirm_close_terminal);
     }
 }

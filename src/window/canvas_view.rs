@@ -1,11 +1,13 @@
 // Modified for Canopy.
 use super::*;
-use crate::canvas::{self, Document};
+use crate::canvas::{self, Document, PILL_WIDTH};
 use gpui::AnimationExt as _;
 
 pub(super) struct State {
     pub doc: Document,
     pub subs: HashMap<String, Vec<crate::subs::Sub>>,
+    sub_watches: HashMap<String, Task<()>>,
+    selected: Option<String>,
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
     preview_drag: Option<(String, bool, Point<Pixels>)>,
     pub panel: Option<String>,
@@ -63,6 +65,8 @@ impl State {
         Self {
             doc,
             subs: HashMap::new(),
+            sub_watches: HashMap::new(),
+            selected: None,
             previews: HashMap::new(),
             preview_drag: None,
             panel: None,
@@ -133,6 +137,88 @@ impl AppWindow {
     pub(super) fn refresh_sub_hooks(&mut self) {
         self.canvas_state.subs = self.live.iter().filter(|(_, record)| record["state"] == "live")
             .map(|(addr, record)| (addr.clone(), crate::subs::hooks(record))).collect();
+    }
+
+    /// Watches transcript folders after label events, without an idle timer.
+    pub(super) fn watch_subs(&mut self, cx: &mut Context<Self>) {
+        let folders: std::collections::HashSet<String> = self.canvas_state.subs.values().flatten()
+            .filter_map(|s| s.transcript.as_ref()?.parent()?.ancestors().find(|p| p.is_dir()))
+            .map(|p| p.to_string_lossy().into_owned()).collect();
+        self.canvas_state.sub_watches.retain(|folder, _| folders.contains(folder));
+        for folder in folders {
+            if self.canvas_state.sub_watches.contains_key(&folder) { continue; }
+            let watch = folder.clone();
+            let task = cx.spawn(async move |this, cx| {
+                loop {
+                    let folder = watch.clone();
+                    let result = cx.background_executor().spawn(async move { crate::files::next_change(folder).await }).await;
+                    let failed = result.is_err();
+                    if this.update(cx, |this, cx| {
+                        if let Err(error) = result { this.canvas_state.error = Some(error); }
+                        else {
+                            this.refresh_sub_hooks();
+                            if this.canvas_state.doc.sync_subs(&this.canvas_state.subs) { this.canvas_changed(cx); }
+                        }
+                        cx.notify();
+                    }).is_err() || failed { break; }
+                }
+            });
+            self.canvas_state.sub_watches.insert(folder, task);
+        }
+    }
+
+    /// Removes finished observations through the parent terminal's lifecycle labels.
+    pub(super) fn clear_subs(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(parent) = a["terminal"].as_str() else { return };
+        let ids = crate::subs::finished_ids(self.canvas_state.subs.get(parent).map(Vec::as_slice).unwrap_or_default(), a["id"].as_str());
+        if ids.is_empty() { return; }
+        let parent = parent.to_owned();
+        let labels: serde_json::Map<String, Value> = ids.iter().map(|id| (format!("canopy.sub.{id}"), json!(""))).collect();
+        let core = self.core.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let params = json!({"terminal":parent,"labels":labels});
+            let result = cx.background_executor().spawn(async move { core.call("terminal.label", params) }).await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if let Err(error) = result { this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":format!("Could not clear finished: {error}")}}), window, cx); }
+                cx.notify();
+            });
+        }).detach();
+    }
+
+    /// Closes the selected cell with confirmation appropriate to its current kind.
+    pub(super) fn close_canvas_cell(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        let key = a["terminal"].as_str().map(str::to_owned).or_else(|| {
+            self.focus.is_focused(window).then(|| self.canvas_state.selected.clone()).flatten()
+        });
+        let Some(key) = key else { return };
+        let Some(card) = self.canvas_state.doc.cards.iter().find(|c| c.key() == key) else { return };
+        let sub = card.parent.as_ref().and_then(|p| self.canvas_state.subs.get(p)).into_iter().flatten()
+            .find(|s| Some(&s.id) == card.sub.as_ref());
+        let agent = self.live.get(&key).is_some_and(canvas_agent);
+        let choice = canvas::close_choice(sub.map(|s| s.done), agent, self.person.confirm_close_terminal);
+        match choice {
+            canvas::CloseChoice::RefuseSub => {
+                self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":"This sub-agent is still working. Stop it through its parent."}}), window, cx);
+            }
+            canvas::CloseChoice::ClearSub => {
+                let args = json!({"terminal":card.parent,"id":card.sub});
+                self.clear_subs(&args, window, cx);
+            }
+            canvas::CloseChoice::ConfirmAgent | canvas::CloseChoice::ConfirmTerminal if a["confirmed"] != if agent { "agent" } else { "terminal" } => {
+                let title = if agent { format!("Terminate {} and close?", self.pill_name(&key)) } else { "Close this terminal?".into() };
+                self.open_overlay(mods::new_overlay_id(), json!({"mod":"confirm","kind":"dialog","width":400,
+                    "props":{"title":title,"detail":"This ends the terminal and its running programs.",
+                    "accept":if agent {"Terminate"} else {"Close"},"dontAsk":!agent,
+                    "command":{"name":"canvas.close","args":{"terminal":key,"confirmed":if agent {"agent"} else {"terminal"}}}}}), window, cx);
+            }
+            _ => {
+                if !agent && a["dont_ask"] == true {
+                    if let Err(error) = settings::skip_terminal_confirmation(&settings::path()) { return self.fail(error); }
+                    self.person.confirm_close_terminal = false;
+                }
+                self.dispatch("terminal.kill", &json!({"terminal":key}), true, window, cx);
+            }
+        }
     }
 
     pub(super) fn message_sub(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
@@ -356,6 +442,7 @@ impl AppWindow {
             let path = card.path.clone();
             let folder = std::path::Path::new(&path)
                 .parent()
+                .and_then(|p| p.ancestors().find(|p| p.is_dir()))
                 .unwrap_or(std::path::Path::new("/"))
                 .to_string_lossy()
                 .into_owned();
@@ -369,7 +456,7 @@ impl AppWindow {
                     let Ok(changed) = result else { break };
                     if !changed
                         .iter()
-                        .any(|p| p == &path || std::path::Path::new(&path).starts_with(p))
+                        .any(|p| p == &path || p == &path.replace(".jsonl", ".meta.json") || std::path::Path::new(&path).starts_with(p))
                     {
                         continue;
                     }
@@ -691,6 +778,7 @@ impl AppWindow {
         pill_label(given, self.live.get(addr).unwrap_or(&Value::Null))
     }
     fn pill_rect(&self, card: &canvas::Card, cx: &App) -> canvas::Rect {
+        if card.sub.is_some() { return card.rect; }
         let rec = self.live.get(&card.terminal).unwrap_or(&Value::Null);
         // Room taken by the trailing status and pop-out glyphs (12 px each plus the gap).
         let trailing = 20 * (canvas_agent(rec) as u8 + self.canvas_state.popped.contains_key(&card.terminal) as u8);
@@ -730,7 +818,9 @@ impl AppWindow {
         if !point.iter().all(|v| v.is_finite()) {
             return Err("invalid canvas point".into());
         }
-        if !self.live.contains_key(terminal) && self.model.pane_of(terminal).is_none() {
+        if !self.live.contains_key(terminal) && self.model.pane_of(terminal).is_none()
+            && !self.canvas_state.doc.cards.iter().any(|c| c.sub.is_some() && c.key() == terminal)
+        {
             return Err("no running terminal".into());
         }
         let card = self
@@ -738,10 +828,11 @@ impl AppWindow {
             .doc
             .cards
             .iter()
-            .find(|c| c.terminal == terminal)
+            .find(|c| c.key() == terminal)
             .cloned()
             .unwrap_or(canvas::Card {
                 terminal: terminal.into(),
+                sub: None, parent: None,
                 rect: [point[0], point[1], 240., 36.],
                 z: 0,
             });
@@ -750,7 +841,7 @@ impl AppWindow {
         r[1] = point[1];
         let space = self
             .model
-            .pane_of(terminal)
+            .pane_of(card.parent.as_deref().unwrap_or(terminal))
             .and_then(|p| self.model.space_of(&p))
             .and_then(|s| {
                 self.canvas_state
@@ -840,6 +931,7 @@ impl AppWindow {
                 let r = self.pill_rect(
                     &canvas::Card {
                         terminal: a.clone(),
+                        sub: None, parent: None,
                         rect: [0., 0., 240., 36.],
                         z: 0,
                     },
@@ -900,7 +992,7 @@ impl AppWindow {
         }
         let before = state.doc.cards.len();
         state.doc.cards.retain(|c| {
-            self.live.contains_key(&c.terminal) || self.born.borrow().contains_key(&c.terminal)
+            c.sub.is_some() || self.live.contains_key(&c.terminal) || self.born.borrow().contains_key(&c.terminal)
         });
         changed |= before != state.doc.cards.len();
         let mut addresses: Vec<_> = self.live.keys().cloned().collect();
@@ -969,6 +1061,7 @@ impl AppWindow {
             }
         }
         if changed {
+            state.doc.sync_subs(&state.subs);
             self.canvas_changed(cx);
         }
     }
@@ -1072,7 +1165,7 @@ impl AppWindow {
             .shadow_sm().cursor_pointer().hover(|d| d.bg(c("hover")))
             // The press itself opens the menu (quote_press); nothing under the icon takes it.
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(svg().path("mods/quote/text-quote.svg").size(px(14.)).text_color(c("foreground")))
+            .child(svg().path("icons/quote.svg").size(px(14.)).text_color(c("foreground")))
             .into_any_element())
     }
 
@@ -1156,6 +1249,10 @@ impl AppWindow {
                     .and_then(|a| self.live.get(a))
                     .is_some_and(canvas_agent);
                 canvas::clear_hidden_focus(&state.doc.view, &mut state.panel, agent);
+                if state.selected.as_ref().is_some_and(|key| !state.doc.cards.iter().any(|card|
+                    card.key() == *key && canvas::view_allows(&state.doc.view, card.sub.is_some() || self.live.get(key).is_some_and(canvas_agent)))) {
+                    state.selected = None;
+                }
                 if state.panel.is_none() {
                     self.focus.focus(window, cx);
                 }
@@ -1210,6 +1307,7 @@ impl AppWindow {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(div().flex().items_center().gap(px(8.)).px(px(12.)).h(px(36. * camera.zoom)).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                        this.canvas_state.selected = None;
                         this.canvas_state.preview_drag = Some((drag.clone(), false, e.position)); cx.stop_propagation();
                     }))
                     .child(svg().path("mods/files/file.svg").size(px(16.)).text_color(c("foreground")))
@@ -1233,6 +1331,7 @@ impl AppWindow {
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
                     .hover(|d| d.border_color(c("foreground")))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                        this.canvas_state.selected = None;
                         this.canvas_state.preview_drag = Some((resize.clone(), true, e.position)); cx.stop_propagation();
                     })))).into_any_element()
     }
@@ -1272,6 +1371,7 @@ impl AppWindow {
                 if e.button == MouseButton::Middle
                     || (e.button == MouseButton::Left && this.canvas_state.space_down)
                 {
+                    this.canvas_state.selected = None;
                     this.canvas_state.drag = Some((None, e.position));
                     cx.stop_propagation();
                     cx.notify();
@@ -1391,6 +1491,7 @@ impl AppWindow {
                 // A click without movement just focuses the canvas; moving pans.
                 cx.listener(|this, e: &MouseDownEvent, window, cx| {
                     this.focus.focus(window, cx);
+                    this.canvas_state.selected = None;
                     this.canvas_state.drag = Some((None, e.position));
                     this.canvas_state.pan_moved = false;
                     cx.notify();
@@ -1448,18 +1549,18 @@ impl AppWindow {
                         .iter()
                         .filter(|c| {
                             this.model
-                                .pane_of(&c.terminal)
+                                .pane_of(c.parent.as_deref().unwrap_or(&c.terminal))
                                 .and_then(|p| this.model.space_of(&p))
                                 .is_some_and(|s| s.id == id)
                         })
-                        .map(|c| c.terminal.clone())
+                        .map(|c| c.key())
                         .collect();
                     let rects: Vec<_> = this
                         .canvas_state
                         .doc
                         .cards
                         .iter()
-                        .filter(|c| members.contains(&c.terminal))
+                        .filter(|c| members.contains(&c.key()))
                         .map(|c| this.pill_rect(c, cx))
                         .collect();
                     let doc = &mut this.canvas_state.doc;
@@ -1490,7 +1591,7 @@ impl AppWindow {
                         .doc
                         .cards
                         .iter()
-                        .find(|c| c.terminal == id)
+                        .find(|c| c.key() == id)
                     {
                         let zoom = this.canvas_state.doc.camera.zoom;
                         let point = [card.rect[0] + d[0] / zoom, card.rect[1] + d[1] / zoom];
@@ -1588,6 +1689,7 @@ impl AppWindow {
                                             this.rename_canvas_space(id.clone(), window, cx);
                                             cx.stop_propagation(); return;
                                         }
+                                        this.canvas_state.selected = None;
                                         this.canvas_state.space_drag =
                                             Some((id.clone(), false, e.position));
                                         this.show_space_files(id.clone(), window, cx);
@@ -1628,15 +1730,16 @@ impl AppWindow {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                                        this.canvas_state.selected = None;
                                         this.canvas_state.space_drag =
                                             Some((resize_id.clone(), true, e.position));
                                         cx.stop_propagation();
                                     }),
                                 ),
                         )
-                        .bg(c(&space.color).opacity(0.08))
+                        .bg(c(&space.color).opacity(0.04))
                         .when(space.frame, |d| {
-                            d.border_1().border_color(c(&space.color).opacity(0.6))
+                            d.border_1().border_color(c(&space.color).opacity(0.4))
                         }),
                 );
         }
@@ -1652,7 +1755,7 @@ impl AppWindow {
             .cards
             .iter()
             .filter(|card| {
-                canvas::view_allows(
+                card.sub.is_none() && canvas::view_allows(
                     &state.doc.view,
                     self.live
                         .get(&card.terminal)
@@ -1692,20 +1795,14 @@ impl AppWindow {
             .collect();
         let mut sub_pills = Vec::new();
         if state.doc.view != canvas::View::Terminals {
-            for (parent, subs) in &state.subs {
-                let Some((_, parent_rect)) = cards.get(parent.as_str()) else { continue };
-                let mut siblings: Vec<_> = cards.values().filter(|(card, _)| self.live.get(&card.terminal)
-                    .and_then(|r| r["parent"].as_str()) == Some(parent.as_str())).map(|(_, rect)| *rect).collect();
-                siblings.sort_by(|a, b| a[1].total_cmp(&b[1]));
-                let mut subs: Vec<_> = subs.iter().collect();
-                subs.sort_by_key(|s| s.id.as_str());
-                for sub in subs {
-                    let rect = canvas::child_position(*parent_rect, &siblings, [PILL_WIDTH, 36.]);
-                    siblings.push(rect);
-                    let ends = canvas::edge_ends(*parent_rect, rect);
+            for card in state.doc.cards.iter().filter(|c| c.sub.is_some()) {
+                let Some(parent) = card.parent.as_ref() else { continue };
+                let Some(sub) = state.subs.get(parent).into_iter().flatten().find(|s| Some(&s.id) == card.sub.as_ref()) else { continue };
+                if let Some((_, parent_rect)) = cards.get(parent.as_str()) {
+                    let ends = canvas::edge_ends(*parent_rect, card.rect);
                     if canvas::edge_visible(camera, ends, viewport) { edges.push(ends); }
-                    if canvas::visible(camera, rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), rect)); }
                 }
+                if canvas::visible(camera, card.rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), card.clone())); }
             }
         }
         area = area.child(
@@ -1739,24 +1836,32 @@ impl AppWindow {
             .absolute()
             .size_full(),
         );
-        for (parent, sub, rect) in sub_pills {
+        let mut pills = Vec::new();
+        for (parent, sub, card) in sub_pills {
+            let rect = card.rect;
+            let key = card.key();
             let [x, y] = camera.to_screen([rect[0], rect[1]]);
             let z = camera.zoom;
             let (icon, tint) = program_icon(&json!({"program":sub.program}));
             let mut pill = div().id(SharedString::from(format!("canvas-sub-{parent}-{}", sub.id)))
                 .absolute().left(px(x)).top(px(y)).w(px(rect[2] * z)).h(px(rect[3] * z))
-                .rounded(px(8. * z)).border_1().border_color(c("border")).bg(c("surface"))
+                .rounded(px(8. * z)).border_1().border_color(c(if state.selected.as_ref() == Some(&key) { "foreground" } else { "border" })).bg(c("surface"))
+                .when(sub.done, |d| d.opacity(0.5))
                 .flex().items_start().px(px(12. * z)).py(px(9. * z)).gap(px(8. * z))
                 .text_size(px(13. * z)).line_height(px(18. * z)).text_color(c("foreground")).overflow_hidden()
                 .child(div().flex_none().mt(px(z)).child(icon_element(&icon, tint, px(16. * z), c("foreground"))));
-            let text = div().flex_1().min_w_0().child(div().text_ellipsis().when(sub.idle, |d| d.text_color(c("muted-foreground")))
-                .child(if sub.idle { format!("{} · idle", sub.name) } else { sub.name.clone() }));
+            let text = div().flex_1().min_w_0().child(div().text_ellipsis().when(sub.done, |d| d.text_color(c("muted-foreground")))
+                .child(format!("{} · {}", sub.name, if sub.done { "done" } else { "working" })));
             pill = pill.child(text);
             let click_sub = sub.clone();
-            pill = pill.on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
-                if let Some(path) = click_sub.transcript.as_ref().filter(|p| p.is_file()) {
+            pill = pill.on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                this.canvas_state.selected = Some(key.clone());
+                this.canvas_state.drag = Some((Some(key.clone()), e.position));
+                this.focus.focus(window, cx);
+                if let Some(path) = click_sub.transcript.as_ref() {
                     this.open_preview(json!({"path":path}), window, cx);
                 }
+                cx.notify();
                 cx.stop_propagation();
             }));
             pill = pill.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
@@ -1765,7 +1870,7 @@ impl AppWindow {
                 }
                 cx.stop_propagation();
             }));
-            area = area.child(pill);
+            pills.push((card.z, pill));
         }
         let mut shown = shown;
         shown.sort_by_key(|c| c.z);
@@ -1787,7 +1892,7 @@ impl AppWindow {
                 .h(px(card.rect[3] * z))
                 .rounded(px(8. * z))
                 .border_1()
-                .border_color(c(if state.panel.as_ref() == Some(&addr) {
+                .border_color(c(if state.selected.as_ref() == Some(&addr) {
                     "ring"
                 } else {
                     "border"
@@ -1874,7 +1979,8 @@ impl AppWindow {
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     this.open_menu(
                         "canvas-card",
-                        json!({"terminal":menu_addr,"id":tab,"popped":this.canvas_state.popped.contains_key(&menu_addr)}),
+                        json!({"terminal":menu_addr,"id":tab,"popped":this.canvas_state.popped.contains_key(&menu_addr),
+                            "finished":this.canvas_state.subs.get(&menu_addr).is_some_and(|subs| subs.iter().any(|s| s.done))}),
                         Some(e.position),
                         window,
                         cx,
@@ -1882,7 +1988,7 @@ impl AppWindow {
                     cx.stop_propagation();
                 }),
             );
-            area = area.child(pill.on_mouse_down(
+            pills.push((card.z, pill.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     if this.canvas_state.popped.contains_key(&addr) {
@@ -1890,6 +1996,7 @@ impl AppWindow {
                         cx.stop_propagation();
                         return;
                     }
+                    this.canvas_state.selected = Some(drag_addr.clone());
                     this.canvas_state.drag = Some((Some(drag_addr.clone()), e.position));
                     cx.stop_propagation();
                     if e.click_count == 2 {
@@ -1920,13 +2027,13 @@ impl AppWindow {
                     this.canvas_state.panel = Some(addr.clone());
                     this.canvas_state.file = None;
                     this.sync(window, cx);
-                    if let Some(t) = this.terms.get("canvas-panel") {
-                        t.focus.focus(window, cx);
-                    }
+                    this.focus.focus(window, cx);
                     cx.notify();
                 }),
-            ));
+            )));
         }
+        pills.sort_by_key(|(z, _)| *z);
+        for (_, pill) in pills { area = area.child(pill); }
         let mut tabs = div()
             .absolute()
             .top(px(12.))
@@ -1937,38 +2044,6 @@ impl AppWindow {
             .rounded(px(8.))
             .bg(c("hover"))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-        for (command, label, view) in [
-            ("view.agents", "Agents", canvas::View::Agents),
-            ("view.all", "All", canvas::View::All),
-            ("view.terminals", "Terminals", canvas::View::Terminals),
-        ] {
-            tabs = tabs.child(
-                div()
-                    .id(command)
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .px(px(12.))
-                    .py(px(6.))
-                    .rounded(px(6.))
-                    .text_color(c("foreground"))
-                    .when(state.doc.view == view, |d| d.bg(c("surface")))
-                    .child(
-                        svg()
-                            .path(match command {
-                                "view.agents" => "icons/bot.svg",
-                                "view.all" => "icons/layers.svg",
-                                _ => "icons/shell.svg",
-                            })
-                            .size(px(14.))
-                            .text_color(c("foreground")),
-                    )
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.canvas_command(command, window, cx)
-                    })),
-            );
-        }
         // Like Claude's toolbar: the folder opens or closes the files pane (tree and preview).
         let open = state.panel.is_some() || state.file.is_some() || state.files;
         tabs = tabs.child(
@@ -2401,9 +2476,6 @@ fn icon_element(icon: &str, tint: bool, size: Pixels, color: Hsla) -> AnyElement
     }
 }
 
-/// Pills share one width so the canvas reads as a tidy grid.
-const PILL_WIDTH: f32 = 220.;
-
 fn canvas_agent(rec: &Value) -> bool {
     rec["program"]["agent"] == true
         || rec["status"]
@@ -2425,7 +2497,7 @@ fn rendered(path: &str) -> bool {
 fn preview_source(path: &str) -> String {
     match canvas::read_preview(std::path::Path::new(path)) {
         Ok(text) if std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl")) => {
-            crate::subs::transcript_markdown(&text, path).unwrap_or_else(|| numbered_code(&text))
+            numbered_code(&crate::subs::transcript_markdown(&text, path).unwrap_or(text))
         }
         Ok(text)
             if std::path::Path::new(path)
@@ -2435,7 +2507,10 @@ fn preview_source(path: &str) -> String {
             text
         }
         Ok(text) => numbered_code(&text),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => "File deleted".into(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if std::path::Path::new(path).extension().is_some_and(|e| e == "jsonl") { "Waiting for transcript".into() }
+            else { "File deleted".into() }
+        },
         Err(_) => "Can't preview file".into(),
     }
 }
@@ -2450,6 +2525,18 @@ fn numbered_code(text: &str) -> String {
 
 #[cfg(test)]
 mod preview_tests {
+    #[test]
+    fn transcripts_wait_for_the_file_and_keep_agent_markup_literal() {
+        let path = std::env::temp_dir().join(format!("canopy-transcript-preview-{}.jsonl", std::process::id()));
+        let path = path.to_str().unwrap();
+        assert_eq!(super::preview_source(path), "Waiting for transcript");
+        std::fs::write(path, serde_json::json!({"type":"assistant","message":{"content":"![image](https://example.com)\n<script>run()</script>"}}).to_string()).unwrap();
+        let text = super::preview_source(path);
+        assert!(text.contains("![image](https://example.com)"));
+        assert!(text.lines().all(|line| line.starts_with("    ")));
+        std::fs::remove_file(path).unwrap();
+    }
+
     #[test]
     fn numbered_code_keeps_markdown_literal() {
         assert_eq!(

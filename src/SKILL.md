@@ -32,12 +32,14 @@ per-session flags, without editing harness configuration.
 
 Helpers started through hc are real child terminals, joined to their parent
 on the canvas. The person can open them and send terminal input.
-Session hooks also report in-process helpers as child pills. A hook pill
-turns "idle" when its turn ends (it may still take messages) and goes with its
-parent terminal. Click it to open its transcript when the file exists. Its
-Message menu pastes `Message your sub-agent <agent_type> (<agent_id>): ` into
-the parent without Enter (`canvas.sub_message {terminal, id}`). Hook pills
-are observations, not terminals.
+Session hooks report in-process helpers as draggable sub-agent cells, named
+by their task description (agent type until it arrives). Click to follow the
+read-only transcript in the side panel. Cells change from working to done;
+a restart of the same id restores working. "Message through parent" pastes
+`Message your sub-agent <name> (<id>): ` into the parent without Enter
+(`canvas.sub_message {terminal, id}`). The parent's "Clear finished" menu or
+`canvas.clear_finished {terminal}` clears done cells; SessionEnd clears all
+its sub-agent labels. These cells describe work, not terminal processes.
 
 ## Agent flags and note in `programs.json`
 
@@ -259,3 +261,17 @@ Canvas space titles rename inline on double-click or Rename. Person-invoked loca
 `space.new` without a folder opens New space; explicit command arguments remain supported.
 `canvas.create {kind: "space", name, folder, point?}` creates directly when `folder`
 is present (an empty string means no folder); omitting it opens the Choose space dialog.
+
+## Canvas selection and views
+
+Click a cell to select it. The canvas keeps the keyboard until the terminal
+panel is clicked. `canvas.close` (Backspace or Delete) closes the selection: running agents
+always ask "Terminate <name> and close?"; plain terminals ask "Close this
+terminal?" with "Don't ask again". That choice writes
+`confirm_close_terminal: false` to settings.json (default true). Done
+sub-agent cells clear; working ones refuse with a toast.
+
+Views are in the macOS View menu or the Linux titlebar's primary menu
+(`app.menu`, optionally with a `group`);
+the active view is checked. `view.agents`, `view.all`, `view.terminals` and
+their keys still work. The canvas toolbar keeps the file button.

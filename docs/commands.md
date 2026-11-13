@@ -53,6 +53,34 @@ Open the quote popover listing running agents, at point or the pointer.
 | `text` | yes |
 | `point` | no |
 
+## `canvas.close`
+
+Close the selected canvas cell or terminal, asking before termination; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
+
+| Argument | Required |
+|---|---|
+| `terminal` | no |
+| `confirmed` | no |
+| `dont_ask` | no |
+
+## `canvas.clear_finished`
+
+Clear finished sub-agent cells and their labels, optionally one id.
+
+| Argument | Required |
+|---|---|
+| `terminal` | yes |
+| `id` | no |
+
+## `canvas.sub_message`
+
+Paste a message addressed to a sub-agent into its parent without Enter.
+
+| Argument | Required |
+|---|---|
+| `terminal` | yes |
+| `id` | yes |
+
 ## `quote.send`
 
 Open an agent in the panel and paste a quote and optional message without Enter, waiting up to 30 seconds for bracketed paste.
@@ -107,6 +135,16 @@ Set a space color or toggle its frame.
 |---|---|
 | `id` | yes |
 | `color` | no |
+
+## `panel.editor`
+
+Choose a file panel editor, or return to the read-only view after saving.
+
+| Argument | Required |
+|---|---|
+| `choice` | no |
+| `done` | no |
+| `path` | no |
 
 ## `preview.open`
 
@@ -633,6 +671,14 @@ No arguments.
 Back to normal size.
 
 No arguments.
+
+## `app.menu`
+
+Open the shared primary command menu, optionally a named group.
+
+| Argument | Required |
+|---|---|
+| `group` | no |
 
 ## `app.quit`
 
