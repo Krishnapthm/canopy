@@ -231,7 +231,6 @@ impl AppWindow {
             .map(|c| self.pill_rect(c, cx))
             .collect();
         let state = &mut self.canvas_state;
-        let old_spaces = state.doc.spaces.clone();
         let count = state.doc.cards.len();
         let pinned = pin.and_then(|id| {
             state
@@ -258,10 +257,7 @@ impl AppWindow {
         if let Some(rest) = &state.rest {
             rest.restore(&mut state.doc);
         }
-        for p in &state.doc.previews {
-            let center = [p.rect[0] + p.rect[2] / 2., p.rect[1] + p.rect[3] / 2.];
-            members.push(canvas::space_at(&state.doc.spaces, center).map(|s| s.space.clone()));
-        }
+        members.extend(state.doc.previews.iter().map(|p| p.space.clone()));
         let doc = &mut state.doc;
         let mut cells: Vec<_> = doc
             .cards
@@ -276,20 +272,6 @@ impl AppWindow {
                 cells[i][2] = sizes[i][2];
                 cells[i][3] = sizes[i][3];
             }
-        }
-        if let Some(id) = space_pin
-            && let (Some(old), Some(space)) = (
-                doc.spaces.iter_mut().find(|s| s.space == id),
-                old_spaces.iter().find(|s| s.space == id),
-            ) {
-                let d = [space.rect[0] - old.rect[0], space.rect[1] - old.rect[1]];
-                old.rect = space.rect;
-                for (r, m) in cells.iter_mut().zip(&members) {
-                    if m.as_deref() == Some(id) {
-                        r[0] += d[0];
-                        r[1] += d[1];
-                    }
-                }
         }
         if let Some(i) = pinned {
             let indices: Vec<_> = (0..cells.len())
@@ -306,33 +288,15 @@ impl AppWindow {
                 cells[j] = r;
             }
         }
-        for space in &mut doc.spaces {
-            let rects: Vec<_> = cells
-                .iter()
-                .zip(&members)
-                .filter(|(_, m)| m.as_deref() == Some(&space.space))
-                .map(|(r, _)| *r)
-                .collect();
-            space.rect = canvas::grow(space.rect, &rects);
-            if pinned.is_some_and(|i| members[i].as_deref() == Some(&space.space))
-                && let Some(old) = old_spaces.iter().find(|s| s.space == space.space) {
-                space.rect = canvas::union(&[space.rect, old.rect]).unwrap();
-            }
-        }
         let active = space_pin.or_else(|| pinned.and_then(|i| members[i].as_deref()));
-        // Root cells occupy the same level as spaces, so neither can cover the other.
+        // On Home, root cells and space cards share one level, so neither covers the other.
         let roots: Vec<_> = (0..cells.len()).filter(|i|members[*i].is_none()).collect();
         let rects: Vec<_> = doc.spaces.iter().map(|s|s.rect).chain(roots.iter().map(|i|cells[*i])).collect();
         let top_pin = doc.spaces.iter().position(|s|Some(s.space.as_str())==active)
             .or_else(||pinned.and_then(|i|roots.iter().position(|j|*j==i)).map(|i|doc.spaces.len()+i));
         if let Some(i) = top_pin {
             let solved = canvas::solve(&rects,i,rects[i],self.person.canvas_gap);
-            for ((space,r),old) in doc.spaces.iter_mut().zip(&solved).zip(&rects) {
-                for (cell,m) in cells.iter_mut().zip(&members) {
-                    if m.as_deref()==Some(&space.space) { cell[0]+=r[0]-old[0]; cell[1]+=r[1]-old[1]; }
-                }
-                space.rect = *r;
-            }
+            for (space,r) in doc.spaces.iter_mut().zip(&solved) { space.rect = *r; }
             for (i,r) in roots.iter().zip(&solved[doc.spaces.len()..]) { cells[*i] = *r; }
         }
         for (r, to) in doc
@@ -368,7 +332,6 @@ impl AppWindow {
         let entity = cx.entity().downgrade();
         window.on_next_frame(move |window, cx| {
             let _ = entity.update(cx, |this, cx| {
-                let members = this.canvas_members();
                 let state = &mut this.canvas_state;
                 state.layout_frame = false;
                 let Some((from, start)) = &state.layout_motion else {
@@ -425,17 +388,6 @@ impl AppWindow {
                     p.rect = target.rect;
                 }
                 if let Some((id, _, _)) = &state.space_drag {
-                    for ((c, target), member) in
-                        shown.cards.iter_mut().zip(&state.doc.cards).zip(&members)
-                    {
-                        if member.as_deref() == Some(id) {
-                            c.rect = target.rect;
-                        }
-                    }
-                    for (preview, target) in shown.previews.iter_mut().zip(&state.doc.previews) {
-                        let center = [target.rect[0]+target.rect[2]/2., target.rect[1]+target.rect[3]/2.];
-                        if canvas::space_at(&state.doc.spaces,center).is_some_and(|s|&s.space==id) { preview.rect = target.rect; }
-                    }
                     if let (Some(s), Some(target)) = (
                         shown.spaces.iter_mut().find(|s| &s.space == id),
                         state.doc.spaces.iter().find(|s| &s.space == id),
@@ -504,21 +456,9 @@ impl AppWindow {
             .map(|c| self.pill_rect(c, cx))
             .chain(doc.previews.iter().map(|p| p.rect))
             .collect();
-        for p in &doc.previews {
-            members.push(
-                canvas::space_at(
-                    &doc.spaces,
-                    [p.rect[0] + p.rect[2] / 2., p.rect[1] + p.rect[3] / 2.],
-                )
-                .map(|s| s.space.clone()),
-            );
-        }
-        let space = args["space"]
-            .as_str()
-            .map(str::to_owned)
-            .or_else(|| doc.panel.space.clone().filter(|id|self.model.space(id).is_some()))
-            .or_else(|| self.model.active.clone())
-            .filter(|id| self.model.space(id).is_none_or(|s| !root_space(s)));
+        members.extend(doc.previews.iter().map(|p| p.space.clone()));
+        // The named space, else the room being shown (None arranges Home's own cells).
+        let space = args["space"].as_str().map(str::to_owned).or_else(|| doc.room.clone());
         let picked = self.canvas_state.selected.last().and_then(|id| ids.iter().position(|k| k == id));
         let indices: Vec<_> = (0..ids.len())
             .filter(|i| {
@@ -557,20 +497,7 @@ impl AppWindow {
                 self.canvas_state.doc.previews[*i - count].rect = r;
             }
         }
-        let doc = &mut self.canvas_state.doc;
-        for s in &mut doc.spaces {
-            let rects: Vec<_> = doc
-                .cards
-                .iter()
-                .map(|c| c.rect)
-                .chain(doc.previews.iter().map(|p| p.rect))
-                .zip(&members)
-                .filter(|(_, m)| m.as_deref() == Some(&s.space))
-                .map(|(r, _)| r)
-                .collect();
-            s.rect = canvas::grow(s.rect, &rects);
-        }
-        self.solve_layout(Some(&ids[indices[0]]), space.as_deref(), cx);
+        self.solve_layout(Some(&ids[indices[0]]), None, cx);
         self.canvas_state.doc.arrange_layout = layout;
         self.canvas_state.shown = Some(before);
         self.animate_layout(window, cx);
@@ -740,14 +667,35 @@ impl AppWindow {
         let space = self.canvas_state.doc.panel.space.as_deref()?;
         self.model.space(space).map(|s| s.folder.clone())
     }
-    /// The topmost space under a window position, if any.
+    /// The space a window position belongs to: the room being shown, else the Home card under it.
     fn space_at(&self, position: Point<Pixels>) -> Option<String> {
+        if let Some(room) = &self.canvas_state.doc.room { return Some(room.clone()); }
         let origin = self.bounds.borrow().get("canopy-canvas").map(|b| b.origin).unwrap_or_default();
         let p = self.canvas_state.doc.camera.to_world([
             f32::from(position.x - origin.x),
             f32::from(position.y - origin.y),
         ]);
         canvas::space_at(&self.canvas_state.doc.spaces, p).map(|s| s.space.clone())
+    }
+    /// Shows a space's room (None: Home) with the camera it had there; a first visit fits what is inside.
+    pub(super) fn go_room(&mut self, room: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let first = !self.canvas_state.doc.cameras.contains_key(&room.clone().unwrap_or_default());
+        self.end_canvas_drag(cx);
+        self.canvas_state.motion = Motion::default();
+        self.canvas_state.doc.go(room.clone());
+        self.canvas_state.selected.clear();
+        self.canvas_state.wire.selected = None;
+        self.canvas_state.connecting = None;
+        self.canvas_state.previous_camera = None;
+        if let Some(id) = &room {
+            self.canvas_state.doc.panel.space = Some(id.clone());
+            self.model.active = Some(id.clone());
+        }
+        if first { self.canvas_command("canvas.fit", window, cx); }
+        self.canvas_changed(cx);
+        self.focus.focus(window, cx);
+        self.sync(window, cx);
+        cx.notify();
     }
     /// Points the panel's file tree at a space's folder.
     fn show_space_files(&mut self, space: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -871,6 +819,7 @@ impl AppWindow {
             self.canvas_state.doc.previews.push(canvas::Preview {
                 path: path.clone(),
                 rect: [point[0], point[1], 560., 420.],
+                space: self.canvas_state.doc.room.clone(),
             });
         }
         self.load_previews(cx);
@@ -885,6 +834,7 @@ impl AppWindow {
                 cards.push(canvas::Preview {
                     path: path.clone(),
                     rect: [0., 0., 0., 0.],
+                    space: None,
                 });
             }
         }
@@ -1206,7 +1156,9 @@ impl AppWindow {
             self.model.spaces.push(model::Space { id: id.clone(), name, folder: folder.clone(), machine: None, tabs: vec![], active: None, rest: Default::default() });
             canvas::remember_folder(&mut self.canvas_state.doc.recent_folders, &folder);
             let color = canvas::unused_color(&self.canvas_state.doc.spaces, self.canvas_state.doc.spaces.len());
-            self.canvas_state.doc.spaces.push(canvas::Space { space: id, rect: [point[0], point[1], 960., 640.], color: color.into(), frame: true });
+            // A new space is a card on Home; you go straight inside it.
+            self.canvas_state.doc.spaces.push(canvas::Space { space: id.clone(), rect: [point[0], point[1], canvas::SPACE_CARD[0], canvas::SPACE_CARD[1]], color: color.into(), frame: true });
+            self.canvas_state.doc.go(Some(id));
             self.canvas_changed(cx);
             self.flush_documents(false, window, cx);
             cx.notify();
@@ -1214,9 +1166,8 @@ impl AppWindow {
         }
         if args.get("folder").is_some() { return self.fail("folder is only for kind space"); }
         // No space: the one under the point, so scripted creates land where they are placed.
-        let space = Self::owned(&args, "space").or_else(|| {
-            canvas::space_at(&self.canvas_state.doc.spaces, point).map(|s| s.space.clone()).filter(|id| self.model.space(id).is_some())
-        });
+        let space = Self::owned(&args, "space").or_else(|| self.canvas_state.doc.room.clone())
+            .filter(|id| self.model.space(id).is_some());
         let folder = space
             .as_deref()
             .and_then(|id| self.model.space(id))
@@ -1369,25 +1320,11 @@ impl AppWindow {
                 terminal: terminal.into(),
                 sub: None, parent: None,
                 rect: [point[0], point[1], 240., 36.],
-                z: 0, size: None,
+                z: 0, size: None, space: None,
             });
         let mut r = self.pill_rect(&card, cx);
         r[0] = point[0];
         r[1] = point[1];
-        let space = self
-            .model
-            .pane_of(card.parent.as_deref().unwrap_or(terminal))
-            .and_then(|p| self.model.space_of(&p))
-            .and_then(|s| {
-                self.canvas_state
-                    .doc
-                    .spaces
-                    .iter()
-                    .find(|g| g.space == s.id)
-            });
-        if let Some(space) = space.filter(|_| self.canvas_state.rest.is_none()) {
-            r = canvas::clamp(r, space.rect);
-        }
         self.canvas_state
             .doc
             .place(terminal, [r[0], r[1]], [card.rect[2], card.rect[3]]);
@@ -1469,7 +1406,7 @@ impl AppWindow {
                         terminal: a.clone(),
                         sub: None, parent: None,
                         rect: [0., 0., 240., 36.],
-                        z: 0, size: None,
+                        z: 0, size: None, space: None,
                     },
                     cx,
                 );
@@ -1516,6 +1453,10 @@ impl AppWindow {
                 changed = true;
             }
         }
+        if state.doc.room.as_ref().is_some_and(|id| !state.doc.spaces.iter().any(|s| &s.space == id)) {
+            state.doc.go(None);
+            changed = true;
+        }
         let before = state.doc.cards.len();
         state.doc.cards.retain(|c| {
             c.sub.is_some() || self.live.contains_key(&c.terminal) || self.born.borrow().contains_key(&c.terminal)
@@ -1548,12 +1489,11 @@ impl AppWindow {
                             .any(|n| n.terminal() == Some(addr))
                     })
                 });
-                let area = space
-                    .and_then(|s| state.doc.spaces.iter().find(|g| g.space == s.id))
-                    .map(|s| s.rect)
-                    .unwrap_or([0., 0., 960., 640.]);
-                let occupied: Vec<_> = state.doc.cards.iter().map(effective).collect();
-                let mut r = if let Some(p) =
+                // Cells land in their own room (None for Home), among that room's cells only.
+                let room = space.filter(|s| !root_space(s)).map(|s| s.id.clone());
+                let occupied: Vec<_> = state.doc.cards.iter().filter(|c| c.space == room).map(effective).collect();
+                let area = canvas::union(&occupied).map_or([0., 0., 960., 640.], |u| [u[0] - 24., u[1] - 24., u[2].max(912.) + 48., u[3] + 48.]);
+                let r = if let Some(p) =
                     parent.and_then(|p| state.doc.cards.iter().find(|c| c.terminal == p))
                 {
                     let siblings: Vec<_> = state
@@ -1572,21 +1512,20 @@ impl AppWindow {
                 } else {
                     canvas::free_spot(area, &occupied, sizes[addr])
                 };
-                if let Some(geometry) =
-                    space.and_then(|s| state.doc.spaces.iter_mut().find(|g| g.space == s.id))
-                {
-                    let minimum = canvas::min_size(geometry.rect, &[r]);
-                    geometry.rect[2] = geometry.rect[2].max(minimum[0]);
-                    geometry.rect[3] = geometry.rect[3].max(minimum[1]);
-                    r = canvas::clamp(r, geometry.rect);
-                }
                 state.doc.place(addr, [r[0], r[1]], [r[2], r[3]]);
+                if let Some(card) = state.doc.cards.iter_mut().find(|c| &c.terminal == addr) { card.space = room; }
                 progress = true;
                 changed = true;
             }
             if !progress {
                 break;
             }
+        }
+        let members = self.canvas_members();
+        let state = &mut self.canvas_state;
+        for (card, member) in state.doc.cards.iter_mut().zip(members) {
+            // The core says where a cell lives; one it no longer knows keeps its last space.
+            if member.is_some() && card.space != member { card.space = member; changed = true; }
         }
         if changed {
             state.doc.sync_subs(&state.subs);
@@ -1753,16 +1692,15 @@ impl AppWindow {
             f32::from(bounds.size.width) / 2.,
             f32::from(bounds.size.height) / 2.,
         ];
-        let current = self.keyboard_space();
+        // Fit the selection, else everything in the current place.
         let fit_rects = if name == "canvas.fit" {
             let doc = &self.canvas_state.doc;
-            let picked: Vec<_> = doc.cards.iter().filter(|c| self.canvas_state.selected.contains(&c.key())).map(|c| self.pill_rect(c, cx)).collect();
-            if !picked.is_empty() { picked } else { match current.as_deref().and_then(|id| doc.spaces.iter().find(|s| s.space == id)) {
-                Some(space) => vec![space.rect],
-                None => doc.cards.iter().filter(|c| doc.space_of(&c.key()).is_none()).map(|c| self.pill_rect(c, cx))
-                    .chain(doc.previews.iter().filter(|p| canvas::space_at(&doc.spaces,
-                        [p.rect[0] + p.rect[2] / 2., p.rect[1] + p.rect[3] / 2.]).is_none()).map(|p| p.rect)).collect(),
-            } }
+            let all = self.canvas_state.selected.is_empty();
+            let pick = |key: &String| all || self.canvas_state.selected.contains(key);
+            doc.cards.iter().filter(|c| doc.shows(c.space.as_ref()) && pick(&c.key())).map(|c| self.pill_rect(c, cx))
+                .chain(doc.previews.iter().filter(|p| doc.shows(p.space.as_ref()) && pick(&p.path)).map(|p| p.rect))
+                .chain(doc.spaces.iter().filter(|s| doc.room.is_none() && pick(&s.space)).map(|s| s.rect))
+                .collect()
         } else { vec![] };
         let from = self.canvas_state.doc.camera;
         let state = &mut self.canvas_state;
@@ -2085,41 +2023,15 @@ impl AppWindow {
                     return;
                 }
                 if let Some((id, resize, previous)) = this.canvas_state.space_drag.clone() {
+                    // A space card moves on Home; what is inside it stays where it is.
                     let zoom = this.canvas_state.doc.camera.zoom;
                     let delta = [
                         f32::from(e.position.x - previous.x) / zoom,
                         f32::from(e.position.y - previous.y) / zoom,
                     ];
-                    let members: Vec<String> = this
-                        .canvas_state
-                        .doc
-                        .cards
-                        .iter()
-                        .filter(|c| {
-                            this.model
-                                .pane_of(c.parent.as_deref().unwrap_or(&c.terminal))
-                                .and_then(|p| this.model.space_of(&p))
-                                .is_some_and(|s| s.id == id)
-                        })
-                        .map(|c| c.key())
-                        .collect();
-                    let rects: Vec<_> = this
-                        .canvas_state
-                        .doc
-                        .cards
-                        .iter()
-                        .filter(|c| members.contains(&c.key()))
-                        .map(|c| this.pill_rect(c, cx))
-                        .collect();
-                    let doc = &mut this.canvas_state.doc;
-                    if let Some(space) = doc.spaces.iter_mut().find(|s| s.space == id) {
-                        if resize {
-                            let min = canvas::min_size(space.rect, &rects);
-                            space.rect[2] = (space.rect[2] + delta[0]).max(min[0]);
-                            space.rect[3] = (space.rect[3] + delta[1]).max(min[1]);
-                        } else {
-                            canvas::move_space(space, &mut doc.cards, &members, delta);
-                        }
+                    if let Some(space) = this.canvas_state.doc.spaces.iter_mut().find(|s| s.space == id) {
+                        space.rect[0] += delta[0];
+                        space.rect[1] += delta[1];
                     }
                     this.solve_layout(None,Some(&id),cx);
                     this.animate_layout(window,cx);
@@ -2195,120 +2107,112 @@ impl AppWindow {
                     cx.notify();
                 }),
             );
-        for space in &shown_doc.spaces {
-            if self
-                .model
-                .spaces
-                .iter()
-                .any(|s| s.id == space.space && root_space(s))
-            {
+        // Home shows each space as a card; double-click it (or Enter) to go inside.
+        for space in shown_doc.spaces.iter().filter(|_| shown_doc.room.is_none()) {
+            if self.model.spaces.iter().any(|s| s.id == space.space && root_space(s)) {
                 continue;
             }
             let id = space.space.clone();
-            let resize_id = id.clone();
             let menu_id = id.clone();
-            let model_space = self.model.space(&id);
-            let label = model_space
-                .map(|s| self.model.space_name(s, &home()))
-                .unwrap_or_default();
+            let label = self.model.space(&id).map(|s| self.model.space_name(s, &home())).unwrap_or_default();
+            let inside: Vec<_> = shown_doc.cards.iter().filter(|c| c.sub.is_none() && c.space.as_ref() == Some(&id))
+                .map(|c| self.live.get(&c.terminal).unwrap_or(&Value::Null)).collect();
+            let working = inside.iter().filter(|r| canvas_agent(r) && r["status"] == "working").count();
+            let blocked = inside.iter().any(|r| canvas_agent(r) && r["status"] == "blocked");
+            let summary = match (inside.len(), working) {
+                (0, _) => "Empty".to_owned(),
+                (n, 0) => format!("{n} terminal{}", if n == 1 { "" } else { "s" }),
+                (n, w) => format!("{n} terminal{} · {w} working", if n == 1 { "" } else { "s" }),
+            };
+            let z = camera.zoom;
             let [x, y] = camera.to_screen([space.rect[0], space.rect[1]]);
-            area =
-                area.child(
-                    div()
-                        .absolute()
-                        .left(px(x))
-                        .top(px(y))
-                        .w(px(space.rect[2] * camera.zoom))
-                        .h(px(space.rect[3] * camera.zoom))
-                        .rounded(px(12. * camera.zoom))
-                        .child(
-                            div()
-                                .id(SharedString::from(format!("space-label-{id}")))
-                                .absolute().top(px(-22.)).left_0().w_full().h(px(20.)).truncate()
-                                .text_size(px(12.))
-                                .flex()
-                                .gap(px(8.))
-                                .text_color(c("muted-foreground"))
-                                .map(|d| {
-                                    if let Some((editing, input, _)) = &state.rename {
-                                        if editing == &id { return d.child(gpui_base::Input::new(input)); }
-                                    }
-                                    d.child(label)
-                                })
-                                .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
-                                    if e.keystroke.key == "escape" {
-                                        this.canvas_state.rename = None;
-                                        this.focus.focus(window, cx);
-                                        cx.stop_propagation(); cx.notify();
-                                    }
-                                }))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                                        if this.canvas_state.rename.as_ref().is_some_and(|(editing, _, _)| editing == &id) {
-                                            cx.stop_propagation(); return;
+            let selected = state.selected.contains(&id);
+            area = area.child(
+                div()
+                    .id(SharedString::from(format!("space-card-{id}")))
+                    .absolute()
+                    .left(px(x))
+                    .top(px(y))
+                    .w(px(space.rect[2] * z))
+                    .h(px(space.rect[3] * z))
+                    .rounded(px(10. * z))
+                    .border_1()
+                    .border_color(if selected { c("ring") } else { c("border") })
+                    .bg(c("surface"))
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .child(div().h(px(4. * z)).w_full().bg(c(&space.color)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .bg(c(&space.color).opacity(self.person.space_fill))
+                            .p(px(12. * z))
+                            .flex()
+                            .flex_col()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(px(14. * z))
+                                    .text_color(c("foreground"))
+                                    .truncate()
+                                    .map(|d| {
+                                        if let Some((editing, input, _)) = &state.rename {
+                                            if editing == &id { return d.child(gpui_base::Input::new(input)); }
                                         }
-                                        if e.click_count == 2 {
-                                            this.rename_canvas_space(id.clone(), window, cx);
-                                            cx.stop_propagation(); return;
-                                        }
-                                        this.begin_layout();
-                                        this.canvas_state.shown = Some(this.canvas_state.doc.clone());
-                                        this.canvas_state.space_drag =
-                                            Some((id.clone(), false, e.position));
-                                        this.show_space_files(id.clone(), window, cx);
-                                        cx.stop_propagation();
+                                        d.child(label)
                                     }),
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Right,
-                                    cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                                        this.open_menu(
-                                            "canvas-space",
-                                            json!({"id":menu_id}),
-                                            Some(e.position),
-                                            window,
-                                            cx,
-                                        );
-                                        cx.stop_propagation();
-                                    }),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .id(SharedString::from(format!("space-resize-{resize_id}")))
-                                .absolute()
-                                .right_0()
-                                .bottom_0()
-                                .size(px(12. * camera.zoom))
-                                .rounded_br(px(12. * camera.zoom))
-                                .cursor(CursorStyle::ResizeUpLeftDownRight)
-                                .border_r_2()
-                                .border_b_2()
-                                .border_color(c(&space.color).opacity(0.35))
-                                .hover(|d| d.border_color(c(&space.color)))
-                                .when(
-                                    matches!(&state.space_drag, Some((s, true, _)) if *s == space.space),
-                                    |d| d.border_color(c(&space.color)),
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-                                        this.begin_layout();
-                                        this.canvas_state.shown = Some(this.canvas_state.doc.clone());
-                                        this.canvas_state.space_drag =
-                                            Some((resize_id.clone(), true, e.position));
-                                        cx.stop_propagation();
-                                    }),
-                                ),
-                        )
-                        .bg(c(&space.color).opacity(self.person.space_fill))
-                        .when(space.frame, |d| {
-                            d.border_1().border_color(c(&space.color).opacity(0.4))
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6. * z))
+                                    .text_size(px(12. * z))
+                                    .text_color(c("muted-foreground"))
+                                    .when(blocked, |d| d.child(svg().path("frame/settings/bell.svg").size(px(12. * z)).text_color(c("muted-foreground"))))
+                                    .child(summary),
+                            ),
+                    )
+                    .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                        if e.keystroke.key == "escape" && this.canvas_state.rename.is_some() {
+                            this.canvas_state.rename = None;
+                            this.focus.focus(window, cx);
+                            cx.stop_propagation(); cx.notify();
+                        }
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                            if this.canvas_state.rename.as_ref().is_some_and(|(editing, _, _)| editing == &id) {
+                                cx.stop_propagation(); return;
+                            }
+                            if e.click_count == 2 {
+                                this.go_room(Some(id.clone()), window, cx);
+                                cx.stop_propagation(); return;
+                            }
+                            if e.modifiers.shift {
+                                if this.canvas_state.selected.contains(&id) { this.canvas_state.selected.retain(|s| s != &id); }
+                                else { this.canvas_state.selected.push(id.clone()); }
+                            } else { this.canvas_state.selected = vec![id.clone()]; }
+                            this.begin_layout();
+                            this.canvas_state.shown = Some(this.canvas_state.doc.clone());
+                            this.canvas_state.space_drag = Some((id.clone(), false, e.position));
+                            this.show_space_files(id.clone(), window, cx);
+                            cx.stop_propagation();
+                            cx.notify();
                         }),
-                );
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                            this.open_menu("canvas-space", json!({"id":menu_id}), Some(e.position), window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+            );
         }
-        for card in &shown_doc.previews {
+        for card in shown_doc.previews.iter().filter(|p| shown_doc.shows(p.space.as_ref())) {
             if canvas::visible(camera, card.rect, viewport) {
                 if let Some((view, _)) = state.previews.get(&card.path) {
                     area = area.child(self.preview_card(card, view, camera, cx));
@@ -2319,7 +2223,7 @@ impl AppWindow {
             .cards
             .iter()
             .filter(|card| {
-                card.sub.is_none() && canvas::view_allows(
+                card.sub.is_none() && shown_doc.shows(card.space.as_ref()) && canvas::view_allows(
                     &state.doc.view,
                     self.live
                         .get(&card.terminal)
@@ -2351,7 +2255,7 @@ impl AppWindow {
             .collect();
         let mut sub_pills = Vec::new();
         if state.doc.view != canvas::View::Terminals {
-            for card in state.doc.cards.iter().filter(|c| c.sub.is_some()) {
+            for card in state.doc.cards.iter().filter(|c| c.sub.is_some() && state.doc.shows(c.space.as_ref())) {
                 let Some(parent) = card.parent.as_ref() else { continue };
                 let Some(sub) = state.subs.get(parent).into_iter().flatten().find(|s| Some(&s.id) == card.sub.as_ref()) else { continue };
                 if canvas::visible(camera, card.rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), card.clone())); }
@@ -2622,6 +2526,39 @@ impl AppWindow {
             .rounded(px(8.))
             .bg(c("hover"))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+        // Inside a space: Home, then the space's name (a breadcrumb), before the files and fit buttons.
+        if let Some(room) = &state.doc.room {
+            let name = self.model.space(room).map(|s| self.model.space_name(s, &home())).unwrap_or_default();
+            let color = state.doc.spaces.iter().find(|s| &s.space == room).map(|s| s.color.clone()).unwrap_or_default();
+            tabs = tabs.child(
+                div()
+                    .id("canvas-home")
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .px(px(8.))
+                    .rounded(px(6.))
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .text_color(c("muted-foreground"))
+                    .hover(|d| d.bg(c("surface")).text_color(c("foreground")))
+                    .child(svg().path("icons/house.svg").size(px(14.)).text_color(c("foreground")))
+                    .child("Home")
+                    .on_click(cx.listener(|this, _, window, cx| this.go_room(None, window, cx))),
+            )
+            .child(div().flex().items_center().text_size(px(12.)).text_color(c("muted-foreground")).child("/"))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .px(px(8.))
+                    .text_size(px(12.))
+                    .text_color(c("foreground"))
+                    .child(div().size(px(8.)).rounded_full().bg(c(&color)))
+                    .child(name),
+            );
+        }
         // Like Claude's toolbar: the folder opens or closes the files pane (tree and preview).
         let open = state.file.is_some() || state.files;
         tabs = tabs.child(

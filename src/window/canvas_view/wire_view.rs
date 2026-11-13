@@ -58,7 +58,7 @@ impl AppWindow {
 
     /// The drawn rect of a cell the current view shows.
     fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
-        let card = doc.cards.iter().find(|c| c.key() == key)?;
+        let card = doc.cards.iter().find(|c| c.key() == key && doc.shows(c.space.as_ref()))?;
         let view = &self.canvas_state.doc.view;
         if card.sub.is_some() {
             return (*view != canvas::View::Terminals).then_some(card.rect);

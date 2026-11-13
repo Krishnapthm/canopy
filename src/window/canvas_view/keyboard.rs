@@ -30,33 +30,29 @@ impl AppWindow {
         !(m.control || m.alt || m.platform)
     }
 
-    /// The space of the selection, otherwise the current canvas space.
+    /// The room being shown; on Home, the selected space card's space.
     pub(super) fn keyboard_space(&self) -> Option<String> {
-        let state = &self.canvas_state;
-        if let Some(key) = state.selected.last() {
-            let space = state.doc.space_of(key).or_else(|| {
-                let r = state.doc.previews.iter().find(|p| &p.path == key)?.rect;
-                canvas::space_at(&state.doc.spaces, [r[0] + r[2] / 2., r[1] + r[3] / 2.])
-            });
-            return space.map(|s| s.space.clone());
-        }
-        state.doc.panel.space.clone().or_else(|| self.model.active.clone())
+        let doc = &self.canvas_state.doc;
+        doc.room.clone().or_else(|| self.canvas_state.selected.last().filter(|k| doc.spaces.iter().any(|s| &s.space == *k)).cloned())
     }
 
+    /// What the keyboard can select in the current place: its cells and previews, and on Home the space cards.
     fn keyboard_cells(&self, cx: &App) -> Vec<(String, canvas::Rect)> {
         let doc = &self.canvas_state.doc;
-        doc.cards.iter().filter(|c| canvas::view_allows(&doc.view, c.sub.is_some() || self.live.get(&c.terminal).is_some_and(canvas_agent)))
+        doc.cards.iter().filter(|c| doc.shows(c.space.as_ref()) && canvas::view_allows(&doc.view, c.sub.is_some() || self.live.get(&c.terminal).is_some_and(canvas_agent)))
             .map(|c| (c.key(), self.pill_rect(c, cx)))
-            .chain(doc.previews.iter().map(|p| (p.path.clone(), p.rect))).collect()
+            .chain(doc.previews.iter().filter(|p| doc.shows(p.space.as_ref())).map(|p| (p.path.clone(), p.rect)))
+            .chain(doc.spaces.iter().filter(|_| doc.room.is_none()).map(|s| (s.space.clone(), s.rect))).collect()
     }
 
     fn keyboard_select(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
         self.canvas_state.selected = vec![key.clone()];
         self.canvas_state.wire.selected = None;
         if let Some(pane) = self.model.pane_of(&key) { self.model.focus_pane(&pane); }
-        let space = self.keyboard_space();
-        if let Some(id) = &space { self.model.active = Some(id.clone()); }
-        self.canvas_state.doc.panel.space = space;
+        if let Some(id) = self.keyboard_space() {
+            self.model.active = Some(id.clone());
+            self.canvas_state.doc.panel.space = Some(id);
+        }
         self.focus.focus(window, cx);
         cx.notify();
     }
@@ -71,8 +67,7 @@ impl AppWindow {
                 self.canvas_state.space_down = false;
                 if selected.is_none() {
                     let cells = self.keyboard_cells(cx);
-                    let current = self.keyboard_space();
-                    if let Some((key, _)) = cells.iter().find(|(k, _)| self.canvas_state.doc.space_of(k).map(|s| &s.space) == current.as_ref()).or(cells.first()) {
+                    if let Some((key, _)) = cells.first() {
                         self.keyboard_select(key.clone(), window, cx);
                     }
                 }
@@ -90,6 +85,11 @@ impl AppWindow {
                     self.canvas_state.connecting = None;
                     self.canvas_state.wire.selected = Some((from, to));
                 } else if let Some(key) = selected {
+                    if self.canvas_state.doc.room.is_none() && self.canvas_state.doc.spaces.iter().any(|s| s.space == key) {
+                        // Enter on a space card goes inside it; the keyboard stays on the canvas.
+                        self.go_room(Some(key), window, cx);
+                        return;
+                    }
                     if let Some((parent, id)) = crate::wire::sub_parts(&key) {
                         let path = self.canvas_state.subs.get(parent).into_iter().flatten().find(|s| s.id == id).and_then(|s| s.transcript.clone());
                         let Some(path) = path else { return self.fail("sub-agent transcript is not available yet"); };
@@ -116,23 +116,27 @@ impl AppWindow {
                 if let Some((key, _)) = next.and_then(|i| cells.get(i)) { self.keyboard_select(key.clone(), window, cx); }
             }
             "canvas.space" => {
+                // next / prev step through the spaces' rooms; a number goes into that space.
                 let doc = &self.canvas_state.doc;
                 let n = doc.spaces.len();
-                if n > 0 {
-                    let i = self.keyboard_space().and_then(|id| doc.spaces.iter().position(|s| s.space == id));
-                    let j = match args["direction"].as_str() {
-                        Some("next") => i.map_or(0, |i| (i + 1) % n),
-                        Some("prev") => i.map_or(n - 1, |i| (i + n - 1) % n),
-                        _ => return self.fail("use next or prev"),
-                    };
-                    let id = doc.spaces[j].space.clone();
-                    let first = self.keyboard_cells(cx).into_iter().find(|(k, _)| doc.space_of(k).is_some_and(|s| s.space == id));
-                    self.canvas_state.selected.clear();
-                    self.canvas_state.doc.panel.space = Some(id.clone());
-                    self.model.active = Some(id);
-                    if let Some((key, _)) = first { self.keyboard_select(key, window, cx); }
-                    self.focus.focus(window, cx);
-                }
+                if n == 0 { return self.fail("no spaces yet"); }
+                let i = doc.room.as_ref().and_then(|id| doc.spaces.iter().position(|s| &s.space == id));
+                let j = match args["direction"].as_str() {
+                    Some("next") => i.map_or(0, |i| (i + 1) % n),
+                    Some("prev") => i.map_or(n - 1, |i| (i + n - 1) % n),
+                    Some(k) => match k.parse::<usize>() {
+                        Ok(k) if (1..=n).contains(&k) => k - 1,
+                        _ => return self.fail(format!("no space {k}")),
+                    },
+                    None => return self.fail("use next, prev or a number"),
+                };
+                let id = doc.spaces[j].space.clone();
+                self.go_room(Some(id), window, cx);
+                return;
+            }
+            "canvas.home" => {
+                self.go_room(None, window, cx);
+                return;
             }
             "canvas.collapse" => if let Some(key) = selected { self.set_expanded(&key, false, window, cx); },
             "canvas.connect" => {
@@ -160,9 +164,8 @@ impl AppWindow {
                 } else { self.canvas_state.end_drag(); }
             }
             "canvas.new" | "canvas.agents" => {
-                let space = self.keyboard_space();
-                let rect = selected.as_deref().and_then(|key| self.keyboard_cells(cx).into_iter().find(|(k, _)| k == key)).map(|(_,r)|r)
-                    .or_else(|| space.as_ref().and_then(|id| self.canvas_state.doc.spaces.iter().find(|s| &s.space == id)).map(|s| s.rect));
+                let space = self.canvas_state.doc.room.clone();
+                let rect = selected.as_deref().and_then(|key| self.keyboard_cells(cx).into_iter().find(|(k, _)| k == key)).map(|(_,r)|r);
                 let gap = self.person.canvas_gap;
                 let point = rect.map(|r| [r[0] + gap, r[1] + gap]);
                 let mut at = json!({});

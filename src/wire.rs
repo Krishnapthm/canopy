@@ -800,7 +800,7 @@ mod tests {
         wires.push(Wire { a: "t3".into(), b: "t1".into(), born: false });
         assert_eq!(neighbors(&wires, "t1"), ["t2", "t3"]);
         assert_eq!(neighbors(&wires, "t2"), ["t1"]);
-        d.cards.push(crate::canvas::Card { terminal: String::new(), sub: Some("a".into()), parent: Some("t1".into()), rect: [0., 100., 220., 36.], z: 4, size: None });
+        d.cards.push(crate::canvas::Card { terminal: String::new(), sub: Some("a".into()), parent: Some("t1".into()), rect: [0., 100., 220., 36.], z: 4, size: None, space: None });
         let edges = born(&d, |k| (k == "t3").then(|| "t2".to_owned()));
         assert_eq!(edges, [Wire { a: "t2".into(), b: "t3".into(), born: true }, Wire { a: "t1".into(), b: "sub:t1:a".into(), born: true }]);
         // Closing a cell removes its wires.
@@ -812,6 +812,7 @@ mod tests {
     fn edges_join_cells_of_one_space_only() {
         let spaces = serde_json::json!([{"space":"a","rect":[-10,-10,500,100],"color":"blue","frame":true},{"space":"b","rect":[550,-10,400,100],"color":"red","frame":true}]);
         let mut d = doc(serde_json::json!({"spaces": spaces}));
+        for (card, space) in d.cards.iter_mut().zip(["a", "a", "b"]) { card.space = Some(space.into()); }
         assert!(d.connect("t1", "t2"));
         assert!(!d.connect("t2", "t3"), "t3 sits in another space");
     }

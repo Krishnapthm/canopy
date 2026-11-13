@@ -52,7 +52,6 @@ function items(p, git, agents) {
       ["Undo layout", "canvas.undo", {}],
       ["Rename", "space.rename", { id: tg.id }],
       ["Color", "sub:canvas-colors", tg],
-      ["Show frame", "canvas.space_style", { id: tg.id }],
       ["Delete space", "space.close", { id: tg.id }],
     ];
     case "canvas-arrange": return [["Tidy", "tidy"], ["Row", "row"], ["Column", "column"], ["By wires", "wires"]].map(([name, layout]) => [name, "canvas.arrange", { ...tg, layout }]);

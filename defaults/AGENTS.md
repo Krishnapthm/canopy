@@ -1073,8 +1073,15 @@ Expanded cells: click a terminal pill to expand it in place into a live terminal
 puts the neighbours back. Drag the bottom-right corner to resize; the terminal
 is resized on release. Several can be open. The wheel scrolls a focused expanded
 terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
-the named or last selected cell; `panel.open {terminal}` only expands. Below 0.5 zoom an expanded cell draws as its
-pill. The side panel shows files and sub-agent transcripts only.
+the named or last selected cell; `panel.open {terminal}` only expands. An expanded cell keeps its size at every
+zoom; below 0.5 zoom it shows a flat stand-in instead of live text. The side panel shows files and sub-agent transcripts only.
+
+Spaces are rooms. Home (`canvas.json` `room` null) shows each space as a fixed-size card plus the cells
+outside any space; double-click a card, or select it and press Enter, to go inside. Inside, only that
+space's cells and previews are drawn and they fill the canvas, with no frame. The toolbar shows
+Home / space; `canvas.home` goes back and `canvas.space {direction: "next" | "prev" | "1".."9"}`
+goes into another space. The app reopens in the space it closed in, and each place keeps its own
+camera (`cameras`). Each card and preview records its `space`.
 
 Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor.
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
@@ -1082,16 +1089,15 @@ Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
 arranges selected cells or the current space; no layout repeats the last choice.
 `canvas.undo` (Cmd+Z / Ctrl+Shift+U while the canvas has focus) restores
 geometry before the last move, resize or arrange. Cells keep a 24 px gap;
-spaces grow to hold them and push other spaces.
+on Home, space cards and root cells push each other the same way.
 
 Empty-canvas left-drag and middle-mouse drag also pan; an empty click focuses the canvas.
 Focused terminals still receive Space. Right-click keeps the canvas menus.
-Canvas space labels drag the space and its cards; bottom-right handles resize with card padding.
-Space label menus offer Rename, Color, Show frame and confirmed Delete space.
+Space cards drag on Home (what is inside stays put). Space card menus offer Rename, Color and confirmed Delete space.
 Empty-canvas menus create terminals in the space folder or home, installed agents,
 and root spaces through the Choose space dialog (previously used space folders, or New space: name, optional folder, recent folders). `canvas.create` takes an optional world
-`point` (default: the middle of the view), optional `space` (default: the space under the point, else the root), `argv`, or `kind: "space"`; `canvas.space_style` takes
-`id` and optional palette `color` (without color it toggles the frame).
+`point` (default: the middle of the view), optional `space` (default: the space being shown, else the root), `argv`, or `kind: "space"`
+(a new space opens straight away); `canvas.space_style` takes `id` and a palette `color`.
 `view.agents`, `view.all`, `view.terminals` select the saved canvas view, bound to
 Cmd+Shift+1/2/3 on macOS and Ctrl+Shift+1/2/3 elsewhere. Hidden cards are deselected.
 `panel.pop_out` takes an optional `terminal` (defaults to the last selected cell); `panel.bring_back`
@@ -1241,11 +1247,11 @@ Cmd are swallowed. No idle timer. The hint mod reads the bindings with `keys()`.
 keep their own keys. `canvas.leave` cancels a pending connection or leaves
 mode; `canvas.enter` connects or expands the selection and leaves mode.
 `canvas.go {direction: "left" | "right" | "up" | "down"}` selects without
-expanding; `canvas.space {direction: "next" | "prev"}` changes space.
+expanding; `canvas.space` goes into another space and `canvas.home` back to Home.
 `canvas.collapse` collapses; `canvas.connect` starts choosing a peer;
 `canvas.thread` opens the selected wire or the cell's first wire.
 `canvas.nudge {direction}` moves one gap with one undo step; `canvas.new`
 creates a terminal here and `canvas.agents` lists installed agents here.
-`canvas.fit` toggles between fitting the current space in the visible canvas
+`canvas.fit` toggles between fitting the selection (else everything in the current place) in the visible canvas
 (excluding the file panel) and the previous camera. The focus icon beside the
 folder icon does the same. See docs/keys.md for keys and preserved collisions.

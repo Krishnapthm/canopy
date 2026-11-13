@@ -2921,7 +2921,7 @@ impl AppWindow {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
-            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.collapse" | "canvas.connect" | "canvas.thread" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
+            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.collapse" | "canvas.connect" | "canvas.thread" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
             "canvas.sub_message" => self.message_sub(a, window, cx),
@@ -2960,8 +2960,8 @@ impl AppWindow {
             "canvas.space_style" => {
                 if a.get("color").is_some() && !Self::arg(a, "color").is_some_and(|c| crate::canvas::COLORS.contains(&c)) { return self.fail("invalid space color"); }
                 if let Some(space) = Self::arg(a, "id").and_then(|id| self.canvas_state.doc.spaces.iter_mut().find(|s| s.space == id)) {
-                    if let Some(color) = Self::arg(a, "color").filter(|c| crate::canvas::COLORS.contains(c)) { space.color = color.into(); }
-                    else { space.frame = !space.frame; }
+                    let Some(color) = Self::arg(a, "color").filter(|c| crate::canvas::COLORS.contains(c)) else { return self.fail("pick a space color") };
+                    space.color = color.into();
                     self.canvas_changed(cx);
                 }
             }
@@ -5674,6 +5674,8 @@ mod tests {
                 {"space":"work", "rect":[0,0,900,600], "color":"blue", "frame":true}
             ])).unwrap();
             this.canvas_state.doc.panel.space = Some("work".into());
+            // Fit takes the selection: here the space's Home card.
+            this.canvas_state.selected = vec!["work".into()];
             this.sync(window, cx);
             cx.notify();
         }));

@@ -402,7 +402,7 @@ person_settings! {
     canvas_color: Option<String> = None => "Canvas background; null follows the theme.";
     canvas_gap: f32 = 24. => "Cell and space gap in world pixels (0..1024).";
     canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live or only on drop (live, drop).";
-    space_fill: f32 = 0.04 => "Space background opacity (0..1).";
+    space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
     #[serde(skip_serializing_if = "is_default_wire_limit")]
     wire_limit: usize = crate::wire::DEFAULT_LIMIT => "Maximum Wire postcard length in characters.";

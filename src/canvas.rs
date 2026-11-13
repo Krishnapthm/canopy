@@ -21,6 +21,8 @@ impl SaveSchedule {
 
 /// The shared width of terminal and sub-agent cells at zoom 1.
 pub const PILL_WIDTH: f32 = 220.;
+/// A space's card on Home at zoom 1.
+pub const SPACE_CARD: Point = [260., 120.];
 /// The header strip of an expanded cell at zoom 1: the pill's one-line height.
 pub const HEADER: f32 = 36.;
 /// Below this camera zoom an expanded cell shows a flat stand-in instead of live text.
@@ -197,16 +199,6 @@ fn separated(a: Rect, b: Rect, gap: f32) -> bool {
         || b[1] + b[3] + gap <= a[1]
 }
 
-/// Grow a space to contain its cells with padding, preserving its previous extent.
-pub fn grow(space: Rect, cells: &[Rect]) -> Rect {
-    let gap = crate::settings::get().canvas_gap;
-    let Some(b) = union(cells) else { return space };
-    union(&[
-        space,
-        [b[0] - gap, b[1] - gap, b[2] + 2. * gap, b[3] + 2. * gap],
-    ])
-    .unwrap()
-}
 
 /// Arrange cells in reading order, or breadth-first parent layers, preserving their sizes.
 /// Cells joined by `links` (wires, either way) come together, connected groups first.
@@ -353,17 +345,6 @@ impl Rest {
         }
     }
 }
-pub fn clamp(mut r: Rect, space: Rect) -> Rect {
-    r[0] = r[0].clamp(
-        space[0] + 24.,
-        (space[0] + space[2] - 24. - r[2]).max(space[0] + 24.),
-    );
-    r[1] = r[1].clamp(
-        space[1] + 24.,
-        (space[1] + space[3] - 24. - r[3]).max(space[1] + 24.),
-    );
-    r
-}
 pub fn union(rects: &[Rect]) -> Option<Rect> {
     let mut out = *rects.first()?;
     for r in &rects[1..] {
@@ -378,18 +359,11 @@ pub fn union(rects: &[Rect]) -> Option<Rect> {
     }
     Some(out)
 }
-pub fn min_size(space: Rect, cards: &[Rect]) -> Point {
-    let b = union(cards).unwrap_or([space[0], space[1], 0., 0.]);
-    [
-        (b[0] + b[2] - space[0] + 24.).max(48.),
-        (b[1] + b[3] - space[1] + 24.).max(48.),
-    ]
-}
-/// Where a space made outside the canvas goes: right of every existing space.
+/// Where a space made outside the canvas goes on Home: right of every existing space card.
 pub fn new_space_rect(spaces: &[Space]) -> Rect {
     let rects: Vec<Rect> = spaces.iter().map(|s| s.rect).collect();
-    let x = union(&rects).map_or(0., |u| u[0] + u[2] + 96.);
-    [x, 0., 960., 640.]
+    let x = union(&rects).map_or(0., |u| u[0] + u[2] + 48.);
+    [x, 0., SPACE_CARD[0], SPACE_CARD[1]]
 }
 pub fn child_position(parent: Rect, siblings: &[Rect], size: Point) -> Rect {
     [
@@ -577,8 +551,11 @@ pub enum View {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Space {
     pub space: String,
+    /// Its card on Home ([`SPACE_CARD`] in size); the cells inside keep their own coordinates.
     pub rect: Rect,
     pub color: String,
+    /// Kept so older files load; spaces have no frame since they became rooms.
+    #[serde(default)]
     pub frame: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -594,6 +571,9 @@ pub struct Card {
     /// Set while the cell is expanded into a live terminal: its size in world px at zoom 1, header included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<Point>,
+    /// The space (room) the cell lives in; None for Home. The window keeps it in step with the core.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
 }
 impl Card {
     /// The canvas identity, distinct from every real terminal address.
@@ -620,6 +600,9 @@ pub struct Panel {
 pub struct Preview {
     pub path: String,
     pub rect: Rect,
+    /// The space (room) it was opened in; None for Home.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
 }
 
 pub const PREVIEW_LIMIT: u64 = 2 * 1024 * 1024;
@@ -668,11 +651,17 @@ pub struct Document {
     /// Drawn Wire edges between cells of one space. Born edges are computed, never stored.
     #[serde(default)]
     pub wires: Vec<Wire>,
+    /// The space being shown, its cells filling the canvas; None is Home (space cards and root cells).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<String>,
+    /// Each place's last camera while another is shown: a space id, or "" for Home.
+    #[serde(default)]
+    pub cameras: std::collections::HashMap<String, Camera>,
 }
 impl Default for Document {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             camera: Camera::default(),
             view: View::All,
             spaces: vec![],
@@ -682,6 +671,8 @@ impl Default for Document {
             recent_folders: vec![],
             arrange_layout: String::new(),
             wires: vec![],
+            room: None,
+            cameras: Default::default(),
         }
     }
 }
@@ -702,10 +693,21 @@ impl Wire {
 }
 
 impl Document {
-    /// The space frame holding a cell's center; None for cells in the unframed root space.
+    /// The space a cell lives in; None for cells on Home.
     pub fn space_of(&self, key: &str) -> Option<&Space> {
-        let r = self.cards.iter().find(|c| c.key() == key)?.rect;
-        space_at(&self.spaces, [r[0] + r[2] / 2., r[1] + r[3] / 2.])
+        let id = self.cards.iter().find(|c| c.key() == key)?.space.as_ref()?;
+        self.spaces.iter().find(|s| &s.space == id)
+    }
+    /// Whether a cell or preview in `space` is shown in the current place.
+    pub fn shows(&self, space: Option<&String>) -> bool {
+        space == self.room.as_ref()
+    }
+    /// Shows another place, keeping the camera of the one left: `room` None is Home.
+    pub fn go(&mut self, room: Option<String>) {
+        if room == self.room { return; }
+        self.cameras.insert(self.room.clone().unwrap_or_default(), self.camera);
+        self.camera = self.cameras.remove(&room.clone().unwrap_or_default()).unwrap_or_default();
+        self.room = room;
     }
     /// Whether both cells exist and share a space (or both sit in the root space).
     pub fn same_space(&self, a: &str, b: &str) -> bool {
@@ -744,6 +746,7 @@ impl Document {
                 rect: [point[0], point[1], size[0], size[1]],
                 z,
                 size: None,
+                space: self.room.clone(),
             });
         }
     }
@@ -756,7 +759,7 @@ impl Document {
         let mut parents: Vec<_> = subs.keys().collect();
         parents.sort();
         for parent in parents {
-            let Some(rect) = self.cards.iter().find(|c| &c.terminal == parent && c.sub.is_none()).map(|c| c.rect) else { continue };
+            let Some((rect, space)) = self.cards.iter().find(|c| &c.terminal == parent && c.sub.is_none()).map(|c| (c.rect, c.space.clone())) else { continue };
             let mut children: Vec<_> = subs[parent].iter().collect();
             children.sort_by_key(|s| &s.id);
             for sub in children {
@@ -764,15 +767,8 @@ impl Document {
                 let siblings: Vec<_> = self.cards.iter().filter(|c| c.parent.as_ref() == Some(parent)).map(|c| c.rect).collect();
                 let z = self.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
                 let child = child_position(rect, &siblings, [PILL_WIDTH, 36.]);
-                // The cell belongs to its parent's space: grow that space to hold it.
-                let center = [rect[0] + rect[2] / 2., rect[1] + rect[3] / 2.];
-                if let Some(space) = self.spaces.iter_mut().find(|s| center[0] >= s.rect[0] && center[0] <= s.rect[0] + s.rect[2]
-                    && center[1] >= s.rect[1] && center[1] <= s.rect[1] + s.rect[3]) {
-                    let minimum = min_size(space.rect, &[child]);
-                    space.rect[2] = space.rect[2].max(minimum[0]);
-                    space.rect[3] = space.rect[3].max(minimum[1]);
-                }
-                self.cards.push(Card { terminal: String::new(), sub: Some(sub.id.clone()), parent: Some(parent.clone()), rect: child, z, size: None });
+                // The cell belongs to its parent's space.
+                self.cards.push(Card { terminal: String::new(), sub: Some(sub.id.clone()), parent: Some(parent.clone()), rect: child, z, size: None, space: space.clone() });
                 changed = true;
             }
         }
@@ -788,12 +784,13 @@ impl Document {
         let parsed = serde_json::from_slice::<Self>(&bytes);
         if let Ok(mut doc) = parsed {
             let valid_rect = |r: Rect| r.iter().all(|n| n.is_finite()) && r[2] > 0. && r[3] > 0.;
-            if doc.version != 1 {
+            if doc.version != 1 && doc.version != 2 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "unsupported canvas version",
                 ));
             }
+            if doc.version == 1 { doc.into_rooms(); }
             if doc.camera.x.is_finite()
                 && doc.camera.y.is_finite()
                 && doc.camera.zoom.is_finite()
@@ -815,6 +812,15 @@ impl Document {
         }
         std::fs::rename(path, bad)?;
         Ok((Self::default(), true))
+    }
+    /// Version 1 to 2: a cell belonged to the space frame holding its center; now it says so,
+    /// and a space is a fixed-size card on Home at its old top left.
+    fn into_rooms(&mut self) {
+        let center = |r: Rect| [r[0] + r[2] / 2., r[1] + r[3] / 2.];
+        for c in &mut self.cards { c.space = space_at(&self.spaces, center(c.rect)).map(|s| s.space.clone()); }
+        for p in &mut self.previews { p.space = space_at(&self.spaces, center(p.rect)).map(|s| s.space.clone()); }
+        for s in &mut self.spaces { s.rect = [s.rect[0], s.rect[1], SPACE_CARD[0], SPACE_CARD[1]]; }
+        self.version = 2;
     }
     pub fn save(&self, path: &Path) -> io::Result<()> {
         crate::persist::write_atomic(path, serde_json::to_vec_pretty(self)?)
@@ -841,14 +847,6 @@ pub fn unused_color(spaces: &[Space], seed: usize) -> &'static str {
     }
 }
 
-pub fn move_space(space: &mut Space, cards: &mut [Card], members: &[String], delta: Point) {
-    space.rect[0] += delta[0];
-    space.rect[1] += delta[1];
-    for card in cards.iter_mut().filter(|c| members.contains(&c.key())) {
-        card.rect[0] += delta[0];
-        card.rect[1] += delta[1];
-    }
-}
 
 pub fn view_allows(view: &View, agent: bool) -> bool {
     match view {
@@ -873,21 +871,7 @@ mod tests {
         assert_eq!(solve(&[],0,pin,GAP),Vec::<Rect>::new());
     }
 
-    #[test]
-    fn growth_pushes_the_next_space_and_carries_cells() {
-        let spaces = [[0.,0.,200.,200.],[224.,0.,200.,200.]];
-        let grown = grow(spaces[0],&[[180.,24.,100.,50.]]);
-        assert_eq!(grown,[0.,0.,304.,200.]);
-        let result = solve(&spaces,0,grown,GAP);
-        assert!(separated(result[0],result[1],GAP));
-        let delta = [result[1][0]-spaces[1][0],result[1][1]-spaces[1][1]];
-        let mut space = Space { space:"b".into(),rect:spaces[1],color:"red".into(),frame:true };
-        let mut cards = [Card { terminal:"b".into(),sub:None,parent:None,rect:[248.,24.,100.,50.],z:0,size:None }];
-        move_space(&mut space,&mut cards,&["b".into()],delta);
-        assert_eq!(cards[0].rect[0]-space.rect[0],24.);
-        assert_eq!(cards[0].rect[1]-space.rect[1],24.);
-        assert_eq!(grow(grown,&[[24.,24.,10.,10.]]),grown);
-    }
+    
 
     #[test]
     fn arrange_layouts_keep_gap_sizes_and_parent_layers() {
@@ -907,6 +891,35 @@ mod tests {
     }
 
     #[test]
+    fn version_one_cells_move_into_their_frames_room() {
+        let mut doc = Document { version: 1, ..Document::default() };
+        doc.spaces.push(Space { space: "s".into(), rect: [0., 0., 960., 640.], color: "blue".into(), frame: true });
+        doc.place("in", [24., 24.], [220., 36.]);
+        doc.place("out", [2000., 24.], [220., 36.]);
+        doc.previews.push(Preview { path: "/tmp/a.md".into(), rect: [100., 100., 200., 100.], space: None });
+        doc.into_rooms();
+        assert_eq!(doc.version, 2);
+        assert_eq!(doc.space_of("in").map(|s| s.space.as_str()), Some("s"));
+        assert!(doc.space_of("out").is_none());
+        assert_eq!(doc.previews[0].space.as_deref(), Some("s"));
+        assert_eq!(doc.spaces[0].rect, [0., 0., SPACE_CARD[0], SPACE_CARD[1]]);
+    }
+
+    #[test]
+    fn going_into_a_room_keeps_each_places_camera() {
+        let mut doc = Document::default();
+        doc.camera.x = 5.;
+        doc.go(Some("s".into()));
+        assert_eq!((doc.camera.x, doc.room.as_deref()), (0., Some("s")));
+        doc.camera.x = 9.;
+        doc.go(None);
+        assert_eq!(doc.camera.x, 5.);
+        doc.go(Some("s".into()));
+        assert_eq!(doc.camera.x, 9.);
+        assert!(doc.shows(Some(&"s".to_owned())) && !doc.shows(None));
+    }
+
+    #[test]
     fn tidy_puts_wired_cells_next_to_each_other() {
         // Four in reading order; 0 is wired to 3, so 3 comes second, beside 0 in the 2-column grid.
         let rects = [[0.,0.,100.,40.],[200.,0.,100.,40.],[0.,100.,100.,40.],[200.,100.,100.,40.]];
@@ -920,7 +933,7 @@ mod tests {
         let mut doc = Document::default();
         doc.place("a",[0.,0.],[100.,50.]);
         doc.spaces.push(Space { space:"s".into(),rect:[0.,0.,200.,200.],color:"blue".into(),frame:true });
-        doc.previews.push(Preview { path:"/tmp/plan.md".into(),rect:[24.,24.,100.,80.] });
+        doc.previews.push(Preview { path:"/tmp/plan.md".into(),rect:[24.,24.,100.,80.], space: None });
         let rest = Rest::capture(&doc);
         doc.spaces[0].rect = [500.,500.,900.,900.];
         doc.previews[0].rect[0] = 600.;
@@ -979,7 +992,7 @@ mod tests {
 
     #[test]
     fn undo_keeps_each_sub_agent_cell_apart() {
-        let sub = |id: &str, x| Card { terminal: String::new(), sub: Some(id.into()), parent: Some("t1".into()), rect: [x, 0., 100., 36.], z: 0, size: None };
+        let sub = |id: &str, x| Card { terminal: String::new(), sub: Some(id.into()), parent: Some("t1".into()), rect: [x, 0., 100., 36.], z: 0, size: None, space: None };
         let mut doc = Document { cards: vec![sub("a", 0.), sub("b", 200.)], ..Document::default() };
         let rest = Rest::capture(&doc);
         doc.cards[0].rect[0] = 50.;
@@ -1048,42 +1061,8 @@ mod tests {
         let r = new_space_rect(&[space(1056.)]);
         assert!(!intersects(r, space(1056.).rect));
     }
-    #[test]
-    fn space_drag_moves_only_its_cards() {
-        let mut space = Space {
-            space: "s".into(),
-            rect: [0., 0., 960., 640.],
-            color: "blue".into(),
-            frame: true,
-        };
-        let mut cards = vec![
-            Card {
-                terminal: "a".into(),
-                sub: None, parent: None,
-                rect: [24., 24., 160., 36.],
-                z: 0,
-                size: None,
-            },
-            Card {
-                terminal: "b".into(),
-                sub: None, parent: None,
-                rect: [1., 2., 160., 36.],
-                z: 0,
-                size: None,
-            },
-        ];
-        move_space(&mut space, &mut cards, &["a".into()], [10., -5.]);
-        assert_eq!(space.rect, [10., -5., 960., 640.]);
-        assert_eq!(cards[0].rect, [34., 19., 160., 36.]);
-        assert_eq!(cards[1].rect, [1., 2., 160., 36.]);
-    }
-    #[test]
-    fn new_card_clamps_at_click_point() {
-        assert_eq!(
-            clamp([900., 620., 240., 36.], [0., 0., 960., 640.]),
-            [696., 580., 240., 36.]
-        );
-    }
+    
+    
     #[test]
     fn random_color_uses_unused_palette_entries() {
         let spaces: Vec<_> = COLORS[..7]
@@ -1136,20 +1115,8 @@ mod tests {
         c.step(1, [0., 0.]);
         assert_eq!(c.zoom, 0.67);
     }
-    #[test]
-    fn card_clamps_into_space() {
-        assert_eq!(
-            clamp([-100., 900., 160., 36.], [0., 0., 960., 640.]),
-            [24., 580., 160., 36.]
-        );
-    }
-    #[test]
-    fn space_minimum_contains_cards() {
-        assert_eq!(
-            min_size([0., 0., 960., 640.], &[[24., 24., 160., 36.]]),
-            [208., 84.]
-        );
-    }
+    
+    
     #[test]
     fn child_is_beside_parent() {
         assert_eq!(
@@ -1228,10 +1195,7 @@ mod tests {
         c.fit(&[[0., 0., 100., 100.]], [800., 600.]);
         assert_eq!(c.zoom, 2.);
     }
-    #[test]
-    fn space_minimum_without_cards() {
-        assert_eq!(min_size([0., 0., 960., 640.], &[]), [48., 48.]);
-    }
+    
     #[test]
     fn valid_document_round_trips() {
         let path =
@@ -1252,7 +1216,7 @@ mod tests {
     fn unsupported_version_is_untouched() {
         let path = std::env::temp_dir().join(format!("canopy-version-{}.json", std::process::id()));
         Document {
-            version: 2,
+            version: 3,
             ..Document::default()
         }
         .save(&path)
@@ -1402,8 +1366,7 @@ mod cell_tests {
         doc.spaces.push(Space { space: "s".into(), rect: [-24., -24., 368., 84.], color: "gray".into(), frame: true });
         assert!(doc.sync_subs(&subs));
         assert_eq!(doc.cards.len(), 2);
-        let (space, child) = (doc.spaces[0].rect, doc.cards[1].rect);
-        assert!(child[0] + child[2] <= space[0] + space[2] && child[1] + child[3] <= space[1] + space[3], "the parent's space grows to hold its sub cell");
+        assert_eq!(doc.cards[1].space, doc.cards[0].space, "a sub cell lives in its parent's space");
         let key = doc.cards[1].key();
         doc.place(&key, [600., 200.], [320., 36.]);
         subs.get_mut("t1").unwrap()[0].done = true;

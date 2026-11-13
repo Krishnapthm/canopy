@@ -1,13 +1,24 @@
 # Canvas layout
 
 At rest, every cell, sub-agent cell and file preview keeps `canvas_gap` world
-pixels from its neighbours (default 24). Spaces keep the same gap from each other.
+pixels from its neighbours (default 24). On Home, space cards keep the same gap.
+
+## Spaces are rooms
+
+Home shows each space as a card (name, color, terminal count, how many are
+working, a bell when one waits for you) next to the cells outside any space.
+Double-click a card, or select it and press Enter, to go inside: the whole
+canvas belongs to that space, with no frame, so its cells grow freely. The
+toolbar then reads **Home / space**; click Home, or run `canvas.home`, to leave.
+`canvas.space` with `next`, `prev` or a number goes into another space. A new
+space opens straight away, and the app reopens where you closed it. Each place
+keeps its own camera. Older `canvas.json` files move each cell into the space
+whose frame held it, and the frame becomes that space's card.
 
 ## Use
 
 - Drag a cell, or resize a preview: neighbours step aside and return when you
-  move on. Drag toward a space's edge: the space grows and pushes the spaces
-  next to it, with their cells. Spaces never shrink by themselves.
+  move on. Drag a space card on Home: only the card moves.
 - Enter [canvas mode](keys.md) to select a collapsed cell without expanding it.
   Click a cell to select it. Shift-click adds or removes cells. Click empty
   canvas to clear the selection.
@@ -71,17 +82,18 @@ and sub-agent transcripts only.
 - Zoom: `terminal::Scaled` multiplies font size, cell size and padding while a
   terminal draws, so the text is real text at every zoom. While the zoom is
   moving (and 160 ms after) the body is a flat fill and the header stays; text
-  returns once it rests. Below 0.5 zoom the cell draws as its pill. No timer
+  returns once it rests. An expanded cell keeps its size at every zoom; below
+0.5 zoom its body stays a flat fill instead of text. No timer
   runs while nothing moves.
 
 ## Focus fit
 
 Press Cmd+Shift+F (Ctrl+Shift+F with canvas focus), mode `f`, or the focus icon
-beside the folder icon to fit the current space. The canvas bounds already
-exclude the file panel, so the space centres in the visible area. The second
-press restores the camera from before the fit; if you moved the camera in
-between, it fits again instead. With no current space, it fits the cells
-outside spaces.
+beside the folder icon to fit the selection, else everything in the current
+space (or Home). Double-clicking a cell does the same for that cell. The canvas
+bounds already exclude the file panel, so it centres in the visible area. The
+second press restores the camera from before the fit; if you moved the camera
+in between, it fits again instead.
 
 In canvas mode, arrows select the cell whose centre is nearest in that
 direction (ties keep document order; nothing there, nothing changes).
