@@ -120,7 +120,7 @@ export default class TerminalsBar extends View {
         .when(!c.active, (el) => el.border_color("#00000000").hover((s) => s.bg(C.hover)))
         .on_click(() => run("tab.select", { id: c.id }))
         .on_mouse_down("right", () =>
-          openOverlay({ mod: "menu", kind: "popup", width: 200, props: { tab: "tab", target: { id: c.id, space: space.id } } }),
+          openOverlay({ mod: "menu", kind: "popup", width: 444, frame: "none", props: { tab: "tab", target: { id: c.id, space: space.id } } }),
         )
         .child(tile(t, p))
         .child(

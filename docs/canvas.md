@@ -12,7 +12,8 @@ pixels from its neighbours (default 24). Spaces keep the same gap from each othe
   Click a cell to select it. Shift-click adds or removes cells. Click empty
   canvas to clear the selection.
 - Right-click a space, a cell or empty canvas: **Arrange** repeats the last
-  layout, **Arrange >** picks one. **Tidy** is a grid in reading order, **Row**
+  layout, hovering **Arrange as** opens a submenu beside it to pick one
+  (submenus open on hover; → and ← work too). **Tidy** is a grid in reading order, **Row**
   and **Column** line cells up, **By wires** puts parents left of their
   children and sub-agents. The choice is saved in `canvas.json`.
 - Arrange works on the selected cells of one space (the space of the cell you

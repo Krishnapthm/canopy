@@ -4666,6 +4666,7 @@ fn terminal_menu_spec(name: &str, defaults: &Value, tab: &str, target: Value) ->
     json!({ "mod": name, "kind": "popup",
         "width": defaults.get("width").and_then(Value::as_f64).unwrap_or(220.0),
         "height": defaults.get("height").and_then(Value::as_f64).unwrap_or(260.0),
+        "frame": defaults.get("frame").cloned().unwrap_or(Value::Null),
         "props": { "tab": tab, "target": target } })
 }
 
@@ -6268,6 +6269,7 @@ export default class SystemToast extends View {
         let stock = super::terminal_menu_spec("menu", &json!({}), "pane", target.clone());
         assert_eq!(stock["width"], 220.0);
         assert_eq!(stock["height"], 260.0);
+        assert_eq!(super::terminal_menu_spec("menu", &json!({"frame": "none"}), "pane", json!({}))["frame"], "none");
         let custom = super::terminal_menu_spec("personal-menu", &json!({"kind": "dialog", "width": 310, "height": 120}), "pane", target.clone());
         assert_eq!(custom["mod"], "personal-menu");
         assert_eq!(custom["kind"], "popup");

@@ -237,7 +237,7 @@ export function focused(): { space: string; tab: string; pane: string | null; te
 /** The shown layout (layouts/<name>.json). Its name is shared("layout").
  *  Root `terminal_menu?: string` chooses a terminal right-click menu mod (default: "menu").
  *  Unknown names warn and fall back to "menu". This replaces the menu, not its items.
- *  Opens a pointer popup with mod.json overlay width/height (default 220×260). */
+ *  Opens a pointer popup with mod.json overlay width/height (default 220×260) and frame. */
 export function layout(): unknown;
 
 /** The names of every layout in layouts/ (main first). */

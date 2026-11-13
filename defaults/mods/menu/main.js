@@ -1,9 +1,11 @@
 // Modified for Canopy.
 // Context menus (Canopy's items). Opened as a popup with
 // props { tab: "pane" | "tab" | "space" | "global", target }.
-// ↑/↓ move, Enter runs, Esc closes. An item is [label, command, args, program?];
-// a command "worktree" opens the worktree dialog instead. A null command is a
-// section label or a note: shown, never chosen.
+// ↑/↓ move, Enter runs, → opens a submenu, ← or Esc closes. An item is
+// [label, command, args, program?]; a command "worktree" opens the worktree
+// dialog instead, and "sub:<tab>" is a submenu of that tab with args as its
+// target, shown beside the row on hover (shadcn ContextMenuSub). A null
+// command is a section label or a note: shown, never chosen.
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -38,7 +40,7 @@ function items(p, git, agents) {
       ["New terminal", "canvas.create", at],
       ["Open file...", "preview.open", { point: tg.point }],
       ["Arrange", "canvas.arrange", {}],
-      ["Arrange >", "canvas.arrange", { picker: true }],
+      ["Arrange as", "sub:canvas-arrange", {}],
       ["Undo layout", "canvas.undo", {}],
       ...(!tg.space ? [["New space here", "canvas.create", { ...at, kind: "space" }]] : []),
       ["Agents", null, { label: true }],
@@ -46,10 +48,10 @@ function items(p, git, agents) {
     ];
     case "canvas-space": return [
       ["Arrange", "canvas.arrange", { space: tg.id }],
-      ["Arrange >", "canvas.arrange", { space: tg.id, picker: true }],
+      ["Arrange as", "sub:canvas-arrange", { space: tg.id }],
       ["Undo layout", "canvas.undo", {}],
       ["Rename", "space.rename", { id: tg.id }],
-      ["Color >", "canvas-colors", tg],
+      ["Color", "sub:canvas-colors", tg],
       ["Show frame", "canvas.space_style", { id: tg.id }],
       ["Delete space", "space.close", { id: tg.id }],
     ];
@@ -63,7 +65,7 @@ function items(p, git, agents) {
     case "canvas-sub": return [["Message through parent", "canvas.sub_message", { terminal: tg.terminal, id: tg.id }]];
     case "canvas-card": return [
       ["Arrange", "canvas.arrange", {}],
-      ["Arrange >", "canvas.arrange", { picker: true }],
+      ["Arrange as", "sub:canvas-arrange", {}],
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],
       ...(!tg.popped ? [[tg.expanded ? "Collapse" : "Expand", "canvas.expand", { terminal: tg.terminal }]] : []),
@@ -132,9 +134,13 @@ function agentItems(agents, at) {
   return installed.map(a => [a.name, "canvas.create", { ...at, argv: a.run }, a]);
 }
 
-function menuIcon(command) {
-  const name = command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
-  return `mods/workspace-chrome/${name}.svg`;
+// One menu box's width and row heights, so a submenu can line up with its row.
+const WIDTH = 220, ROW = 31, LABEL = 25;
+
+// A rule above row i: before closing, help and the first theme.
+function rule(list, i) {
+  const c = list[i][1];
+  return i > 0 && Boolean(c) && (c.endsWith(".close") || c === "app.help" || (c === "app.theme" && list[i - 1][1] !== "app.theme"));
 }
 
 // The key bound to a command, for the hint on the right.
@@ -167,63 +173,95 @@ export default class Menu extends View {
       });
   }
 
+  // `sub`: the open submenu {i, tab, target}; `subAt`: its keyboard row, or -1 while the keys stay on the menu.
   choose(i, cx) {
     const it = items(props(), this.git, this.agents)[i];
     if (!it?.[1]) return;
+    if (it[1].startsWith("sub:")) return this.open(i, it, 0, cx);
+    this.run(it);
+  }
+
+  run(it) {
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
-    else if (it[1] === "canvas-colors") openOverlay({ mod: "menu", kind: "popup", width: 220, props: { tab: "canvas-colors", target: it[2] } });
     else run(it[1], it[2]);
+  }
+
+  open(i, it, at, cx) {
+    this.sub = { i, tab: it[1].slice(4), target: it[2] };
+    this.subAt = at;
+    cx.notify();
+  }
+
+  // One menu box: the rows of `list`, `at` highlighted.
+  box(t, list, at, row) {
+    return v_flex().w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(8).shadow_lg().text_size(12.8)
+      .children(list.map((it, i) => !it[1]
+        // shadcn ContextMenuSeparator + ContextMenuLabel; a note is a dim row.
+        ? v_flex()
+          .when(it[2].label, el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+          .child(div().h(it[2].label ? LABEL : ROW).px(8).flex().items_center().text_size(it[2].label ? 11.5 : 12.8).text_color(t.dim)
+            .when(it[2].label, el => el.font_semibold()).child(it[0]))
+        : v_flex()
+          .when(rule(list, i), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
+          .child(row(h_flex()
+            .id(`mi-${list === this.list ? "" : "s"}${i}`)
+            .h(ROW).px(8).gap(9).rounded(7).items_center().justify_between()
+            .text_color(t.foreground)
+            .when(i === at, (el) => el.bg(t.selected))
+            .hover((s) => s.bg(t.hover))
+            // Only agents carry an icon: the program's own.
+            .when(it[1] === "canvas.create" && it[3]?.icon, el => el.child(it[3].tint ? svg(it[3].icon).size(14).flex_none().text_color(t.foreground) : image(it[3].icon).w(14).h(14).flex_none()))
+            .child(div().flex_1().child(it[0]))
+            .child(it[1].startsWith("sub:")
+              ? svg("mods/workspace-chrome/chevron-right.svg").size(12).flex_none().text_color(t.muted)
+              : div().text_size(11).text_color(t.dim).child(shortcut(it[1], it[2]))), it, i))));
   }
 
   render(cx) {
     const t = theme();
-    const list = items(props(), this.git, this.agents);
+    const list = this.list = items(props(), this.git, this.agents);
+    const sub = this.sub && items({ tab: this.sub.tab, target: this.sub.target }, null, null);
     // Arrow keys step over labels and notes.
-    const step = (d) => { for (let n = 1; n <= list.length; n++) { const j = (this.at + d * n + list.length * n) % list.length; if (list[j][1]) return j; } return this.at; };
-    return v_flex()
+    const step = (rows, from, d) => { for (let n = 1; n <= rows.length; n++) { const j = (from + d * n + rows.length * n) % rows.length; if (rows[j][1]) return j; } return from; };
+    const inSub = sub && this.subAt >= 0;
+    // The submenu hangs beside its row: rows above it, their rules and the box padding.
+    const top = this.sub ? list.slice(0, this.sub.i + 1).reduce((y, it, i) => y + (it[1] ? ROW : LABEL) + (rule(list, i) || it[2]?.label ? 9 : 0), 5) - ROW - 5 : 0;
+    return h_flex()
       .id("menu")
       .track_focus(this.handle)
       .w_full()
       .min_h(0)
-      .p(5)
-      .bg(t.popover)
-      .text_size(12.8)
+      .items_start()
+      .gap(4)
+      // The overlay is wider than the menu, for the submenu: a click on the empty part closes it.
+      .on_mouse_down("left", () => closeOverlay(props().overlay))
       .on_key_down((e, cx) => {
-        if (e.key === "down") this.at = step(1);
-        else if (e.key === "up") this.at = step(-1);
+        if (inSub) {
+          if (e.key === "down") this.subAt = step(sub, this.subAt, 1);
+          else if (e.key === "up") this.subAt = step(sub, this.subAt, -1);
+          else if (e.key === "enter") return sub[this.subAt]?.[1] && this.run(sub[this.subAt]);
+          else if (e.key === "left" || e.key === "escape") this.subAt = -1;
+          else return;
+        } else if (e.key === "down") { this.at = step(list, this.at, 1); this.sub = null; }
+        else if (e.key === "up") { this.at = step(list, this.at, -1); this.sub = null; }
+        else if (e.key === "right" && list[this.at]?.[1]?.startsWith("sub:")) return this.open(this.at, list[this.at], 0, cx);
         else if (e.key === "enter") this.choose(this.at, cx);
         else if (e.key === "escape") closeOverlay(props().overlay);
         else return;
         cx.notify();
       })
-      .children(
-        list.map((it, i) => !it[1]
-          // shadcn ContextMenuSeparator + ContextMenuLabel; a note is a dim row.
-          ? v_flex()
-            .when(it[2].label, el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
-            .child(div().px(8).py(it[2].label ? 5 : 7).text_size(it[2].label ? 11.5 : 12.8).text_color(t.dim)
-              .when(it[2].label, el => el.font_semibold()).child(it[0]))
-          : v_flex()
-            .when(i > 0 && (it[1].endsWith(".close") || it[1] === "app.help" || (it[1] === "app.theme" && list[i - 1][1] !== "app.theme")), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
-            .child(h_flex()
-            .id(`mi-${i}`)
-            .h(31)
-            .px(8)
-            .gap(9)
-            .rounded(7)
-            .items_center()
-            .justify_between()
-            .text_color(t.foreground)
-            .when(i === this.at, (el) => el.bg(t.selected))
-            .hover((s) => s.bg(t.hover))
-            .on_click((_e, cx) => this.choose(i, cx))
-            .child(it[3]?.icon
-              ? (it[3].tint ? svg(it[3].icon).size(14).flex_none().text_color(t.foreground) : image(it[3].icon).w(14).h(14).flex_none())
-              : svg(menuIcon(it[1])).size(14).flex_none().text_color(t.muted))
-            .child(div().flex_1().child(it[0]))
-            .child(div().text_size(11).text_color(t.dim).child(shortcut(it[1], it[2])))),
-        ),
-      );
+      .child(this.box(t, list, this.at, (row, it, i) => row
+        .on_hover((on, cx) => {
+          if (!on) return;
+          this.at = i;
+          if (it[1].startsWith("sub:")) { if (this.sub?.i !== i) this.open(i, it, -1, cx); }
+          else if (this.sub) { this.sub = null; cx.notify(); }
+          else cx.notify();
+        })
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => this.choose(i, cx))))
+      .when(Boolean(sub), el => el.child(div().mt(top).on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .child(this.box(t, sub ?? [], this.subAt, (row, it) => row.on_click(() => this.run(it))))));
   }
 }

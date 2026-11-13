@@ -14,7 +14,7 @@ const specs = new Map(
   ]),
 );
 // Menu-only items that open another popup or dialog, and the command each one ends in.
-const local: Record<string, string | null> = { "canvas-colors": null, "canvas-close": "terminal.kill" };
+const local: Record<string, string | null> = { "canvas-close": "terminal.kill" };
 const agents = [{ name: "Claude Code", installed: true, run: ["claude"] }, { name: "Gone", installed: false, run: ["gone"] }];
 
 test("every canvas menu item passes only declared args, with the required ones", () => {
@@ -39,6 +39,8 @@ test("every canvas menu item passes only declared args, with the required ones",
   for (const menu of menus) {
     for (const [label, command, args] of items(menu, null, agents)) {
       if (command === null) continue;
+      // A submenu is checked as the menu it opens, with its args as the target.
+      if (command.startsWith("sub:")) { menus.push({ tab: command.slice(4), target: args }); continue; }
       const name = command in local ? local[command] : command;
       if (name === null) continue;
       const spec = specs.get(name);
