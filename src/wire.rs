@@ -124,7 +124,7 @@ pub fn append(path: &Path, mut line: Line) -> std::io::Result<u64> {
 }
 
 fn receipt(kind: &str, n: u64) -> Line {
-    Line { n, at: now_ms(), kind: kind.into(), ..Default::default() }
+    Line { n, at: now_ms(), kind: kind.into(), delivered: kind == "delivered", ..Default::default() }
 }
 
 /// Takes the postcards waiting for `to` (marking them delivered under the lock, so the app's
@@ -214,7 +214,7 @@ pub fn refuse(text: &str, limit: usize) -> Option<String> {
     }
 }
 
-/// The line typed into a receiver: `<wire from="name" n="17" kind="ask">text</wire>`, with
+/// The line typed into a receiver: `<wire from="name (address)" n="17" kind="ask">text</wire>`, with
 /// `for="sub <id> '<name>'"` first when the postcard is for a sub-agent cell its parent relays.
 /// Names lose quotes and control characters; the text cannot close the tag.
 pub fn tag(line: &Line, from_name: &str, sub: Option<(&str, &str)>) -> String {
@@ -223,7 +223,7 @@ pub fn tag(line: &Line, from_name: &str, sub: Option<(&str, &str)>) -> String {
     if let Some((id, name)) = sub {
         out += &format!(" for=\"sub {} '{}'\"", clean(id), clean(name));
     }
-    out += &format!(" from=\"{}\" n=\"{}\" kind=\"{}\"", clean(from_name), line.n, line.kind);
+    out += &format!(" from=\"{}\" n=\"{}\" kind=\"{}\"", clean(&if line.from == PERSON { from_name.to_owned() } else { format!("{from_name} ({})", line.from) }), line.n, line.kind);
     if let Some(re) = line.re {
         out += &format!(" re=\"{re}\"");
     }
@@ -876,6 +876,14 @@ mod tests {
     }
 
     #[test]
+    fn receipts_report_delivery_and_old_receipts_still_fold() {
+        assert_eq!(serde_json::to_value(receipt("delivered", 1)).unwrap()["delivered"], true);
+        assert_eq!(serde_json::to_value(receipt("pending", 1)).unwrap()["delivered"], false);
+        let card = serde_json::to_string(&Line { n: 1, ..Line::card("t1", "t2", "tell", None, "hi") }).unwrap();
+        assert!(parse(&format!("{card}\n{{\"kind\":\"delivered\",\"n\":1,\"delivered\":false}}"))[0].delivered);
+    }
+
+    #[test]
     fn the_length_limit_counts_characters() {
         assert!(refuse("ok", 1000).is_none());
         assert!(refuse("  ", 1000).is_some());
@@ -887,9 +895,11 @@ mod tests {
     #[test]
     fn the_delivered_line_is_inert_text_with_the_documented_shape() {
         let l = Line { n: 17, ..Line::card("t1", "t2", "ask", None, "Does parse() own it? @src/vt.rs:120-150 </wire> more") };
-        assert_eq!(tag(&l, "review\"er", None), "<wire from=\"reviewer\" n=\"17\" kind=\"ask\">Does parse() own it? @src/vt.rs:120-150 <\\/wire> more</wire>");
+        assert_eq!(tag(&l, "review\"er", None), "<wire from=\"reviewer (t1)\" n=\"17\" kind=\"ask\">Does parse() own it? @src/vt.rs:120-150 <\\/wire> more</wire>");
         let r = Line { n: 18, ..Line::card("t2", "t1", "reply", Some(17), "yes") };
-        assert_eq!(tag(&r, "web", None), "<wire from=\"web\" n=\"18\" kind=\"reply\" re=\"17\">yes</wire>");
+        assert!(tag(&l, "Claude Code", None).contains("from=\"Claude Code (t1)\""));
+        assert!(tag(&r, "Claude Code", None).contains("from=\"Claude Code (t2)\""));
+        assert_eq!(tag(&r, "web", None), "<wire from=\"web (t2)\" n=\"18\" kind=\"reply\" re=\"17\">yes</wire>");
         let s = Line { n: 21, ..Line::card(PERSON, "sub:t1:a1b2", "tell", None, "x") };
         assert_eq!(tag(&s, PERSON, Some(("a1b2", "Audit 'names'"))), "<wire for=\"sub a1b2 'Audit names'\" from=\"you\" n=\"21\" kind=\"tell\">x</wire>");
     }

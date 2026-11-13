@@ -1,7 +1,7 @@
 # Canvas layout
 
-Cells never overlap. Every cell, sub-agent cell and file preview keeps 24 world
-pixels from its neighbours, and spaces keep the same gap from each other.
+At rest, every cell, sub-agent cell and file preview keeps `canvas_gap` world
+pixels from its neighbours (default 24). Spaces keep the same gap from each other.
 
 ## Use
 
@@ -25,6 +25,11 @@ pixels from its neighbours, and spaces keep the same gap from each other.
 `canvas.arrange` takes `layout` (`tidy`, `row`, `column`, `wires`), `space`
 (a space id) or `picker: true` (open the layout menu).
 
+The hand-edited [settings](settings.md) reload live: `canvas_gap` changes spacing,
+`canvas_push: "drop"` leaves neighbours still until a drag or resize is released.
+Release outside completes when the pointer returns. Click expansion solves on the
+completed click. `space_fill` controls space opacity (default 0.04; 0 removes fill).
+
 ## How it works
 
 `canvas::solve` starts from rest rectangles (where the person left things),
@@ -46,8 +51,8 @@ menu has Expand / Collapse. Drag the bottom-right corner to resize. Several
 cells can be open at once. Pop-out is unchanged. The side panel is for files
 and sub-agent transcripts only.
 
-- Size: 100 x 30 cells of the terminal font at zoom 1, header included. The
-  size is saved per cell in `canvas.json` (`size`; older files load as pills).
+- Size: `terminal_size` (default [100, 30]) cells of the terminal font at zoom 1,
+  header included. The size is saved per cell in `canvas.json` (`size`; older files load as pills).
 - Neighbours: expanding pins the cell and runs `canvas::solve`, so the cells
   around it give way and stay one gap clear, also of each other. Each
   expansion remembers what it moved; collapsing puts back what is still where

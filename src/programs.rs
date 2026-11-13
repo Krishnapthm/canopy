@@ -361,9 +361,10 @@ pub fn install_icons() {
 pub fn load() -> Result<(), String> {
     let mut table: Table = serde_json::from_str(BUILT_IN).expect("defaults/programs.json");
     let result = match std::fs::read_to_string(path()) {
-        Err(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("programs.json: {e}")),
         Ok(text) => match serde_json::from_str::<Table>(&text) {
-            Err(e) => Err(format!("programs.json: {e}")),
+            Err(e) => Err(crate::settings::json_error("programs.json", e)),
             Ok(mine) => {
                 table.note = mine.note.or(table.note);
                 table.shells.extend(mine.shells);
@@ -375,9 +376,10 @@ pub fn load() -> Result<(), String> {
             }
         },
     };
-    let installed = install_shell_files(&table);
+    result?;
+    install_shell_files(&table)?;
     TABLE.with(|t| *t.borrow_mut() = table);
-    result.and(installed)
+    Ok(())
 }
 
 /// How a terminal shows: from the agent's own report (`app`), else the

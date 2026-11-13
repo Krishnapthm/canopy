@@ -8,6 +8,7 @@ mod wire_view;
 pub(super) struct State {
     pub doc: Document,
     rest: Option<canvas::Rest>,
+    pending_layout: Option<(Option<String>, Option<String>)>,
     undo: Option<canvas::Rest>,
     shown: Option<Document>,
     layout_motion: Option<(Document, std::time::Instant)>,
@@ -79,6 +80,7 @@ impl State {
         Self {
             doc,
             rest: None,
+            pending_layout: None,
             undo: None,
             shown: None,
             layout_motion: None,
@@ -186,7 +188,26 @@ impl AppWindow {
         }).collect()
     }
 
-    fn solve_layout(&mut self, pin: Option<&str>, space_pin: Option<&str>, cx: &App) {
+    fn end_canvas_drag(&mut self, cx: &App) {
+        if let Some((pin, space)) = self.canvas_state.pending_layout.take() {
+            self.solve_layout_now(pin.as_deref(), space.as_deref(), cx);
+        }
+        self.canvas_state.end_drag();
+    }
+
+    /// Resolve cell and space spacing, deferring neighbours until release in drop mode.
+    pub(super) fn solve_layout(&mut self, pin: Option<&str>, space_pin: Option<&str>, cx: &App) {
+        if self.person.canvas_push == settings::CanvasPush::Drop
+            && (self.canvas_state.drag.is_some() || self.canvas_state.cell_resize.is_some()
+                || self.canvas_state.preview_drag.is_some() || self.canvas_state.space_drag.is_some()) {
+            self.canvas_state.pending_layout = Some((pin.map(str::to_owned), space_pin.map(str::to_owned)));
+            return;
+        }
+        self.canvas_state.pending_layout = None;
+        self.solve_layout_now(pin, space_pin, cx);
+    }
+
+    fn solve_layout_now(&mut self, pin: Option<&str>, space_pin: Option<&str>, cx: &App) {
         let mut members = self.canvas_members();
         let sizes: Vec<_> = self
             .canvas_state
@@ -265,7 +286,7 @@ impl AppWindow {
                 &rects,
                 indices.iter().position(|j| *j == i).unwrap(),
                 cells[i],
-                canvas::GAP,
+                self.person.canvas_gap,
             );
             for (j, r) in indices.into_iter().zip(solved) {
                 cells[j] = r;
@@ -291,7 +312,7 @@ impl AppWindow {
         let top_pin = doc.spaces.iter().position(|s|Some(s.space.as_str())==active)
             .or_else(||pinned.and_then(|i|roots.iter().position(|j|*j==i)).map(|i|doc.spaces.len()+i));
         if let Some(i) = top_pin {
-            let solved = canvas::solve(&rects,i,rects[i],canvas::GAP);
+            let solved = canvas::solve(&rects,i,rects[i],self.person.canvas_gap);
             for ((space,r),old) in doc.spaces.iter_mut().zip(&solved).zip(&rects) {
                 for (cell,m) in cells.iter_mut().zip(&members) {
                     if m.as_deref()==Some(&space.space) { cell[0]+=r[0]-old[0]; cell[1]+=r[1]-old[1]; }
@@ -453,7 +474,7 @@ impl AppWindow {
             self.command_error("Arrange", "Use tidy, row, column or wires", window, cx);
             return;
         }
-        self.canvas_state.end_drag();
+        self.end_canvas_drag(cx);
         let mut members = self.canvas_members();
         let doc = &self.canvas_state.doc;
         let count = doc.cards.len();
@@ -538,7 +559,7 @@ impl AppWindow {
 
     /// Restore the one geometry snapshot without changing terminal state.
     pub(super) fn undo_canvas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.canvas_state.end_drag();
+        self.end_canvas_drag(cx);
         if let Some(rest) = self.canvas_state.undo.take() {
             let before = self.canvas_state.doc.clone();
             rest.restore(&mut self.canvas_state.doc);
@@ -983,11 +1004,12 @@ impl AppWindow {
         let state = &mut self.canvas_state;
         let Some(i) = state.doc.cards.iter().position(|c| c.sub.is_none() && c.terminal == addr) else { return };
         if state.doc.cards[i].size.is_some() == expand || (expand && (!self.live.contains_key(addr) || state.popped.contains_key(addr))) { return; }
-        state.end_drag();
+        self.end_canvas_drag(cx);
+        let state = &mut self.canvas_state;
         if state.shown.is_none() { state.shown = Some(state.doc.clone()); }
         if expand {
             let before = canvas::Rest::capture(&state.doc);
-            let body = crate::terminal::size_of_grid(EXPANDED_COLS, EXPANDED_ROWS, window);
+            let body = crate::terminal::size_of_grid(self.person.terminal_size[0], self.person.terminal_size[1], window);
             let z = state.doc.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
             // The 2 px is the frame around the body.
             state.doc.cards[i].size = Some([f32::from(body.width) + 2., f32::from(body.height) + canvas::HEADER + 2.]);
@@ -1997,7 +2019,7 @@ impl AppWindow {
                 if e.pressed_button.is_none()
                     && (this.canvas_state.drag.is_some() || this.canvas_state.space_drag.is_some() || this.canvas_state.preview_drag.is_some() || this.canvas_state.cell_resize.is_some())
                 {
-                    this.canvas_state.end_drag();
+                    this.end_canvas_drag(cx);
                     this.canvas_changed(cx);
                     cx.notify();
                     return;
@@ -2021,7 +2043,7 @@ impl AppWindow {
                 }
                 if let Some((path, resize, previous)) = this.canvas_state.preview_drag.clone() {
                     if e.pressed_button.is_none() {
-                        this.canvas_state.end_drag();
+                        this.end_canvas_drag(cx);
                         return;
                     }
                     let z = this.canvas_state.doc.camera.zoom;
@@ -2143,7 +2165,7 @@ impl AppWindow {
                             && this.canvas_state.doc.cards.iter().any(|c| c.sub.is_none() && &c.terminal == key) => Some(key.clone()),
                         _ => None,
                     };
-                    this.canvas_state.end_drag();
+                    this.end_canvas_drag(cx);
                     this.animate_camera(window, cx);
                     if let Some(key) = toggled {
                         this.expand_canvas_cell(&json!({"terminal":key}), window, cx);
@@ -2157,7 +2179,7 @@ impl AppWindow {
             .on_mouse_up(
                 MouseButton::Middle,
                 cx.listener(|this, _, window, cx| {
-                    this.canvas_state.end_drag();
+                    this.end_canvas_drag(cx);
                     this.animate_camera(window, cx);
                     cx.notify();
                 }),
@@ -2269,7 +2291,7 @@ impl AppWindow {
                                     }),
                                 ),
                         )
-                        .bg(c(&space.color).opacity(0.04))
+                        .bg(c(&space.color).opacity(self.person.space_fill))
                         .when(space.frame, |d| {
                             d.border_1().border_color(c(&space.color).opacity(0.4))
                         }),
@@ -2911,9 +2933,6 @@ impl AppWindow {
     }
 }
 
-/// The default columns and rows of a cell when it expands.
-const EXPANDED_COLS: u16 = 100;
-const EXPANDED_ROWS: u16 = 30;
 /// How long the zoom must be still before an expanded cell draws live text again.
 const ZOOM_REST: Duration = Duration::from_millis(160);
 
@@ -3184,5 +3203,52 @@ mod spacing_membership_tests {
         assert_eq!(cell_space(&model,&live,"grandchild").unwrap().id,"s");
         assert!(cell_space(&model,&live,"cycle").is_none());
         assert!(cell_space(&model,&live,"missing").is_none());
+    }
+}
+
+#[cfg(test)]
+mod settings_tests {
+    use super::{canvas, settings, point, px, TestAppContext, json};
+    use super::super::tests::{in_own_process, open_window, running_alone};
+    const TEST: &str = "window::canvas_view::settings_tests::drop_layout";
+
+    #[test]
+    fn drop_waits_for_release() { in_own_process(TEST); }
+
+    #[gpui::test]
+    fn drop_layout(cx: &mut TestAppContext) {
+        if !running_alone(TEST) { return; }
+        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
+        view.update_in(cx, |this, window, cx| {
+            this.person.canvas_push = settings::CanvasPush::Drop;
+            for resize in [false, true] {
+                this.canvas_state.doc.cards = serde_json::from_value(json!([
+                    {"terminal":"t1","rect":[0,0,200,100],"z":0,"size":[200,100]},
+                    {"terminal":"t2","rect":[400,0,200,100],"z":1,"size":[200,100]}
+                ])).unwrap();
+                this.begin_layout();
+                if resize {
+                    this.canvas_state.cell_resize = Some(("t1".into(), point(px(0.),px(0.))));
+                    this.canvas_state.doc.cards[0].size = Some([500.,100.]);
+                } else {
+                    this.canvas_state.drag = Some((Some("t1".into()), point(px(0.),px(0.))));
+                    this.canvas_state.doc.cards[0].rect[0] = 400.;
+                }
+                let neighbour = this.canvas_state.doc.cards[1].rect;
+                this.solve_layout(Some("t1"), None, cx);
+                assert_eq!(this.canvas_state.doc.cards[1].rect, neighbour);
+                this.end_canvas_drag(cx);
+                assert_ne!(this.canvas_state.doc.cards[1].rect, neighbour);
+                assert!(this.canvas_state.pending_layout.is_none());
+            }
+            // A click expansion has no active drag, so release solves immediately.
+            this.canvas_state.doc.cards[0].size = None;
+            this.live.insert("t1".into(), json!({}));
+            this.person.terminal_size = [140,45];
+            this.set_expanded("t1", true, window, cx);
+            let body = crate::terminal::size_of_grid(140,45,window);
+            assert_eq!(this.canvas_state.doc.cards[0].size, Some([f32::from(body.width)+2., f32::from(body.height)+canvas::HEADER+2.]));
+            assert!(this.canvas_state.pending_layout.is_none());
+        });
     }
 }
