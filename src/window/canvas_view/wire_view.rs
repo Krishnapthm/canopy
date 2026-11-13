@@ -18,7 +18,7 @@ pub(in crate::window) struct WireUi {
     hover: Option<String>,
     /// A wire being drawn: the cell it starts at, where it starts (world) and the pointer (window).
     drag: Option<(String, canvas::Point, Point<Pixels>)>,
-    selected: Option<(String, String)>,
+    pub(super) selected: Option<(String, String)>,
     pulses: HashMap<(String, String), Instant>,
     stats: HashMap<(String, String), Stat>,
     watch: Option<Task<()>>,

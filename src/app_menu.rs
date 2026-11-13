@@ -28,7 +28,7 @@ pub fn groups(view: &View) -> Vec<(&'static str, Vec<Value>)> {
             json!(["Zoom In", "canvas.zoom_in", {}]),
             json!(["Zoom Out", "canvas.zoom_out", {}]),
             json!(["Actual Size", "canvas.zoom_reset", {}]),
-            json!(["Fit All", "canvas.fit", {}]),
+            json!(["Focus Space / Previous View", "canvas.fit", {}]),
             Value::Null,
             json!(["Command Palette", "app.palette", {}]),
         ]),

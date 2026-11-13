@@ -150,7 +150,7 @@ fn fixture(populated: bool, props: Value) -> BTreeMap<String, Value> {
         ("window".into(), json!({"platform":"linux","titlebar":"none","buttons":true,"maximized":false,"fullscreen":false,"active":true})),
         ("placement".into(), Value::Null),
         ("home".into(), json!("/fixture")), ("appHome".into(), json!("/fixture/app")),
-        ("keys".into(), Value::Array(serde_json::from_str::<BTreeMap<String, BTreeMap<String, String>>>(include_str!("../../defaults/keys.json")).unwrap().into_iter().flat_map(|(section, bindings)| bindings.into_iter().map(move |(keys, action)| json!({"section":section,"keys":keys,"action":action}))).collect())),
+        ("keys".into(), Value::Array(serde_json::from_str::<BTreeMap<String, BTreeMap<String, Value>>>(include_str!("../../defaults/keys.json")).unwrap().into_iter().flat_map(|(section, bindings)| bindings.into_iter().map(move |(keys, action)| json!({"section":section,"keys":keys,"action":action.as_str().map(str::to_owned).unwrap_or_else(|| action.to_string())}))).collect())),
         ("commands".into(), Value::Array(crate::commands::COMMANDS.iter().map(|c| json!({"name":c.name,"about":c.about,"args":c.args.iter().map(|a| json!({"name":a.name,"required":a.required})).collect::<Vec<_>>()})).collect())),
     ]);
     if populated {
@@ -1022,9 +1022,15 @@ fn shipped_layouts_and_keys() {
         include_str!("../../defaults/keys.macos.json"),
     ] {
         crate::keys::parse(text).unwrap();
-        let sections: BTreeMap<String, BTreeMap<String, String>> = serde_json::from_str(text).unwrap();
+        let sections: BTreeMap<String, BTreeMap<String, Value>> = serde_json::from_str(text).unwrap();
         for bindings in sections.values() {
             for action in bindings.values() {
+                if let Some(value) = action.as_object() {
+                    let (name, args) = crate::keys::CommandBinding { value: value.clone() }.command().unwrap();
+                    assert!(crate::commands::missing(crate::commands::find(&name).unwrap(), &args).is_none());
+                    continue;
+                }
+                let action = action.as_str().unwrap();
                 let name = action.split(':').next().unwrap();
                 if let Some(command) = crate::commands::find(name) {
                     let args = match action.split_once(':') {

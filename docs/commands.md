@@ -53,7 +53,79 @@ No arguments.
 
 ## `canvas.fit`
 
-Fit all spaces and cards.
+Fit the current space in the visible canvas; repeat to restore the previous camera.
+
+No arguments.
+
+## `canvas.mode`
+
+Enter canvas mode: its keys take priority and unbound keys are swallowed until Enter or Escape.
+
+No arguments.
+
+## `canvas.leave`
+
+Cancel a keyboard connection, or leave canvas mode with selection unchanged.
+
+No arguments.
+
+## `canvas.enter`
+
+Complete a keyboard connection, or expand the selected cell and leave canvas mode.
+
+No arguments.
+
+## `canvas.go`
+
+Select the nearest shown cell left, right, up or down without expanding it.
+
+| Argument | Required |
+|---|---|
+| `direction` | yes |
+
+## `canvas.space`
+
+Select the next or prev canvas space and its first shown cell.
+
+| Argument | Required |
+|---|---|
+| `direction` | yes |
+
+## `canvas.collapse`
+
+Collapse the selected terminal cell.
+
+No arguments.
+
+## `canvas.connect`
+
+Start a keyboard connection from the selected cell; move to the other cell and press Enter.
+
+No arguments.
+
+## `canvas.thread`
+
+Open the selected wire thread, or the first wire of the selected cell.
+
+No arguments.
+
+## `canvas.nudge`
+
+Move the selected cell left, right, up or down by one canvas gap, with one undo step.
+
+| Argument | Required |
+|---|---|
+| `direction` | yes |
+
+## `canvas.new`
+
+Create a terminal beside the selected cell, in its space.
+
+No arguments.
+
+## `canvas.agents`
+
+Open the installed agent list beside the selected cell.
 
 No arguments.
 

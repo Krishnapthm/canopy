@@ -4,9 +4,14 @@ use crate::canvas::{self, Document, PILL_WIDTH};
 use gpui::AnimationExt as _;
 
 mod wire_view;
+mod keyboard;
 
 pub(super) struct State {
     pub doc: Document,
+    pub(super) mode: bool,
+    connecting: Option<String>,
+    /// The camera before a focus fit and the camera that fit produced.
+    previous_camera: Option<(canvas::Camera, canvas::Camera)>,
     rest: Option<canvas::Rest>,
     undo: Option<canvas::Rest>,
     shown: Option<Document>,
@@ -78,6 +83,9 @@ impl State {
         };
         Self {
             doc,
+            mode: false,
+            connecting: None,
+            previous_camera: None,
             rest: None,
             undo: None,
             shown: None,
@@ -118,6 +126,12 @@ impl State {
             wire: Default::default(),
         }
     }
+    /// The requested camera before animation finishes, for keyboard integration tests.
+    #[cfg(test)]
+    pub(super) fn motion_target_for_test(&self) -> canvas::Camera {
+        self.motion.target.unwrap().1
+    }
+
     /// End any drag, returning whether geometry was committed.
     pub(super) fn end_drag(&mut self) -> bool {
         let mut changed = false;
@@ -719,13 +733,13 @@ impl AppWindow {
         }
     }
     pub(super) fn panel_mods(&self) -> Vec<(String, Instance)> {
-        if !self.has_canvas()
-            || (self.canvas_state.file.is_none() && !self.canvas_state.files)
-        {
-            return vec![];
-        }
-        let root = self.panel_root();
+        if !self.has_canvas() { return vec![]; }
         let mut slots = vec![];
+        if self.canvas_state.mode {
+            slots.push(("canvas-keys".into(), Instance { name: "canvas-keys".into(), props: json!({"connecting":self.canvas_state.connecting.is_some()}) }));
+        }
+        if self.canvas_state.file.is_none() && !self.canvas_state.files { return slots; }
+        let root = self.panel_root();
         if !self.canvas_state.doc.panel.tree_hidden {
             slots.push((
                 "canvas-tree".into(),
@@ -1006,7 +1020,7 @@ impl AppWindow {
         self.canvas_changed(cx);
         if expand && let Some(p) = self.model.pane_of(addr) { self.model.focus_pane(&p); }
         self.sync(window, cx);
-        match self.terms.get(&cell_slot(addr)).filter(|_| expand) {
+        match self.terms.get(&cell_slot(addr)).filter(|_| expand && !self.canvas_state.mode) {
             Some(t) => t.focus.focus(window, cx),
             None => self.focus.focus(window, cx),
         }
@@ -1097,7 +1111,7 @@ impl AppWindow {
                     let world = to.to_world(anchor);
                     state.doc.camera = canvas::Camera { x: f[0]+(world[0]-f[0])*a-anchor[0]/zoom, y: f[1]+(world[1]-f[1])*a-anchor[1]/zoom, zoom };
                     active = t < 1.;
-                    if !active { state.motion.target = None; }
+                    if !active { state.doc.camera = to; state.motion.target = None; }
                 } else if state.drag.is_none() {
                     let dt = state.motion.sample.map(|t| now.duration_since(t).as_secs_f32()).unwrap_or(0.016).min(0.05);
                     state.motion.sample = Some(now);
@@ -1712,26 +1726,19 @@ impl AppWindow {
             f32::from(bounds.size.width) / 2.,
             f32::from(bounds.size.height) / 2.,
         ];
+        let current = self.keyboard_space();
         let fit_rects = if name == "canvas.fit" {
-            self.canvas_state
-                .doc
-                .spaces
-                .iter()
-                .map(|s| s.rect)
-                .chain(
-                    self.canvas_state
-                        .doc
-                        .cards
-                        .iter()
-                        .map(|c| self.pill_rect(c, cx)),
-                )
-                .chain(self.canvas_state.doc.previews.iter().map(|p| p.rect))
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
+            let doc = &self.canvas_state.doc;
+            match current.as_deref().and_then(|id| doc.spaces.iter().find(|s| s.space == id)) {
+                Some(space) => vec![space.rect],
+                None => doc.cards.iter().filter(|c| doc.space_of(&c.key()).is_none()).map(|c| self.pill_rect(c, cx))
+                    .chain(doc.previews.iter().filter(|p| canvas::space_at(&doc.spaces,
+                        [p.rect[0] + p.rect[2] / 2., p.rect[1] + p.rect[3] / 2.]).is_none()).map(|p| p.rect)).collect(),
+            }
+        } else { vec![] };
         let from = self.canvas_state.doc.camera;
         let state = &mut self.canvas_state;
+        if let Some((_, target, ..)) = state.motion.target { state.doc.camera = target; }
         match name {
             "view.agents" | "view.all" | "view.terminals" => {
                 state.doc.view = match name {
@@ -1753,10 +1760,8 @@ impl AppWindow {
             }
             "canvas.zoom_reset" => state.doc.camera.zoom_at(1., anchor),
             "canvas.fit" => {
-                state
-                    .doc
-                    .camera
-                    .fit(&fit_rects, [anchor[0] * 2., anchor[1] * 2.]);
+                canvas::focus_fit(&mut state.doc.camera, &mut state.previous_camera,
+                    &fit_rects, [anchor[0] * 2., anchor[1] * 2.]);
             }
             _ => state
                 .doc
@@ -2536,13 +2541,22 @@ impl AppWindow {
                 let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.terminal);
                 t.view.update(cx, |v, cx| v.set_scale(z, (!resizing).then_some(body_size), cx));
             }
-            let (select_addr, resize_addr) = (card.terminal.clone(), card.terminal.clone());
+            let (select_addr, resize_addr, mode_addr) = (card.terminal.clone(), card.terminal.clone(), card.terminal.clone());
             let body = div()
                 .id(SharedString::from(format!("canvas-body-{}", card.terminal)))
                 .flex_1()
                 .min_h_0()
                 .w_full()
                 .overflow_hidden()
+                .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    if this.canvas_state.mode && e.button == MouseButton::Left {
+                        // Keep native text composition on the canvas too, before the terminal can take focus.
+                        this.canvas_state.selected = vec![mode_addr.clone()];
+                        this.focus.focus(window, cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                    }
+                }))
                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, _, cx| {
                     // The terminal took the focus; the cell is the one selected, and the canvas does not pan.
                     this.canvas_state.selected = vec![select_addr.clone()];
@@ -2632,7 +2646,14 @@ impl AppWindow {
                     }
                 })),
         );
+        tabs = tabs.child(panel_button("canvas-focus", "mods/pane/zoom.svg", c("foreground"), c("surface"))
+            .on_click(cx.listener(|this, _, window, cx| this.canvas_command("canvas.fit", window, cx))));
         area = area.child(tabs);
+        if state.mode {
+            area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(72.))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(self.render_slot("canvas-keys", cx)));
+        }
         let mut row = div()
             .size_full()
             .flex()

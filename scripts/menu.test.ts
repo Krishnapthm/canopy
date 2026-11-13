@@ -23,6 +23,7 @@ test("every canvas menu item passes only declared args, with the required ones",
   const card = { terminal: "t1", id: "tab1", popped: false };
   const menus = [
     { tab: "canvas-empty", target: empty },
+    { tab: "canvas-agents", target: empty },
     { tab: "canvas-empty", target: { ...empty, space: null, machine: null } },
     { tab: "canvas-editors", target: { path: "/tmp/file.rs", editors: [{ key: "vscode", name: "VS Code", icon: "icons/program.svg" }] } },
     { tab: "canvas-space", target: { id: "s1" } },
@@ -96,4 +97,35 @@ test("confirm forwards the terminal opt-out only when the dialog offers it", asy
   current = { command: { name: "canvas.close", args: { terminal: "t1", confirmed: "agent" } } };
   confirm.yes();
   expect(sent.pop()).toEqual(["canvas.close", { terminal: "t1", confirmed: "agent" }]);
+});
+
+test("canvas hint bar reads rebound mode keys and distinguishes the layout picker", async () => {
+  const source = (await readFile(new URL("../defaults/mods/canvas-keys/main.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\n/gm, "").replace("export default class CanvasKeys", "class CanvasKeys");
+  const shown: string[] = [];
+  const element: unknown = new Proxy({}, { get: (_, name) => (...args: unknown[]) => {
+    if (name === "child" && typeof args[0] === "string") shown.push(args[0]);
+    return element;
+  } });
+  const Hint = new Function("View", "div", "v_flex", "keys", "props", "theme", `${source}; return CanvasKeys;`)(class {}, () => element, () => element, () => [
+    {section:"global", keys:"q", action:"app.quit"},
+    {section:"canvas-mode", keys:"z", action:"canvas.new"},
+    {section:"canvas-mode", keys:"b", action:"{}"},
+    {section:"canvas-mode", keys:"shift-z", action:JSON.stringify({command:"canvas.arrange",args:{picker:true}})},
+  ], () => ({connecting:true}), () => ({}));
+  new Hint().render();
+  expect(shown).toContain("z new terminal");
+  expect(shown).toContain("b invalid binding");
+  expect(shown).toContain("shift-z layout picker");
+  expect(shown.some(s => s.includes("Connect:"))).toBe(true);
+  expect(shown.some(s => s.includes("app.quit"))).toBe(false);
+});
+
+test("full key help names object bindings without splitting their JSON", async () => {
+  const source = (await readFile(new URL("../defaults/mods/help/main.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\n/gm, "").replace("export default class Help", "class Help");
+  const label = new Function("View", `${source}; return label;`)(class {});
+  expect(label('{"command":"canvas.arrange","args":{"picker":true}}')).toBe("choose canvas layout");
+  expect(label("canvas.go:left")).toBe("canvas go left");
+  expect(label('{}')).toBe("invalid binding");
 });
