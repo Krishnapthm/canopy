@@ -13,9 +13,12 @@ pixels from its neighbours (default 24). Spaces keep the same gap from each othe
   canvas to clear the selection.
 - Right-click a space, a cell or empty canvas: **Arrange** repeats the last
   layout, hovering **Arrange as** opens a submenu beside it to pick one
-  (submenus open on hover; → and ← work too). **Tidy** is a grid in reading order, **Row**
+  (submenus open on hover; → and ← work too). **Tidy** is a grid in reading order with wired cells kept next to each other, **Row**
   and **Column** line cells up, **By wires** puts parents left of their
   children and sub-agents. The choice is saved in `canvas.json`.
+- Edges run straight with rounded bends, leave and enter at whichever sides
+  give the shortest path, and go around other cells. They draw above cells, so
+  an edge stays visible even when no clear path exists.
 - Arrange works on the selected cells of one space (the space of the cell you
   selected last), otherwise on the current space. A space menu always arranges
   that space.

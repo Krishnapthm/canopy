@@ -209,7 +209,8 @@ pub fn grow(space: Rect, cells: &[Rect]) -> Rect {
 }
 
 /// Arrange cells in reading order, or breadth-first parent layers, preserving their sizes.
-pub fn arrange(rects: &[Rect], parents: &[Option<usize>], layout: &str) -> Vec<Rect> {
+/// Cells joined by `links` (wires, either way) come together, connected groups first.
+pub fn arrange(rects: &[Rect], parents: &[Option<usize>], links: &[(usize, usize)], layout: &str) -> Vec<Rect> {
     let gap = crate::settings::get().canvas_gap;
     let Some(bounds) = union(rects) else {
         return vec![];
@@ -221,6 +222,7 @@ pub fn arrange(rects: &[Rect], parents: &[Option<usize>], layout: &str) -> Vec<R
             .then(rects[*a][0].total_cmp(&rects[*b][0]))
             .then(a.cmp(b))
     });
+    let order = connected_first(&order, links);
     let mut layers = vec![None; rects.len()];
     let mut queue = std::collections::VecDeque::new();
     if layout == "wires" {
@@ -418,18 +420,124 @@ pub fn free_spot(space: Rect, occupied: &[Rect], size: Point) -> Rect {
     }
     unreachable!()
 }
-pub fn edge_ends(parent: Rect, child: Rect) -> (Point, Point) {
-    if child[0] < parent[0] {
-        (
-            [parent[0], parent[1] + parent[3] / 2.],
-            [child[0] + child[2], child[1] + child[3] / 2.],
-        )
-    } else {
-        (
-            [parent[0] + parent[2], parent[1] + parent[3] / 2.],
-            [child[0], child[1] + child[3] / 2.],
-        )
+/// `order` regrouped so linked cells sit next to each other: each connected group
+/// breadth-first from its first cell, groups in `order`, then the unlinked cells.
+fn connected_first(order: &[usize], links: &[(usize, usize)]) -> Vec<usize> {
+    let linked = |i: usize| links.iter().any(|(a, b)| *a == i || *b == i);
+    let mut out: Vec<usize> = vec![];
+    for seed in order.iter().copied().filter(|i| linked(*i)) {
+        if out.contains(&seed) { continue; }
+        let mut queue = std::collections::VecDeque::from([seed]);
+        out.push(seed);
+        while let Some(i) = queue.pop_front() {
+            for j in order.iter().copied() {
+                if !out.contains(&j) && links.iter().any(|l| *l == (i, j) || *l == (j, i)) {
+                    out.push(j);
+                    queue.push_back(j);
+                }
+            }
+        }
     }
+    out.extend(order.iter().copied().filter(|i| !linked(*i)));
+    out
+}
+
+/// How far an edge leaves a cell before it turns, and how far it keeps from other cells.
+const EDGE_PAD: f32 = 16.;
+
+/// An orthogonal edge from `a` to `b`: it leaves and enters at whichever sides make the
+/// shortest clear path, and goes around `others`. When no candidate is clear the cheapest
+/// is kept; the canvas paints edges above cells, so it still shows.
+/// shortcut: tries the two L shapes and Z shapes through the middle and along each cell's
+/// padded edges, not a full pathfinder; upgrade if dense canvases still cross cells.
+pub fn route(a: Rect, b: Rect, others: &[Rect]) -> Vec<Point> {
+    let side = |r: Rect, s: usize| -> (Point, Point) {
+        match s {
+            0 => ([r[0] + r[2] / 2., r[1]], [0., -1.]),
+            1 => ([r[0] + r[2], r[1] + r[3] / 2.], [1., 0.]),
+            2 => ([r[0] + r[2] / 2., r[1] + r[3]], [0., 1.]),
+            _ => ([r[0], r[1] + r[3] / 2.], [-1., 0.]),
+        }
+    };
+    // Only cells near the pair can be in the way.
+    let near = union(&[a, b]).map(|u| [u[0] - 200., u[1] - 200., u[2] + 400., u[3] + 400.]).unwrap();
+    let others: Vec<Rect> = others.iter().copied().filter(|r| *r != a && *r != b && intersects(*r, near)).collect();
+    let mut best: Option<(f32, Vec<Point>)> = None;
+    for sa in 0..4 {
+        for sb in 0..4 {
+            let ((pa, na), (pb, nb)) = (side(a, sa), side(b, sb));
+            let s = [pa[0] + na[0] * EDGE_PAD, pa[1] + na[1] * EDGE_PAD];
+            let e = [pb[0] + nb[0] * EDGE_PAD, pb[1] + nb[1] * EDGE_PAD];
+            let mut xs = vec![(s[0] + e[0]) / 2.];
+            let mut ys = vec![(s[1] + e[1]) / 2.];
+            for r in others.iter().chain([&a, &b]) {
+                xs.extend([r[0] - EDGE_PAD, r[0] + r[2] + EDGE_PAD]);
+                ys.extend([r[1] - EDGE_PAD, r[1] + r[3] + EDGE_PAD]);
+            }
+            let mids = [vec![[s[0], e[1]]], vec![[e[0], s[1]]]].into_iter()
+                .chain(xs.iter().map(|x| vec![[*x, s[1]], [*x, e[1]]]))
+                .chain(ys.iter().map(|y| vec![[s[0], *y], [e[0], *y]]));
+            for mid in mids {
+                let mut path = vec![pa, s];
+                path.extend(mid);
+                path.extend([e, pb]);
+                path.dedup();
+                let cost = route_cost(&path, a, b, &others);
+                if best.as_ref().is_none_or(|(c, _)| cost < *c) { best = Some((cost, path)); }
+            }
+        }
+    }
+    best.map(|(_, p)| p).unwrap_or_default()
+}
+
+/// Length, plus a little per bend, plus a lot per cell crossed or turn back on itself.
+fn route_cost(path: &[Point], a: Rect, b: Rect, others: &[Rect]) -> f32 {
+    let mut cost = 0.;
+    let last = path.len() - 1;
+    for (i, w) in path.windows(2).enumerate() {
+        let (p, q) = (w[0], w[1]);
+        cost += (q[0] - p[0]).abs() + (q[1] - p[1]).abs();
+        // The stubs touch their own cell; the rest may touch neither end.
+        let ends: &[Rect] = if i == 0 { &[b] } else if i + 1 == last { &[a] } else { &[a, b] };
+        cost += 10_000. * others.iter().chain(ends).filter(|r| segment_hits(p, q, **r)).count() as f32;
+        if i > 0 {
+            let o = path[i - 1];
+            let dot = (p[0] - o[0]) * (q[0] - p[0]) + (p[1] - o[1]) * (q[1] - p[1]);
+            cost += if dot < 0. { 1_000. } else if dot == 0. { 24. } else { 0. };
+        }
+    }
+    cost
+}
+
+/// Whether an axis-aligned segment passes through a rect's inside.
+fn segment_hits(p: Point, q: Point, r: Rect) -> bool {
+    let (x0, x1, y0, y1) = (p[0].min(q[0]), p[0].max(q[0]), p[1].min(q[1]), p[1].max(q[1]));
+    x1 > r[0] + 0.5 && x0 < r[0] + r[2] - 0.5 && y1 > r[1] + 0.5 && y0 < r[1] + r[3] - 0.5
+}
+
+/// The point `t` (0 to 1) of the way along a path, by length.
+pub fn along(path: &[Point], t: f32) -> Point {
+    let lens: Vec<f32> = path.windows(2).map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt()).collect();
+    let mut left = lens.iter().sum::<f32>() * t.clamp(0., 1.);
+    for (w, len) in path.windows(2).zip(&lens) {
+        if left <= *len && *len > 0. {
+            let k = left / len;
+            return [w[0][0] + (w[1][0] - w[0][0]) * k, w[0][1] + (w[1][1] - w[0][1]) * k];
+        }
+        left -= len;
+    }
+    path.last().copied().unwrap_or_default()
+}
+
+/// How far a point is from a path.
+pub fn path_distance(path: &[Point], p: Point) -> f32 {
+    path.windows(2).map(|w| {
+        let (a, b) = (w[0], w[1]);
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let len2 = d[0] * d[0] + d[1] * d[1];
+        let k = if len2 > 0. { (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / len2).clamp(0., 1.) } else { 0. };
+        ((a[0] + d[0] * k - p[0]).powi(2) + (a[1] + d[1] * k - p[1]).powi(2)).sqrt()
+    }).fold(f32::INFINITY, f32::min)
 }
 pub fn visible(camera: Camera, rect: Rect, viewport: Point) -> bool {
     let p = camera.to_world([0., 0.]);
@@ -713,17 +821,9 @@ impl Document {
     }
 }
 
-pub fn edge_visible(camera: Camera, (a, b): (Point, Point), viewport: Point) -> bool {
-    visible(
-        camera,
-        [
-            a[0].min(b[0]) - 3.,
-            a[1].min(b[1]) - 3.,
-            (a[0] - b[0]).abs() + 6.,
-            (a[1] - b[1]).abs() + 6.,
-        ],
-        viewport,
-    )
+pub fn edge_visible(camera: Camera, path: &[Point], viewport: Point) -> bool {
+    let rects: Vec<Rect> = path.iter().map(|p| [p[0] - 3., p[1] - 3., 6., 6.]).collect();
+    union(&rects).is_some_and(|r| visible(camera, r, viewport))
 }
 pub const COLORS: [&str; 8] = [
     "gray", "red", "orange", "yellow", "green", "teal", "blue", "purple",
@@ -794,16 +894,25 @@ mod tests {
         let rects = [[80.,30.,100.,40.],[0.,0.,70.,90.],[0.,50.,150.,60.],[0.,50.,30.,100.]];
         let parents = [None,Some(0),Some(0),Some(1)];
         for layout in ["tidy","row","column","wires"] {
-            let result = arrange(&rects,&parents,layout);
-            assert_eq!(result,arrange(&rects,&parents,layout));
+            let result = arrange(&rects,&parents,&[],layout);
+            assert_eq!(result,arrange(&rects,&parents,&[],layout));
             for i in 0..result.len() {
                 assert_eq!(&result[i][2..],&rects[i][2..]);
                 for j in 0..i { assert!(separated(result[i],result[j],GAP),"{layout}: {result:?}"); }
             }
             if layout == "wires" { assert!(result[0][0]<result[1][0] && result[1][0]<result[3][0]); assert_eq!(result[1][0],result[2][0]); }
         }
-        let cycle = arrange(&rects,&[Some(1),Some(0),Some(2),None],"wires");
+        let cycle = arrange(&rects,&[Some(1),Some(0),Some(2),None],&[],"wires");
         for i in 0..cycle.len() { for j in 0..i { assert!(separated(cycle[i],cycle[j],GAP)); } }
+    }
+
+    #[test]
+    fn tidy_puts_wired_cells_next_to_each_other() {
+        // Four in reading order; 0 is wired to 3, so 3 comes second, beside 0 in the 2-column grid.
+        let rects = [[0.,0.,100.,40.],[200.,0.,100.,40.],[0.,100.,100.,40.],[200.,100.,100.,40.]];
+        let out = arrange(&rects,&[None;4],&[(3,0)],"tidy");
+        assert_eq!(out[3][1],out[0][1]);
+        assert!(out[3][0] > out[0][0]);
     }
 
     #[test]
@@ -1060,18 +1169,25 @@ mod tests {
         );
     }
     #[test]
-    fn edge_joins_right_child() {
-        assert_eq!(
-            edge_ends([24., 24., 160., 36.], [264., 24., 160., 36.]),
-            ([184., 42.], [264., 42.])
-        );
+    fn route_picks_facing_sides() {
+        let side_by_side = route([24., 24., 160., 36.], [264., 24., 160., 36.], &[]);
+        assert_eq!((side_by_side[0], *side_by_side.last().unwrap()), ([184., 42.], [264., 42.]));
+        // A cell straight below joins bottom to top, whichever way the wire was drawn.
+        let below = route([0., 300., 100., 40.], [0., 0., 100., 40.], &[]);
+        assert_eq!((below[0], *below.last().unwrap()), ([50., 300.], [50., 40.]));
     }
     #[test]
-    fn edge_mirrors_for_left_child() {
-        assert_eq!(
-            edge_ends([264., 24., 160., 36.], [24., 24., 160., 36.]),
-            ([264., 42.], [184., 42.])
-        );
+    fn route_goes_around_a_cell_in_the_way() {
+        let (a, b, block) = ([0., 0., 100., 40.], [400., 0., 100., 40.], [180., -40., 140., 120.]);
+        let path = route(a, b, &[block]);
+        assert!(path.windows(2).all(|w| !segment_hits(w[0], w[1], block)), "{path:?}");
+        assert!(path.windows(2).all(|w| w[0][0] == w[1][0] || w[0][1] == w[1][1]), "orthogonal: {path:?}");
+    }
+    #[test]
+    fn path_measures() {
+        let path = [[0., 0.], [10., 0.], [10., 10.]];
+        assert_eq!(along(&path, 0.5), [10., 0.]);
+        assert_eq!(path_distance(&path, [5., 3.]), 3.);
     }
     #[test]
     fn free_spot_skips_occupied() {
@@ -1092,7 +1208,7 @@ mod tests {
     fn crossing_curve_is_kept() {
         assert!(edge_visible(
             Camera::default(),
-            ([-1000., 200.], [2000., 200.]),
+            &[[-1000., 200.], [2000., 200.]],
             [800., 600.]
         ));
     }

@@ -542,7 +542,12 @@ impl AppWindow {
                     .and_then(|p| indices.iter().position(|j| ids[*j] == p))
             })
             .collect();
-        let arranged = canvas::arrange(&rects, &parents, &layout);
+        // Drawn wires and born parents both keep cells together.
+        let at = |key: &str| indices.iter().position(|j| ids[*j] == key);
+        let links: Vec<_> = doc.wires.iter().filter_map(|w| Some((at(&w.a)?, at(&w.b)?)))
+            .chain(parents.iter().enumerate().filter_map(|(i, p)| Some((i, (*p)?))))
+            .collect();
+        let arranged = canvas::arrange(&rects, &parents, &links, &layout);
         let before = self.canvas_state.doc.clone();
         self.canvas_state.undo = Some(canvas::Rest::capture(&before));
         for (i, r) in indices.iter().zip(arranged) {
@@ -2353,7 +2358,6 @@ impl AppWindow {
             }
         }
         let (edge_layer, edge_marks) = self.wire_layer(viewport, cx);
-        area = area.child(edge_layer).children(edge_marks);
         let mut pills = Vec::new();
         for (parent, sub, card) in sub_pills {
             let rect = card.rect;
@@ -2606,7 +2610,8 @@ impl AppWindow {
         }
         pills.sort_by_key(|(z, _)| *z);
         for (_, pill) in pills { area = area.child(pill); }
-        area = area.children(self.wire_handles(cx));
+        // Edges paint above cells: they route around them, and stay visible when they cannot.
+        area = area.child(edge_layer).children(edge_marks).children(self.wire_handles(cx));
         let mut tabs = div()
             .absolute()
             .top(px(12.))
