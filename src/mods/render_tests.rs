@@ -475,11 +475,12 @@ fn shipped_initial_descriptions(cx: &mut TestAppContext) {
 fn canvas_files_slots_describe_tree_and_viewer(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let staged = Staged::new();
-    for mode in ["tree", "viewer"] {
+    for mode in ["tree", "viewer", "editing"] {
         let tree = describe(cx, &staged, "mods/files", true,
-            json!({"canvas":mode,"root":"/fixture","file":if mode=="viewer" {Some("hello.rs")} else {None}}), None).unwrap();
+            json!({"canvas":if mode=="editing" {"viewer"} else {mode},"editing":mode=="editing","root":"/fixture","file":if mode!="tree" {Some("hello.rs")} else {None}}), None).unwrap();
         assert!(!tree.is_empty());
         if mode == "tree" { assert!(tree.contains("canvas-files-tree"), "{tree}"); }
+        if mode == "editing" { assert!(tree.contains("Save") && tree.contains("Done"), "{tree}"); }
     }
 }
 
@@ -615,6 +616,21 @@ fn confirm_dialog_background_follows_the_frame_corners(cx: &mut TestAppContext) 
     let tree = describe(cx, &staged, "mods/confirm", true, p, None).unwrap();
     let root = tree.lines().find(|l| l.contains(":id[Str(\"confirm\")]")).unwrap();
     assert!(root.contains(".rounded[Number(8.0)]"), "the dialog background must follow the frame's corners: {root}");
+}
+
+#[gpui::test]
+fn process_details_have_only_a_close_button(cx: &mut TestAppContext) {
+    cx.update(gpui_shell::init);
+    let staged = Staged::new();
+    let mut p = props();
+    p.as_object_mut().unwrap().remove("command");
+    p["title"] = json!("Helper");
+    p["detail"] = json!("helper exec review\n/tmp/work");
+    let tree = describe(cx, &staged, "mods/confirm", true, p, None).unwrap();
+    assert!(tree.contains("helper exec review"));
+    assert!(tree.contains("/tmp/work"));
+    assert!(tree.contains("Close"));
+    assert!(!tree.contains(":id[Str(\"yes\")]"));
 }
 
 #[gpui::test]

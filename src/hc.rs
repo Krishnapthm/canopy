@@ -464,7 +464,10 @@ impl Core {
     /// Starts a program in a new core terminal and returns its address (`tN`).
     /// Starts a terminal, here or on another machine (`on`: its name in `hc machine ls`).
     pub fn run(&self, argv: Vec<String>, cwd: Option<String>, labels: Value, on: Option<&str>, size: Option<(u16, u16)>, display: Value) -> Result<String> {
-        let env = json!({"TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "herdr"});
+        let mut env = json!({"TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "herdr"});
+        if on.is_none() && (argv.is_empty() || argv == [crate::window::shell()]) {
+            crate::programs::shell_env(&crate::window::shell(), &mut env);
+        }
         let mut params = json!({"argv": argv, "cwd": cwd, "env": env, "labels": labels, "on": on, "keep": true, "display": display});
         // Released cores ignore unknown parameters, including when forwarding to another machine.
         if let Some((cols, rows)) = size {
@@ -721,16 +724,26 @@ mod tests {
         let routes = core.routes.clone();
         let display = json!({"fg": "#25272c", "bg": "#ffffff", "cursor": "#25272c", "cell": [9, 18]});
         let expected = display.clone();
+        let shell = crate::window::shell();
+        let expected_shell = shell.clone();
         let peer = std::thread::spawn(move || {
-            let frame = frames.recv().unwrap();
-            let request: Value = serde_json::from_slice(&frame[HEADER..]).unwrap();
-            assert_eq!(request["method"], "terminal.run");
-            assert_eq!(request["params"]["size"], json!({"cols": 80, "rows": 24}));
-            assert_eq!(request["params"]["display"], expected);
-            routes.lock().unwrap().replies.remove(&request["id"].as_u64().unwrap()).unwrap()
-                .send(Ok(json!({"address": "t1"}))).unwrap();
+            for plain in [true, false, false] {
+                let frame = frames.recv().unwrap();
+                let request: Value = serde_json::from_slice(&frame[HEADER..]).unwrap();
+                assert_eq!(request["method"], "terminal.run");
+                assert_eq!(request["params"]["size"], json!({"cols": 80, "rows": 24}));
+                assert_eq!(request["params"]["display"], expected);
+                let env = &request["params"]["env"];
+                let name = std::path::Path::new(&expected_shell).file_name().unwrap().to_str().unwrap();
+                assert_eq!(env.get("ZDOTDIR").is_some(), plain && !cfg!(windows) && name == "zsh");
+                assert_eq!(env.get("XDG_DATA_DIRS").is_some(), plain && !cfg!(windows) && name == "fish");
+                routes.lock().unwrap().replies.remove(&request["id"].as_u64().unwrap()).unwrap()
+                    .send(Ok(json!({"address": "t1"}))).unwrap();
+            }
         });
-        assert_eq!(core.run(vec![], None, json!({}), None, Some((80, 24)), display).unwrap(), "t1");
+        for (argv, on) in [(vec![], None), (vec![], Some("remote")), (vec![shell, "-ic".into(), "agent".into()], None)] {
+            assert_eq!(core.run(argv, None, json!({}), on, Some((80, 24)), display.clone()).unwrap(), "t1");
+        }
         peer.join().unwrap();
     }
 

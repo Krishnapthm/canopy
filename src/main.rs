@@ -25,6 +25,7 @@ mod macos_check;
 mod mods;
 mod mod_files;
 mod process_cwd;
+mod subs;
 mod programs;
 mod remote_shell;
 mod settings;
@@ -49,6 +50,7 @@ Usage:
   canopy commands               every command, its arguments, what it does
   canopy status                 what the window shows, and any errors
   canopy shot [file.png]        save the last window frame (default: herdr-shot.png)
+  canopy hook sub-start|sub-stop  report a session hook (JSON on stdin, best effort)
   canopy check <mod folder>     load a mod once and report what's wrong
   canopy --skill                Agent Skill: driving the window, and where hc fits
   canopy --version
@@ -75,6 +77,10 @@ fn attach_console() {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).is_some_and(|s| s == "hook") {
+        subs::hook(args.get(2).map(String::as_str));
+        return;
+    }
     #[cfg(target_os = "macos")]
     macos_check::startup(&args);
     #[cfg(windows)]

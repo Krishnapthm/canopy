@@ -30,6 +30,8 @@ function items(p, git, agents) {
   // `machine` only picks which agents to list; canvas.create does not take it.
   const { machine: _, ...at } = tg;
   switch (p.tab) {
+    case "canvas-editors": return [["Open here", "panel.editor", { choice: "here", path: tg.path }, { icon: "mods/workspace-chrome/square-pen.svg", tint: true }],
+      ...(tg.editors ?? []).map(e => [`Open in ${e.name}`, "panel.editor", { choice: e.key, path: tg.path }, e])];
     case "canvas-empty": return [
       ["New terminal", "canvas.create", at],
       ["Open file...", "preview.open", { point: tg.point }],
@@ -44,6 +46,7 @@ function items(p, git, agents) {
       ["Delete space", "space.close", { id: tg.id }],
     ];
     case "canvas-colors": return ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"].map(color => [color, "canvas.space_style", { id: tg.id, color }]);
+    case "canvas-sub": return [["Message", "canvas.sub_message", { terminal: tg.terminal, id: tg.id }]];
     case "canvas-card": return [
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],

@@ -24,8 +24,10 @@ test("every canvas menu item passes only declared args, with the required ones",
   const menus = [
     { tab: "canvas-empty", target: empty },
     { tab: "canvas-empty", target: { ...empty, space: null, machine: null } },
+    { tab: "canvas-editors", target: { path: "/tmp/file.rs", editors: [{ key: "vscode", name: "VS Code", icon: "icons/program.svg" }] } },
     { tab: "canvas-space", target: { id: "s1" } },
     { tab: "canvas-colors", target: { id: "s1" } },
+    { tab: "canvas-sub", target: { terminal: "t1", id: "abc" } },
     { tab: "canvas-card", target: card },
     { tab: "canvas-card", target: { ...card, popped: true } },
   ];
@@ -55,5 +57,12 @@ test("the canvas menu lists installed agents under a label, with a note while ch
   const listed = items(menu, null, agents);
   expect(listed.slice(label(listed) + 1).map(([text, command, args]) => [text, command, args])).toEqual([
     ["Claude Code", "canvas.create", { point: [1, 2], space: "s1", argv: ["claude"] }],
+  ]);
+});
+
+
+test("hook children only offer Message", () => {
+  expect(items({ tab: "canvas-sub", target: { terminal: "t1", id: "abc" } })).toEqual([
+    ["Message", "canvas.sub_message", { terminal: "t1", id: "abc" }],
   ]);
 });

@@ -5,10 +5,13 @@ use gpui::AnimationExt as _;
 
 pub(super) struct State {
     pub doc: Document,
+    pub subs: HashMap<String, Vec<crate::subs::Sub>>,
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
     preview_drag: Option<(String, bool, Point<Pixels>)>,
     pub panel: Option<String>,
     pub file: Option<String>,
+    pub(super) editing: Option<String>,
+    editors: Vec<crate::programs::Editor>,
     pub tabs: Vec<String>,
     /// The folder button opened the panel for the file tree, with no tab needed.
     pub files: bool,
@@ -30,6 +33,9 @@ pub(super) struct State {
     rename: Option<(String, Entity<gpui_base::input::InputState>, Subscription)>,
     /// The preview text a quote popover was opened from, kept highlighted, and that popover's id.
     quote_mark: Option<(Entity<gpui_base::TextViewState>, String)>,
+    /// A finished selection waiting behind a small quote icon: the quote (with its
+    /// window `point`) and the TextView it came from, None for the Files code viewer.
+    quote_chip: Option<(Value, Option<Entity<gpui_base::TextViewState>>)>,
     /// The panel's terminal, file and tabs when it was closed, for the folder button to bring back.
     closed: Option<(Option<String>, Option<String>, Vec<String>)>,
 }
@@ -56,10 +62,13 @@ impl State {
         };
         Self {
             doc,
+            subs: HashMap::new(),
             previews: HashMap::new(),
             preview_drag: None,
             panel: None,
             file: None,
+            editing: None,
+            editors: Vec::new(),
             tabs: Vec::new(),
             files: false,
             popped: HashMap::new(),
@@ -78,6 +87,7 @@ impl State {
             motion: Motion::default(),
             rename: None,
             quote_mark: None,
+            quote_chip: None,
             closed: None,
         }
     }
@@ -120,6 +130,68 @@ impl Render for PopOut {
     }
 }
 impl AppWindow {
+    pub(super) fn refresh_sub_hooks(&mut self) {
+        self.canvas_state.subs = self.live.iter().filter(|(_, record)| record["state"] == "live")
+            .map(|(addr, record)| (addr.clone(), crate::subs::hooks(record))).collect();
+    }
+
+    pub(super) fn message_sub(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(addr) = a["terminal"].as_str() else { return };
+        let Some(sub) = self.canvas_state.subs.get(addr).into_iter().flatten()
+            .find(|s| s.transcript.is_some() && Some(s.id.as_str()) == a["id"].as_str()) else { return };
+        let text = format!("Message your sub-agent {} ({}): ", sub.name, sub.id);
+        self.paste_agent(addr.to_owned(), Value::String(text), window, cx);
+    }
+
+    pub(super) fn check_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let editors = crate::programs::editors();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx.background_executor().spawn(async move { crate::programs::installed_editors(editors) }).await;
+            let _ = this.update_in(cx, |this, _, cx| {
+                match result {
+                    Ok(editors) => this.canvas_state.editors = editors,
+                    Err(e) => this.canvas_state.error = Some(e),
+                }
+                cx.notify();
+            });
+        }).detach();
+    }
+
+    fn panel_editors(&self) -> Vec<crate::programs::Editor> {
+        if self.canvas_state.doc.panel.space.as_deref().and_then(|id| self.model.space(id)).is_some_and(|s| s.machine.is_some()) {
+            vec![]
+        } else { self.canvas_state.editors.clone() }
+    }
+
+    pub(super) fn panel_editor(&mut self, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.canvas_state.file.clone() else { return };
+        if args["path"].as_str().is_some_and(|p| p != path) { return; }
+        if args["done"].as_bool() == Some(true) {
+            self.canvas_state.editing = None;
+        } else {
+            let choice = args["choice"].as_str().unwrap_or("here");
+            if choice == "here" {
+                self.canvas_state.editing = Some(path.clone());
+            } else {
+                let Some(editor) = self.panel_editors().into_iter().find(|e| e.key == choice) else { return };
+                cx.spawn_in(window, async move |this, cx| {
+                    let result = cx.background_executor().spawn(async move {
+                        crate::spawn::command(&editor.argv[0]).args(&editor.argv[1..]).arg(&path)
+                            .stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()
+                    }).await;
+                    match result {
+                        Ok(mut child) => { std::thread::spawn(move || { let _ = child.wait(); }); }
+                        Err(e) => { let _ = this.update_in(cx, |this, window, cx| this.layout_notice("Editor", &format!("Could not open editor: {e}"), window, cx)); }
+                    }
+                }).detach();
+            }
+            self.canvas_state.doc.panel.editor = Some(choice.to_owned());
+            self.canvas_changed(cx);
+        }
+        self.sync(window, cx);
+        cx.notify();
+    }
+
     /// The folder of the space last clicked on the canvas.
     fn panel_root(&self) -> Option<String> {
         let space = self.canvas_state.doc.panel.space.as_deref()?;
@@ -161,11 +233,9 @@ impl AppWindow {
             ));
         }
         if let Some(path) = &self.canvas_state.file {
-            if !std::path::Path::new(path)
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+            if self.canvas_state.editing.as_ref() == Some(path) || !rendered(path)
             {
-                slots.push(("canvas-file".into(), Instance { name: "files".into(), props: json!({"canvas":"viewer","space":self.canvas_state.doc.panel.space,"root":std::path::Path::new(path).parent(),"file":std::path::Path::new(path).file_name().map(|p|p.to_string_lossy())}) }));
+                slots.push(("canvas-file".into(), Instance { name: "files".into(), props: json!({"canvas":"viewer","editing":self.canvas_state.editing.as_ref() == Some(path),"root":std::path::Path::new(path).parent(),"file":std::path::Path::new(path).file_name().map(|p|p.to_string_lossy())}) }));
             }
         }
         slots
@@ -267,10 +337,7 @@ impl AppWindow {
     fn load_previews(&mut self, cx: &mut Context<Self>) {
         let mut cards = self.canvas_state.doc.previews.clone();
         if let Some(path) = &self.canvas_state.file {
-            if std::path::Path::new(path)
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
-            {
+            if rendered(path) {
                 cards.push(canvas::Preview {
                     path: path.clone(),
                     rect: [0., 0., 0., 0.],
@@ -909,7 +976,10 @@ impl AppWindow {
         let (Some(path), Some(text)) = (a["path"].as_str(), a["text"].as_str()) else { return self.fail("quote needs path and text"); };
         if !std::path::Path::new(path).is_absolute() || text.is_empty() { return self.fail("quote needs an absolute path and non-empty text"); }
         if name == "quote.menu" {
-            self.quote_menu(a, window, cx);
+            // The selection stays live (copyable) until the person opens the menu from its icon.
+            self.clear_quote_mark(cx);
+            self.canvas_state.quote_chip = Some((a.clone(), None));
+            cx.notify();
             return;
         }
         if a.get("argv").is_some() && a.get("terminal").is_none() {
@@ -919,18 +989,21 @@ impl AppWindow {
             return;
         }
         let Some(addr) = a["terminal"].as_str().map(str::to_owned) else { return self.fail("quote.send needs terminal or argv"); };
-        let quote = a.clone();
+        self.paste_agent(addr, a.clone(), window, cx);
+    }
+
+    fn paste_agent(&mut self, addr: String, quote: Value, window: &mut Window, cx: &mut Context<Self>) {
         cx.spawn_in(window, async move |this, cx| {
             let started = Instant::now();
             let mut opened = false;
             loop {
                 let done = this.update_in(cx, |this, window, cx| {
                     if started.elapsed() >= Duration::from_secs(30) {
-                        this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":"Quote not sent: the agent did not get ready for a paste"}}), window, cx);
+                        this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":"Text not pasted: the agent did not get ready for a paste"}}), window, cx);
                         return true;
                     }
-                    let Some(rec) = this.live.get(&addr).filter(|rec| canvas_agent(rec)) else { return false };
-                    let text = format_quote(&quote, rec.pointer("/foreground/cwd").and_then(Value::as_str).or_else(|| rec["cwd"].as_str()));
+                    let Some(rec) = this.live.get(&addr).filter(|rec| canvas_agent(rec) || crate::programs::agent_program(&rec["program"])) else { return false };
+                    let text = quote.as_str().map(str::to_owned).unwrap_or_else(|| format_quote(&quote, rec.pointer("/foreground/cwd").and_then(Value::as_str).or_else(|| rec["cwd"].as_str())));
                     // Open once: the person may close the panel or pick another pill while the agent starts.
                     if !opened {
                         opened = true;
@@ -971,25 +1044,36 @@ impl AppWindow {
         id
     }
 
-    /// A finished selection in a preview TextView opens the quote popover at the
-    /// mouse-up point. The selection becomes a highlight, since any click (one on
-    /// the popover too) clears window text selections.
-    fn quote_selection(&mut self, path: &str, view: &Entity<gpui_base::TextViewState>, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+    /// A finished selection in a preview TextView shows the quote icon at the mouse-up
+    /// point; the selection stays live, so it can still be copied.
+    fn quote_selection(&mut self, path: &str, view: &Entity<gpui_base::TextViewState>, position: Point<Pixels>, _window: &mut Window, cx: &mut Context<Self>) {
         let text = view.read(cx).selected_text();
         if text.trim().is_empty() { return; }
-        let mut quote = if std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("md")) {
+        let mut quote = if rendered(path) {
             markdown_quote(path, &preview_source(path), &text)
         } else { code_quote(path, &text) };
         quote["point"] = json!({"x": f32::from(position.x), "y": f32::from(position.y)});
-        let range = view.read(cx).selected_source_range().and_then(|r| view.read(cx).rendered_text().range_for_source(r));
-        let id = self.quote_menu(&quote, window, cx);
         self.clear_quote_mark(cx);
-        let marked = range.is_some_and(|range| view.update(cx, |v, cx| {
-            let ok = v.set_range_highlights([gpui_base::RangeHighlight::new(range, c("selection"))], cx).is_ok();
-            if ok { v.clear_selection(cx); }
-            ok
-        }));
-        if marked { self.canvas_state.quote_mark = Some((view.clone(), id)); }
+        self.canvas_state.quote_chip = Some((quote, Some(view.clone())));
+        cx.notify();
+    }
+
+    /// Where the quote icon sits: just below and right of the mouse-up point.
+    fn quote_chip_bounds(quote: &Value) -> Option<Bounds<Pixels>> {
+        let p = &quote["point"];
+        Some(Bounds::new(point(px(p["x"].as_f64()? as f32 + 6.), px(p["y"].as_f64()? as f32 + 6.)), size(px(26.), px(26.))))
+    }
+
+    /// The quote icon, absolutely placed in the window.
+    pub(super) fn quote_chip_element(&self) -> Option<AnyElement> {
+        let bounds = Self::quote_chip_bounds(&self.canvas_state.quote_chip.as_ref()?.0)?;
+        Some(div().id("quote-chip").absolute().left(bounds.origin.x).top(bounds.origin.y).size(bounds.size.width)
+            .flex().items_center().justify_center().rounded(px(7.)).border_1().border_color(c("border")).bg(c("surface"))
+            .shadow_sm().cursor_pointer().hover(|d| d.bg(c("hover")))
+            // The press itself opens the menu (quote_press); nothing under the icon takes it.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(svg().path("mods/quote/text-quote.svg").size(px(14.)).text_color(c("foreground")))
+            .into_any_element())
     }
 
     fn clear_quote_mark(&mut self, cx: &mut Context<Self>) {
@@ -998,8 +1082,26 @@ impl AppWindow {
         }
     }
 
-    /// A left press anywhere drops the quote highlight, except inside its open popover.
-    pub(super) fn quote_press(&mut self, cx: &mut Context<Self>) {
+    /// A left press on the quote icon opens the quote menu there, marking the selection
+    /// first (the press would clear it). Any other press drops the icon, and the
+    /// highlight unless it lands in the open popover.
+    pub(super) fn quote_press(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some((quote, view)) = self.canvas_state.quote_chip.take() {
+            cx.notify();
+            if Self::quote_chip_bounds(&quote).is_some_and(|b| b.contains(&position)) {
+                let id = self.quote_menu(&quote, window, cx);
+                let marked = view.as_ref().is_some_and(|view| {
+                    let range = view.read(cx).selected_source_range().and_then(|r| view.read(cx).rendered_text().range_for_source(r));
+                    range.is_some_and(|range| view.update(cx, |v, cx| {
+                        let ok = v.set_range_highlights([gpui_base::RangeHighlight::new(range, c("selection"))], cx).is_ok();
+                        if ok { v.clear_selection(cx); }
+                        ok
+                    }))
+                });
+                if marked { self.canvas_state.quote_mark = Some((view.unwrap(), id)); }
+                return;
+            }
+        }
         if self.canvas_state.quote_mark.as_ref().is_some_and(|(_, id)| !self.overlays.iter().any(|o| &o.id == id)) {
             self.clear_quote_mark(cx);
         }
@@ -1579,7 +1681,7 @@ impl AppWindow {
                 card
             })
             .collect();
-        let edges: Vec<_> = cards
+        let mut edges: Vec<_> = cards
             .values()
             .filter_map(|(child, rect)| {
                 let parent = self.live.get(&child.terminal)?["parent"].as_str()?;
@@ -1588,6 +1690,24 @@ impl AppWindow {
                 canvas::edge_visible(camera, ends, viewport).then_some(ends)
             })
             .collect();
+        let mut sub_pills = Vec::new();
+        if state.doc.view != canvas::View::Terminals {
+            for (parent, subs) in &state.subs {
+                let Some((_, parent_rect)) = cards.get(parent.as_str()) else { continue };
+                let mut siblings: Vec<_> = cards.values().filter(|(card, _)| self.live.get(&card.terminal)
+                    .and_then(|r| r["parent"].as_str()) == Some(parent.as_str())).map(|(_, rect)| *rect).collect();
+                siblings.sort_by(|a, b| a[1].total_cmp(&b[1]));
+                let mut subs: Vec<_> = subs.iter().collect();
+                subs.sort_by_key(|s| s.id.as_str());
+                for sub in subs {
+                    let rect = canvas::child_position(*parent_rect, &siblings, [PILL_WIDTH, 36.]);
+                    siblings.push(rect);
+                    let ends = canvas::edge_ends(*parent_rect, rect);
+                    if canvas::edge_visible(camera, ends, viewport) { edges.push(ends); }
+                    if canvas::visible(camera, rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), rect)); }
+                }
+            }
+        }
         area = area.child(
             canvas(
                 |_, _, _| {},
@@ -1619,6 +1739,34 @@ impl AppWindow {
             .absolute()
             .size_full(),
         );
+        for (parent, sub, rect) in sub_pills {
+            let [x, y] = camera.to_screen([rect[0], rect[1]]);
+            let z = camera.zoom;
+            let (icon, tint) = program_icon(&json!({"program":sub.program}));
+            let mut pill = div().id(SharedString::from(format!("canvas-sub-{parent}-{}", sub.id)))
+                .absolute().left(px(x)).top(px(y)).w(px(rect[2] * z)).h(px(rect[3] * z))
+                .rounded(px(8. * z)).border_1().border_color(c("border")).bg(c("surface"))
+                .flex().items_start().px(px(12. * z)).py(px(9. * z)).gap(px(8. * z))
+                .text_size(px(13. * z)).line_height(px(18. * z)).text_color(c("foreground")).overflow_hidden()
+                .child(div().flex_none().mt(px(z)).child(icon_element(&icon, tint, px(16. * z), c("foreground"))));
+            let text = div().flex_1().min_w_0().child(div().text_ellipsis().when(sub.idle, |d| d.text_color(c("muted-foreground")))
+                .child(if sub.idle { format!("{} · idle", sub.name) } else { sub.name.clone() }));
+            pill = pill.child(text);
+            let click_sub = sub.clone();
+            pill = pill.on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
+                if let Some(path) = click_sub.transcript.as_ref().filter(|p| p.is_file()) {
+                    this.open_preview(json!({"path":path}), window, cx);
+                }
+                cx.stop_propagation();
+            }));
+            pill = pill.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                if sub.transcript.is_some() {
+                    this.open_menu("canvas-sub", json!({"terminal":parent,"id":sub.id}), Some(e.position), window, cx);
+                }
+                cx.stop_propagation();
+            }));
+            area = area.child(pill);
+        }
         let mut shown = shown;
         shown.sort_by_key(|c| c.z);
         for card in shown {
@@ -1942,7 +2090,7 @@ impl AppWindow {
                     state.file.is_none() && state.panel.as_ref() == Some(&tab)
                 };
                 let label = if is_file {
-                    std::path::Path::new(&tab).file_name().unwrap_or_default().to_string_lossy().into_owned()
+                    crate::subs::transcript_title(&tab).unwrap_or_else(|| std::path::Path::new(&tab).file_name().unwrap_or_default().to_string_lossy().into_owned())
                 } else {
                     self.pill_name(&tab)
                 };
@@ -2023,7 +2171,11 @@ impl AppWindow {
                 .unwrap_or_else(|| self.cwds.get(addr).map(String::as_str).unwrap_or(&name));
             let root = self.panel_root();
             // Outside the tree's folder, paths read from home.
-            let breadcrumb = canvas::breadcrumb(path, root.as_deref().filter(|r| std::path::Path::new(path).starts_with(r)).or(Some(&home())));
+            // A sub-agent reads as itself, not as a file in its agent's data folder.
+            let breadcrumb = match crate::subs::transcript_title(path) {
+                Some(_) => "Sub-agent · read-only".to_owned(),
+                None => canvas::breadcrumb(path, root.as_deref().filter(|r| std::path::Path::new(path).starts_with(r)).or(Some(&home()))),
+            };
             panel = panel.child(
                 div()
                     .flex()
@@ -2043,6 +2195,33 @@ impl AppWindow {
                             .text_color(c("muted-foreground"))
                             .child(breadcrumb),
                     )
+                    // An agent transcript is read, not edited.
+                    .when(state.file.as_ref().is_some_and(|f| !f.ends_with(".jsonl")), |d| {
+                        let editors = self.panel_editors();
+                        let choice = state.doc.panel.editor.as_deref()
+                            .filter(|key| *key == "here" || editors.iter().any(|e| e.key == *key))
+                            .unwrap_or_else(|| editors.first().map(|e| e.key.as_str()).unwrap_or("here"));
+                        let editor = editors.iter().find(|e| e.key == choice);
+                        let label = editor.map(|e| format!("Open in {}", e.name)).unwrap_or_else(|| "Open here".into());
+                        let icon = editor.map(|e| e.icon.clone()).unwrap_or_else(|| "mods/workspace-chrome/square-pen.svg".into());
+                        let tint = editor.is_none_or(|e| e.tint);
+                        let choice = choice.to_owned();
+                        let path = state.file.clone().unwrap();
+                        let menu_path = path.clone();
+                        d.child(div().flex().items_center().h(px(26.)).border_1().border_color(c("border")).rounded(px(7.)).overflow_hidden()
+                            .child(div().id("panel-editor").flex().items_center().gap(px(6.)).px(px(8.)).h_full().cursor_pointer()
+                                .text_size(px(12.)).text_color(c("foreground")).hover(|s| s.bg(c("hover")))
+                                .on_click(cx.listener(move |this, _, window, cx| this.panel_editor(&json!({"choice":choice,"path":path}), window, cx)))
+                                .child(icon_element(&icon, tint, px(14.), c("foreground"))).child(label))
+                            .child(div().id("panel-editor-menu").flex().items_center().justify_center().w(px(25.)).h_full()
+                                .border_l_1().border_color(c("border")).cursor_pointer().hover(|s| s.bg(c("hover")))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let editors: Vec<Value> = this.panel_editors().iter().map(|e| json!({"key":e.key,"name":e.name,"icon":e.icon,"tint":e.tint})).collect();
+                                    this.open_menu("canvas-editors", json!({"path":menu_path,"editors":editors}), None, window, cx);
+                                    this.check_editors(window, cx);
+                                }))
+                                .child(svg().path("mods/files/chevron-down.svg").size(px(12.)))))
+                    })
                     .when(state.file.is_some(), |d| {
                         d.child(
                             panel_button(
@@ -2113,9 +2292,7 @@ impl AppWindow {
                 .file
                 .as_ref()
                 .filter(|p| {
-                    std::path::Path::new(p)
-                        .extension()
-                        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+                    state.editing.as_ref() != Some(*p) && rendered(p)
                 })
                 .and_then(|p| state.previews.get(p))
             {
@@ -2239,8 +2416,17 @@ fn root_space(s: &model::Space) -> bool {
     s.name == "Canvas" && s.folder == home() && s.machine.is_none()
 }
 
+/// Files the panel shows through the inert markdown renderer: markdown, and JSONL
+/// (an agent transcript reads as a conversation).
+fn rendered(path: &str) -> bool {
+    std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("jsonl"))
+}
+
 fn preview_source(path: &str) -> String {
     match canvas::read_preview(std::path::Path::new(path)) {
+        Ok(text) if std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl")) => {
+            crate::subs::transcript_markdown(&text, path).unwrap_or_else(|| numbered_code(&text))
+        }
         Ok(text)
             if std::path::Path::new(path)
                 .extension()

@@ -811,23 +811,68 @@ fn run_remote_with_limit(machine: &str, command: &str, args: &[String], cwd: Opt
     Ok((code, bytes("stdout")?, bytes("stderr")?))
 }
 
-/// The agents a machine can start (`knownAgents()`), asked at most once a minute.
+/// The agents a machine can start (`knownAgents()`). Answers from the last check at
+/// once and re-checks in the background (the check runs a login shell: seconds);
+/// only the first ask for a machine, or after programs.json changes, waits for it.
 fn known_agents(on: Option<String>, list: Vec<Value>) -> Result<Value, String> {
     known_agents_with(on, list, crate::programs::installed)
 }
 
-fn known_agents_with(on: Option<String>, list: Vec<Value>, check: impl FnOnce(&[String], Option<&str>) -> Result<Vec<String>, String>) -> Result<Value, String> {
-    type InstalledCache = std::collections::HashMap<Option<String>, (std::time::Instant, Vec<String>, Vec<String>)>;
-    static SEEN: std::sync::Mutex<Option<InstalledCache>> = std::sync::Mutex::new(None);
-    let commands: Vec<String> = list.iter().filter_map(|a| a["run"][0].as_str().map(str::to_owned)).collect();
-    let cached = SEEN.lock().ok().and_then(|s| s.as_ref()?.get(&on).filter(|(at, checked, _)| at.elapsed().as_secs() < 60 && checked == &commands).map(|(_, _, v)| v.clone()));
-    let have = if let Some(cached) = cached { cached } else {
-        let found = check(&commands, on.as_deref())?;
-        if let Ok(mut s) = SEEN.lock() {
-            s.get_or_insert_with(std::collections::HashMap::new).insert(on.clone(), (std::time::Instant::now(), commands, found.clone()));
+/// Checks the local machine now, so the first menu does not wait. Call on the window thread.
+pub fn warm_known_agents() {
+    let list = crate::programs::startable();
+    std::thread::spawn(move || {
+        let _ = known_agents(None, list);
+    });
+}
+
+pub type Check = fn(&[String], Option<&str>) -> Result<Vec<String>, String>;
+// Per machine and command list: when it was checked and which were found.
+type InstalledCache = HashMap<(Option<String>, Vec<String>), (std::time::Instant, Vec<String>)>;
+static SEEN: std::sync::Mutex<Option<InstalledCache>> = std::sync::Mutex::new(None);
+// Held while a shell check runs, so concurrent asks share one shell.
+static CHECKING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn seen(on: &Option<String>, commands: &[String]) -> Option<(std::time::Instant, Vec<String>)> {
+    SEEN.lock().ok()?.as_ref()?.get(&(on.clone(), commands.to_vec())).cloned()
+}
+
+/// Runs the shell check unless another one is running (`wait`: wait for it instead) and records it.
+fn check_installed(on: &Option<String>, commands: &[String], check: Check, wait: bool) -> Result<Vec<String>, String> {
+    let _guard = if wait { CHECKING.lock().unwrap_or_else(|e| e.into_inner()) } else {
+        match CHECKING.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(Vec::new()),
         }
-        found
     };
+    // Asked only when none was recorded, so one now came from the check this waited for.
+    if let Some((_, found)) = seen(on, commands).filter(|_| wait) {
+        return Ok(found);
+    }
+    let found = check(commands, on.as_deref())?;
+    if let Ok(mut s) = SEEN.lock() {
+        s.get_or_insert_with(HashMap::new).insert((on.clone(), commands.to_vec()), (std::time::Instant::now(), found.clone()));
+    }
+    Ok(found)
+}
+
+/// Which of `commands` a machine has, from the last check when there is one (re-checked
+/// in the background once it is 30 s old). Blocks only for the first check. Any thread.
+pub fn installed_cached(on: Option<String>, commands: Vec<String>, check: Check) -> Result<Vec<String>, String> {
+    match seen(&on, &commands) {
+        Some((at, found)) => {
+            if at.elapsed().as_secs() >= 30 {
+                std::thread::spawn(move || check_installed(&on, &commands, check, false));
+            }
+            Ok(found)
+        }
+        None => check_installed(&on, &commands, check, true),
+    }
+}
+
+fn known_agents_with(on: Option<String>, list: Vec<Value>, check: Check) -> Result<Value, String> {
+    let commands: Vec<String> = list.iter().filter_map(|a| a["run"][0].as_str().map(str::to_owned)).collect();
+    let have = installed_cached(on, commands, check)?;
     Ok(Value::Array(
         list.into_iter()
             .map(|mut a| {
@@ -1253,32 +1298,35 @@ mod tests {
     }
 
     #[test]
-    fn known_agents_uses_snapshot_and_refreshes_changed_commands() {
+    fn known_agents_answers_from_the_last_check_and_rechecks_in_the_background() {
         let on = Some("known-agents-snapshot-test".to_owned());
         let snapshot = vec![json!({"key": "custom", "run": ["missing-agent"]})];
         let first = known_agents_with(on.clone(), snapshot, |commands, machine| {
-            assert_eq!(commands, &["missing-agent"]);
-            assert_eq!(machine, on.as_deref());
+            assert_eq!((commands, machine), (&["missing-agent".to_owned()][..], Some("known-agents-snapshot-test")));
             Ok(Vec::new())
         }).unwrap();
         assert_eq!(first[0]["run"], json!(["missing-agent"]));
         assert_eq!(first[0]["installed"], false);
-        let cached = known_agents_with(on.clone(), vec![json!({"key": "renamed", "run": ["missing-agent"]})], |_, _| panic!("unchanged commands must use the cache")).unwrap();
+        let cached = known_agents_with(on.clone(), vec![json!({"key": "renamed", "run": ["missing-agent"]})], |_, _| panic!("a fresh check must be reused")).unwrap();
         assert_eq!(cached[0]["key"], "renamed");
-        assert_eq!(cached[0]["installed"], false);
         let snapshot = vec![json!({"key": "custom", "run": ["fake-agent"]}), json!({"key": "custom-alt", "run": ["fake-agent"]})];
-        let called = std::cell::Cell::new(false);
-        let next = known_agents_with(on.clone(), snapshot, |commands, machine| {
-            called.set(true);
-            assert_eq!(commands, &["fake-agent", "fake-agent"]);
-            assert_eq!(machine, on.as_deref());
+        let next = known_agents_with(on.clone(), snapshot.clone(), |commands, _| {
+            assert_eq!(commands, &["fake-agent", "fake-agent"], "changed commands must check again");
             Ok(vec!["fake-agent".into()])
         }).unwrap();
-        assert!(called.get(), "changed commands must bypass the fresh cache");
-        assert_eq!(next.as_array().unwrap().len(), 2);
-        assert_eq!(next[0]["installed"], true);
         assert_eq!(next[1]["key"], "custom-alt");
         assert_eq!(next[1]["installed"], true);
+        // A stale answer comes back at once while a background check replaces it.
+        let old = std::time::Instant::now() - Duration::from_secs(31);
+        SEEN.lock().unwrap().as_mut().unwrap().insert((on.clone(), vec!["fake-agent".into(); 2]), (old, vec!["fake-agent".into()]));
+        let stale = known_agents_with(on.clone(), snapshot, |_, _| Ok(Vec::new())).unwrap();
+        assert_eq!(stale[0]["installed"], true);
+        let commands = vec!["fake-agent".to_owned(); 2];
+        let start = std::time::Instant::now();
+        while seen(&on, &commands).unwrap().1 != Vec::<String>::new() {
+            assert!(start.elapsed() < Duration::from_secs(5), "the background check never landed");
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]

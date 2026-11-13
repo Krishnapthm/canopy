@@ -1,5 +1,5 @@
 // Asks before something destructive, e.g. "Close space?". Opened as a
-// dialog with props { title, detail, command: { name, args } }.
+// dialog with props { title, detail, command?: { name, args } }.
 // Enter confirms (runs the command), Esc cancels.
 
 import { View, div } from "gpui-kit";
@@ -15,7 +15,7 @@ export default class Confirm extends View {
   yes() {
     const p = props();
     closeOverlay(p.overlay);
-    run(p.command.name, p.command.args ?? {});
+    if (p.command) run(p.command.name, p.command.args ?? {});
   }
 
   render(cx) {
@@ -46,8 +46,8 @@ export default class Confirm extends View {
           .justify_end()
           .gap(8)
           .text_size(12)
-          .child(button("no", "Cancel", t.raised, t.foreground, () => closeOverlay(props().overlay)))
-          .child(button("yes", "Confirm", t.solid, t.solid_foreground, () => this.yes())),
+          .child(button("no", p.command ? "Cancel" : "Close", t.raised, t.foreground, () => closeOverlay(props().overlay)))
+          .children(p.command ? [button("yes", "Confirm", t.solid, t.solid_foreground, () => this.yes())] : []),
       );
   }
 }

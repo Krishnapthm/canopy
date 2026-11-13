@@ -22,12 +22,51 @@ its terminals.
 
 ## Helpers the person can see
 
-Start another agent or a long job through hc from your terminal, not straight
-from your shell: `hc run --bg --name review -- <agent> <args>`. It becomes a
-child of your terminal, drawn as a pill joined to yours on the canvas. Wait with
-`hc wait --children all` (or `any` for the next news) and read it with
-`hc read <t>`. A program started directly from your shell has no terminal, so
-the person never sees it.
+When you start another coding agent as a helper, use
+`hc run --bg --name <name> -- <agent command and args>`, then `hc wait <name>`
+until it finishes, `hc read <name>` for its output, and
+`hc send <name> <text>` to message it. Do not start agent CLIs directly from
+your shell. Your core terminal is `$HC_TERMINAL_ID`; `canopy --skill` explains
+how to work with the window. Canopy gives agents this short note through
+per-session flags, without editing harness configuration.
+
+Helpers started through hc are real child terminals, joined to their parent
+on the canvas. The person can open them and send terminal input.
+Session hooks also report in-process helpers as child pills. A hook pill
+turns "idle" when its turn ends (it may still take messages) and goes with its
+parent terminal. Click it to open its transcript when the file exists. Its
+Message menu pastes `Message your sub-agent <agent_type> (<agent_id>): ` into
+the parent without Enter (`canvas.sub_message {terminal, id}`). Hook pills
+are observations, not terminals.
+
+## Agent flags and note in `programs.json`
+
+The built-in table supplies a top-level `note` string. A person's
+`programs.json` replaces it when `note` is set, including an empty string.
+An agent entry's `flags` are extra argv words appended to its `run` command;
+they merge like `run`. `{canopy}` expands to the shell-quoted absolute app
+binary, `{note}` to the plain note, and `{note_json}` to a JSON string literal
+(also a valid TOML basic string). JSON-shaped flag words are expanded as JSON
+so embedded quotes and newlines stay valid.
+
+Claude gets its per-session `--settings` hooks JSON followed by
+`--append-system-prompt` and the note. Codex gets
+`-c developer_instructions={note_json}`. This replaces any
+`developer_instructions` in the person's Codex config for Canopy-started
+Codex sessions only.
+
+Local menu launches receive the flags directly. In plain local zsh and fish
+terminals Canopy creates, typed agents receive the same flags through shell
+functions generated from `run` and `flags` under the app home's `shell/`.
+The function runs `command <run> <flags>` with the person's arguments. If
+those arguments already contain the first flag word (for example
+`--settings`), it passes them through without adding anything.
+The startup file restores the inherited `ZDOTDIR` or `XDG_DATA_DIRS` before
+children run; zsh sources the person's `.zshenv` and reads their remaining
+startup files normally. Canopy never edits the person's shell files.
+Remote terminals, bash, other shells and Windows have no typed-agent wrapper;
+remote and Windows menu launches also omit these flags.
+
 
 ## Show something when asked
 
@@ -200,8 +239,17 @@ The header shows a breadcrumb and a folder button toggles the right file tree,
 saved as `panel.tree_hidden` in canvas.json. The tree shows the folder of the space last
 clicked on the canvas (`panel.space`); clicking pills does not change it. File tabs have a pin
 button to place a canvas card. The Files mod supplies the bounded lazy tree and
-highlighted read-only code editor. Markdown uses the inert document renderer.
-Canvas cards retain their existing viewer, drag header and resize grip.
+highlighted code editor. Markdown uses the inert document renderer when read-only.
+File panel headers have an editor split button: the main button repeats the last choice,
+and its menu offers Open here and installed external editors (local files only).
+The choice is saved as `panel.editor` in canvas.json; initially it uses the first installed
+editor, or Open here. Editors come from programs.json `open` argv and macOS `app`.
+Open here edits in place, including markdown source, with highlighting. Save or cmd+s
+saves and keeps editing; Done saves pending edits and returns to the read-only view.
+Unsaved marks a draft. Switching tabs or closing the tab drops it without a dialog.
+Saves use `writeTextFile(path, text, expected)`; conflicts show inline and keep the draft.
+Canvas cards stay read-only with their existing viewer, drag header and resize grip;
+there is no card-header Edit button.
 Files follow folder watcher changes, show File deleted when missing, and never
 execute content or load remote images.
 

@@ -137,3 +137,54 @@ test("Files filter preserves folders for lazy expansion and matches names withou
   expect(matches({ dir: false, name: "other.rs" }, "main")).toBe(false);
   expect(matches({ dir: false, name: "other.rs" }, "")).toBe(true);
 });
+
+test("Files saves the snapshot, keeps conflicts and newer edits, and Done exits only a saved draft", async () => {
+  let disk = "original", draft = "draft", pending: Promise<void> | undefined;
+  const calls: unknown[] = [];
+  const Files = new Function("View", "writeTextFile", "run", source.slice(source.indexOf("export default class")).replace("export default ", "") + "; return Files;")(
+    class {},
+    async (path: string, text: string, expected: string) => {
+      expect(path).toBe("/fixture/hello.md");
+      if (disk !== expected) throw new Error("File changed outside Canopy");
+      disk = text;
+    },
+    (...args: unknown[]) => calls.push(args),
+  );
+  const files = new Files();
+  files.root = "/fixture"; files.file = "hello.md"; files.original = disk;
+  files.code = { value: () => draft };
+  const cx = { notify() {}, spawn(f: Function) { pending = f(cx); } };
+  files.save(false, cx); await pending;
+  expect(disk).toBe("draft"); expect(files.original).toBe("draft"); expect(calls).toEqual([]);
+  disk = "external"; draft = "my changes";
+  files.save(true, cx); await pending;
+  expect(files.saveError).toContain("changed outside");
+  expect(files.code.value()).toBe("my changes"); expect(files.original).toBe("draft");
+  expect(disk).toBe("external"); expect(calls).toEqual([]);
+  disk = "draft";
+  files.save(true, cx); draft = "newer changes"; await pending;
+  expect(files.original).toBe("my changes"); expect(calls).toEqual([]);
+  files.save(true, cx); await pending;
+  expect(disk).toBe("newer changes");
+  expect(calls).toEqual([["panel.editor", { done: true, path: "/fixture/hello.md" }]]);
+});
+
+test("Files edits full markdown source instead of the bounded read-only preview", async () => {
+  const text = "# Source\n" + "a".repeat(400001);
+  const options: any[] = [];
+  let editing = true, pending: Promise<void> | undefined;
+  const Files = new Function("View", "readTextFile", "theme", "settings", "EditorState", "props",
+    source.replace(/^import .*;\n/gm, "").replace("export default class", "class") + "; return Files;")(
+    class {}, async () => text, () => ({}), () => ({}),
+    { new(o: any) { options.push(o); return { on() {}, release() {} }; } }, () => ({ editing }),
+  );
+  const files = new Files();
+  files.root = "/fixture"; files.current = () => true;
+  const cx = { notify() {}, spawn(f: Function) { pending = f(cx); } };
+  files.show("notes.md", cx); await pending;
+  expect(options[0].language).toBe("markdown");
+  expect(options[0].readonly).toBe(false); expect(options[0].value).toBe(text);
+  editing = false;
+  files.show("notes.md", cx); await pending;
+  expect(options[1].readonly).toBe(true); expect(options[1].value).toContain("file truncated");
+});

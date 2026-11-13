@@ -1,7 +1,7 @@
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, props, run, nextCommand } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, nextCommand } from "herdr";
 
 function location() {
   if (props()?.canvas) return { cwd: props().root, on: null };
@@ -11,7 +11,7 @@ function location() {
   return { cwd: pane?.cwd || f?.cwd || space?.folder, on, space: space?.id };
 }
 const key = () => JSON.stringify(location());
-const LANG = { ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
+const LANG = { md: "markdown", mdx: "markdown", ts: "js", tsx: "js", mts: "js", cts: "js", jsx: "js", mjs: "js", toml: "yaml", jsonc: "json", svelte: "html", vue: "html" };
 const PER_FOLDER = 500, TOTAL = 5000, HITS = 200;
 const CODE = new Set(["c", "cc", "cpp", "cs", "css", "go", "h", "hpp", "html", "java", "js", "json", "jsonc", "jsx", "kt", "lua", "mjs", "cjs", "mts", "cts", "php", "py", "rb", "rs", "scss", "sh", "sql", "svelte", "swift", "toml", "ts", "tsx", "vue", "xml", "yaml", "yml", "zig", "zsh"]);
 
@@ -73,7 +73,7 @@ export default class Files extends View {
     this.watched = root;
     const context = this.context;
     cx.spawn(async cx => {
-      try { while (this.context === context) { await watchFolder(root); if (this.current(context)) { this.refresh(cx); if (this.file) this.show(this.file, cx); } } }
+      try { while (this.context === context) { await watchFolder(root); if (this.current(context)) { this.refresh(cx); if (this.file && !props()?.editing) this.show(this.file, cx); } } }
       catch { if (this.context === context) this.watched = null; }
     });
   }
@@ -164,12 +164,31 @@ export default class Files extends View {
         if (text === null) { this.fileError = "File deleted"; return; }
         if (text.includes("\0")) { this.fileError = "Can't preview"; return; }
         const t = theme(), ext = path.includes(".") ? path.split(".").pop() : "txt";
-        this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: true,
-          value: text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text,
+        this.original = text;
+        this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: !props()?.editing,
+          value: !props()?.editing && text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text,
           font_family: settings().font_family, font_size: 12,
           syntax: { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 } });
+        this.code.on("change", (_e, cx) => cx.notify());
       } catch { if (this.file === path && this.current(context)) this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; }
       finally { cx.notify(); }
+    });
+  }
+
+  save(done, cx) {
+    if (this.saving) return;
+    if (!this.code) { if (done) run("panel.editor", { done: true, path: `${this.root}/${this.file}` }); return; }
+    const code = this.code, text = code.value(), path = `${this.root}/${this.file}`;
+    if (done && text === this.original) { run("panel.editor", { done: true, path }); return; }
+    this.saving = true; this.saveError = null; cx.notify();
+    cx.spawn(async cx => {
+      try {
+        await writeTextFile(path, text, this.original);
+        if (this.code !== code) return;
+        this.original = text;
+        if (done && code.value() === text) run("panel.editor", { done: true, path });
+      } catch (e) { if (this.code === code) this.saveError = String(e); }
+      finally { this.saving = false; cx.notify(); }
     });
   }
 
@@ -214,8 +233,17 @@ export default class Files extends View {
     if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
     if (props()?.canvas === "viewer") return v_flex().size_full().min_h(0).text_color(t.foreground)
+      .on_key_down((e, cx) => {
+        if (props()?.editing && e.keystroke === "cmd-s") { this.save(false, cx); cx.stop_propagation(); }
+      })
+      .when(Boolean(props()?.editing), el => el.child(h_flex().h(32).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border).text_size(12)
+        .child(div().flex_1().text_color(t.dim).child(this.saving ? "Saving…" : this.code && this.code.value() !== this.original ? "Unsaved" : "Saved"))
+        .children(["Save", "Done"].map(label => div().id(`file-${label}`).px(8).py(3).rounded(7).border_1().border_color(t.border)
+          .cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => this.save(label === "Done", cx)).child(label)))))
+      .when(Boolean(this.saveError), el => el.child(div().px(12).py(6).text_size(12).text_color(t.foreground).child(this.saveError)))
       // A finished selection opens the quote popover where the mouse came up.
       .on_mouse_up("left", (e) => {
+        if (props()?.editing) return;
         const quote = this.code?.selection();
         if (quote?.text.trim()) run("quote.menu", { ...quote, path: `${this.root}/${this.file}`, point: e.position });
       })

@@ -14,6 +14,7 @@ fn walk(dir: &Path, base: &Path, root: &Path, out: &mut Vec<String>) {
     let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).collect();
     entries.sort();
     for p in entries {
+        if p.file_name().is_some_and(|name| name == ".DS_Store") { continue; }
         if p.is_dir() {
             walk(&p, base, root, out);
         } else {

@@ -225,6 +225,8 @@ pub struct Card {
 pub struct Panel {
     #[serde(default)]
     pub tree_hidden: bool,
+    #[serde(default)]
+    pub editor: Option<String>,
     /// The space last clicked on the canvas: the panel's file tree shows its folder.
     #[serde(default)]
     pub space: Option<String>,

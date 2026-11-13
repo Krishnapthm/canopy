@@ -566,7 +566,14 @@ impl AppWindow {
         });
         settings::install_themes();
         crate::programs::install_icons();
+        match crate::programs::load() {
+            Ok(()) => { let _ = std::fs::remove_file(file("programs.error")); }
+            Err(e) => w.report("programs", &e),
+        }
+        w.watched.programs = mtime(&crate::programs::path());
         w.reload_config(window, cx);
+        mods::warm_known_agents();
+        w.check_editors(window, cx);
         install_layouts();
         let name = mods::shared("layout").and_then(|v| v.as_str().map(str::to_owned)).filter(|n| layout_path(n).exists());
         // A layout whose mods are gone (Zen, T4, ADE after the update took
@@ -845,6 +852,8 @@ impl AppWindow {
             match crate::programs::load() {
                 Ok(()) => {
                     let _ = std::fs::remove_file(file("programs.error"));
+                    mods::warm_known_agents();
+                    self.check_editors(window, cx);
                 }
                 Err(e) => self.report("programs", &e),
             }
@@ -1334,6 +1343,7 @@ impl AppWindow {
 
     /// Creates what's visible, drops what isn't, publishes state, saves, focuses.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.canvas_state.editing != self.canvas_state.file { self.canvas_state.editing = None; }
         self.sync_canvas(window,cx);
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
@@ -2056,6 +2066,7 @@ impl AppWindow {
                 self.alert(&addr, alert, looking, window, cx);
             }
         }
+        self.refresh_sub_hooks();
         self.track_folders(cx);
         for (address, view) in self.terminal_views(cx) {
             if self.live.get(&address).is_some_and(|r| r["pid"].as_u64().is_some()) {
@@ -2393,6 +2404,9 @@ impl AppWindow {
     fn agent_argv(argv: Option<Vec<String>>, task: Option<&str>, on: Option<&str>) -> Option<Vec<String>> {
         let task = task.map(str::trim).filter(|t| !t.is_empty());
         argv.filter(|a| !a.is_empty()).map(|mut cmd| {
+            if on.is_none() && !cfg!(windows) && let Ok(exe) = std::env::current_exe() {
+                crate::programs::append_flags(&mut cmd, &exe.to_string_lossy());
+            }
             cmd.extend(task.map(str::to_owned));
             if on.is_some() {
                 return crate::remote_shell::launch(cmd);
@@ -2876,6 +2890,7 @@ impl AppWindow {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
+            "canvas.sub_message" => self.message_sub(a, window, cx),
             "quote.menu" | "quote.send" => self.quote_command(name, a, window, cx),
             "panel.open" => {
                 let Some(addr)=Self::arg(a,"terminal").filter(|a|self.live.contains_key(*a)) else {return self.fail("no running terminal")};
@@ -2889,6 +2904,7 @@ impl AppWindow {
                     self.pop_canvas(addr, name == "panel.bring_back", window, cx);
                 }
             }
+            "panel.editor" => self.panel_editor(a, window, cx),
             "preview.open" => self.open_preview(a.clone(), window, cx),
             "canvas.create" => {
                 self.create_canvas(a.clone(), window, cx);
@@ -4871,9 +4887,9 @@ impl Render for AppWindow {
                     cx.stop_propagation();
                 }
             }))
-            .capture_any_mouse_down(cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+            .capture_any_mouse_down(cx.listener(|this, ev: &MouseDownEvent, window, cx| {
                 this.pointer = ev.position;
-                if ev.button == MouseButton::Left { this.quote_press(cx); }
+                if ev.button == MouseButton::Left { this.quote_press(ev.position, window, cx); }
             }))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| {
                 this.drag_window(ev, window);
@@ -4900,6 +4916,7 @@ impl Render for AppWindow {
             }))
             .child(tree)
             .children(overlays)
+            .children(self.quote_chip_element())
             .children(tracker)
             .children(win_tracker)
             .child(pane_drag)
