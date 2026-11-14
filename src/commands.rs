@@ -40,7 +40,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.leave", &[], "Cancel a keyboard connection, or leave canvas mode with selection unchanged."),
     cmd("canvas.enter", &[], "Complete a keyboard connection, or expand the selected cell and leave canvas mode."),
     cmd("canvas.go", &[req("direction")], "Select the nearest shown cell left, right, up or down without expanding it."),
-    cmd("canvas.space", &[req("direction")], "Go into the next or prev space, or space N (1-based); its cells fill the canvas."),
+    cmd("canvas.space", &[req("direction")], "Go into the next or prev space, space N (1-based, top strip order), or the recent / oldest one entered; its cells fill the canvas."),
     cmd("canvas.home", &[], "Leave the space for Home: space cards and cells outside any space."),
     cmd("canvas.select_all", &[], "Select every cell, preview and (on Home) space card in the current place."),
     cmd("canvas.fit_all", &[], "Fit everything in the current place, whatever is selected; repeat to restore the previous camera."),

@@ -103,6 +103,8 @@
     "cmd-8": "canvas.space:8",
     "cmd-9": "canvas.space:9",
     "cmd-escape": "canvas.mode",
+    "ctrl-tab": "canvas.space:recent",
+    "ctrl-shift-tab": "canvas.space:oldest",
     "cmd-shift-h": "canvas.home"
   },
   "canvas-mode": {

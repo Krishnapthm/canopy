@@ -140,21 +140,26 @@ impl AppWindow {
                 if let Some((key, _)) = next.and_then(|i| cells.get(i)) { self.keyboard_select(key.clone(), window, cx); }
             }
             "canvas.space" => {
-                // next / prev step through the spaces' rooms; a number goes into that space.
-                let doc = &self.canvas_state.doc;
-                let n = doc.spaces.len();
+                // In top strip tab order: next / prev step, a number goes into that space,
+                // recent / oldest walk the spaces by when they were last entered.
+                let ids = super::strip_spaces(&self.model);
+                let n = ids.len();
                 if n == 0 { return self.fail("no spaces yet"); }
-                let i = doc.room.as_ref().and_then(|id| doc.spaces.iter().position(|s| &s.space == id));
-                let j = match args["direction"].as_str() {
-                    Some("next") => i.map_or(0, |i| (i + 1) % n),
-                    Some("prev") => i.map_or(n - 1, |i| (i + n - 1) % n),
+                let room = self.canvas_state.doc.room.clone();
+                let i = room.as_ref().and_then(|id| ids.iter().position(|s| s == id));
+                let id = match args["direction"].as_str() {
+                    Some("next") => ids[i.map_or(0, |i| (i + 1) % n)].clone(),
+                    Some("prev") => ids[i.map_or(n - 1, |i| (i + n - 1) % n)].clone(),
+                    Some(d @ ("recent" | "oldest")) => {
+                        let Some(id) = super::recent_space(&self.canvas_state.recent, &ids, room.as_ref(), d == "oldest") else { return };
+                        id
+                    }
                     Some(k) => match k.parse::<usize>() {
-                        Ok(k) if (1..=n).contains(&k) => k - 1,
+                        Ok(k) if (1..=n).contains(&k) => ids[k - 1].clone(),
                         _ => return self.fail(format!("no space {k}")),
                     },
-                    None => return self.fail("use next, prev or a number"),
+                    None => return self.fail("use next, prev, recent, oldest or a number"),
                 };
-                let id = doc.spaces[j].space.clone();
                 self.go_room(Some(id), window, cx);
                 return;
             }

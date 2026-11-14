@@ -99,6 +99,8 @@
     "ctrl-8": "canvas.space:8",
     "ctrl-9": "canvas.space:9",
     "ctrl-escape": "canvas.mode",
+    "ctrl-tab": "canvas.space:recent",
+    "ctrl-shift-tab": "canvas.space:oldest",
     "ctrl-shift-h": "canvas.home"
   },
   "canvas-mode": {

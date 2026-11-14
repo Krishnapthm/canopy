@@ -38,6 +38,8 @@ pub(super) struct State {
     panel_restore: Option<Option<f32>>,
     editors: Vec<crate::programs::Editor>,
     pub tabs: Vec<String>,
+    /// Space ids, most recently entered first, for ctrl-tab (memory only).
+    recent: Vec<String>,
     /// The folder button opened the panel for the file tree, with no tab needed.
     pub files: bool,
     pub popped: HashMap<String, WindowHandle<PopOut>>,
@@ -143,6 +145,7 @@ impl State {
             panel_restore: None,
             editors: Vec::new(),
             tabs: Vec::new(),
+            recent: Vec::new(),
             files: false,
             popped: HashMap::new(),
             save: canvas::SaveSchedule::default(),
@@ -967,6 +970,8 @@ impl AppWindow {
         self.canvas_state.connecting = None;
         self.canvas_state.previous_camera = None;
         if let Some(id) = &room {
+            self.canvas_state.recent.retain(|r| r != id);
+            self.canvas_state.recent.insert(0, id.clone());
             self.canvas_state.doc.panel.space = Some(id.clone());
             self.model.active = Some(id.clone());
         }
@@ -3379,6 +3384,18 @@ fn cell_space<'a>(model: &'a model::Model, live: &HashMap<String,Value>, termina
     None
 }
 
+/// The spaces shown as top strip tabs, in tab order (⌘1..9 count these).
+pub(super) fn strip_spaces(model: &model::Model) -> Vec<String> {
+    model.spaces.iter().filter(|s| !root_space(s)).map(|s| s.id.clone()).collect()
+}
+
+/// The space ctrl-tab enters: the most recent other one (`back`: the oldest), among `ids`.
+pub(super) fn recent_space(recent: &[String], ids: &[String], current: Option<&String>, back: bool) -> Option<String> {
+    let mut known: Vec<&String> = recent.iter().filter(|r| ids.contains(r) && Some(*r) != current).collect();
+    known.extend(ids.iter().filter(|i| !recent.contains(i) && Some(*i) != current));
+    if back { known.last() } else { known.first() }.map(|s| (*s).clone())
+}
+
 /// The home "Canvas" space holds root terminals; it has no frame on the canvas.
 fn root_space(s: &model::Space) -> bool {
     s.name == "Canvas" && s.folder == home() && s.machine.is_none()
@@ -3749,5 +3766,20 @@ mod like_tests {
         assert_eq!(like_run(&json!({"program":{"key":"uv"}}), &startable), Some(vec!["uv".into(), "run".into(), "python".into()]));
         assert_eq!(like_run(&json!({"program":{"key":"shell"}}), &startable), None);
         assert_eq!(like_run(&json!({}), &startable), None);
+    }
+}
+
+#[cfg(test)]
+mod recent_space_tests {
+    use super::recent_space;
+
+    #[test]
+    fn ctrl_tab_toggles_the_last_two_and_falls_back_to_tab_order() {
+        let ids: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+        let recent: Vec<String> = ["b", "a"].map(String::from).to_vec();
+        assert_eq!(recent_space(&recent, &ids, Some(&"b".into()), false).as_deref(), Some("a"));
+        assert_eq!(recent_space(&recent, &ids, Some(&"b".into()), true).as_deref(), Some("c"));
+        assert_eq!(recent_space(&[], &ids, None, false).as_deref(), Some("a"));
+        assert_eq!(recent_space(&["gone".into()], &ids[..1], Some(&"a".into()), false), None);
     }
 }

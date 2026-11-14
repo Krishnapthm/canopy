@@ -46,7 +46,10 @@ it (with a confirmation). Cards sit next to the cells outside any space.
 Double-click a card, or select it and press Enter, to go inside: the whole
 canvas belongs to that space, with no frame, so its cells grow freely.
 Use Home or `canvas.home` to leave.
-`canvas.space` with `next`, `prev` or a number goes into another space. A new
+`canvas.space` with `next`, `prev` or a number goes into another space, counted
+in top strip tab order (⌘1..⌘9). ⌃Tab (`recent`) enters the space you were in
+last, so pressing it again toggles back; ⌃⇧Tab (`oldest`) walks back through
+the rest. The order is kept in memory only. A new
 space opens straight away, and the app reopens where you closed it. Each place
 keeps its own camera. Older `canvas.json` files move each cell into the space
 whose frame held it, and the frame becomes that space's card.
