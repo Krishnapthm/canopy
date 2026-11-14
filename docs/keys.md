@@ -24,7 +24,7 @@ were in last (again toggles; Ctrl+Shift+Tab walks further back).
 | Esc | Cancel a connection, else clear the selection, else go back Home |
 | Shift+1 / Shift+2 / Shift+0 | Fit everything / fit the selection / 100% |
 | f | Fit the selection, else everything; again restores the previous view |
-| Cmd+A (Ctrl+A) | Select everything here |
+| Cmd+A (Ctrl+Shift+A) | Select every pane in the current space |
 | Arrows | Move the selection by one gap, with one undo step |
 | h j k l, Tab / Shift+Tab | Select the nearest cell in that direction |
 | x | Collapse the selected terminal |
@@ -45,7 +45,8 @@ Enter on a sub-agent opens its transcript; on a file card it opens the file.
 | Focus fit toggle | Cmd+Shift+F | Ctrl+Shift+F on canvas |
 | Tile view toggle | Cmd+Shift+G | Ctrl+Shift+G |
 | Expand / collapse | Cmd+Enter | Ctrl+Shift+Enter |
-| Arrange | Cmd+Shift+A | Ctrl+Shift+A |
+| Select every pane (canvas focus) | Cmd+A | Ctrl+Shift+A |
+| Arrange | Cmd+Shift+A | Ctrl+Alt+Shift+A |
 | Zoom in / out / 100% | Cmd+= / Cmd+- / Cmd+0 | Ctrl+= / Ctrl+- / Ctrl+0 |
 | Agents / All / Terminals | Cmd+Shift+1/2/3 | Ctrl+Shift+1/2/3 |
 
@@ -88,3 +89,6 @@ Concurrent edits are retried at most twice; errors raise a toast. The existing
 config reload applies saved keys and refreshes the page, with no new watcher.
 Commands needing arguments can be configured as object actions in keys.json;
 the recorder keeps existing arguments and replaces only the keys.
+
+Select-all uses `canvas.select_all` only with canvas focus. An entered terminal
+keeps Cmd+A for `terminal.select_all`; plain Ctrl+A still reaches shells.

@@ -69,6 +69,8 @@ function items(p, git, agents) {
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],
       ...(!tg.popped ? [[tg.expanded ? "Collapse" : "Expand", "canvas.expand", { terminal: tg.terminal }]] : []),
       ...(tg.finished ? [["Clear finished", "canvas.clear_finished", { terminal: tg.terminal }]] : []),
+      ["Bring to front", "canvas.front"],
+      ["Send to back", "canvas.back"],
       ["Close terminal", "canvas.close", { terminal: tg.terminal }],
       ["Kill terminal", "terminal.kill", { terminal: tg.terminal }],
     ];

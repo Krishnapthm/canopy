@@ -73,6 +73,7 @@
     "cmd-backspace": "send:\u0015"
   },
   "layout:main": {
+    "cmd-a": "canvas.select_all",
     "cmd-t": {"command": "canvas.new", "args": {"like": true}},
     "cmd-shift-t": "canvas.new",
     "ctrl-=": "canvas.zoom_in",

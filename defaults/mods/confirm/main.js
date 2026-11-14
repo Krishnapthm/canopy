@@ -1,9 +1,9 @@
 // Asks before something destructive, e.g. "Delete space?". Opened as a dialog.
-// Props: title, detail, command?, accept?, destructive?; dontAsk offers the terminal-close opt-out.
+// Props: title, detail, panes? (icon, tint, name), command?, accept?, destructive?, dontAsk?.
 // Enter confirms (runs the command), Esc cancels.
 
-import { View } from "gpui-kit";
-import { run, props, closeOverlay, ui } from "herdr";
+import { View, div, svg, image } from "gpui-kit";
+import { run, props, closeOverlay, theme, ui } from "herdr";
 
 export default class Confirm extends View {
   init(_props, cx) {
@@ -31,6 +31,10 @@ export default class Confirm extends View {
       })
       .child(ui.title(p.title ?? "Are you sure?"))
       .when(Boolean(p.detail), (el) => el.child(ui.description(p.detail)))
+      .when(Boolean(p.panes?.length), el => el.child(div().id("confirm-panes").max_h(320).overflow_y_scroll()
+        .children(p.panes.map((pane, i) => div().id(`confirm-pane-${i}`).flex().items_center().gap(8).py(4)
+          .child(pane.tint ? svg(pane.icon).size(16).flex_none().text_color(theme().muted) : image(pane.icon).w(16).h(16).flex_none())
+          .child(div().flex_1().min_w(0).child(pane.name))))))
       .when(p.dontAsk, (el) => el.child(ui.checkbox("dont-ask", this.dontAsk, "Don't ask again", (checked, cx) => { this.dontAsk = checked; cx.notify(); })))
       .child(ui.footer(
         ui.button("no", p.command ? "Cancel" : "Close").on_click(close),

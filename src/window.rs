@@ -2947,6 +2947,7 @@ impl AppWindow {
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
             "canvas.tile" => self.tile_canvas(true, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
+            "canvas.front" | "canvas.back" => self.stack_panes(name == "canvas.front", window, cx),
             "canvas.sub_message" => self.message_sub(a, window, cx),
             "wire.connect" | "wire.remove" | "wire.reset" | "wire.open" => self.wire_command(name, a, window, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
@@ -4926,7 +4927,7 @@ impl Render for AppWindow {
             .font_family(settings::get().ui_font_family.clone())
             .on_action(cx.listener(|this, a: &ShellAction, w, cx| {
                 // Canvas-only keys reach a focused terminal untouched.
-                if matches!(a.id(), "canvas.close" | "canvas.undo") && !this.focus.is_focused(w) {
+                if matches!(a.id(), "canvas.close" | "canvas.undo" | "canvas.select_all") && !this.focus.is_focused(w) {
                     cx.propagate();
                     return;
                 }
@@ -4942,7 +4943,7 @@ impl Render for AppWindow {
             .on_action(cx.listener(|this, a: &crate::keys::CommandBinding, w, cx| {
                 match a.command() {
                     Ok((name, args)) => {
-                        if matches!(name.as_str(), "canvas.close" | "canvas.undo") && args.get("terminal").is_none() && !this.focus.is_focused(w) {
+                        if matches!(name.as_str(), "canvas.close" | "canvas.undo" | "canvas.select_all") && args.get("terminal").is_none() && !this.focus.is_focused(w) {
                             cx.propagate();
                             return;
                         }

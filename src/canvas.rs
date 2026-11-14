@@ -833,6 +833,20 @@ impl Document {
         self.wires.retain(|w| has(&w.a) && has(&w.b));
         before != self.wires.len()
     }
+    /// Move panes to the front or back, keeping each group's order and saved geometry.
+    pub fn stack(&mut self, keys: &[String], front: bool) -> bool {
+        if !self.cards.iter().any(|c| keys.contains(&c.key())) { return false; }
+        // Only `z` changes: the cards keep their stored order.
+        let mut order: Vec<usize> = (0..self.cards.len()).collect();
+        order.sort_by_key(|&i| (keys.contains(&self.cards[i].key()) == front, self.cards[i].z));
+        let mut changed = false;
+        for (rank, i) in order.into_iter().enumerate() {
+            changed |= self.cards[i].z != rank as u64;
+            self.cards[i].z = rank as u64;
+        }
+        changed
+    }
+
     pub fn place(&mut self, terminal: &str, point: Point, size: Point) {
         let z = self
             .cards
@@ -1598,5 +1612,31 @@ mod keyboard_tests {
         camera.x += 50.;
         focus_fit(&mut camera, &mut previous, &[space], visible);
         assert_eq!(camera, fitted);
+    }
+}
+
+
+#[cfg(test)]
+mod stacking_tests {
+    use super::*;
+
+    #[test]
+    fn pane_stack_preserves_group_order_geometry_and_document_roundtrip() {
+        let mut doc = Document::default();
+        for (i, key) in ["t1", "t2", "t3", "t4"].iter().enumerate() {
+            doc.place(key, [i as f32 * 300., 0.], [220., 36.]);
+        }
+        let geometry: std::collections::HashMap<_, _> = doc.cards.iter().map(|c| (c.key(), c.rect)).collect();
+        let targets = vec!["t3".into(), "t1".into()];
+        assert!(doc.stack(&targets, true));
+        let order = |doc: &Document| { let mut cards: Vec<_> = doc.cards.iter().collect(); cards.sort_by_key(|c| c.z); cards.iter().map(|c| c.key()).collect::<Vec<_>>() };
+        assert_eq!(order(&doc), ["t2", "t4", "t1", "t3"]);
+        assert!(!doc.stack(&targets, true), "a second press need not save again");
+        assert!(doc.stack(&targets, false));
+        assert_eq!(order(&doc), ["t1", "t3", "t2", "t4"]);
+        let restored: Document = serde_json::from_value(serde_json::to_value(&doc).unwrap()).unwrap();
+        assert_eq!(order(&restored), order(&doc));
+        assert!(restored.cards.iter().all(|c| c.rect == geometry[&c.key()]));
+        assert!(!doc.stack(&["missing".into()], true));
     }
 }

@@ -774,13 +774,38 @@ impl AppWindow {
         }).detach();
     }
 
+    /// The panes an action applies to.
+    fn targets(&self, window: &Window) -> Vec<String> {
+        let doc = &self.canvas_state.doc;
+        let here = |key: &str| doc.cards.iter().any(|c| c.key() == key && doc.shows(c.space.as_ref()));
+        let selected: Vec<_> = self.canvas_state.selected.iter().filter(|k| here(k)).cloned().collect();
+        if !selected.is_empty() { return selected; }
+        self.terms.values().find(|t| t.focus.is_focused(window) && here(&t.address))
+            .map(|t| t.address.clone())
+            .or_else(|| self.canvas_state.selected.last().filter(|k| here(k)).cloned())
+            .into_iter().collect()
+    }
+
     /// Closes the selected cell with confirmation appropriate to its current kind.
     pub(super) fn close_canvas_cell(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
         if a["terminal"].is_null() && self.wire_delete_selected(window, cx) { return; }
-        let key = a["terminal"].as_str().map(str::to_owned).or_else(|| {
-            self.focus.is_focused(window).then(|| self.canvas_state.selected.last().cloned()).flatten()
-        });
-        let Some(key) = key else { return };
+        // The confirmed dialog hands back the whole list; terminate it as is.
+        if let Some(list) = a["terminals"].as_array() {
+            for key in list.iter().filter_map(Value::as_str) { self.dispatch("terminal.kill", &json!({"terminal":key}), true, window, cx); }
+            return;
+        }
+        let key = match a["terminal"].as_str() {
+            Some(key) => key.to_owned(),
+            None => {
+                if !self.focus.is_focused(window) { return; }
+                // Every target pane closes behind one dialog; only spaces and sub-agents take the single path.
+                let panes: Vec<_> = self.targets(window).into_iter()
+                    .filter(|k| self.canvas_state.doc.cards.iter().any(|c| &c.key() == k && c.sub.is_none())).collect();
+                if !panes.is_empty() { return self.close_panes(panes, window, cx); }
+                let Some(key) = self.canvas_state.selected.last().cloned() else { return };
+                key
+            }
+        };
         // A space card on Home: delete the space, with its usual confirmation.
         if self.canvas_state.doc.spaces.iter().any(|s| s.space == key) {
             return self.run_key("space.close", json!({"id":key}), window, cx);
@@ -817,6 +842,36 @@ impl AppWindow {
                 self.dispatch("terminal.kill", &json!({"terminal":key}), true, window, cx);
             }
         }
+    }
+
+    /// `canvas.front` / `canvas.back`: moves the target panes above or below every other pane.
+    pub(super) fn stack_panes(&mut self, front: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let targets = self.targets(window);
+        if self.canvas_state.doc.stack(&targets, front) { self.canvas_changed(cx); cx.notify(); }
+    }
+
+    /// A click on a pane raises it; saves only when the order changed.
+    fn raise_pane(&mut self, key: &str, cx: &mut Context<Self>) {
+        if self.canvas_state.doc.stack(&[key.to_owned()], true) { self.canvas_changed(cx); }
+    }
+
+    /// Terminates every pane behind one dialog listing them; without agents and with the
+    /// terminal prompt switched off it just closes them.
+    fn close_panes(&mut self, panes: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let agents = panes.iter().any(|k| self.live.get(k).is_some_and(canvas_agent));
+        if !agents && !self.person.confirm_close_terminal {
+            for key in &panes { self.dispatch("terminal.kill", &json!({"terminal":key}), true, window, cx); }
+            return;
+        }
+        let rows: Vec<_> = panes.iter().map(|k| {
+            let (icon, tint) = program_icon(self.live.get(k).unwrap_or(&Value::Null));
+            json!({"name":self.pill_name(k),"icon":icon,"tint":tint})
+        }).collect();
+        let title = if panes.len() == 1 { "Terminate this pane?".to_owned() } else { format!("Terminate {} panes?", panes.len()) };
+        self.open_overlay(mods::new_overlay_id(), json!({"mod":"confirm","kind":"dialog","width":400,
+            "props":{"title":title,"detail":"Their programs stop and the panes close.","panes":rows,"destructive":true,
+            "accept":"Terminate and close all",
+            "command":{"name":"canvas.close","args":{"terminals":panes}}}}), window, cx);
     }
 
     /// `canvas.sub_message`: a Wire postcard from you to a sub-agent cell (its parent relays it);
@@ -2750,6 +2805,7 @@ impl AppWindow {
                         return;
                     }
                     this.canvas_state.pan_moved = false;
+                    this.raise_pane(&drag_addr, cx);
                     this.begin_layout();
                     if e.modifiers.shift {
                         if this.canvas_state.selected.contains(&drag_addr) { this.canvas_state.selected.retain(|id|id!=&drag_addr); }
@@ -2807,6 +2863,7 @@ impl AppWindow {
                     // cell (and leaves the entered one), a drag moves it, a double-click enters it.
                     let entered = !this.canvas_state.mode && this.canvas_state.selected.last() == Some(&mode_addr);
                     if !entered && e.button == MouseButton::Left {
+                        this.raise_pane(&mode_addr, cx);
                         this.canvas_state.mode = true;
                         this.focus.focus(window, cx);
                         if e.click_count == 2 {
@@ -2828,6 +2885,7 @@ impl AppWindow {
                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, _, cx| {
                     // The terminal took the focus; the cell is the one selected, and the canvas does not pan.
                     this.canvas_state.selected = vec![select_addr.clone()];
+                    this.raise_pane(&select_addr, cx);
                     if let Some(p) = this.model.pane_of(&select_addr) { this.model.focus_pane(&p); }
                     cx.stop_propagation();
                     cx.notify();
@@ -3782,4 +3840,61 @@ mod recent_space_tests {
         assert_eq!(recent_space(&[], &ids, None, false).as_deref(), Some("a"));
         assert_eq!(recent_space(&["gone".into()], &ids[..1], Some(&"a".into()), false), None);
     }
+}
+
+#[cfg(test)]
+mod pane_action_tests {
+    use super::{TestAppContext, json};
+    use super::super::tests::{in_own_process, open_window, running_alone};
+    const TARGETS: &str = "window::canvas_view::pane_action_tests::targets_headless";
+
+    #[test]
+    fn pane_targets_stay_in_the_current_space() { in_own_process(TARGETS); }
+
+    #[gpui::test]
+    fn targets_headless(cx: &mut TestAppContext) {
+        if !running_alone(TARGETS) { return; }
+        let (view, cx) = open_window(cx, "pane-targets", "", json!({"id":"root","type":"canvas"}));
+        view.update_in(cx, |this, window, _| {
+            this.canvas_state.doc.cards = serde_json::from_value(json!([
+                {"terminal":"t1","rect":[0,0,220,36],"z":0},
+                {"terminal":"t2","space":"other","rect":[0,0,220,36],"z":1}
+            ])).unwrap();
+            this.canvas_state.selected = vec!["t1".into(), "t2".into(), "preview.md".into()];
+            assert_eq!(this.targets(window), ["t1"]);
+            this.canvas_state.doc.room = Some("other".into());
+            assert_eq!(this.targets(window), ["t2"]);
+            this.canvas_state.selected.clear();
+            assert!(this.targets(window).is_empty());
+        });
+    }
+    const CLOSE: &str = "window::canvas_view::pane_action_tests::close_headless";
+
+    #[test]
+    fn close_removes_every_selected_pane() { in_own_process(CLOSE); }
+
+    #[gpui::test]
+    fn close_headless(cx: &mut TestAppContext) {
+        if !running_alone(CLOSE) { return; }
+        let (view, cx) = open_window(cx, "pane-close", "", json!({"id":"root","type":"canvas"}));
+        view.update_in(cx, |this, window, cx| {
+            this.person.confirm_close_terminal = false;
+            this.listed_once = true;
+            this.documents.entry("".into()).or_default().read_attempted = true;
+            for i in 1..=3 {
+                let key = format!("t{i}");
+                this.canvas_state.doc.place(&key, [i as f32 * 300., 0.], [220., 36.]);
+                this.live.insert(key.clone(), json!({"address":key}));
+                this.canvas_state.selected.push(key);
+            }
+            this.focus.focus(window, cx);
+            this.run_key("canvas.close", json!({}), window, cx);
+            assert_eq!(this.closing_terminals.len(), 3, "the shared close command must terminate every target");
+            // Deliver the core listing after the requested terminations, without a real core.
+            let remaining: Vec<_> = this.live.iter().filter(|(key, _)| !this.closing_terminals.contains_key(*key)).map(|(_, rec)| rec.clone()).collect();
+            this.terminals_listed(json!({"terminals":remaining}), window, cx);
+            assert!(this.canvas_state.doc.cards.is_empty(), "all three selected cards must be gone");
+        });
+    }
+
 }

@@ -1267,11 +1267,12 @@ remote and Windows menu launches also omit these flags.
 ## Canvas selection and views
 
 Double-click a cell to enter it; a click only selects it.
-Enter enters the selected cell; Esc clears the selection, then goes Home. `canvas.close` (Backspace or Delete) closes the selection: running agents
-always ask "Terminate agent?" (naming it in the detail); plain terminals ask "Close this
-terminal?" with "Don't ask again". That choice writes
-`confirm_close_terminal: false` to settings.json (default true). Done
-sub-agent cells clear; working ones refuse with a toast.
+Enter enters the selected cell; Esc clears the selection, then goes Home. `canvas.close` (Backspace or Delete) closes
+every selected pane (else the focused one) behind one dialog that lists them, with "Terminate and close all" and
+"Cancel". With `confirm_close_terminal: false` in settings.json (default true) and no agent among them they close
+without asking. `canvas.close {terminal}` closes one cell: running agents ask "Terminate agent?", plain terminals
+"Close this terminal?". Done sub-agent cells clear; working ones refuse with a toast.
+`canvas.front` and `canvas.back` raise or lower the selected panes; the order is saved.
 
 Views are in the macOS View menu or the Linux titlebar's primary menu
 (`app.menu`, optionally with a `group`);
@@ -1284,7 +1285,7 @@ timer. The hint mod reads the bindings with `keys()` and shows while Option is h
 and inputs keep their own keys. `canvas.mode` (Cmd+Esc, Cmd+J) leaves the entered cell.
 `canvas.leave` (Esc) cancels a pending connection, else clears the selection, else goes Home;
 `canvas.enter` connects, enters the selected cell or goes into the selected space.
-`canvas.select_all` selects everything in the current place; `canvas.fit_all` fits it all.
+`canvas.select_all` selects every pane in the current place (canvas focus only); `canvas.fit_all` fits it all.
 `canvas.go {direction: "left" | "right" | "up" | "down"}` selects without
 expanding; `canvas.space` goes into another space and `canvas.home` back to Home.
 `canvas.collapse` collapses; `canvas.connect` starts choosing a peer;

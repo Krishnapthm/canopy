@@ -203,3 +203,22 @@ In canvas mode, arrows select the cell whose centre is nearest in that
 direction (ties keep document order; nothing there, nothing changes).
 Shift+arrows move the selection one gap through the same solver as a drag,
 saved once, as one undo step.
+
+## Action targets
+
+Pane actions use the selected terminal or agent cells in the current space.
+With no pane selected there, they use the pane holding keyboard focus, if any.
+Space cards and previews are not pane targets.
+
+## Closing and stacking panes
+
+Backspace or Delete closes every target pane behind one dialog that lists each
+with its icon and name; "Terminate and close all" ends them, "Cancel" or Esc
+closes nothing. With the terminal prompt off in settings and no agent among
+them, they close at once. Cmd+A (Ctrl+Shift+A) selects every pane in the
+current space, only while the canvas has the keyboard.
+
+A click anywhere on a pane brings it to the front. The pane menu has "Bring to
+front" and "Send to back" (`canvas.front`, `canvas.back`) for the targets. Draw
+order is the `z` of each card in the saved document, so it persists like
+positions.

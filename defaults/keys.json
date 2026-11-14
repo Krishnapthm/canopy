@@ -72,6 +72,7 @@
     "shift-insert": "terminal.paste"
   },
   "layout:main": {
+    "ctrl-shift-a": "canvas.select_all",
     "ctrl-shift-t": {"command": "canvas.new", "args": {"like": true}},
     "ctrl-alt-t": "canvas.new",
     "ctrl-=": "canvas.zoom_in",
@@ -88,7 +89,7 @@
     "ctrl-shift-u": "canvas.undo",
     "ctrl-shift-j": "canvas.mode",
     "ctrl-shift-enter": "canvas.expand",
-    "ctrl-shift-a": "canvas.arrange",
+    "ctrl-alt-shift-a": "canvas.arrange",
     "ctrl-1": "canvas.space:1",
     "ctrl-2": "canvas.space:2",
     "ctrl-3": "canvas.space:3",
@@ -120,7 +121,7 @@
     "shift-2": "canvas.fit",
     "shift-0": "canvas.zoom_reset",
     "f": "canvas.fit",
-    "ctrl-a": "canvas.select_all",
+    "ctrl-shift-a": "canvas.select_all",
     "x": "canvas.collapse",
     "c": "canvas.connect",
     "t": "canvas.thread",

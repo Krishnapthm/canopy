@@ -131,3 +131,38 @@ test("full key help names object bindings without splitting their JSON", async (
   expect(label("canvas.go:left")).toBe("canvas go left");
   expect(label('{}')).toBe("invalid binding");
 });
+
+
+test("pane confirmation lists each pane and cancels without running its captured command", async () => {
+  const source = (await readFile(new URL("../defaults/mods/confirm/main.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\n/gm, "").replace("export default class Confirm", "class Confirm");
+  const labels: string[] = [], icons: string[] = [], text: string[] = [], sent: unknown[] = [];
+  let keydown: (event: { key: string }, cx: unknown) => void;
+  let cancel: () => void;
+  let closed = 0;
+  const element: any = new Proxy({}, { get: (_, name) => (...args: any[]) => {
+    if (name === "when" && args[0]) args[1](element);
+    if (name === "child" && typeof args[0] === "string") text.push(args[0]);
+    if (name === "on_key_down") keydown = args[0];
+    return element;
+  } });
+  const ui = { panel: () => element, title: () => element, description: () => element, footer: () => element,
+    button: (id: string, label: string) => { labels.push(label); return { on_click: (fn: () => void) => { if (id === "no") cancel = fn; return element; } }; } };
+  const current = { overlay: "dialog", title: "Terminate panes?", accept: "Terminate and close all", destructive: true,
+    panes: [{ name: "review <script>", icon: "icons/agent.svg", tint: true }, { name: "shell", icon: "icons/terminal.svg", tint: true }],
+    command: { name: "canvas.close", args: { terminals: ["t1", "t2"], confirmed: "all" } } };
+  const Confirm = new Function("View", "div", "svg", "image", "props", "closeOverlay", "run", "theme", "ui", `${source}; return Confirm;`)(
+    class {}, () => element, (path: string) => { icons.push(path); return element; }, () => element, () => current,
+    () => closed++, (...args: unknown[]) => sent.push(args), () => ({ muted: "gray" }), ui);
+  const confirm = new Confirm();
+  confirm.render();
+  expect(labels).toEqual(["Cancel", "Terminate and close all"]);
+  expect(text).toEqual(["review <script>", "shell"]);
+  expect(icons).toEqual(["icons/agent.svg", "icons/terminal.svg"]);
+  cancel!();
+  keydown!({ key: "escape" }, { stop_propagation() {} });
+  expect(closed).toBe(2);
+  expect(sent).toEqual([]);
+  confirm.yes();
+  expect(sent).toEqual([["canvas.close", current.command.args]]);
+});

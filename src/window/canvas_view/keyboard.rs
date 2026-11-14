@@ -99,7 +99,9 @@ impl AppWindow {
                 self.focus.focus(window, cx);
             }
             "canvas.select_all" => {
-                self.canvas_state.selected = self.keyboard_cells(cx).into_iter().map(|(k, _)| k).collect();
+                if !self.focus.is_focused(window) { return; }
+                let doc = &self.canvas_state.doc;
+                self.canvas_state.selected = doc.cards.iter().filter(|c| c.sub.is_none() && doc.shows(c.space.as_ref())).map(|c| c.key()).collect();
             }
             "canvas.enter" => {
                 if let Some(from) = self.canvas_state.connecting.clone() {
