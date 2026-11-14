@@ -22,19 +22,22 @@ are no tab borders, dividers or strip bottom border. Inactive text is muted and
 brightens on hover. Tabs shrink to 96 px, then scroll sideways with a wheel or
 trackpad; Home, + and the control buttons stay visible.
 
-The plain grid and file icons after + toggle tile view and the files panel.
+The grid and folder icons at the right end of the strip, beside the panel,
+toggle tile view and the files panel.
 Hover labels show the current shortcut where one exists; no keys are added.
 The file button restores the panel's closed tabs through the existing panel
 restore path. Grid uses `canvas.tile`; closing the panel uses `panel.close`.
 
 When the preview panel is open, its file tabs occupy the same strip, exactly
-above its left edge. Click a tab to select its preview, hover for the full path,
+above it, in the panel's own color. Click a tab to select its preview, hover for the full path,
 or use its X to close that tab. Unsaved edits replace the X with a foreground
 dot until hover. The Files editor reports saved/unsaved transitions through
 `panel.editor {path, dirty}` without sending contents or polling. The section's
-right buttons expand to the existing maximum panel width (75% of the window),
-restore the previous width, or close the panel. Dragging its resize edge leaves
-expanded mode. File tab selection and close reuse the existing panel handlers.
+right buttons expand the panel to fill the window (hiding the space tabs and
+canvas; the icon turns into restore) or close the panel. Closing it or
+dragging its edge ends expanded mode. A 1 px line marks the panel's
+left edge from the window top to bottom; drag it to resize (it lights up on
+hover). File tab selection and close reuse the existing panel handlers.
 
 ## Spaces are rooms
 
@@ -156,7 +159,7 @@ and sub-agent transcripts only.
 
 ## Tile view
 
-Press Cmd+Shift+G (Ctrl+Shift+G), the grid icon beside the focus icon, or
+Press Cmd+Shift+G (Ctrl+Shift+G), the grid icon at the right of the top strip, or
 **Tile view** in the canvas menu to fit the expanded cells and previews into the
 visible canvas at 100% zoom, like tmux's tiled layout. With two or more cells
 selected only those tile: the others stay where they are, under the tiles.
@@ -181,7 +184,8 @@ back where they were.
   `canvas.sync`). Each keystroke or paste in one synced pane goes to all of
   them, like tmux's synchronize-panes. Synced panes show an accent border and a
   SYNC badge. Cmd+Enter again, Esc on the canvas, or deselecting turns it off
-  (a pane that leaves the selection leaves the group).
+  (a pane that leaves the selection leaves the group). Clicking into a synced
+  pane to type keeps the group.
 - `=` (`canvas.equalize`) gives the selected panes, else the focused one, the
   standard size: the `terminal_size` grid new panes open at. Cmd+A then `=`
   equalizes the whole space; in tile view it re-tiles.
