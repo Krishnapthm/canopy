@@ -271,6 +271,8 @@ fill the view, the selected one largest; dragging a tile ends tile view in place
 `panel.close` closes the
 file panel. Geometry is in app-home canvas.json;
 `canvas_color` in settings.json overrides the theme background (null resets).
+Layouts without a theme use `canopy-dark` or `canopy-light` by appearance.
+Saved `graphite`/`paper` themes alias `herdr-dark`/`herdr-light`.
 Hand-edited canvas settings reload live: `canvas_gap` (24, 0..1024 world pixels),
 `tile_gap` (0, tile view cell gap), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `canvas_resize_terminals` (false keeps the grid and scales it to the cell), `space_fill` (0.04, 0..1),
 and `terminal_size` ([100, 30], columns 20..500 and rows 5..200 for new expansions).

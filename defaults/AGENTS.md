@@ -314,17 +314,19 @@ on any node, and the nearest node up the tree wins, so the root sets the
 layout's look and a block can differ:
 
 ```json
-{ "id": "root", "type": "row", "theme": "graphite", "colors": { "accent": "#a7b4c6" },
+{ "id": "root", "type": "row", "theme": "canopy-dark", "colors": { "accent": "#a7b4c6" },
   "font": "Geist Mono", "font_size": 15, "ui_font": "Geist",
   "terminal_padding": [10, 6], "terminal_opacity": 1, ... }
 ```
 
-- `theme`: `graphite`, `ink`, `moss` (dark), `paper` (light), or the name
+- `theme`: `canopy-dark`, `herdr-dark`, `ink`, `moss` (dark),
+  `canopy-light`, `herdr-light` (light), or the name
   of a file in `themes/`; or one for each appearance:
-  `"theme": { "light": "paper", "dark": "graphite" }` follows the system's
+  `"theme": { "light": "canopy-light", "dark": "canopy-dark" }` follows the system's
   light or dark mode (or the person's `appearance`). `app.theme {name}`
   sets the half of the name's lightness. A layout without a theme shows
-  settings.json's theme, else graphite or paper. `colors` overrides any theme color by name (see
+  settings.json's theme, else Canopy Dark or Canopy Light. Saved `graphite` and `paper` names alias
+  Herdr Dark and Herdr Light respectively. `colors` overrides any theme color by name (see
   `theme()` below), for terminals and panels alike: overrides apply in
   both appearances, so name theme colors (`chrome`, `canvas`) rather than
   writing hex when a layout should work light and dark.

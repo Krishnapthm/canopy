@@ -60,11 +60,12 @@ pub struct Theme {
     pub minimum_contrast: f32,
 }
 
-/// The terminal colors from settings.json's theme.
+/// Terminal colors from the resolved theme, composited over its background.
 pub fn theme() -> Theme {
     use crate::settings::rgb;
     let t = crate::settings::theme();
-    let get = |k: &str| rgb(t.get(k).map(String::as_str).unwrap_or("#ff00ff"));
+    let background = rgb(t.get("background").map(String::as_str).unwrap_or("#ff00ff"));
+    let get = |k: &str| crate::settings::rgb_on(t.get(k).map(String::as_str).unwrap_or("#ff00ff"), background);
     let mut palette16 = [Rgb::default(); 16];
     for (i, c) in palette16.iter_mut().enumerate() {
         *c = get(&format!("ansi{i}"));

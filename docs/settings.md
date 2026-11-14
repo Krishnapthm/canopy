@@ -32,3 +32,45 @@ On first start, with no good values yet, Canopy uses defaults.
 
 Reloads use the existing file watch. They add no idle timer. A bad edit is never
 written over by an in-app settings change.
+
+## Built-in themes
+
+Canopy Dark and Canopy Light are the appearance defaults for layouts without a
+specified theme. Select `canopy-dark`, `canopy-light`, `herdr-dark` or
+`herdr-light` in Settings. Ink and Moss remain available. Saved `graphite`
+selects Herdr Dark; saved `paper` selects Herdr Light, the blue-tinted light
+counterpart of the former default. Personal theme files are preserved.
+
+Themes use the existing color tokens. `canvas` is the canvas; `background`
+is the terminal; `surface` and `chrome` are panels and bars; `popover` and
+`raised` are menus and dialogs. `foreground`, `muted`/`muted-foreground`,
+`border`, `selected`/`selection`, `ring` and `accent` carry the specified
+text, muted text, border, selection, focus and accent colors. Canopy and
+Herdr Light working, blocked and done use ANSI yellow, red and blue. Herdr
+Dark retains its status colors (`#E5C07B`, `#F0705F`, `#76A8FF`).
+Dim, gray, idle and unknown use ANSI bright black; hover uses selected;
+input uses border; solid uses foreground and solid foreground uses terminal
+background. Color aliases use their matching ANSI slots; orange mixes red
+and yellow. Herdr Dark retains its original palette derivation. Theme JSON
+contains the exact palette and overrides.
+
+Herdr Light uses canvas `#F8FAFD`, panels/terminal `#EFF3F9`, raised `#FFFFFF`,
+text `#111111`, muted `#111111A6`, border `#11111117`, selection `#11111112`,
+focus `#11111133`, accent `#2B5F9E`. ANSI red, green, yellow, blue, magenta,
+cyan are `#B4183F`, `#0B6B3F`, `#82530A`, `#2B5F9E`, `#8A1A66`, `#1A6870`.
+
+Canopy Dark ANSI black/white are `#7A7A7A`/`#EDEDED`; bright black/white
+are `#999999`/`#FFFFFF`. Canopy Light and Herdr Light use
+`#111111`/`#555555`, bright `#666666`/`#111111`. Bright chromatic colors
+repeat the normal colors to retain contrast. Herdr Dark preserves Graphite,
+except ANSI black is `#7F8186` for readability.
+
+`cargo test --locked builtin_contrast -- --nocapture` prints WCAG contrast
+ratios for all four themes, compositing translucent text onto each background.
+
+Terminal colors composite alpha over their background before conversion to
+the renderer’s opaque RGB palette. Editors inherit the canvas color.
+
+Herdr Dark ANSI black changes from `#45484F` (1.922:1) to `#7F8186`
+(4.514:1), the first passing step when mixing toward white in 1/255 increments.
+All supplied Canopy values remain exact.

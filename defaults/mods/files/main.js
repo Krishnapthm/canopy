@@ -232,7 +232,7 @@ export default class Files extends View {
   render(cx) {
     if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
-    if (props()?.canvas === "viewer") return v_flex().size_full().min_h(0).text_color(t.foreground)
+    if (props()?.canvas === "viewer") return v_flex().size_full().min_h(0).bg(t.canvas).text_color(t.foreground)
       .on_key_down((e, cx) => {
         if (props()?.editing && e.keystroke === "cmd-s") { this.save(false, cx); cx.stop_propagation(); }
       })

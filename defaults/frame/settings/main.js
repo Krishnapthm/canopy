@@ -333,8 +333,10 @@ export default class Settings extends View {
         themes()
           .filter((x) => Boolean(x.light) === light && (x.name === shared("layout") || !layouts().includes(x.name)))
           .map(({ name, colors: c }) => {
-          const on = name === current;
-          const label = name.replace(/-/g, " ");
+          const on = name === current || (current === "graphite" && name === "herdr-dark") || (current === "paper" && name === "herdr-light");
+          const label = ["canopy-dark", "canopy-light", "herdr-dark", "herdr-light"].includes(name)
+            ? name.split("-").map(word => word[0].toUpperCase() + word.slice(1)).join(" ")
+            : name.replace(/-/g, " ");
           const dot = (color) => div().w(8).h(8).rounded(4).bg(color);
           return v_flex()
             .id(`st-t-${name}`)
