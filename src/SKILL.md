@@ -356,7 +356,7 @@ sub-agent cells clear; working ones refuse with a toast.
 Views are in the macOS View menu or the Linux titlebar's primary menu
 (`app.menu`, optionally with a `group`);
 the active view is checked. `view.agents`, `view.all`, `view.terminals` and
-their keys still work. The canvas toolbar has file and focus-fit buttons.
+their keys still work. The canvas bar (top of the window) has file, focus-fit and tile buttons.
 
 Canvas keyboard: the canvas has the keyboard unless a cell is entered; then the `canvas-mode`
 key section gets first refusal and unbound keys without Ctrl, Alt or Cmd are swallowed. No idle

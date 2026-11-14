@@ -664,9 +664,8 @@ impl AppWindow {
         let rects: Vec<_> = tiles.iter().map(|x| x.1).collect();
         let pills: Vec<_> = lined_up.iter().map(|x| if x.2 < count { self.pill_rect(&doc.cards[x.2], cx) } else { x.1 }).collect();
         let active = self.canvas_state.selected.iter().rev().find_map(|k| tiles.iter().position(|t| &t.0 == k));
-        // Tiles start below the toolbar (12 px from the top, 32 px tall) so it never covers one.
-        const TOOLBAR: f32 = 44.;
-        let (placed, lined) = canvas::tile([area[0], area[1] + TOOLBAR, visible[0], visible[1] - TOOLBAR], tiles.len(), active, &pills, self.person.tile_gap);
+        // The canvas starts under the bar, so tiles fill its whole area.
+        let (placed, lined) = canvas::tile([area[0], area[1], visible[0], visible[1]], tiles.len(), active, &pills, self.person.tile_gap);
         let state = &mut self.canvas_state;
         let unchanged = rects == placed && lined_up.iter().zip(&lined).all(|(a, b)| a.1[0] == b[0] && a.1[1] == b[1]);
         if !toggle && unchanged { return; }
@@ -2809,21 +2808,15 @@ impl AppWindow {
         if let Some(keys) = &state.actions {
             area = area.children(self.action_strips(shown_doc, keys, cx));
         }
-        let mut tabs = div()
-            .absolute()
-            .top(px(12.))
-            .right(px(12.))
-            .flex()
-            .gap(px(4.))
-            .p(px(4.))
-            .rounded(px(ui::RADIUS))
-            .bg(c("hover"))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-        // Inside a space: Home, then the space's name (a breadcrumb), before the files and fit buttons.
+        // The bar's controls opt out of window dragging.
+        let control = || div().flex().items_center().gap(px(4.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+        let mut crumbs = control();
+        let mut tabs = control();
+        // Inside a space: Home, then the space's name (a breadcrumb), on the bar's left.
         if let Some(room) = &state.doc.room {
             let name = self.model.space(room).map(|s| self.model.space_name(s, &home())).unwrap_or_default();
             let color = state.doc.spaces.iter().find(|s| &s.space == room).map(|s| s.color.clone()).unwrap_or_default();
-            tabs = tabs.child(
+            crumbs = crumbs.child(
                 div()
                     .id("canvas-home")
                     .flex()
@@ -2852,20 +2845,11 @@ impl AppWindow {
                     .child(name),
             );
         }
-        // Like Claude's toolbar: the folder opens or closes the files pane (tree and preview).
+        // Like Claude's titlebar: the folder opens or closes the files pane (tree and preview).
         let open = state.file.is_some() || state.files;
         tabs = tabs.child(
-            div()
-                .id("canvas-files")
-                .flex()
-                .items_center()
-                .px(px(10.))
-                .py(px(6.))
-                .rounded(px(ui::RADIUS_SM))
-                .cursor_pointer()
-                .hover(|d| d.bg(c("surface")))
-                .when(open, |d| d.bg(c("surface")))
-                .child(svg().path("mods/files/folder.svg").size(px(14.)).text_color(c("foreground")))
+            panel_button("canvas-files", "mods/files/folder.svg", c("foreground"), c("hover"))
+                .when(open, |d| d.bg(c("hover")))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if open {
                         this.canvas_command("panel.close", window, cx);
@@ -2882,19 +2866,24 @@ impl AppWindow {
                     }
                 })),
         );
-        tabs = tabs.child(panel_button("canvas-focus", "mods/pane/zoom.svg", c("foreground"), c("surface"))
+        tabs = tabs.child(panel_button("canvas-focus", "mods/pane/zoom.svg", c("foreground"), c("hover"))
             .on_click(cx.listener(|this, _, window, cx| this.canvas_command("canvas.fit", window, cx))));
-        tabs = tabs.child(panel_button("canvas-tile", "icons/layout-grid.svg", c("foreground"), c("surface"))
-            .when(state.tile.is_some(), |d| d.bg(c("surface")))
+        tabs = tabs.child(panel_button("canvas-tile", "icons/layout-grid.svg", c("foreground"), c("hover"))
+            .when(state.tile.is_some(), |d| d.bg(c("hover")))
             .on_click(cx.listener(|this, _, window, cx| this.tile_canvas(true, window, cx))));
-        area = area.child(tabs);
+        let bar = self.window_drag(div().flex().flex_none().items_center().justify_between().w_full().h(px(BAR))
+            .pl(px(bar_inset(cfg!(target_os = "macos"), self.fullscreen))).pr(px(12.))
+            .bg(c("background")).border_b_1().border_color(c("border")), cx)
+            .child(crumbs).child(tabs);
         if state.actions.is_some() || state.connecting.is_some() {
             area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(72.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_slot("canvas-keys", cx)));
         }
         let mut row = div()
-            .size_full()
+            .flex_1()
+            .min_h_0()
+            .w_full()
             .flex()
             .child(area)
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
@@ -3167,8 +3156,16 @@ impl AppWindow {
             if let Some(footer) = self.wire_footer() { panel = panel.child(footer); }
             row = row.child(panel);
         }
-        row.into_any_element()
+        div().size_full().flex().flex_col().child(bar).child(row).into_any_element()
     }
+}
+
+/// Height of the bar the canvas draws across the window top (px at zoom 1).
+const BAR: f32 = 40.;
+
+/// Space left of the bar's breadcrumb: macOS traffic lights sit there, except in full screen.
+fn bar_inset(macos: bool, fullscreen: bool) -> f32 {
+    if macos && !fullscreen { 76. } else { 12. }
 }
 
 /// How long the zoom must be still before an expanded cell draws live text again.
@@ -3558,5 +3555,17 @@ mod tile_tests {
             let after: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| (c.rect, c.size)).collect();
             assert_eq!(after, before);
         });
+    }
+}
+
+#[cfg(test)]
+mod bar_tests {
+    use super::bar_inset;
+
+    #[test]
+    fn bar_leaves_room_for_traffic_lights_only_on_macos_outside_full_screen() {
+        assert_eq!(bar_inset(true, false), 76.);
+        assert_eq!(bar_inset(true, true), 12.);
+        assert_eq!(bar_inset(false, false), 12.);
     }
 }

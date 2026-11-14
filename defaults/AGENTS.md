@@ -258,6 +258,8 @@ Properties any node can have:
   buttons over the layout at `"traffic_lights": [x, y]` (px); leave them
   room. Where the system draws no buttons (`window().buttons`, Linux and
   Windows), the bar draws them with `window.minimize`, `window.maximize`, `window.close`.
+  The shipped `main` layout (a canvas) uses `"none"` on macOS and draws its own
+  40 px bar; other platforms keep the system bar for canvas layouts.
   Windows' shipped tab bar and system strip use vector window icons, with a
   restore icon when maximized, rather than font glyphs.
 - Root only: `"preview": "layouts/<name>.svg"` (or png): the picture the

@@ -3,6 +3,12 @@
 At rest, every cell, sub-agent cell and file preview keeps `canvas_gap` world
 pixels from its neighbours (default 24). On Home, space cards keep the same gap.
 
+The window has no system title bar on macOS: the canvas draws a 40 px bar across
+the top, over the canvas and the files panel. The traffic lights sit in it, the
+breadcrumb follows them (no gap in full screen), and the folder (files), fit and
+tile buttons are on the right. Drag the bar to move the window; double-click
+maximizes. Linux and Windows keep their system title bar or menu strip above it.
+
 ## Spaces are rooms
 
 Home shows each space as a card, like a Figma frame: its name and color dot
@@ -12,7 +18,7 @@ click the name to rename it; right-click the card to rename, recolor or delete
 it (with a confirmation). Cards sit next to the cells outside any space.
 Double-click a card, or select it and press Enter, to go inside: the whole
 canvas belongs to that space, with no frame, so its cells grow freely. The
-toolbar then reads **Home / space**; click Home, or run `canvas.home`, to leave.
+bar then reads **Home / space**; click Home, or run `canvas.home`, to leave.
 `canvas.space` with `next`, `prev` or a number goes into another space. A new
 space opens straight away, and the app reopens where you closed it. Each place
 keeps its own camera. Older `canvas.json` files move each cell into the space

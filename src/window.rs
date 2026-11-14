@@ -433,6 +433,8 @@ pub struct AppWindow {
     /// Where a press on a `window_drag` node started, until it moves the window.
     drag_from: Option<Point<Pixels>>,
     titlebar_applied: Option<(crate::layout::Titlebar, Option<[f32; 2]>)>,
+    /// Whether the window was full screen at the last render (the canvas bar drops its traffic-light inset).
+    fullscreen: bool,
     focused_pane: Option<String>,
     /// The mod block holding the keyboard for directional navigation.
     focused_block: Option<String>,
@@ -528,6 +530,7 @@ impl AppWindow {
             pointer: Point::default(),
             drag_from: None,
             titlebar_applied: None,
+            fullscreen: false,
             focused_pane: None,
             focused_block: None,
             synced_model_pane: None,
