@@ -1598,7 +1598,10 @@ impl AppWindow {
             .any(|n| matches!(n.kind, Kind::Canvas))
     }
     pub(super) fn sync_canvas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.has_canvas() || !self.listed_once {
+        // Until the core's document has loaded the model has no spaces, and pruning
+        // would wipe every saved space card; `sync` runs again when it arrives.
+        let loaded = self.documents.get("").is_some_and(|s| s.document.is_some());
+        if !self.has_canvas() || !self.listed_once || !loaded {
             return;
         }
         self.load_previews(cx);
@@ -3191,8 +3194,9 @@ fn panel_button(id: &'static str, icon: &'static str, fg: Hsla, hover: Hsla) -> 
 }
 
 /// What a terminal is called on its pill, panel tab and quote row: a name the
-/// person gave it, else an agent's session title or program name ("Claude Code"),
-/// else the command in front ("uv run main.py"), else "terminal".
+/// person gave it, else an agent's program name ("Claude Code"), else "terminal"
+/// for a shell, else the command's basename ("uv"), never its flags. An agent's own
+/// title is left out so the name is stable, including before the agent reports.
 fn pill_label(given: Option<&str>, rec: &Value) -> String {
     let program = &rec["program"];
     let key = program["key"].as_str().unwrap_or_default();
@@ -3201,14 +3205,8 @@ fn pill_label(given: Option<&str>, rec: &Value) -> String {
     if let Some(name) = given.or(rec["name"].as_str()).map(str::trim).filter(|s| !generic(s)) {
         return name.to_owned();
     }
-    if canvas_agent(rec) {
-        let folder = rec["cwd"].as_str().and_then(|c| c.rsplit('/').next()).unwrap_or_default();
-        // An agent's title is its session name once it has one; paths and the folder are not.
-        return rec["title"].as_str().map(str::trim)
-            .filter(|t| !generic(t) && *t != folder && !t.contains('/'))
-            .or(Some(shown).filter(|s| !s.is_empty()))
-            .unwrap_or("agent")
-            .to_owned();
+    if crate::programs::agent_program(program) || canvas_agent(rec) {
+        return if shown.is_empty() { "agent" } else { shown }.to_owned();
     }
     if program["shell"] == true {
         return "terminal".into();
@@ -3217,9 +3215,11 @@ fn pill_label(given: Option<&str>, rec: &Value) -> String {
         .map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
     // The app's launch wrapper (`zsh -lic '"$@"; exec "$0" -li' zsh <cmd>...`, see programs::resolve) names <cmd>.
     if argv.len() > 4 && argv[2].contains("\"$@\"") { argv.drain(..4); }
-    if argv.is_empty() { return if shown.is_empty() { "terminal".into() } else { shown.to_owned() }; }
-    // Long commands are cut by the pill's ellipsis.
-    argv.join(" ").replace(['\n', '\r'], " ")
+    match argv.first().and_then(|a| a.rsplit('/').next()).filter(|b| !b.is_empty()) {
+        Some(base) => base.to_owned(),
+        None if shown.is_empty() => "terminal".into(),
+        None => shown.to_owned(),
+    }
 }
 
 /// A program's icon and whether to draw it in one color (`tint`) or its own colors.
@@ -3408,13 +3408,17 @@ mod pill_label_tests {
         assert_eq!(pill_label(None, &claude("Claude Code")), "Claude Code");
         assert_eq!(pill_label(None, &claude("~/w/canopy")), "Claude Code");
         assert_eq!(pill_label(None, &claude("canopy")), "Claude Code");
-        assert_eq!(pill_label(None, &claude("Fix pill labels")), "Fix pill labels");
+        // The agent's own title never names the cell.
+        assert_eq!(pill_label(None, &claude("Fix pill labels")), "Claude Code");
+        // Before the agent reports: no status, no agent flag, argv full of flags.
+        let early = json!({"foreground":{"argv":["claude","--settings","{\"hooks\":{}}"]},"program":{"key":"claude","name":"Claude Code"}});
+        assert_eq!(pill_label(None, &early), "Claude Code");
         assert_eq!(pill_label(Some("review"), &claude("Fix pill labels")), "review");
         assert_eq!(pill_label(Some("claude"), &claude("")), "Claude Code");
         let shell = json!({"foreground":{"argv":["zsh"]},"program":{"key":"shell","name":"zsh","shell":true}});
         assert_eq!(pill_label(Some(""), &shell), "terminal");
         let uv = json!({"foreground":{"argv":["uv","run","main.py"]},"program":{"key":"uv","name":"uv","shell":false}});
-        assert_eq!(pill_label(None, &uv), "uv run main.py");
+        assert_eq!(pill_label(None, &uv), "uv");
         let wrapped = json!({"foreground":{"argv":["/bin/zsh","-lic","\"$@\"; exec \"$0\" -li","/bin/zsh","claude"]},"program":{"key":"zsh","name":"zsh","shell":false}});
         assert_eq!(pill_label(None, &wrapped), "claude");
     }

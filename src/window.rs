@@ -1728,7 +1728,7 @@ impl AppWindow {
                         self.live.get(addr).and_then(|r| r.get("title")).and_then(Value::as_str).map(str::to_owned)
                     });
                     panes.push(json!({
-                        "pane": p.id, "terminal": addr, "tab": ctx.id, "title": title.clone().unwrap_or_default(),
+                        "pane": p.id, "terminal": addr, "tab": ctx.id, "name": ctx.name, "title": title.clone().unwrap_or_default(),
                         "cwd": self.cwds.get(addr), "branch": m.folder_info.get(addr).and_then(|f| f.branch.clone()),
                         "status": m.status(addr), "app": a.and_then(|a| a.app.clone()), "program": self.program(addr),
                         "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id),

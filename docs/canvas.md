@@ -34,6 +34,9 @@ whose frame held it, and the frame becomes that space's card.
 - Right-click a cell (its pill, header or terminal) for its own menu: Rename,
   Pop out or Bring back, Expand or Collapse, Clear finished, Close terminal
   (asks first) and Kill terminal (ends it and its sub-agents now).
+- A cell is named by what you renamed it to, else "Claude Code" (the agent's
+  program name), else "terminal" for a shell, else the command's name ("uv").
+  An agent's own session title and a command's flags are never shown.
 - Right-click a space or empty canvas: **Arrange** repeats the last
   layout, hovering **Arrange as** opens a submenu beside it to pick one
   (submenus open on hover; → and ← work too). **Tidy** is a grid in reading order with wired cells kept next to each other, **Row**
