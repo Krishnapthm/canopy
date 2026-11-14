@@ -52,8 +52,9 @@ Usage:
   canopy commands               every command, its arguments, what it does
   canopy status                 what the window shows, and any errors
   canopy shot [file.png]        save the last window frame (default: herdr-shot.png)
-  canopy hook sub-start|sub-stop|session-end|wire  report a session hook (JSON on stdin, best effort)
-  canopy wire [tell|ask|reply|wait|read ...]  Wire: list peers and mail, or send a postcard to a wired cell
+  canopy hook sub-start|sub-stop|session-end|wire|idle  report a session hook (JSON on stdin, best effort)
+  canopy wire [tell|reply|wait|read ...]  Wire: list peers and mail, or send a message to a wired cell
+  canopy spawn <program> --name <n> [--model <m>] [-- <message>]  start an agent beside this one, wired to it
   canopy check <mod folder>     load a mod once and report what's wrong
   canopy config                 Settings defaults and explanations
   canopy --skill                Agent Skill: driving the window, and where hc fits
@@ -84,12 +85,16 @@ fn main() {
     if args.get(1).is_some_and(|s| s == "hook") {
         match args.get(2).map(String::as_str) {
             Some("wire") => wire::hook(),
+            Some("idle") => wire::hook_idle(),
             action => subs::hook(action),
         }
         return;
     }
     if args.get(1).is_some_and(|s| s == "wire") {
         std::process::exit(wire::cli(&args[2..]));
+    }
+    if args.get(1).is_some_and(|s| s == "spawn") {
+        std::process::exit(wire::spawn_cli(&args[2..]));
     }
     #[cfg(target_os = "macos")]
     macos_check::startup(&args);
@@ -123,6 +128,8 @@ fn main() {
 
     #[cfg(target_os = "macos")]
     core_bin::fill_path();
+    #[cfg(unix)]
+    core_bin::put_cli_on_path();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("HERDR_APP_LOG")
@@ -215,7 +222,7 @@ pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiv
                     title: Some("Canopy".into()),
                     // Windows: hidden for good (it can't change live); the app draws it.
                     appears_transparent: cfg!(any(target_os = "macos", windows)),
-                    traffic_light_position: cfg!(target_os = "macos").then(|| point(px(12.0), px(7.0))),
+                    traffic_light_position: cfg!(target_os = "macos").then(|| point(px(12.0), px(13.0))),
                 }),
                 app_owns_titlebar_drag: cfg!(target_os = "macos"),
                 // Linux: open with the title bar the shipped layouts draw. Turning the

@@ -36,6 +36,10 @@ pub const DEFAULTS: &str = include_str!("../defaults/keys.macos.json");
 // Keep these when defaults change: only untouched shipped files may migrate.
 #[cfg(any(not(target_os = "macos"), test))]
 const SHIPPED_KEYS: &[&str] = &[
+    include_str!("keys/shipped/v0.1.15-dev7-keys.json"),
+    include_str!("keys/shipped/v0.1.15-dev6-keys.json"),
+    include_str!("keys/shipped/v0.1.15-dev5-keys.json"),
+    include_str!("keys/shipped/v0.1.15-dev4-keys.json"),
     include_str!("keys/shipped/v0.1.15-dev3-keys.json"),
     include_str!("keys/shipped/v0.1.15-dev2-keys.json"),
     include_str!("keys/shipped/v0.1.15-dev-keys.json"),
@@ -45,6 +49,10 @@ const SHIPPED_KEYS: &[&str] = &[
 ];
 #[cfg(any(target_os = "macos", test))]
 const SHIPPED_MACOS_KEYS: &[&str] = &[
+    include_str!("keys/shipped/v0.1.15-dev7-keys.macos.json"),
+    include_str!("keys/shipped/v0.1.15-dev6-keys.macos.json"),
+    include_str!("keys/shipped/v0.1.15-dev5-keys.macos.json"),
+    include_str!("keys/shipped/v0.1.15-dev4-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-dev3-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-dev2-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-dev-keys.macos.json"),
@@ -248,6 +256,7 @@ pub fn parse(text: &str) -> Result<Vec<KeyBinding>, String> {
                 let native: Option<Box<dyn gpui::Action>> = None;
                 native.unwrap_or_else(|| Box::new(ShellAction::new(action.clone())))
             };
+            // Canvas keys may carry modifiers (Shift+1, Cmd+A), but are never sequences.
             if section == "canvas-mode" && keys.split_whitespace().count() != 1 {
                 problems.push(format!("canvas-mode.{keys}: use one key, not a sequence"));
                 continue;

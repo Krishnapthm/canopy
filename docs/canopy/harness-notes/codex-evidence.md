@@ -1,5 +1,5 @@
 # codex installed evidence
-Executable: `/Users/krishna/.codex/packages/standalone/current/codex`
+Executable: `~/.codex/packages/standalone/current/codex`
 SHA256: `ebabe5f0d79145a9e61274ce9ecf7c02c9021b7b04bfa59b7e61ad4461c32b0b`
 Collected 2026-11-12. Display normalization: em dashes and escaped Unicode em dashes replaced with plain dashes; control bytes rendered as escapes. Native binary excerpts below are evidence of embedded text/source, not observed runtime behavior. Byte offsets are zero-based. Reproduce with Python Path(path).read_bytes()[offset:offset+length].decode("utf-8", "replace").
 

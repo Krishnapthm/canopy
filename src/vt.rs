@@ -60,11 +60,12 @@ pub struct Theme {
     pub minimum_contrast: f32,
 }
 
-/// The terminal colors from settings.json's theme.
+/// Terminal colors from the resolved theme, composited over its background.
 pub fn theme() -> Theme {
     use crate::settings::rgb;
     let t = crate::settings::theme();
-    let get = |k: &str| rgb(t.get(k).map(String::as_str).unwrap_or("#ff00ff"));
+    let background = rgb(t.get("background").map(String::as_str).unwrap_or("#ff00ff"));
+    let get = |k: &str| crate::settings::rgb_on(t.get(k).map(String::as_str).unwrap_or("#ff00ff"), background);
     let mut palette16 = [Rgb::default(); 16];
     for (i, c) in palette16.iter_mut().enumerate() {
         *c = get(&format!("ansi{i}"));
@@ -1235,6 +1236,11 @@ impl Vt {
         self.feed_search();
     }
 
+    /// Empties screen and scrollback, cursor at the top left (a restored shell then redraws its prompt there).
+    pub fn clear_for_restore(&mut self) {
+        self.write(b"\x1b[H\x1b[2J\x1b[3J");
+    }
+
     pub fn allow_clipboard_write(&mut self, allow: bool) {
         self.shared.clipboard_write = allow;
     }
@@ -1847,6 +1853,94 @@ mod tests {
             vt.progress_search();
         }
         panic!("terminal search did not finish incrementally");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn restore_resize_race_leaves_zsh_prompt_sp_on_a_separate_row() {
+        use std::io::Read;
+        use std::os::fd::{AsRawFd, FromRawFd};
+        use std::os::unix::process::CommandExt;
+        use std::process::{Command, Stdio};
+
+        let mut master = -1;
+        let mut slave = -1;
+        let mut size = libc::winsize { ws_row: 5, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0 };
+        assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) }, 0);
+        let mut master = unsafe { std::fs::File::from_raw_fd(master) };
+        let slave = unsafe { std::fs::File::from_raw_fd(slave) };
+        let mut command = Command::new("/bin/zsh");
+        command.args(["-f", "-o", "PROMPT_SP", "-i"])
+            .env_clear().env("TERM", "xterm-256color").env("PS1", "restore> ")
+            .env("RPS1", "").env("HOME", std::env::temp_dir()).env("PATH", "/usr/bin:/bin")
+            .stdin(Stdio::from(slave.try_clone().unwrap()))
+            .stdout(Stdio::from(slave.try_clone().unwrap())).stderr(Stdio::from(slave));
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY.into(), 0) < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut shell = command.spawn().unwrap();
+        // Reads until the pty goes quiet (300 ms) with `done` true, or 5 s pass.
+        let read_until = |master: &mut std::fs::File, done: &dyn Fn(&[u8]) -> bool| -> std::io::Result<Vec<u8>> {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut bytes = Vec::new();
+            while Instant::now() < deadline {
+                let mut fd = libc::pollfd { fd: master.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+                if unsafe { libc::poll(&mut fd, 1, 300) } < 0 { return Err(std::io::Error::last_os_error()); }
+                if fd.revents & libc::POLLIN == 0 { if done(&bytes) { break; } continue; }
+                let mut buf = [0; 4096];
+                let n = master.read(&mut buf)?;
+                if n == 0 { break; }
+                bytes.extend_from_slice(&buf[..n]);
+            }
+            Ok(bytes)
+        };
+        let prompt = |b: &[u8]| b.windows(8).any(|w| w == b"restore>");
+        let captured = read_until(&mut master, &prompt);
+        let bytes = match captured {
+            Ok(bytes) if prompt(&bytes) => bytes,
+            other => { shell.kill().unwrap(); shell.wait().unwrap(); panic!("shell did not draw a prompt: {other:?}"); }
+        };
+        // What the shell writes when its pty is resized and it gets SIGWINCH (the restore redraw).
+        let mut resized = libc::winsize { ws_row: 5, ws_col: 40, ws_xpixel: 0, ws_ypixel: 0 };
+        let redraw = (|| {
+            if unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCSWINSZ.into(), &mut resized) } < 0 { return Err(std::io::Error::last_os_error()); }
+            if unsafe { libc::kill(shell.id() as i32, libc::SIGWINCH) } < 0 { return Err(std::io::Error::last_os_error()); }
+            read_until(&mut master, &prompt)
+        })();
+        // Kill only this test's shell, including on capture failure; never read user startup files.
+        shell.kill().unwrap();
+        shell.wait().unwrap();
+        let redraw = redraw.unwrap();
+        assert!(prompt(&redraw), "shell did not redraw on SIGWINCH: {redraw:?}");
+
+        let mut correct = Vt::new(80, 5);
+        correct.write(&bytes);
+        let frame = correct.frame();
+        let text = |row: &Rc<Vec<Cell>>| row.iter().map(|c| c.text.as_str()).collect::<String>();
+        assert!(text(&frame.rows[0]).starts_with("restore>"));
+        assert_eq!(frame.cursor_cell.unwrap().1, 0);
+
+        // The core resizes its screen before the shell consumes the queued PTY resize.
+        let mut restored = Vt::new(80, 5);
+        restored.resize(40, 5, 9, 18);
+        restored.write(&bytes);
+        let frame = restored.frame();
+        assert!(text(&frame.rows[0]).starts_with('%'));
+        assert!(text(&frame.rows[1]).starts_with("restore>"));
+        assert_eq!(frame.cursor_cell.unwrap().1, 1);
+
+        // Restore-clean: drop the replay, then take the shell's redraw: the prompt lands on row 0.
+        restored.clear_for_restore();
+        restored.write(&redraw);
+        let frame = restored.frame();
+        assert!(text(&frame.rows[0]).starts_with("restore>"), "{:?}", text(&frame.rows[0]));
+        assert!(frame.rows.iter().all(|r| !text(r).starts_with('%')));
+        assert_eq!(frame.cursor_cell.unwrap().1, 0);
     }
 
     #[test]

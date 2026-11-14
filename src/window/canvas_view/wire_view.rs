@@ -15,9 +15,13 @@ const GRAB: f32 = 6.;
 #[derive(Default)]
 pub(in crate::window) struct WireUi {
     /// The cell whose side "+" handles show.
-    hover: Option<String>,
+    pub(super) hover: Option<String>,
     /// A wire being drawn: the cell it starts at, where it starts (world) and the pointer (window).
     drag: Option<(String, canvas::Point, Point<Pixels>)>,
+    /// Where the button went down on the "+" handle, to tell a click from a drag.
+    down: Point<Pixels>,
+    /// The handle was clicked, not dragged: the wire follows the pointer until a click picks a cell.
+    sticky: bool,
     pub(super) selected: Option<(String, String)>,
     pulses: HashMap<(String, String), Instant>,
     stats: HashMap<(String, String), Stat>,
@@ -26,27 +30,24 @@ pub(in crate::window) struct WireUi {
     thread: Option<(Vec<String>, Entity<InputState>, Subscription)>,
 }
 
-/// One edge as drawn: its cells in the order stored (a is the parent of a born edge).
+/// One edge as drawn: its cells in the order stored (a is the parent of a born edge), and its smoothed route.
 struct Edge {
     key: (String, String),
     born: bool,
-    ends: (canvas::Point, canvas::Point),
+    path: Vec<canvas::Point>,
 }
 
-/// A point on the edge's curve, `t` from 0 to 1 (the same cubic the painter draws).
-fn bezier(a: canvas::Point, z: canvas::Point, t: f32) -> canvas::Point {
-    let (c1, c2) = ([(a[0] + z[0]) / 2., a[1]], [(a[0] + z[0]) / 2., z[1]]);
-    let u = 1. - t;
-    let mix = |i: usize| u * u * u * a[i] + 3. * u * u * t * c1[i] + 3. * u * t * t * c2[i] + t * t * t * z[i];
-    [mix(0), mix(1)]
+/// How far (screen px) the pointer may move between press and release on a handle and still be a click.
+const CLICK: f32 = 4.;
+
+/// A release this close to where the button went down on a handle is a click, not a drag.
+fn is_click(down: Point<Pixels>, up: Point<Pixels>) -> bool {
+    f32::from(up.x - down.x).hypot(f32::from(up.y - down.y)) < CLICK
 }
 
-/// How far a point is from the curve (same units as the points).
-fn curve_distance(a: canvas::Point, z: canvas::Point, p: canvas::Point) -> f32 {
-    (0..=32).map(|i| {
-        let q = bezier(a, z, i as f32 / 32.);
-        ((q[0] - p[0]).powi(2) + (q[1] - p[1]).powi(2)).sqrt()
-    }).fold(f32::INFINITY, f32::min)
+/// The pointer's line while a wire is drawn: a cubic leaving `a` sideways.
+fn bezier(a: canvas::Point, z: canvas::Point) -> [canvas::Point; 2] {
+    [[(a[0] + z[0]) / 2., a[1]], [(a[0] + z[0]) / 2., z[1]]]
 }
 
 impl AppWindow {
@@ -68,14 +69,18 @@ impl AppWindow {
     }
 
     /// The drawn rect of a cell the current view shows.
-    fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
-        let card = doc.cards.iter().find(|c| c.key() == key)?;
+    pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
+        let card = doc.cards.iter().find(|c| c.key() == key && doc.shows(c.space.as_ref()))?;
         let view = &self.canvas_state.doc.view;
         if card.sub.is_some() {
             return (*view != canvas::View::Terminals).then_some(card.rect);
         }
         if !canvas::view_allows(view, self.live.get(&card.terminal).is_some_and(canvas_agent)) { return None; }
-        let size = self.canvas_state.pill_sizes.borrow().get(&card.terminal).map(|v| v.3).unwrap_or([240., 36.]);
+        // Match the drawn cell: an expanded one has its own size, a pill its measured one.
+        let size = match card.size {
+            Some(_) => [card.rect[2].max(canvas::PILL_WIDTH), card.rect[3].max(canvas::HEADER)],
+            None => self.canvas_state.pill_sizes.borrow().get(&card.terminal).map(|v| v.3).unwrap_or([240., 36.]),
+        };
         Some([card.rect[0], card.rect[1], size[0], size[1]])
     }
 
@@ -84,17 +89,19 @@ impl AppWindow {
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
         let mut out: Vec<Edge> = vec![];
         let all = wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
+        // Every shown cell, for edges to go around.
+        let cells: Vec<_> = doc.cards.iter().filter_map(|c| self.wire_cell(doc, &c.key())).collect();
         for w in all.iter().filter(|w| w.born).chain(all.iter().filter(|w| !w.born)) {
             if out.iter().any(|e| (e.key.0 == w.a && e.key.1 == w.b) || (e.key.0 == w.b && e.key.1 == w.a)) { continue; }
             if let (Some(a), Some(b)) = (self.wire_cell(doc, &w.a), self.wire_cell(doc, &w.b)) {
-                out.push(Edge { key: (w.a.clone(), w.b.clone()), born: w.born, ends: canvas::edge_ends(a, b) });
+                out.push(Edge { key: (w.a.clone(), w.b.clone()), born: w.born, path: canvas::smooth(&canvas::route(a, b, &cells)) });
             }
         }
         out
     }
 
     /// A window position in canvas-local pixels.
-    fn wire_local(&self, position: Point<Pixels>) -> canvas::Point {
+    pub(super) fn wire_local(&self, position: Point<Pixels>) -> canvas::Point {
         let origin = self.bounds.borrow().get("canopy-canvas").map(|b| b.origin).unwrap_or_default();
         [f32::from(position.x - origin.x), f32::from(position.y - origin.y)]
     }
@@ -113,12 +120,18 @@ impl AppWindow {
     fn wire_edge_at(&self, position: Point<Pixels>) -> Option<Edge> {
         let camera = self.canvas_state.doc.camera;
         let p = self.wire_local(position);
-        self.wire_edges().into_iter().find(|e| curve_distance(camera.to_screen(e.ends.0), camera.to_screen(e.ends.1), p) <= GRAB)
+        self.wire_edges().into_iter().find(|e| canvas::path_distance(&e.path.iter().map(|v| camera.to_screen(*v)).collect::<Vec<_>>(), p) <= GRAB)
     }
 
     /// Mouse moves on the canvas: shows the "+" handles of the cell under the pointer and
     /// follows a wire being drawn. True when the move was part of drawing.
     pub(in crate::window) fn wire_pointer(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) -> bool {
+        let wire = &mut self.canvas_state.wire;
+        if let Some(drag) = wire.drag.as_mut().filter(|_| wire.sticky) {
+            drag.2 = e.position;
+            cx.notify();
+            return true;
+        }
         if let Some((from, start, _)) = self.canvas_state.wire.drag.take() {
             // The button came up outside the window: nothing was released on a cell, so cancel.
             if e.pressed_button.is_some() { self.canvas_state.wire.drag = Some((from, start, e.position)); }
@@ -159,11 +172,41 @@ impl AppWindow {
     }
 
     /// The left button came up: a wire being drawn connects to the cell under it, or is dropped.
+    /// A release on the handle it started from, without moving, keeps the wire (see `wire_pick`).
     pub(in crate::window) fn wire_release(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let wire = &mut self.canvas_state.wire;
+        if wire.drag.is_none() || wire.sticky { return false; }
+        if is_click(wire.down, position) {
+            wire.sticky = true;
+            cx.notify();
+            return true;
+        }
         let Some((from, ..)) = self.canvas_state.wire.drag.take() else { return false };
         if let Some(to) = self.wire_cell_at(position, 0.).filter(|to| *to != from) {
             if let Err(why) = self.wire_connect(&from, &to, window, cx) { self.wire_toast(why, window, cx); }
         }
+        cx.notify();
+        true
+    }
+
+    /// A left press while a wire follows the pointer (capture phase, so an entered terminal cannot
+    /// swallow it): the cell under it is wired to, anywhere else cancels. True when it was taken.
+    pub(in crate::window) fn wire_pick(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.canvas_state.wire.sticky { return false; }
+        let drag = self.canvas_state.wire.drag.take();
+        self.canvas_state.wire.sticky = false;
+        if let Some(to) = drag.and_then(|(from, ..)| self.wire_cell_at(position, 0.).filter(|to| *to != from).map(|to| (from, to))) {
+            if let Err(why) = self.wire_connect(&to.0, &to.1, window, cx) { self.wire_toast(why, window, cx); }
+        }
+        cx.notify();
+        true
+    }
+
+    /// Escape drops a wire that follows the pointer. True when there was one.
+    pub(in crate::window) fn wire_cancel(&mut self, cx: &mut Context<Self>) -> bool {
+        let wire = &mut self.canvas_state.wire;
+        if !wire.sticky { return false; }
+        (wire.drag, wire.sticky) = (None, false);
         cx.notify();
         true
     }
@@ -373,9 +416,13 @@ impl AppWindow {
                 .size(px(HANDLE)).rounded_full().bg(c("surface")).border_1().border_color(c("muted-foreground")).cursor_pointer()
                 .hover(|d| d.border_color(c("foreground")))
                 .child(line(6., 1.)).child(line(1., 6.))
-                .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     this.canvas_state.selected.clear();
+                    // Focus the canvas so Escape can cancel a wire that ends up following the pointer.
+                    this.canvas_state.mode = true;
+                    this.focus.focus(window, cx);
                     this.canvas_state.wire.drag = Some((key.clone(), start, e.position));
+                    this.canvas_state.wire.down = e.position;
                     cx.stop_propagation();
                     cx.notify();
                 })).into_any_element());
@@ -388,15 +435,15 @@ impl AppWindow {
     pub(in crate::window) fn wire_layer(&self, viewport: canvas::Point, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
         let state = &self.canvas_state;
         let camera = state.doc.camera;
-        let mut paint: Vec<(canvas::Point, canvas::Point, bool, bool, bool, Option<Instant>)> = vec![];
+        let mut paint: Vec<(Vec<canvas::Point>, bool, bool, bool, Option<Instant>)> = vec![];
         let mut marks = vec![];
-        for edge in self.wire_edges().into_iter().filter(|e| canvas::edge_visible(camera, e.ends, viewport)) {
+        for edge in self.wire_edges().into_iter().filter(|e| canvas::edge_visible(camera, &e.path, viewport)) {
             let stat = state.wire.stats.get(&edge.key).cloned().unwrap_or_default();
             let selected = state.wire.selected.as_ref() == Some(&edge.key);
             let pulse = state.wire.pulses.get(&edge.key).copied().filter(|t| t.elapsed() < PULSE);
-            paint.push((edge.ends.0, edge.ends.1, edge.born, selected || stat.tripped, stat.tripped, pulse));
+            let [x, y] = camera.to_screen(canvas::along(&edge.path, 0.5));
+            paint.push((edge.path.clone(), edge.born, selected || stat.tripped, stat.tripped, pulse));
             if !(stat.waiting > 0 || stat.unanswered || stat.tripped) { continue; }
-            let [x, y] = camera.to_screen(bezier(edge.ends.0, edge.ends.1, 0.5));
             let (a, b) = edge.key.clone();
             let mut row = div().absolute().left(px(x - 6.)).top(px(y - 6.)).flex().items_center().gap(px(4.));
             if stat.tripped {
@@ -420,35 +467,38 @@ impl AppWindow {
         let layer = canvas(|_, _, _| {}, move |b, _, window, cx| {
             let p = |v: [f32; 2]| point(b.origin.x + px(v[0]), b.origin.y + px(v[1]));
             let mut animating = false;
-            for (a, z, born, strong, dashed, pulse) in &paint {
-                let (sa, sz) = (camera.to_screen(*a), camera.to_screen(*z));
+            for (path, born, strong, dashed, pulse) in &paint {
+                let screen: Vec<_> = path.iter().map(|v| camera.to_screen(*v)).collect();
                 let glow = pulse.map(|t| 1. - t.elapsed().as_secs_f32() / PULSE.as_secs_f32()).filter(|g| *g > 0.);
                 animating |= glow.is_some();
                 let color = if glow.is_some() { c("ring") } else if *strong { c("foreground").opacity(0.7) } else { c("muted-foreground").opacity(if *born { 0.5 } else { 0.7 }) };
                 let width = if glow.is_some() { 2.5 } else if *born { 1. } else { 1.5 };
-                // A tripped wire is dashed: every other of 24 short pieces.
-                let pieces: Vec<(f32, f32)> = if *dashed { (0..24).step_by(2).map(|i| (i as f32 / 24., (i + 1) as f32 / 24.)).collect() } else { vec![(0., 1.)] };
-                for (from, to) in pieces {
-                    let (pa, pz) = (bezier(sa, sz, from), bezier(sa, sz, to));
-                    let mut path = PathBuilder::stroke(px(width));
-                    if *dashed {
-                        path.move_to(p(pa));
-                        path.line_to(p(pz));
-                    } else {
-                        path.move_to(p(sa));
-                        path.cubic_bezier_to(p(sz), p([(sa[0] + sz[0]) / 2., sa[1]]), p([(sa[0] + sz[0]) / 2., sz[1]]));
+                if *dashed {
+                    // A tripped wire is dashed: every other of 24 short pieces.
+                    for i in (0..24).step_by(2) {
+                        let mut piece = PathBuilder::stroke(px(width));
+                        piece.move_to(p(canvas::along(&screen, i as f32 / 24.)));
+                        piece.line_to(p(canvas::along(&screen, (i + 1) as f32 / 24.)));
+                        if let Ok(piece) = piece.build() { window.paint_path(piece, color); }
                     }
-                    if let Ok(path) = path.build() { window.paint_path(path, color); }
+                } else {
+                    // The smoothed route: soft curves around cells (canvas::smooth).
+                    let mut line = PathBuilder::stroke(px(width));
+                    let Some((first, rest)) = screen.split_first() else { continue };
+                    line.move_to(p(*first));
+                    for v in rest { line.line_to(p(*v)); }
+                    if let Ok(line) = line.build() { window.paint_path(line, color); }
                 }
                 let dot = |window: &mut Window, v: [f32; 2], r: f32| window.paint_quad(fill(Bounds::new(p([v[0] - r, v[1] - r]), size(px(2. * r), px(2. * r))), c("muted-foreground")).corner_radii(px(r)));
-                dot(window, sz, 3.);
-                if !*born { dot(window, sa, 3.); }
+                if let Some(end) = screen.last() { dot(window, *end, 3.); }
+                if !*born && let Some(start) = screen.first() { dot(window, *start, 3.); }
             }
             if let Some((start, world)) = live {
                 let (sa, sz) = (camera.to_screen(start), camera.to_screen(world));
                 let mut path = PathBuilder::stroke(px(1.5));
                 path.move_to(p(sa));
-                path.cubic_bezier_to(p(sz), p([(sa[0] + sz[0]) / 2., sa[1]]), p([(sa[0] + sz[0]) / 2., sz[1]]));
+                let [c1, c2] = bezier(sa, sz);
+                path.cubic_bezier_to(p(sz), p(c1), p(c2));
                 if let Ok(path) = path.build() { window.paint_path(path, c("ring")); }
             }
             if let Some(r) = target {
@@ -458,5 +508,53 @@ impl AppWindow {
             if animating && !cx.reduce_motion() { window.request_animation_frame(); }
         }).absolute().size_full().into_any_element();
         (layer, marks)
+    }
+}
+
+#[cfg(test)]
+mod sticky_tests {
+    use super::{AppWindow, MouseMoveEvent, TestAppContext, json, point, px};
+    use crate::window::tests::{in_own_process, open_window, running_alone};
+    const TEST: &str = "window::canvas_view::wire_view::sticky_tests::sticky_wire";
+
+    #[test]
+    fn a_clicked_handle_keeps_the_wire_until_a_cell_is_clicked() { in_own_process(TEST); }
+
+    #[gpui::test]
+    fn sticky_wire(cx: &mut TestAppContext) {
+        if !running_alone(TEST) { return; }
+        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
+        view.update_in(cx, |this, window, cx| {
+            this.canvas_state.doc.cards = serde_json::from_value(json!([
+                {"terminal":"t1","rect":[0,0,200,100],"z":0,"size":[200,100]},
+                {"terminal":"t2","rect":[400,0,200,100],"z":1,"size":[200,100]}
+            ])).unwrap();
+            for t in ["t1", "t2"] { this.live.insert(t.into(), json!({})); }
+            let (down, over_t2) = (point(px(200.), px(50.)), point(px(450.), px(50.)));
+            let start = |this: &mut AppWindow| {
+                this.canvas_state.wire.drag = Some(("t1".into(), [200., 50.], down));
+                this.canvas_state.wire.down = down;
+            };
+            // A release where the press was keeps the wire, and it follows the pointer.
+            start(this);
+            assert!(this.wire_release(down, window, cx));
+            assert!(this.canvas_state.wire.sticky);
+            let moved = MouseMoveEvent { position: over_t2, pressed_button: None, modifiers: Default::default() };
+            assert!(this.wire_pointer(&moved, cx));
+            assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| d.2), Some(over_t2));
+            // Escape drops it.
+            assert!(this.wire_cancel(cx));
+            assert!(this.canvas_state.wire.drag.is_none() && this.canvas_state.doc.wires.is_empty());
+            // The next click on a cell connects.
+            start(this);
+            this.wire_release(down, window, cx);
+            assert!(this.wire_pick(over_t2, window, cx));
+            assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
+            assert_eq!(this.canvas_state.doc.wires.len(), 1);
+            // A drag released on empty canvas still just drops.
+            start(this);
+            assert!(this.wire_release(point(px(900.), px(900.)), window, cx));
+            assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
+        });
     }
 }

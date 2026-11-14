@@ -465,8 +465,14 @@ impl Core {
     /// Starts a terminal, here or on another machine (`on`: its name in `hc machine ls`).
     pub fn run(&self, argv: Vec<String>, cwd: Option<String>, labels: Value, on: Option<&str>, size: Option<(u16, u16)>, display: Value) -> Result<String> {
         let mut env = json!({"TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "herdr"});
-        if on.is_none() && (argv.is_empty() || argv == [crate::window::shell()]) {
-            crate::programs::shell_env(&crate::window::shell(), &mut env);
+        if on.is_none() {
+            // The app's PATH, with `canopy` first (core_bin::put_cli_on_path), even on a core started elsewhere.
+            if cfg!(unix) {
+                env["PATH"] = json!(std::env::var("PATH").unwrap_or_default());
+            }
+            if argv.is_empty() || argv == [crate::window::shell()] {
+                crate::programs::shell_env(&crate::window::shell(), &mut env);
+            }
         }
         let mut params = json!({"argv": argv, "cwd": cwd, "env": env, "labels": labels, "on": on, "keep": true, "display": display});
         // Released cores ignore unknown parameters, including when forwarding to another machine.

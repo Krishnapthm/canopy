@@ -3,13 +3,14 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, InputState, Input, Popup } from "gpui-base";
-import { hc, run, theme, themes, fonts, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window } from "herdr";
+import { commands, keys, nextCommand, openOverlay, setShared, notify, hc, run, theme, themes, fonts, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, ui } from "herdr";
 
 const I = (name) => `frame/settings/${name}.svg`;
 
 const SECTIONS = [
   { id: "look", title: "Look", icon: "palette" },
   ...(window()?.platform === "macos" ? [{ id: "keyboard", title: "Keyboard", icon: "keyboard" }] : []),
+  { id: "shortcuts", title: "Shortcuts", icon: "keyboard" },
   { id: "machines", title: "Machines", icon: "server" },
   { id: "alerts", title: "Alerts", icon: "bell" },
 ];
@@ -24,6 +25,91 @@ const APPEARANCES = [
 // What the app uses when settings.json names no font (settings.rs).
 const DEFAULT_FONT = "JetBrains Mono";
 const DEFAULT_UI_FONT = "Geist";
+
+// Keep argument-bearing actions distinct, including object bindings.
+function actionName(action) {
+  return typeof action === "string" ? action : JSON.stringify(action);
+}
+
+function commandName(action) {
+  return typeof action === "string" ? action.split(":")[0] : action.command;
+}
+
+function normalizedKey(key) {
+  return key.trim().split(/\s+/).map(chord => {
+    const parts = chord.split("-");
+    const key = parts.pop();
+    if (/^[A-Z]$/.test(key)) parts.push("shift");
+    const modifiers = parts.map(p => ({ super: "cmd", win: "cmd", secondary: window()?.platform === "macos" ? "cmd" : "ctrl" })[p.toLowerCase()] ?? p.toLowerCase());
+    return [...new Set(modifiers)].sort().concat(key.toLowerCase()).join("-");
+  }).join(" ");
+}
+
+function conflicts(bindings, key, action) {
+  return Object.entries(bindings).filter(([k, a]) => normalizedKey(k) === normalizedKey(key) && actionName(a) !== actionName(action)).map(([, a]) => actionName(a));
+}
+
+function parseShortcuts(raw) {
+  const value = JSON.parse(raw);
+  const object = v => v !== null && typeof v === "object" && !Array.isArray(v);
+  if (!object(value) || Object.values(value).some(section => !object(section) || Object.values(section).some(action => typeof action !== "string" && !(object(action) && typeof action.command === "string")))) {
+    throw new Error("keys.json must contain sections of key actions.");
+  }
+  return value;
+}
+
+function matchesShortcut(row, query) {
+  return `${row.name} ${row.about} ${row.current.join(" ")} ${row.defaults.join(" ")}`.toLowerCase().includes(query.trim().toLowerCase());
+}
+
+// Replace only this action; a collision never takes another action's key away.
+function bindShortcut(current, row, nextKeys) {
+  const bindings = current[row.section] ?? (current[row.section] = {});
+  for (const [key, action] of Object.entries(bindings)) {
+    if (actionName(action) === row.name) delete bindings[key];
+  }
+  for (const key of nextKeys) {
+    if (normalizedKey(key) === normalizedKey("ctrl-alt-shift-escape")) throw new Error("Ctrl+Alt+Shift+Esc is reserved for restoring Canopy.");
+    const other = conflicts(bindings, key, row.action);
+    if (other.length) throw new Error(`${row.section}: ${key} already binds ${other.join(", ")}. Clear that binding first.`);
+    bindings[key] = row.action;
+  }
+}
+
+function resetShortcuts(current, defaults, catalog, row = null) {
+  if (row) {
+    const keys = Object.entries(defaults[row.section] ?? {}).filter(([, action]) => actionName(action) === row.name).map(([key]) => key);
+    bindShortcut(current, row, keys);
+    return;
+  }
+  const known = new Set(catalog.map(c => c.name));
+  for (const [section, bindings] of Object.entries(current)) {
+    const shipped = new Set(Object.values(defaults[section] ?? {}).map(actionName));
+    for (const [key, action] of Object.entries(bindings)) {
+      if (known.has(commandName(action)) || shipped.has(actionName(action))) delete bindings[key];
+    }
+  }
+  for (const row of shortcutRows({}, defaults, [])) bindShortcut(current, row, row.defaults);
+}
+
+function shortcutRows(current, defaults, catalog) {
+  const rows = new Map();
+  for (const [source, field] of [[current, "current"], [defaults, "defaults"]]) {
+    for (const [section, bindings] of Object.entries(source)) {
+      for (const [key, action] of Object.entries(bindings)) {
+        const id = JSON.stringify([section, actionName(action)]);
+        if (!rows.has(id)) rows.set(id, { id, section, action, name: actionName(action), about: catalog.find(c => c.name === commandName(action))?.about ?? "Custom key action", current: [], defaults: [] });
+        rows.get(id)[field].push(key);
+      }
+    }
+  }
+  for (const c of catalog) {
+    if ([...rows.values()].some(row => commandName(row.action) === c.name)) continue;
+    const id = JSON.stringify(["global", c.name]);
+    rows.set(id, { id, section: "global", action: c.name, name: c.name, about: c.about, current: [], defaults: [] });
+  }
+  return [...rows.values()].sort((a, b) => a.section.localeCompare(b.section) || a.name.localeCompare(b.name));
+}
 
 export default class Settings extends View {
   init(_props, cx) {
@@ -43,6 +129,16 @@ export default class Settings extends View {
       const edit = this.machineEdit;
       if (edit?.action === "rename") this.machineAction(edit.machine, "rename", cx, edit.name);
     });
+    this.shortcutQuery = "";
+    this.shortcutInput = InputState.new({ placeholder: "Search actions, descriptions or keys" });
+    this.shortcutInput.on("change", (_e, cx) => { this.shortcutQuery = this.shortcutInput.value(); cx.notify(); });
+    this.shortcutInput.on("focus", (_e, cx) => { this.cancelShortcut(); cx.notify(); });
+    this.recording = null;
+    this.shortcutBusy = false;
+    this.shortcutRevision = null;
+    this.shortcutKeys = null;
+    this.shortcutDefaults = {};
+    this.shortcutError = null;
     this.person = {};
     this.raw = null;
     this.previews = {}; // layout name -> its "preview" picture
@@ -56,10 +152,20 @@ export default class Settings extends View {
     this.machineNotice = null;
     this.handle = cx.focus_handle();
     this.handle.focus();
+    this.cancelShortcut();
     cx.spawn(async (cx) => {
       await this.load();
+      if (this.section === "shortcuts") await this.loadShortcuts();
       if (this.section === "machines") await this.loadMachines();
       cx.notify();
+    });
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const command = await nextCommand();
+        if (command === "reset_shortcuts") this.saveShortcuts(current => resetShortcuts(current, this.shortcutDefaults, commands()), cx);
+        else if (command === "focus" && this.section === "shortcuts") { await this.loadShortcuts(); cx.notify(); }
+        else if (command.startsWith('{"shortcut":')) this.captureShortcut(JSON.parse(command).shortcut, cx);
+      }
     });
     cx.timer.every(3000, (cx) => {
       if (this.section !== "machines") return;
@@ -118,6 +224,7 @@ export default class Settings extends View {
   }
 
   close() {
+    this.cancelShortcut();
     closeOverlay(props().overlay);
   }
 
@@ -152,7 +259,7 @@ export default class Settings extends View {
       .id(id)
       .px(12)
       .py(5)
-      .rounded(7)
+      .rounded(ui.size.radiusSm)
       .border_1()
       .border_color(t.border)
       .bg(t.raised)
@@ -182,7 +289,7 @@ export default class Settings extends View {
         .child(label);
     return h_flex()
       .items_center()
-      .rounded(7)
+      .rounded(ui.size.radiusSm)
       .border_1()
       .border_color(t.border)
       .bg(t.raised)
@@ -204,7 +311,7 @@ export default class Settings extends View {
       .flex()
       .when(on, (el) => el.justify_end())
       .on_click(onClick)
-      .child(div().w(16).h(16).rounded(8).bg(on ? t.accent_foreground : t.muted));
+      .child(div().w(16).h(16).rounded(ui.size.radius).bg(on ? t.accent_foreground : t.muted));
   }
 
   // Look -----------------------------------------------------------------
@@ -295,7 +402,7 @@ export default class Settings extends View {
     return h_flex()
       .p(2)
       .gap(2)
-      .rounded(8)
+      .rounded(ui.size.radius)
       .border_1()
       .border_color(t.border)
       .bg(t.background)
@@ -333,8 +440,10 @@ export default class Settings extends View {
         themes()
           .filter((x) => Boolean(x.light) === light && (x.name === shared("layout") || !layouts().includes(x.name)))
           .map(({ name, colors: c }) => {
-          const on = name === current;
-          const label = name.replace(/-/g, " ");
+          const on = name === current || (current === "graphite" && name === "herdr-dark") || (current === "paper" && name === "herdr-light");
+          const label = ["canopy-dark", "canopy-light", "herdr-dark", "herdr-light"].includes(name)
+            ? name.split("-").map(word => word[0].toUpperCase() + word.slice(1)).join(" ")
+            : name.replace(/-/g, " ");
           const dot = (color) => div().w(8).h(8).rounded(4).bg(color);
           return v_flex()
             .id(`st-t-${name}`)
@@ -384,7 +493,7 @@ export default class Settings extends View {
       .w(220)
       .px(12)
       .py(6)
-      .rounded(7)
+      .rounded(ui.size.radiusSm)
       .border_1()
       .border_color(open ? t.accent : t.border)
       .bg(t.raised)
@@ -433,7 +542,7 @@ export default class Settings extends View {
         this.handle.focus();
         cx.notify();
       })
-      .rounded(8)
+      .rounded(ui.size.radius)
       .border_1()
       .border_color(t.border)
       .bg(t.background)
@@ -496,6 +605,9 @@ export default class Settings extends View {
       .child(this.themePicker(t, true))
       .child(div().h(18))
       .child(this.row(t, "Canvas color", "Hex color or theme default.", h_flex().gap(8).child(Input.new(this.canvasColorInput).w(120).h(28)).child(this.button(t, "canvas-color-default", "Default", (_e, cx) => this.change((q) => { q.canvas_color = null; }, cx)))))
+      .child(this.heading(t, "Canvas"))
+      .child(this.row(t, "Push neighbours", "Cells nudge each other apart. Off lets them overlap. For drop-on-release, set canvas_push to \"drop\" in settings.json.", this.toggle(t, "st-canvas-push", this.person.canvas_push !== "off", (_e, cx) => this.change((q) => { if (q.canvas_push === "off") delete q.canvas_push; else q.canvas_push = "off"; }, cx))))
+      .child(this.row(t, "Focused tile grows", "In tile view the selected tile takes more room. Off keeps every tile the same size.", this.toggle(t, "st-tile-grows", this.person.tile_focus_grows === true, (_e, cx) => this.change((q) => { if (q.tile_focus_grows) delete q.tile_focus_grows; else q.tile_focus_grows = true; }, cx))))
       .child(this.heading(t, "Size and fonts"))
       .child(
         this.row(
@@ -523,6 +635,108 @@ export default class Settings extends View {
       .child(fontRow("ui_font", null, "Interface font", s.ui_font_family, DEFAULT_UI_FONT));
   }
 
+  async loadShortcuts() {
+    try {
+      const name = window()?.platform === "macos" ? "keys.macos.json" : "keys.json";
+      const shipped = await readTextFile(`${appHome()}/frame/settings/${name}`);
+      if (shipped === null) throw new Error("Shipped shortcuts are missing. Restart Canopy to install them.");
+      this.shortcutDefaults = parseShortcuts(shipped);
+      const raw = await readTextFile(`${appHome()}/keys.json`);
+      this.shortcutKeys = parseShortcuts(raw ?? shipped);
+      this.shortcutRevision = JSON.stringify(keys());
+      this.shortcutError = null;
+    } catch (e) {
+      this.shortcutKeys = null;
+      this.shortcutError = String(e);
+      notify({ title: "Couldn't read shortcuts", body: String(e), level: "error" });
+    }
+  }
+
+  cancelShortcut() {
+    this.recording = null;
+    if (shared("settings.record-shortcut") === props().overlay) setShared("settings.record-shortcut", null);
+  }
+
+  captureShortcut(key, cx) {
+    const row = this.recording;
+    this.cancelShortcut();
+    if (row && key !== "escape") this.saveShortcuts(current => bindShortcut(current, row, key === "backspace" ? [] : [key]), cx);
+    cx.notify();
+  }
+
+  // Re-read before every edit, then use the existing atomic, expected-text write.
+  saveShortcuts(edit, cx) {
+    if (this.shortcutBusy) return;
+    this.shortcutBusy = true;
+    this.cancelShortcut();
+    cx.notify();
+    cx.spawn(async (cx) => {
+      try {
+        const file = `${appHome()}/keys.json`;
+        for (let attempt = 0; ; attempt++) {
+          const raw = await readTextFile(file);
+          const current = parseShortcuts(raw ?? JSON.stringify(this.shortcutDefaults));
+          edit(current);
+          try {
+            await writeTextFile(file, JSON.stringify(current, null, 2) + "\n", raw);
+            this.shortcutKeys = current;
+            this.shortcutRevision = JSON.stringify(keys());
+            break;
+          } catch (e) {
+            if (attempt === 2 || await readTextFile(file) === raw) throw e;
+          }
+        }
+        this.shortcutError = null;
+      } catch (e) {
+        this.shortcutError = String(e);
+        notify({ title: "Couldn't save shortcuts", body: String(e), level: "error" });
+      } finally {
+        this.shortcutBusy = false;
+        cx.notify();
+      }
+    });
+  }
+
+  shortcuts(t, cx) {
+    // Config reloads already redraw mods. Compare the listing instead of adding a watcher.
+    if (this.shortcutRevision !== null && !this.shortcutBusy && this.shortcutRevision !== JSON.stringify(keys())) {
+      this.shortcutRevision = JSON.stringify(keys());
+      cx.spawn(async (cx) => { await this.loadShortcuts(); cx.notify(); });
+    }
+    const page = v_flex().w_full().gap(8)
+      .child(Input.new(this.shortcutInput).h(32).text_color(t.foreground))
+      .child(this.heading(t, "Shortcuts"));
+    if (!this.shortcutKeys) return page.child(div().text_color(t.dim).child(this.shortcutError ?? "Reading shortcuts"));
+    const rows = shortcutRows(this.shortcutKeys, this.shortcutDefaults, commands()).filter(row => matchesShortcut(row, this.shortcutQuery));
+    return page
+      .child(this.button(t, "st-shortcuts-reset-all", this.shortcutBusy ? "Saving shortcuts" : "Reset all shortcuts", () => {
+        if (this.shortcutBusy) return;
+        this.cancelShortcut();
+        openOverlay({ mod: "confirm", kind: "dialog", width: 400, props: {
+          title: "Reset all shortcuts?", detail: "Restore shipped keys for this OS. Custom mod actions and unrelated sections are kept. Conflicting custom keys must be cleared first.",
+          accept: "Reset all shortcuts", destructive: true, command: { name: "frame-settings.reset_shortcuts" },
+        } });
+      }))
+      .child(div().text_size(12).text_color(t.dim).child("Click a key, then press a combination. Esc cancels; Backspace clears."))
+      .when(Boolean(this.shortcutError), el => el.child(div().text_size(12).text_color(t.blocked).child(this.shortcutError)))
+      .when(rows.length === 0, el => el.child(div().text_color(t.dim).child("No matching shortcuts")))
+      .children(rows.map((row, i) => {
+        const warnings = row.current.flatMap(key => conflicts(this.shortcutKeys[row.section], key, row.action).map(other => `${key} also binds ${other}`));
+        return this.row(t, row.name, `${row.section}: ${row.about}`,
+          v_flex().w(210).gap(4)
+            .child(this.button(t, `st-shortcut-key-${i}`, this.recording?.id === row.id ? "Press a key (Esc cancels)" : row.current.join(", ") || "Unbound", (_e, cx) => {
+              if (this.shortcutBusy) return;
+              this.recording = row;
+              this.handle.focus();
+              setShared("settings.record-shortcut", props().overlay);
+              cx.notify();
+            }))
+            .child(div().text_size(12).text_color(t.dim).child(`Default: ${row.defaults.join(", ") || "Unbound"}`))
+            .child(this.button(t, `st-shortcut-reset-${i}`, "Reset to default", (_e, cx) => this.saveShortcuts(current => resetShortcuts(current, this.shortcutDefaults, commands(), row), cx)))
+            .when(warnings.length > 0, el => el.child(div().text_size(12).text_color(t.blocked).child(warnings.join("; ")))));
+      }));
+  }
+
   keyboard(t) {
     const choices = [
       ["auto", "Automatic (Alt on US keyboards)"],
@@ -542,7 +756,7 @@ export default class Settings extends View {
           .gap(10)
           .px(12)
           .py(10)
-          .rounded(7)
+          .rounded(ui.size.radiusSm)
           .items_center()
           .cursor_pointer()
           .hover((s) => s.bg(t.hover))
@@ -605,7 +819,7 @@ export default class Settings extends View {
     const color = ["connected", "online"].includes(m.state) ? t.ansi2 : ["connecting", "reconnecting"].includes(m.state) ? t.working : t.blocked;
     const result = this.machineResults[m.name];
     const controls = h_flex().gap(6).items_center();
-    if (busy) controls.child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12).text_color(t.muted).child(busy === "rename" ? "Renaming…" : "Removing…"));
+    if (busy) controls.child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12).text_color(t.muted).child(busy === "rename" ? "Renaming" : "Removing"));
     else {
       for (const [action, label] of [["rename", "Rename"], ["rm", "Remove"]]) {
         controls.child(this.button(t, `st-m-${action}-${m.name}`, label, (_e, cx) => {
@@ -650,7 +864,7 @@ export default class Settings extends View {
       else row.child(v_flex().gap(6)
         .child(div().text_size(12).text_color(t.dim).child("New name (addresses using the old name stop working)"))
         .child(h_flex().gap(6).items_center()
-          .child(Input.new(this.renameInput).flex_1().min_w(0).h(32).px(10).rounded(7).border_1().border_color(this.renameFocused ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground))
+          .child(Input.new(this.renameInput).flex_1().min_w(0).h(32).px(10).rounded(ui.size.radiusSm).border_1().border_color(this.renameFocused ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground))
           .child(cancel).child(this.button(t, `st-m-save-${m.name}`, "Save", (_e, cx) => this.machineAction(m.name, "rename", cx, edit.name)))));
     }
     if (result) row.child(div().text_size(12.5).text_color(result.ok ? t.ansi2 : t.blocked).child(result.message));
@@ -663,7 +877,7 @@ export default class Settings extends View {
       .child(div().pb(8).text_size(12.5).line_height("18px").text_color(t.dim).child("Your computers, reached over ssh. Their terminals keep running when you disconnect."))
       .child(this.row(t, "This computer", "Connected", div().w(7).h(7).rounded(4).bg(t.ansi2)))
       .children((this.machineList ?? []).map((m) => this.machineRow(t, m)))
-      .when(this.machineList === null && !this.machineError, (el) => el.child(h_flex().py(14).gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12.5).text_color(t.dim).child("Reading machines…"))))
+      .when(this.machineList === null && !this.machineError, (el) => el.child(h_flex().py(14).gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12.5).text_color(t.dim).child("Reading machines"))))
       .when(this.machineList?.length === 0, (el) => el.child(div().py(14).text_size(12.5).text_color(t.dim).child("No other machines yet.")))
       .when(Boolean(this.machineError), (el) => el.child(div().py(10).text_size(12.5).text_color(t.blocked).child(this.machineError)))
       .when(Boolean(this.machineNotice), (el) => el.child(div().py(10).text_size(12.5).text_color(t.ansi2).child(this.machineNotice)))
@@ -713,15 +927,17 @@ export default class Settings extends View {
             .px(10)
             .py(7)
             .items_center()
-            .rounded(7)
+            .rounded(ui.size.radiusSm)
             .cursor_pointer()
             .bg(on ? t.raised : "#00000000")
             .hover((st) => st.bg(t.raised))
             .on_click((_e, cx) => {
+              this.cancelShortcut();
               this.section = s.id;
               this.picking = null;
               this.machineEdit = null;
               this.handle.focus();
+              if (s.id === "shortcuts") cx.spawn(async (cx) => { await this.loadShortcuts(); cx.notify(); });
               if (s.id === "machines") cx.spawn(async (cx) => { await this.loadMachines(); cx.notify(); });
               cx.notify();
             })
@@ -732,7 +948,7 @@ export default class Settings extends View {
     return h_flex()
       .id("settings")
       .track_focus(this.handle)
-      .when(Boolean(this.picking), (el) => el.on_action("overlay.close", (_e, cx) => {
+      .when(Boolean(this.picking) && !this.recording, (el) => el.on_action("overlay.close", (_e, cx) => {
         this.picking = null;
         this.handle.focus();
         cx.stop_propagation();
@@ -743,6 +959,7 @@ export default class Settings extends View {
       .min_h(0)
       .items_start()
       .on_key_down((e, cx) => {
+        if (this.recording) { cx.stop_propagation(); return; }
         const k = e.key;
         if (this.machineEdit) {
           if (k === "escape") this.machineEdit = null;
@@ -783,6 +1000,8 @@ export default class Settings extends View {
                   .child(
                     this.section === "look"
                       ? this.look(t, cx)
+                      : this.section === "shortcuts"
+                        ? this.shortcuts(t, cx)
                       : this.section === "keyboard"
                         ? this.keyboard(t)
                       : this.section === "machines"

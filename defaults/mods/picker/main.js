@@ -1,3 +1,4 @@
+// ⌘K / ⌘P: typing also finds spaces, terminal panes and open file tabs (fuzzy).
 // Go to a tab. Drops from the Terminals layout's space chip (popup, at: "top"). Spaces with
 // something that needs you come first, quiet spaces (no agent running)
 // fold into "earlier". Type to filter, ↑/↓ and Enter to go, ctrl+d to close
@@ -6,7 +7,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, spaces, terminals, run, hc, theme, settings, props, closeOverlay, openOverlay, shared, setShared } from "herdr";
+import { agents, spaces, terminals, run, hc, theme, settings, props, closeOverlay, openOverlay, shared, setShared, ui } from "herdr";
 
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 
@@ -34,13 +35,40 @@ function spaceColor(t, p) {
   return c.startsWith("#") ? c : (MARK[c] ?? t[c]);
 }
 
+// Characters of q in order inside s (case-insensitive); lower is better, -1 is no match.
+function fuzzy(q, s) {
+  q = q.toLowerCase(); s = s.toLowerCase();
+  const at = s.indexOf(q);
+  if (at >= 0) return at;
+  let i = 0, gaps = 0;
+  for (const ch of s) {
+    if (i < q.length && ch === q[i]) i++;
+    else if (i > 0 && i < q.length) gaps++;
+  }
+  return i === q.length ? 100 + gaps : -1;
+}
+
+// Spaces, live terminals and the canvas's open file tabs that match q, best first.
+function finds(q, spaceList, terminalList, files) {
+  const base = (p) => p.split("/").pop();
+  const all = [
+    ...spaceList.filter((w) => w.name !== "~").map((w) => ({ kind: "find", what: "space", id: w.id, label: w.name, sub: w.folder ?? "" })),
+    ...terminalList.filter((x) => x.state === "live").map((x) => ({ kind: "find", what: "pane", id: x.address, label: x.name ?? x.agent ?? x.address, sub: x.where ?? "" })),
+    ...files.map((p) => ({ kind: "find", what: "file", id: p, label: base(p), sub: p })),
+  ];
+  return all.map((r) => ({ r, score: fuzzy(q, r.label) }))
+    .map(({ r, score }) => ({ r, score: score >= 0 ? score : (fuzzy(q, r.sub) >= 0 ? 1000 + fuzzy(q, r.sub) : -1) }))
+    .filter((x) => x.score >= 0).sort((a, b) => a.score - b.score).slice(0, 12).map((x) => x.r);
+}
+
 export default class Picker extends View {
+  static finds = finds;
   init(_props, cx) {
     this.filter = "";
-    this.input = InputState.new({ placeholder: "Go to a tab, space or agent…" });
+    this.input = InputState.new({ placeholder: "Go to a space, pane, file or tab" });
     this.input.on("change", (_e, cx) => {
       this.filter = this.input.value();
-      this.at = this.filter ? Math.max(0, this.rows().filter(r => r.kind !== "head").findIndex(r => r.kind === "ctx")) : 0;
+      this.at = this.filter ? Math.max(0, this.rows().filter(r => r.kind !== "head").findIndex(r => r.kind === "find" || r.kind === "ctx")) : 0;
       cx.notify();
     });
     this.input.on("submit", (_e, cx) => this.go(this.rows().filter(r => r.kind !== "head")[this.at], cx));
@@ -86,7 +114,7 @@ export default class Picker extends View {
     const busy = groups.filter((p) => p.w.status && p.ctxs.length);
     const quiet = groups.filter((p) => !p.w.status && p.ctxs.length);
     busy.sort((a, b) => (b.w.status === "blocked") - (a.w.status === "blocked"));
-    const out = [];
+    const out = f ? finds(f, spaces(), terminals() ?? [], [].concat(shared("canvas.files") ?? []).filter((p) => typeof p === "string")) : [];
     const add = (p) => {
       out.push({ kind: "head", w: p.w });
       for (const c of p.ctxs) out.push({ kind: "ctx", ...c });
@@ -112,6 +140,12 @@ export default class Picker extends View {
       return;
     }
     this.close();
+    if (r.kind === "find") {
+      if (r.what === "space") run("canvas.space", { direction: r.id });
+      else if (r.what === "pane") run("canvas.expand", { terminal: r.id });
+      else run("preview.open", { path: r.id });
+      return;
+    }
     if (r.kind === "ctx") run("tab.select", { id: r.ctx.id });
     else if (r.kind === "new") run("tab.new");
     else if (r.kind === "space") run("space.new", { machine: r.machine ?? "" });
@@ -133,7 +167,7 @@ export default class Picker extends View {
     // One continuous strip: each row (and the group title before it) at a fixed
     // y. Scrolling moves the strip only as far as it takes to keep the selected
     // row in view, so the arrows can't run the selection off the list.
-    const H = { head: 29, earlier: 35, new: 36, ctx: 32, space: 32 };
+    const H = { head: 29, earlier: 35, new: 36, ctx: 32, space: 32, find: 32 };
     const tops = [];
     let y = 0;
     rows.forEach((r) => { tops.push(y); y += H[r.kind] ?? 32; });
@@ -164,7 +198,7 @@ export default class Picker extends View {
           .text_size(11)
           .font_semibold()
           .text_color(t.dim)
-          .child(h_flex().size(18).rounded(5).bg(spaceColor(t, r.w)).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...r.w.name][0]?.toUpperCase() ?? "?"))
+          .child(h_flex().size(18).rounded(ui.size.radiusSm).bg(spaceColor(t, r.w)).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...r.w.name][0]?.toUpperCase() ?? "?"))
           .child(r.w.name);
       }
       if (r.kind === "earlier") {
@@ -184,16 +218,28 @@ export default class Picker extends View {
           .child(`earlier: ${r.count} quiet space${r.count > 1 ? "s" : ""} ${this.showEarlier ? "▴" : "▾"}`);
       }
       const on = r === sel;
+      if (r.kind === "find") {
+        const icon = { space: "mods/files/folder.svg", pane: "mods/workspace-chrome/terminal.svg", file: "mods/files/file.svg" }[r.what];
+        return h_flex()
+          .id(`pk-find-${r.what}-${r.id}`)
+          .mx(4).px(10).h(ui.size.control).rounded(ui.size.radiusSm).gap(10).items_center().cursor_pointer()
+          .when(on, (el) => el.bg(t.hover))
+          .hover((s) => s.bg(t.hover))
+          .on_click(() => this.go(r))
+          .child(svg(icon).size(14).flex_none().text_color(t.muted))
+          .child(div().flex_none().max_w(220).truncate().text_color(t.foreground).child(r.label))
+          .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.sub));
+      }
       if (r.kind === "new" || r.kind === "space") {
-        const label = r.kind === "new" ? "new tab" : r.machine ? `new space on ${r.machine}` : "new space";
+        const label = r.kind === "new" ? "new tab" : r.machine ? `open space on ${r.machine}` : "open space";
         return h_flex()
           .id(r.kind === "new" ? "pk-new" : `pk-space-${r.machine ?? "here"}`)
           .mx(4)
           .when(r.kind === "new", (el) => el.mt(4))
           .px(10)
-          .h(32)
+          .h(ui.size.control)
           .items_center()
-          .rounded(7)
+          .rounded(ui.size.radiusSm)
           .gap(8)
           .text_color(t.muted)
           .cursor_pointer()
@@ -209,8 +255,8 @@ export default class Picker extends View {
         .id(`pk-${r.ctx.id}`)
         .mx(4)
         .px(10)
-.h(32)
-        .rounded(7)
+.h(ui.size.control)
+        .rounded(ui.size.radiusSm)
         .gap(10)
         .items_center()
         .cursor_pointer()
@@ -247,11 +293,11 @@ export default class Picker extends View {
         cx.stop_propagation();
         cx.notify();
       })
-      .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child("Go to…")).child(div().id("picker-esc").px(6).py(2).rounded(5).text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => this.close()).child("Esc")))
+      .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child("Go to")).child(div().id("picker-esc").px(6).py(2).rounded(ui.size.radiusSm).text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => this.close()).child("Esc")))
       .child(
-        h_flex().h(36).flex_none().px(10).gap(8).items_center().rounded(9).border_1().border_color(t.accent).bg(t.background)
+        h_flex().h(ui.size.control).flex_none().px(10).gap(8).items_center().rounded(ui.size.radius).border_1().border_color(t.accent).bg(t.background)
           .child(svg("mods/workspace-chrome/search.svg").size(15).text_color(t.dim))
-          .child(Input.new(this.input).flex_1().h_full().text_size(12.8).text_color(t.foreground)),
+          .child(Input.new(this.input).flex_1().h_full().text_size(ui.size.text).text_color(t.foreground)),
       )
       .child(
         v_flex()

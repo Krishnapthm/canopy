@@ -55,3 +55,20 @@ Launched through `hc run` in a separate core with `env -i`, per-run `-c` overrid
 
 Not checked: whether `canopy wire` (app home and core socket outside the workspace)
 runs inside Codex's `workspace-write` sandbox without escalation.
+
+## Agent teams, 2026-11-13 (0.169.0)
+
+- **Turn-end payload exists - binary strings only, not run.** The binary ships
+  `legacy_notify` with `agent-turn-complete`, `thread-id`, `turn-id`, `cwd`, `client`,
+  `input-messages`, `last-assistant-message`, and a `stop` hook event with
+  `last_assistant_message`. Canopy does not use either yet: `-c notify=[...]` replaces the
+  person's own `notify` (this machine's config uses it for another tool's `turn-ended`),
+  and hooks need the person's trust (see above). So a Codex child's idle line comes from
+  the app and ends `canopy wire read <t>`.
+- **`canopy wire tell` from Codex - verified, dev home only.** With the person's
+  `sandbox_mode = "workspace-write"` and `approval_policy = "never"`, a spawned Codex ran
+  `canopy wire tell t1 "hi from nova"` and it was delivered. The dev app home and core
+  socket sit under `$TMPDIR`, which the sandbox allows; a real `~/.config/canopy` home is
+  not checked.
+- A Codex child's status goes `working` then `idle` in the core, which the app's
+  fallback idle line relies on - verified.

@@ -14,7 +14,7 @@ const specs = new Map(
   ]),
 );
 // Menu-only items that open another popup or dialog, and the command each one ends in.
-const local: Record<string, string | null> = { "canvas-colors": null, "canvas-close": "terminal.kill" };
+const local: Record<string, string | null> = { "canvas-close": "terminal.kill" };
 const agents = [{ name: "Claude Code", installed: true, run: ["claude"] }, { name: "Gone", installed: false, run: ["gone"] }];
 
 test("every canvas menu item passes only declared args, with the required ones", () => {
@@ -39,6 +39,8 @@ test("every canvas menu item passes only declared args, with the required ones",
   for (const menu of menus) {
     for (const [label, command, args] of items(menu, null, agents)) {
       if (command === null) continue;
+      // A submenu is checked as the menu it opens, with its args as the target.
+      if (command.startsWith("sub:")) { menus.push({ tab: command.slice(4), target: args }); continue; }
       const name = command in local ? local[command] : command;
       if (name === null) continue;
       const spec = specs.get(name);
@@ -55,7 +57,7 @@ test("the canvas menu lists installed agents under a label, with a note while ch
   const menu = { tab: "canvas-empty", target: { point: [1, 2], space: "s1", machine: null } };
   const label = (list: ReturnType<typeof items>) => list.findIndex(([, command, args]) => command === null && args.label);
   const checking = items(menu);
-  expect(checking[label(checking) + 1].slice(0, 2)).toEqual(["Checking installed agents...", null]);
+  expect(checking[label(checking) + 1].slice(0, 2)).toEqual(["Checking installed agents", null]);
   const none = items(menu, null, [{ name: "Gone", installed: false, run: ["gone"] }]);
   expect(none.slice(label(none) + 1).map(([text, command]) => [text, command])).toEqual([["No agents installed", null]]);
   const listed = items(menu, null, agents);
@@ -128,4 +130,39 @@ test("full key help names object bindings without splitting their JSON", async (
   expect(label('{"command":"canvas.arrange","args":{"picker":true}}')).toBe("choose canvas layout");
   expect(label("canvas.go:left")).toBe("canvas go left");
   expect(label('{}')).toBe("invalid binding");
+});
+
+
+test("pane confirmation lists each pane and cancels without running its captured command", async () => {
+  const source = (await readFile(new URL("../defaults/mods/confirm/main.js", import.meta.url), "utf8"))
+    .replace(/^import .*;\n/gm, "").replace("export default class Confirm", "class Confirm");
+  const labels: string[] = [], icons: string[] = [], text: string[] = [], sent: unknown[] = [];
+  let keydown: (event: { key: string }, cx: unknown) => void;
+  let cancel: () => void;
+  let closed = 0;
+  const element: any = new Proxy({}, { get: (_, name) => (...args: any[]) => {
+    if (name === "when" && args[0]) args[1](element);
+    if (name === "child" && typeof args[0] === "string") text.push(args[0]);
+    if (name === "on_key_down") keydown = args[0];
+    return element;
+  } });
+  const ui = { panel: () => element, title: () => element, description: () => element, footer: () => element,
+    button: (id: string, label: string) => { labels.push(label); return { on_click: (fn: () => void) => { if (id === "no") cancel = fn; return element; } }; } };
+  const current = { overlay: "dialog", title: "Terminate panes?", accept: "Terminate and close all", destructive: true,
+    panes: [{ name: "review <script>", icon: "icons/agent.svg", tint: true }, { name: "shell", icon: "icons/terminal.svg", tint: true }],
+    command: { name: "canvas.close", args: { terminals: ["t1", "t2"], confirmed: "all" } } };
+  const Confirm = new Function("View", "div", "svg", "image", "props", "closeOverlay", "run", "theme", "ui", `${source}; return Confirm;`)(
+    class {}, () => element, (path: string) => { icons.push(path); return element; }, () => element, () => current,
+    () => closed++, (...args: unknown[]) => sent.push(args), () => ({ muted: "gray" }), ui);
+  const confirm = new Confirm();
+  confirm.render();
+  expect(labels).toEqual(["Cancel", "Terminate and close all"]);
+  expect(text).toEqual(["review <script>", "shell"]);
+  expect(icons).toEqual(["icons/agent.svg", "icons/terminal.svg"]);
+  cancel!();
+  keydown!({ key: "escape" }, { stop_propagation() {} });
+  expect(closed).toBe(2);
+  expect(sent).toEqual([]);
+  confirm.yes();
+  expect(sent).toEqual([["canvas.close", current.command.args]]);
 });

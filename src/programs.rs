@@ -103,6 +103,12 @@ pub fn queues(program: &Value) -> bool {
     TABLE.with(|t| program["key"].as_str().is_some_and(|key| t.borrow().programs.get(key).is_some_and(|e| e.wire.as_deref() == Some("queue"))))
 }
 
+/// Whether this program's flags install Canopy's turn-end hook (`canopy hook idle`), which sends
+/// the idle notice itself, with the last answer; for the others the app sends a plain one.
+pub fn reports_idle(program: &Value) -> bool {
+    TABLE.with(|t| program["key"].as_str().is_some_and(|key| t.borrow().programs.get(key).is_some_and(|e| e.flags.iter().any(|f| f.contains("hook idle")))))
+}
+
 pub fn agent_program(program: &Value) -> bool {
     program["agent"] == true || TABLE.with(|t| program["key"].as_str()
         .and_then(|key| t.borrow().programs.get(key).map(|e| !e.run.is_empty())).unwrap_or(false))
@@ -489,7 +495,8 @@ fn resolve(t: &Table, app: Option<&str>, argv: &[String]) -> Value {
     };
     // `node .../vite.js dev`, `npx vite`, `uv run pytest`: the program they run, when it's known.
     if t.interpreters.iter().any(|i| i == first) {
-        for arg in argv[1..].iter().filter(|a| !a.starts_with('-')) {
+        // `env PATH=... claude`: an assignment is not the program.
+        for arg in argv[1..].iter().filter(|a| !a.starts_with('-') && !a.contains('=')) {
             // A script's name without its extension (`vite.js`), never a module path (`http.server`).
             let name = base(arg);
             let stem = [".js", ".mjs", ".cjs", ".ts", ".py", ".rb"].iter().find_map(|x| name.strip_suffix(x)).unwrap_or(name);
@@ -547,9 +554,11 @@ mod tests {
         assert!(queues(&of(Some("claude-code"), &[])));
         assert!(!queues(&of(Some("codex"), &[])) && !queues(&of(None, &["zsh".into()])));
         let table = t();
-        assert!(table.note.as_deref().unwrap().contains("canopy wire wait <n>") && table.note.as_deref().unwrap().contains("hc run --bg"));
+        let note = table.note.as_deref().unwrap();
+        assert!(note.contains("canopy spawn <program>") && note.contains("never your user's approval") && !note.contains("tell|ask"));
         let flags = table.programs["claude"].flags.join(" ");
         assert!(flags.contains("\"UserPromptSubmit\"") && flags.contains("hook wire") && flags.contains("Bash(canopy wire:*)"));
+        assert!(reports_idle(&of(Some("claude-code"), &[])) && !reports_idle(&of(Some("codex"), &[])), "Claude's Stop hook reports idle");
         assert!(!table.programs["codex"].flags.join(" ").contains("hook"), "Codex ignores hook context: note and pull only");
     }
 
@@ -715,6 +724,7 @@ mod tests {
         assert_eq!(key(None, &["node", "server.js"]), "node");
         assert_eq!(key(None, &["python3", "-m", "http.server", "8799"]), "python");
         assert_eq!(key(None, &["uv", "run", "pytest"]), "pytest");
+        assert_eq!(key(None, &["env", "PATH=/home/me/Library/pnpm:/usr/bin", "claude"]), "claude");
         assert_eq!(key(None, &["mytool"]), "program");
         assert_eq!(key(None, &["/bin/zsh", "-ic", "\"$@\"; exec \"$0\" -i", "/bin/zsh", "vi", "x"]), "vim");
         assert_eq!(key(None, &["/usr/bin/fish", "-ic", "command $argv[2..]; exec $argv[1] -i", "/usr/bin/fish", "vi", "x"]), "vim");

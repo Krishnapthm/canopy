@@ -154,7 +154,7 @@ export default class Files extends View {
   }
 
   show(path, cx) {
-    this.code?.release(); this.code = null; this.file = path; this.fileError = null;
+    this.code?.release(); this.code = null; this.file = path; this.fileError = null; this.reportedDirty = undefined;
     if (!path || !cx) return;
     const context = this.context, root = this.root, on = this.on;
     cx.spawn(async cx => {
@@ -169,10 +169,20 @@ export default class Files extends View {
           value: !props()?.editing && text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text,
           font_family: settings().font_family, font_size: 12,
           syntax: { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 } });
-        this.code.on("change", (_e, cx) => cx.notify());
+        this.code.on("change", (_e, cx) => { this.reportDirty(); cx.notify(); });
+        this.reportDirty();
       } catch { if (this.file === path && this.current(context)) this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; }
       finally { cx.notify(); }
     });
+  }
+
+  // Only transitions reach the native strip, never a timer or the file contents.
+  reportDirty() {
+    if (props()?.canvas !== "viewer" || !props()?.editing || !this.code) return;
+    const dirty = this.code.value() !== this.original;
+    if (dirty === this.reportedDirty) return;
+    this.reportedDirty = dirty;
+    run("panel.editor", { path: `${this.root}/${this.file}`, dirty });
   }
 
   save(done, cx) {
@@ -186,6 +196,7 @@ export default class Files extends View {
         await writeTextFile(path, text, this.original);
         if (this.code !== code) return;
         this.original = text;
+        this.reportDirty();
         if (done && code.value() === text) run("panel.editor", { done: true, path });
       } catch (e) { if (this.code === code) this.saveError = String(e); }
       finally { this.saving = false; cx.notify(); }
@@ -232,12 +243,12 @@ export default class Files extends View {
   render(cx) {
     if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
-    if (props()?.canvas === "viewer") return v_flex().size_full().min_h(0).text_color(t.foreground)
+    if (props()?.canvas === "viewer") return v_flex().size_full().min_h(0).bg(t.canvas).text_color(t.foreground)
       .on_key_down((e, cx) => {
         if (props()?.editing && e.keystroke === "cmd-s") { this.save(false, cx); cx.stop_propagation(); }
       })
       .when(Boolean(props()?.editing), el => el.child(h_flex().h(32).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border).text_size(12)
-        .child(div().flex_1().text_color(t.dim).child(this.saving ? "Saving…" : this.code && this.code.value() !== this.original ? "Unsaved" : "Saved"))
+        .child(div().flex_1().text_color(t.dim).child(this.saving ? "Saving" : this.code && this.code.value() !== this.original ? "Unsaved" : "Saved"))
         .children(["Save", "Done"].map(label => div().id(`file-${label}`).px(8).py(3).rounded(7).border_1().border_color(t.border)
           .cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => this.save(label === "Done", cx)).child(label)))))
       .when(Boolean(this.saveError), el => el.child(div().px(12).py(6).text_size(12).text_color(t.foreground).child(this.saveError)))
@@ -247,14 +258,14 @@ export default class Files extends View {
         const quote = this.code?.selection();
         if (quote?.text.trim()) run("quote.menu", { ...quote, path: `${this.root}/${this.file}`, point: e.position });
       })
-      .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(16).text_color(t.dim).child(this.fileError || "Loading file…"));
+      .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(16).text_color(t.dim).child(this.fileError || "Loading file"));
     const list = props()?.canvas === "tree" ? this.rows("", 0, [], t) : null;
     if (props()?.canvas === "tree") return v_flex().size_full().min_h(0).text_size(13).text_color(t.muted)
       .child(div().p(8).flex_none().child(Input.new(this.input).w_full().h(30).px(10).gap(8).rounded(8).border_1().border_color(t.border).text_size(12)
         .child(svg("mods/files/search.svg").size(14).flex_none().text_color(t.dim))))
       .child(v_flex().id("canvas-files-tree").flex_1().min_h(0).overflow_y_scrollbar().px(6).pb(6).children(list)
         .when(Boolean(this.filter) && !list.length && Boolean(this.entries.get("")?.length), el => el.child(div().p(8).text_size(12).text_color(t.dim).child("No matching files")))
-        .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "Click a space to see its files"))))
+        .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files" : this.root ? "No files" : "Click a space to see its files"))))
         .when(this.limited, el => el.child(div().p(8).text_size(11).child("File list limited"))));
     return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
@@ -262,8 +273,8 @@ export default class Files extends View {
         .child(div().font_semibold().child("Files"))
         .child(div().flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim).child(this.file ?? this.root?.split(/[\\/]/).pop() ?? "")))
       .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(this.rows("", 0, [], t))
-        .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "No folder"))))
+        .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files" : this.root ? "No files" : "No folder"))))
         .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("File list limited to 500 entries per folder and 5,000 total")))))
-      .when(Boolean(this.file), el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));
+      .when(Boolean(this.file), el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file")));
   }
 }

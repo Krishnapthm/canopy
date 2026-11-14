@@ -48,6 +48,10 @@ function shellCommands(source: string): string[][] {
 export function checkExample(source: string, ref: Reference): string[] {
   const errors: string[] = [];
   const verbs = new Set([...ref.help.matchAll(/^\s+canopy\s+([\w-]+)/gm)].map(m => m[1]));
+  // The flags each command's help line names (`canopy spawn <program> --name <n>`).
+  const known = new Map<string, Set<string>>();
+  for (const [, verb, rest] of ref.help.matchAll(/^\s+canopy\s+([\w-]+)(.*)$/gm))
+    known.set(verb, new Set([...(known.get(verb) ?? []), ...rest.match(/--[\w-]+/g) ?? []]));
   verbs.add("--help"); // The help used to build this reference was obtained with this flag.
   for (const words of shellCommands(source)) {
     const start = words.findIndex(w => /^(?:\.\/|[\w./-]+\/)?canopy(?:\.exe)?$/.test(w));
@@ -57,7 +61,7 @@ export function checkExample(source: string, ref: Reference): string[] {
     if (!verb) continue;
     if (!verbs.has(verb)) { errors.push(`unknown command or flag: ${verb}`); continue; }
     if (verb !== "do") {
-      for (const arg of args) if (arg.startsWith("-")) errors.push(`unknown flag for ${verb}: ${arg}`);
+      for (const arg of args) if (arg.startsWith("-") && arg !== "--" && !known.get(verb)?.has(arg)) errors.push(`unknown flag for ${verb}: ${arg}`);
       continue;
     }
     const name = args.shift();

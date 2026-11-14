@@ -521,3 +521,14 @@ Command: `curl -fsSL https://raw.githubusercontent.com/herdrdev/herdr-core/7edc5
 36: pub mod wait;
 37: pub mod wire;
 ```
+
+## Terminal restore sizing (2026-11-14)
+
+Installed `hc --version`: 0.1.20. The source below also declares 0.1.20; binary/source identity is unverified.
+Reopening attaches to the surviving PTY, using core dimensions or a 120x40 hint (`src/window.rs:1414`); first pane fit precedes attach, with a 100 ms fallback (`src/terminal.rs:318`).
+Attach sends the fitted grid and 2000 history lines (`src/hc.rs:506`); later fits resize both the local VT and PTY (`src/terminal.rs:282`).
+In [core viewers.rs](https://github.com/herdrdev/herdr-core/blob/7edc5dfbe3f54ac23ad22313ce32f552f219ff44/crates/herdr-core/src/viewers.rs#L360), last-viewer detach selects the headless grid (default 200x120, config.rs:58); attach resizes its screen and queues the PTY resize before immediately serializing replay (viewers.rs:96-99, 382-402), without waiting for shell output.
+After holder loss, [core kept.rs:107](https://github.com/herdrdev/herdr-core/blob/7edc5dfbe3f54ac23ad22313ce32f552f219ff44/crates/herdr-core/src/kept.rs#L107) spawns a replacement shell at the recorded dimensions before a pane attaches, not at the app's fallback hint.
+
+Reproduce the width race on macOS with `cargo test --locked restore_resize_race --bin canopy`: zsh 5.9 runs under a private PTY with `-f -o PROMPT_SP -i` and a fixed prompt. The matching-width control requires the prompt on row 0; the resized-screen case currently requires the stray `%` row and prompt on row 1. This demonstrates the mechanism, not an end-to-end core reproduction or a fix.
+The exposed core API has no atomic idle-shell clear/redraw operation; deferred kept-shell spawn and synchronized restore need a core change. Canopy uses an external `hc`, whose implementation is absent from this repository.

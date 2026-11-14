@@ -723,6 +723,8 @@ pub fn from_host(v: &HostValue) -> Value {
 }
 
 pub const DECLARATIONS: &str = include_str!("../defaults/herdr.d.ts");
+/// The shared styled pieces exported as `ui` (defaults/ui.js).
+const UI_KIT: &str = include_str!("../defaults/ui.js");
 
 fn strings(v: Option<&HostValue>) -> Vec<String> {
     v.and_then(HostValue::as_array).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect()).unwrap_or_default()
@@ -934,6 +936,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
     });
     HostModule::new("herdr")
         .declarations(DECLARATIONS)
+        .script(UI_KIT)
         .async_function("exec", |a| {
             let command = a.string(0)?.to_owned();
             Ok(exec_future(command, strings(a.get(1)), opt_str(a.get(2), "cwd"), opt_str(a.get(2), "on"), exec_limit(a.get(2))?))

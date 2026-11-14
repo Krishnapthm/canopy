@@ -1,10 +1,10 @@
 {
   "id": "root",
   "type": "canvas",
-  "titlebar": "system",
+  "titlebar": "none",
   "traffic_lights": [
     12,
-    16
+    13
   ],
   "terminal_padding": [
     14,

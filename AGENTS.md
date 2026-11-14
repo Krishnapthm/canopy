@@ -3,7 +3,7 @@
 # Canopy
 
 Canopy is a native Rust/GPUI control room for agents and terminals, based on
-herdr-app. Read docs/canopy/plan.md and docs/canopy/herdr-map.md before work.
+herdr-app. Read docs/canopy/herdr-map.md before work.
 Read AGENTS.local.md too when present.
 
 ## Rules
@@ -68,6 +68,10 @@ changing default keys.
 
 ## Build and checks
 
+Disk is tight. Never create a per-worktree `target/`: builds in a worktree
+use the one shared `CARGO_TARGET_DIR` the orchestrator gives you. No extra
+profiles or flags unless needed. Prune a worktree once its branch merges.
+
 Zig 0.16 is required. On macOS:
 
 ```sh
@@ -77,7 +81,8 @@ cargo test --locked
 ```
 
 just build builds; just test also runs Bun mod tests; just check aliases test.
-CI tests Linux, macOS and Windows. Test OS behavior on its actual OS.
+CI tests Linux on PRs; pushes to main add macOS and Windows. Test OS behavior
+on its actual OS.
 just install installs the app and affects the user's installation, so leave
 that to the orchestrator.
 

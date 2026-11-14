@@ -21,9 +21,11 @@ impl SaveSchedule {
 
 /// The shared width of terminal and sub-agent cells at zoom 1.
 pub const PILL_WIDTH: f32 = 220.;
+/// A space's card on Home at zoom 1.
+pub const SPACE_CARD: Point = [260., 120.];
 /// The header strip of an expanded cell at zoom 1: the pill's one-line height.
 pub const HEADER: f32 = 36.;
-/// Below this camera zoom an expanded cell is drawn as its pill.
+/// Below this camera zoom an expanded cell shows a flat stand-in instead of live text.
 pub const EXPANDED_MIN_ZOOM: f32 = 0.5;
 
 pub const ZOOMS: [f32; 12] = [
@@ -87,6 +89,75 @@ impl Camera {
         self.y = bounds[1] + bounds[3] / 2. - viewport[1] / self.zoom / 2.;
     }
 }
+/// Screen px a pressed cell must move before the press is a drag; less is a click.
+pub const DRAG_THRESHOLD: f32 = 3.;
+/// A tile smaller than this (world px) shows its icon and name instead of terminal text.
+pub const TILE_COMPACT: Point = [320., 140.];
+/// The active tile's share of its row, and (at least) its row's share of the height.
+const TILE_ACTIVE: f32 = 0.6;
+
+/// The indices of `rects` in reading order: top to bottom, then left to right.
+pub fn reading(rects: &[Rect]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..rects.len()).collect();
+    order.sort_by(|a, b| (rects[*a][1], rects[*a][0]).partial_cmp(&(rects[*b][1], rects[*b][0])).unwrap_or(std::cmp::Ordering::Equal));
+    order
+}
+
+/// Tile view: fills `area` with `tiles` tiles like tmux's tiled layout, and lines `pills`
+/// (sizes) up along its bottom. Both are placed in the order given (the caller keeps it, so
+/// nothing swaps when the active one changes or a rect jitters). The `active` tile's row is
+/// taller and the tile wider, so it is always the largest; the rest share what is left.
+/// Returns the tiles' and pills' rects in the order given.
+pub fn tile(area: Rect, tiles: usize, active: Option<usize>, pills: &[Rect], gap: f32) -> (Vec<Rect>, Vec<Rect>) {
+    let [x0, y0, w, h] = [area[0] + gap, area[1] + gap, (area[2] - 2. * gap).max(1.), (area[3] - 2. * gap).max(1.)];
+    // Pills wrap into rows along the bottom; the tiles get what is above them.
+    let mut placed = vec![[0.; 4]; pills.len()];
+    let (mut x, mut row_h, mut rows) = (0., 0., vec![]);
+    for i in 0..pills.len() {
+        let [pw, ph] = [pills[i][2], pills[i][3]];
+        if x > 0. && x + pw > w { rows.push(row_h); x = 0.; row_h = 0.; }
+        placed[i] = [x, rows.iter().map(|r| r + gap).sum::<f32>(), pw, ph];
+        x += pw + gap;
+        row_h = f32::max(row_h, ph);
+    }
+    if !pills.is_empty() { rows.push(row_h); }
+    let strip = rows.iter().sum::<f32>() + gap * rows.len() as f32;
+    for r in &mut placed { r[0] += x0; r[1] += y0 + h - strip + gap; }
+    if !pills.is_empty() && tiles == 0 { for r in &mut placed { r[1] -= h - strip + gap; } }
+    let th = (h - strip).max(1.);
+    // A run of `k` where the active one (if any) takes `big` of it and the others share the rest:
+    // (offset, length) of item `i`, as fractions.
+    let share = |k: usize, i: usize, active: Option<usize>, big: f32| {
+        let size = |j: usize| match active { Some(a) if k > 1 => if j == a { big } else { (1. - big) / (k - 1) as f32 }, _ => 1. / k as f32 };
+        ((0..i).map(size).sum::<f32>(), size(i))
+    };
+    let n = tiles;
+    let mut out = vec![[0.; 4]; n];
+    if n == 0 { return (out, placed); }
+    // tmux's tiled grid: the last row is the short one and stretches.
+    let cols = (n as f32).sqrt().ceil() as usize;
+    let row_count = n.div_ceil(cols);
+    let in_row = |r: usize| cols.min(n - r * cols);
+    let at = active.map(|p| (p / cols, p % cols));
+    // The active row is TILE_ACTIVE tall, or taller when a shorter row's stretched tiles would
+    // otherwise outgrow the active tile.
+    let tall = at.map_or(TILE_ACTIVE, |(r, _)| {
+        let wide = if in_row(r) > 1 { TILE_ACTIVE } else { 1. };
+        let fewest = (0..row_count).filter(|o| *o != r).map(in_row).min().unwrap_or(1) as f32;
+        let needed = 1. / (1. + wide * (row_count - 1) as f32 * fewest);
+        TILE_ACTIVE.max(needed + 0.05).min(0.9)
+    });
+    for p in 0..n {
+        let (r, c) = (p / cols, p % cols);
+        let k = in_row(r);
+        let (ry, rh) = share(row_count, r, at.map(|a| a.0), tall);
+        let (cx, cw) = share(k, c, at.filter(|a| a.0 == r).map(|a| a.1), TILE_ACTIVE);
+        let (aw, ah) = (w - gap * (k - 1) as f32, th - gap * (row_count - 1) as f32);
+        out[p] = [x0 + cx * aw + gap * c as f32, y0 + ry * ah + gap * r as f32, cw * aw, rh * ah];
+    }
+    (out, placed)
+}
+
 /// Toggle a space fit in the visible canvas: a second press restores the camera from before
 /// the fit, unless the camera moved since, in which case it fits again.
 pub fn focus_fit(camera: &mut Camera, previous: &mut Option<(Camera, Camera)>, rects: &[Rect], visible: Point) {
@@ -197,19 +268,10 @@ fn separated(a: Rect, b: Rect, gap: f32) -> bool {
         || b[1] + b[3] + gap <= a[1]
 }
 
-/// Grow a space to contain its cells with padding, preserving its previous extent.
-pub fn grow(space: Rect, cells: &[Rect]) -> Rect {
-    let gap = crate::settings::get().canvas_gap;
-    let Some(b) = union(cells) else { return space };
-    union(&[
-        space,
-        [b[0] - gap, b[1] - gap, b[2] + 2. * gap, b[3] + 2. * gap],
-    ])
-    .unwrap()
-}
 
 /// Arrange cells in reading order, or breadth-first parent layers, preserving their sizes.
-pub fn arrange(rects: &[Rect], parents: &[Option<usize>], layout: &str) -> Vec<Rect> {
+/// Cells joined by `links` (wires, either way) come together, connected groups first.
+pub fn arrange(rects: &[Rect], parents: &[Option<usize>], links: &[(usize, usize)], layout: &str) -> Vec<Rect> {
     let gap = crate::settings::get().canvas_gap;
     let Some(bounds) = union(rects) else {
         return vec![];
@@ -221,6 +283,7 @@ pub fn arrange(rects: &[Rect], parents: &[Option<usize>], layout: &str) -> Vec<R
             .then(rects[*a][0].total_cmp(&rects[*b][0]))
             .then(a.cmp(b))
     });
+    let order = connected_first(&order, links);
     let mut layers = vec![None; rects.len()];
     let mut queue = std::collections::VecDeque::new();
     if layout == "wires" {
@@ -351,17 +414,6 @@ impl Rest {
         }
     }
 }
-pub fn clamp(mut r: Rect, space: Rect) -> Rect {
-    r[0] = r[0].clamp(
-        space[0] + 24.,
-        (space[0] + space[2] - 24. - r[2]).max(space[0] + 24.),
-    );
-    r[1] = r[1].clamp(
-        space[1] + 24.,
-        (space[1] + space[3] - 24. - r[3]).max(space[1] + 24.),
-    );
-    r
-}
 pub fn union(rects: &[Rect]) -> Option<Rect> {
     let mut out = *rects.first()?;
     for r in &rects[1..] {
@@ -376,18 +428,11 @@ pub fn union(rects: &[Rect]) -> Option<Rect> {
     }
     Some(out)
 }
-pub fn min_size(space: Rect, cards: &[Rect]) -> Point {
-    let b = union(cards).unwrap_or([space[0], space[1], 0., 0.]);
-    [
-        (b[0] + b[2] - space[0] + 24.).max(48.),
-        (b[1] + b[3] - space[1] + 24.).max(48.),
-    ]
-}
-/// Where a space made outside the canvas goes: right of every existing space.
+/// Where a space made outside the canvas goes on Home: right of every existing space card.
 pub fn new_space_rect(spaces: &[Space]) -> Rect {
     let rects: Vec<Rect> = spaces.iter().map(|s| s.rect).collect();
-    let x = union(&rects).map_or(0., |u| u[0] + u[2] + 96.);
-    [x, 0., 960., 640.]
+    let x = union(&rects).map_or(0., |u| u[0] + u[2] + 48.);
+    [x, 0., SPACE_CARD[0], SPACE_CARD[1]]
 }
 pub fn child_position(parent: Rect, siblings: &[Rect], size: Point) -> Rect {
     [
@@ -418,18 +463,160 @@ pub fn free_spot(space: Rect, occupied: &[Rect], size: Point) -> Rect {
     }
     unreachable!()
 }
-pub fn edge_ends(parent: Rect, child: Rect) -> (Point, Point) {
-    if child[0] < parent[0] {
-        (
-            [parent[0], parent[1] + parent[3] / 2.],
-            [child[0] + child[2], child[1] + child[3] / 2.],
-        )
-    } else {
-        (
-            [parent[0] + parent[2], parent[1] + parent[3] / 2.],
-            [child[0], child[1] + child[3] / 2.],
-        )
+/// `order` regrouped so linked cells sit next to each other: each connected group
+/// breadth-first from its first cell, groups in `order`, then the unlinked cells.
+fn connected_first(order: &[usize], links: &[(usize, usize)]) -> Vec<usize> {
+    let linked = |i: usize| links.iter().any(|(a, b)| *a == i || *b == i);
+    let mut out: Vec<usize> = vec![];
+    for seed in order.iter().copied().filter(|i| linked(*i)) {
+        if out.contains(&seed) { continue; }
+        let mut queue = std::collections::VecDeque::from([seed]);
+        out.push(seed);
+        while let Some(i) = queue.pop_front() {
+            for j in order.iter().copied() {
+                if !out.contains(&j) && links.iter().any(|l| *l == (i, j) || *l == (j, i)) {
+                    out.push(j);
+                    queue.push_back(j);
+                }
+            }
+        }
     }
+    out.extend(order.iter().copied().filter(|i| !linked(*i)));
+    out
+}
+
+/// How far an edge leaves a cell before it turns, and how far it keeps from other cells.
+const EDGE_PAD: f32 = 16.;
+
+/// An orthogonal edge from `a` to `b`: it leaves and enters at whichever sides make the
+/// shortest clear path, and goes around `others`. When no candidate is clear the cheapest
+/// is kept; the canvas paints edges above cells, so it still shows.
+/// shortcut: tries the two L shapes and Z shapes through the middle and along each cell's
+/// padded edges, not a full pathfinder; upgrade if dense canvases still cross cells.
+pub fn route(a: Rect, b: Rect, others: &[Rect]) -> Vec<Point> {
+    let side = |r: Rect, s: usize| -> (Point, Point) {
+        match s {
+            0 => ([r[0] + r[2] / 2., r[1]], [0., -1.]),
+            1 => ([r[0] + r[2], r[1] + r[3] / 2.], [1., 0.]),
+            2 => ([r[0] + r[2] / 2., r[1] + r[3]], [0., 1.]),
+            _ => ([r[0], r[1] + r[3] / 2.], [-1., 0.]),
+        }
+    };
+    // Only cells near the pair can be in the way.
+    let near = union(&[a, b]).map(|u| [u[0] - 200., u[1] - 200., u[2] + 400., u[3] + 400.]).unwrap();
+    let others: Vec<Rect> = others.iter().copied().filter(|r| *r != a && *r != b && intersects(*r, near)).collect();
+    let between = union(&[a, b]).map(|u| [u[0] - EDGE_PAD, u[1] - EDGE_PAD, u[2] + 2. * EDGE_PAD, u[3] + 2. * EDGE_PAD]).unwrap();
+    let mut best: Option<(f32, Vec<Point>)> = None;
+    for sa in 0..4 {
+        for sb in 0..4 {
+            let ((pa, na), (pb, nb)) = (side(a, sa), side(b, sb));
+            let s = [pa[0] + na[0] * EDGE_PAD, pa[1] + na[1] * EDGE_PAD];
+            let e = [pb[0] + nb[0] * EDGE_PAD, pb[1] + nb[1] * EDGE_PAD];
+            let mut xs = vec![(s[0] + e[0]) / 2.];
+            let mut ys = vec![(s[1] + e[1]) / 2.];
+            // Bends hug the cells that can be in the way: the two ends and those between them.
+            for r in others.iter().filter(|r| intersects(**r, between)).chain([&a, &b]) {
+                xs.extend([r[0] - EDGE_PAD, r[0] + r[2] + EDGE_PAD]);
+                ys.extend([r[1] - EDGE_PAD, r[1] + r[3] + EDGE_PAD]);
+            }
+            let mids = [vec![[s[0], e[1]]], vec![[e[0], s[1]]]].into_iter()
+                .chain(xs.iter().map(|x| vec![[*x, s[1]], [*x, e[1]]]))
+                .chain(ys.iter().map(|y| vec![[s[0], *y], [e[0], *y]]));
+            for mid in mids {
+                let mut path = vec![pa, s];
+                path.extend(mid);
+                path.extend([e, pb]);
+                path.dedup();
+                let cost = route_cost(&path, a, b, &others);
+                if best.as_ref().is_none_or(|(c, _)| cost < *c) { best = Some((cost, path)); }
+            }
+        }
+    }
+    best.map(|(_, p)| p).unwrap_or_default()
+}
+
+/// Length, plus a little per bend, plus a lot per cell crossed or turn back on itself.
+fn route_cost(path: &[Point], a: Rect, b: Rect, others: &[Rect]) -> f32 {
+    let mut cost = 0.;
+    let last = path.len() - 1;
+    for (i, w) in path.windows(2).enumerate() {
+        let (p, q) = (w[0], w[1]);
+        cost += (q[0] - p[0]).abs() + (q[1] - p[1]).abs();
+        // The stubs touch their own cell; the rest may touch neither end.
+        let ends: &[Rect] = if i == 0 { &[b] } else if i + 1 == last { &[a] } else { &[a, b] };
+        cost += 10_000. * others.iter().chain(ends).filter(|r| segment_hits(p, q, **r)).count() as f32;
+        if i > 0 {
+            let o = path[i - 1];
+            let dot = (p[0] - o[0]) * (q[0] - p[0]) + (p[1] - o[1]) * (q[1] - p[1]);
+            cost += if dot < 0. { 1_000. } else if dot == 0. { 24. } else { 0. };
+        }
+    }
+    cost
+}
+
+/// Whether an axis-aligned segment passes through a rect's inside.
+fn segment_hits(p: Point, q: Point, r: Rect) -> bool {
+    let (x0, x1, y0, y1) = (p[0].min(q[0]), p[0].max(q[0]), p[1].min(q[1]), p[1].max(q[1]));
+    x1 > r[0] + 0.5 && x0 < r[0] + r[2] - 0.5 && y1 > r[1] + 0.5 && y0 < r[1] + r[3] - 0.5
+}
+
+/// A routed path as the soft curve that is drawn and clicked: straight runs merge, and every
+/// bend is rounded as far as both of its runs allow (half of each), so a Z route reads as the
+/// old side-to-side S-curve and a detour as an arc around the cell. Returns sampled points.
+pub fn smooth(path: &[Point]) -> Vec<Point> {
+    let mut pts: Vec<Point> = Vec::with_capacity(path.len());
+    for &p in path {
+        if pts.last() == Some(&p) { continue; }
+        // Drop the middle of three collinear points.
+        if let [.., a, b] = pts[..] && ((a[0] == b[0] && b[0] == p[0]) || (a[1] == b[1] && b[1] == p[1])) { pts.pop(); }
+        pts.push(p);
+    }
+    if pts.len() < 3 { return pts; }
+    let len = |a: Point, b: Point| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+    let toward = |v: Point, to: Point, r: f32| { let d = len(v, to); [v[0] + (to[0] - v[0]) * r / d, v[1] + (to[1] - v[1]) * r / d] };
+    let mut out = vec![pts[0]];
+    for (i, w) in pts.windows(3).enumerate() {
+        let (o, v, q) = (w[0], w[1], w[2]);
+        // The first and last runs end at a cell: they may be used whole; inner runs are shared by two bends.
+        let share = |end: bool| if end { 1. } else { 0.5 };
+        let r = (len(o, v) * share(i == 0)).min(len(v, q) * share(i + 3 == pts.len()));
+        let (a, b) = (toward(v, o, r), toward(v, q, r));
+        const STEPS: usize = 10;
+        for s in 0..=STEPS {
+            let t = s as f32 / STEPS as f32;
+            let u = 1. - t;
+            // A quadratic with its control on the corner: tangent to both runs.
+            out.push([u * u * a[0] + 2. * u * t * v[0] + t * t * b[0], u * u * a[1] + 2. * u * t * v[1] + t * t * b[1]]);
+        }
+    }
+    out.push(pts[pts.len() - 1]);
+    out.dedup();
+    out
+}
+
+/// The point `t` (0 to 1) of the way along a path, by length.
+pub fn along(path: &[Point], t: f32) -> Point {
+    let lens: Vec<f32> = path.windows(2).map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt()).collect();
+    let mut left = lens.iter().sum::<f32>() * t.clamp(0., 1.);
+    for (w, len) in path.windows(2).zip(&lens) {
+        if left <= *len && *len > 0. {
+            let k = left / len;
+            return [w[0][0] + (w[1][0] - w[0][0]) * k, w[0][1] + (w[1][1] - w[0][1]) * k];
+        }
+        left -= len;
+    }
+    path.last().copied().unwrap_or_default()
+}
+
+/// How far a point is from a path.
+pub fn path_distance(path: &[Point], p: Point) -> f32 {
+    path.windows(2).map(|w| {
+        let (a, b) = (w[0], w[1]);
+        let d = [b[0] - a[0], b[1] - a[1]];
+        let len2 = d[0] * d[0] + d[1] * d[1];
+        let k = if len2 > 0. { (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / len2).clamp(0., 1.) } else { 0. };
+        ((a[0] + d[0] * k - p[0]).powi(2) + (a[1] + d[1] * k - p[1]).powi(2)).sqrt()
+    }).fold(f32::INFINITY, f32::min)
 }
 pub fn visible(camera: Camera, rect: Rect, viewport: Point) -> bool {
     let p = camera.to_world([0., 0.]);
@@ -469,8 +656,11 @@ pub enum View {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Space {
     pub space: String,
+    /// Its card on Home ([`SPACE_CARD`] in size); the cells inside keep their own coordinates.
     pub rect: Rect,
     pub color: String,
+    /// Kept so older files load; spaces have no frame since they became rooms.
+    #[serde(default)]
     pub frame: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -486,6 +676,9 @@ pub struct Card {
     /// Set while the cell is expanded into a live terminal: its size in world px at zoom 1, header included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<Point>,
+    /// The space (room) the cell lives in; None for Home. The window keeps it in step with the core.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
 }
 impl Card {
     /// The canvas identity, distinct from every real terminal address.
@@ -512,6 +705,9 @@ pub struct Panel {
 pub struct Preview {
     pub path: String,
     pub rect: Rect,
+    /// The space (room) it was opened in; None for Home.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
 }
 
 pub const PREVIEW_LIMIT: u64 = 2 * 1024 * 1024;
@@ -560,11 +756,17 @@ pub struct Document {
     /// Drawn Wire edges between cells of one space. Born edges are computed, never stored.
     #[serde(default)]
     pub wires: Vec<Wire>,
+    /// The space being shown, its cells filling the canvas; None is Home (space cards and root cells).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<String>,
+    /// Each place's last camera while another is shown: a space id, or "" for Home.
+    #[serde(default)]
+    pub cameras: std::collections::HashMap<String, Camera>,
 }
 impl Default for Document {
     fn default() -> Self {
         Self {
-            version: 1,
+            version: 2,
             camera: Camera::default(),
             view: View::All,
             spaces: vec![],
@@ -574,6 +776,8 @@ impl Default for Document {
             recent_folders: vec![],
             arrange_layout: String::new(),
             wires: vec![],
+            room: None,
+            cameras: Default::default(),
         }
     }
 }
@@ -594,10 +798,21 @@ impl Wire {
 }
 
 impl Document {
-    /// The space frame holding a cell's center; None for cells in the unframed root space.
+    /// The space a cell lives in; None for cells on Home.
     pub fn space_of(&self, key: &str) -> Option<&Space> {
-        let r = self.cards.iter().find(|c| c.key() == key)?.rect;
-        space_at(&self.spaces, [r[0] + r[2] / 2., r[1] + r[3] / 2.])
+        let id = self.cards.iter().find(|c| c.key() == key)?.space.as_ref()?;
+        self.spaces.iter().find(|s| &s.space == id)
+    }
+    /// Whether a cell or preview in `space` is shown in the current place.
+    pub fn shows(&self, space: Option<&String>) -> bool {
+        space == self.room.as_ref()
+    }
+    /// Shows another place, keeping the camera of the one left: `room` None is Home.
+    pub fn go(&mut self, room: Option<String>) {
+        if room == self.room { return; }
+        self.cameras.insert(self.room.clone().unwrap_or_default(), self.camera);
+        self.camera = self.cameras.remove(&room.clone().unwrap_or_default()).unwrap_or_default();
+        self.room = room;
     }
     /// Whether both cells exist and share a space (or both sit in the root space).
     pub fn same_space(&self, a: &str, b: &str) -> bool {
@@ -618,6 +833,20 @@ impl Document {
         self.wires.retain(|w| has(&w.a) && has(&w.b));
         before != self.wires.len()
     }
+    /// Move panes to the front or back, keeping each group's order and saved geometry.
+    pub fn stack(&mut self, keys: &[String], front: bool) -> bool {
+        if !self.cards.iter().any(|c| keys.contains(&c.key())) { return false; }
+        // Only `z` changes: the cards keep their stored order.
+        let mut order: Vec<usize> = (0..self.cards.len()).collect();
+        order.sort_by_key(|&i| (keys.contains(&self.cards[i].key()) == front, self.cards[i].z));
+        let mut changed = false;
+        for (rank, i) in order.into_iter().enumerate() {
+            changed |= self.cards[i].z != rank as u64;
+            self.cards[i].z = rank as u64;
+        }
+        changed
+    }
+
     pub fn place(&mut self, terminal: &str, point: Point, size: Point) {
         let z = self
             .cards
@@ -636,6 +865,7 @@ impl Document {
                 rect: [point[0], point[1], size[0], size[1]],
                 z,
                 size: None,
+                space: self.room.clone(),
             });
         }
     }
@@ -648,7 +878,7 @@ impl Document {
         let mut parents: Vec<_> = subs.keys().collect();
         parents.sort();
         for parent in parents {
-            let Some(rect) = self.cards.iter().find(|c| &c.terminal == parent && c.sub.is_none()).map(|c| c.rect) else { continue };
+            let Some((rect, space)) = self.cards.iter().find(|c| &c.terminal == parent && c.sub.is_none()).map(|c| (c.rect, c.space.clone())) else { continue };
             let mut children: Vec<_> = subs[parent].iter().collect();
             children.sort_by_key(|s| &s.id);
             for sub in children {
@@ -656,15 +886,8 @@ impl Document {
                 let siblings: Vec<_> = self.cards.iter().filter(|c| c.parent.as_ref() == Some(parent)).map(|c| c.rect).collect();
                 let z = self.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
                 let child = child_position(rect, &siblings, [PILL_WIDTH, 36.]);
-                // The cell belongs to its parent's space: grow that space to hold it.
-                let center = [rect[0] + rect[2] / 2., rect[1] + rect[3] / 2.];
-                if let Some(space) = self.spaces.iter_mut().find(|s| center[0] >= s.rect[0] && center[0] <= s.rect[0] + s.rect[2]
-                    && center[1] >= s.rect[1] && center[1] <= s.rect[1] + s.rect[3]) {
-                    let minimum = min_size(space.rect, &[child]);
-                    space.rect[2] = space.rect[2].max(minimum[0]);
-                    space.rect[3] = space.rect[3].max(minimum[1]);
-                }
-                self.cards.push(Card { terminal: String::new(), sub: Some(sub.id.clone()), parent: Some(parent.clone()), rect: child, z, size: None });
+                // The cell belongs to its parent's space.
+                self.cards.push(Card { terminal: String::new(), sub: Some(sub.id.clone()), parent: Some(parent.clone()), rect: child, z, size: None, space: space.clone() });
                 changed = true;
             }
         }
@@ -680,12 +903,13 @@ impl Document {
         let parsed = serde_json::from_slice::<Self>(&bytes);
         if let Ok(mut doc) = parsed {
             let valid_rect = |r: Rect| r.iter().all(|n| n.is_finite()) && r[2] > 0. && r[3] > 0.;
-            if doc.version != 1 {
+            if doc.version != 1 && doc.version != 2 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "unsupported canvas version",
                 ));
             }
+            if doc.version == 1 { doc.into_rooms(); }
             if doc.camera.x.is_finite()
                 && doc.camera.y.is_finite()
                 && doc.camera.zoom.is_finite()
@@ -708,22 +932,23 @@ impl Document {
         std::fs::rename(path, bad)?;
         Ok((Self::default(), true))
     }
+    /// Version 1 to 2: a cell belonged to the space frame holding its center; now it says so,
+    /// and a space is a fixed-size card on Home at its old top left.
+    fn into_rooms(&mut self) {
+        let center = |r: Rect| [r[0] + r[2] / 2., r[1] + r[3] / 2.];
+        for c in &mut self.cards { c.space = space_at(&self.spaces, center(c.rect)).map(|s| s.space.clone()); }
+        for p in &mut self.previews { p.space = space_at(&self.spaces, center(p.rect)).map(|s| s.space.clone()); }
+        for s in &mut self.spaces { s.rect = [s.rect[0], s.rect[1], SPACE_CARD[0], SPACE_CARD[1]]; }
+        self.version = 2;
+    }
     pub fn save(&self, path: &Path) -> io::Result<()> {
         crate::persist::write_atomic(path, serde_json::to_vec_pretty(self)?)
     }
 }
 
-pub fn edge_visible(camera: Camera, (a, b): (Point, Point), viewport: Point) -> bool {
-    visible(
-        camera,
-        [
-            a[0].min(b[0]) - 3.,
-            a[1].min(b[1]) - 3.,
-            (a[0] - b[0]).abs() + 6.,
-            (a[1] - b[1]).abs() + 6.,
-        ],
-        viewport,
-    )
+pub fn edge_visible(camera: Camera, path: &[Point], viewport: Point) -> bool {
+    let rects: Vec<Rect> = path.iter().map(|p| [p[0] - 3., p[1] - 3., 6., 6.]).collect();
+    union(&rects).is_some_and(|r| visible(camera, r, viewport))
 }
 pub const COLORS: [&str; 8] = [
     "gray", "red", "orange", "yellow", "green", "teal", "blue", "purple",
@@ -741,14 +966,6 @@ pub fn unused_color(spaces: &[Space], seed: usize) -> &'static str {
     }
 }
 
-pub fn move_space(space: &mut Space, cards: &mut [Card], members: &[String], delta: Point) {
-    space.rect[0] += delta[0];
-    space.rect[1] += delta[1];
-    for card in cards.iter_mut().filter(|c| members.contains(&c.key())) {
-        card.rect[0] += delta[0];
-        card.rect[1] += delta[1];
-    }
-}
 
 pub fn view_allows(view: &View, agent: bool) -> bool {
     match view {
@@ -773,37 +990,61 @@ mod tests {
         assert_eq!(solve(&[],0,pin,GAP),Vec::<Rect>::new());
     }
 
-    #[test]
-    fn growth_pushes_the_next_space_and_carries_cells() {
-        let spaces = [[0.,0.,200.,200.],[224.,0.,200.,200.]];
-        let grown = grow(spaces[0],&[[180.,24.,100.,50.]]);
-        assert_eq!(grown,[0.,0.,304.,200.]);
-        let result = solve(&spaces,0,grown,GAP);
-        assert!(separated(result[0],result[1],GAP));
-        let delta = [result[1][0]-spaces[1][0],result[1][1]-spaces[1][1]];
-        let mut space = Space { space:"b".into(),rect:spaces[1],color:"red".into(),frame:true };
-        let mut cards = [Card { terminal:"b".into(),sub:None,parent:None,rect:[248.,24.,100.,50.],z:0,size:None }];
-        move_space(&mut space,&mut cards,&["b".into()],delta);
-        assert_eq!(cards[0].rect[0]-space.rect[0],24.);
-        assert_eq!(cards[0].rect[1]-space.rect[1],24.);
-        assert_eq!(grow(grown,&[[24.,24.,10.,10.]]),grown);
-    }
+    
 
     #[test]
     fn arrange_layouts_keep_gap_sizes_and_parent_layers() {
         let rects = [[80.,30.,100.,40.],[0.,0.,70.,90.],[0.,50.,150.,60.],[0.,50.,30.,100.]];
         let parents = [None,Some(0),Some(0),Some(1)];
         for layout in ["tidy","row","column","wires"] {
-            let result = arrange(&rects,&parents,layout);
-            assert_eq!(result,arrange(&rects,&parents,layout));
+            let result = arrange(&rects,&parents,&[],layout);
+            assert_eq!(result,arrange(&rects,&parents,&[],layout));
             for i in 0..result.len() {
                 assert_eq!(&result[i][2..],&rects[i][2..]);
                 for j in 0..i { assert!(separated(result[i],result[j],GAP),"{layout}: {result:?}"); }
             }
             if layout == "wires" { assert!(result[0][0]<result[1][0] && result[1][0]<result[3][0]); assert_eq!(result[1][0],result[2][0]); }
         }
-        let cycle = arrange(&rects,&[Some(1),Some(0),Some(2),None],"wires");
+        let cycle = arrange(&rects,&[Some(1),Some(0),Some(2),None],&[],"wires");
         for i in 0..cycle.len() { for j in 0..i { assert!(separated(cycle[i],cycle[j],GAP)); } }
+    }
+
+    #[test]
+    fn version_one_cells_move_into_their_frames_room() {
+        let mut doc = Document { version: 1, ..Document::default() };
+        doc.spaces.push(Space { space: "s".into(), rect: [0., 0., 960., 640.], color: "blue".into(), frame: true });
+        doc.place("in", [24., 24.], [220., 36.]);
+        doc.place("out", [2000., 24.], [220., 36.]);
+        doc.previews.push(Preview { path: "/tmp/a.md".into(), rect: [100., 100., 200., 100.], space: None });
+        doc.into_rooms();
+        assert_eq!(doc.version, 2);
+        assert_eq!(doc.space_of("in").map(|s| s.space.as_str()), Some("s"));
+        assert!(doc.space_of("out").is_none());
+        assert_eq!(doc.previews[0].space.as_deref(), Some("s"));
+        assert_eq!(doc.spaces[0].rect, [0., 0., SPACE_CARD[0], SPACE_CARD[1]]);
+    }
+
+    #[test]
+    fn going_into_a_room_keeps_each_places_camera() {
+        let mut doc = Document::default();
+        doc.camera.x = 5.;
+        doc.go(Some("s".into()));
+        assert_eq!((doc.camera.x, doc.room.as_deref()), (0., Some("s")));
+        doc.camera.x = 9.;
+        doc.go(None);
+        assert_eq!(doc.camera.x, 5.);
+        doc.go(Some("s".into()));
+        assert_eq!(doc.camera.x, 9.);
+        assert!(doc.shows(Some(&"s".to_owned())) && !doc.shows(None));
+    }
+
+    #[test]
+    fn tidy_puts_wired_cells_next_to_each_other() {
+        // Four in reading order; 0 is wired to 3, so 3 comes second, beside 0 in the 2-column grid.
+        let rects = [[0.,0.,100.,40.],[200.,0.,100.,40.],[0.,100.,100.,40.],[200.,100.,100.,40.]];
+        let out = arrange(&rects,&[None;4],&[(3,0)],"tidy");
+        assert_eq!(out[3][1],out[0][1]);
+        assert!(out[3][0] > out[0][0]);
     }
 
     #[test]
@@ -811,7 +1052,7 @@ mod tests {
         let mut doc = Document::default();
         doc.place("a",[0.,0.],[100.,50.]);
         doc.spaces.push(Space { space:"s".into(),rect:[0.,0.,200.,200.],color:"blue".into(),frame:true });
-        doc.previews.push(Preview { path:"/tmp/plan.md".into(),rect:[24.,24.,100.,80.] });
+        doc.previews.push(Preview { path:"/tmp/plan.md".into(),rect:[24.,24.,100.,80.], space: None });
         let rest = Rest::capture(&doc);
         doc.spaces[0].rect = [500.,500.,900.,900.];
         doc.previews[0].rect[0] = 600.;
@@ -870,7 +1111,7 @@ mod tests {
 
     #[test]
     fn undo_keeps_each_sub_agent_cell_apart() {
-        let sub = |id: &str, x| Card { terminal: String::new(), sub: Some(id.into()), parent: Some("t1".into()), rect: [x, 0., 100., 36.], z: 0, size: None };
+        let sub = |id: &str, x| Card { terminal: String::new(), sub: Some(id.into()), parent: Some("t1".into()), rect: [x, 0., 100., 36.], z: 0, size: None, space: None };
         let mut doc = Document { cards: vec![sub("a", 0.), sub("b", 200.)], ..Document::default() };
         let rest = Rest::capture(&doc);
         doc.cards[0].rect[0] = 50.;
@@ -939,42 +1180,8 @@ mod tests {
         let r = new_space_rect(&[space(1056.)]);
         assert!(!intersects(r, space(1056.).rect));
     }
-    #[test]
-    fn space_drag_moves_only_its_cards() {
-        let mut space = Space {
-            space: "s".into(),
-            rect: [0., 0., 960., 640.],
-            color: "blue".into(),
-            frame: true,
-        };
-        let mut cards = vec![
-            Card {
-                terminal: "a".into(),
-                sub: None, parent: None,
-                rect: [24., 24., 160., 36.],
-                z: 0,
-                size: None,
-            },
-            Card {
-                terminal: "b".into(),
-                sub: None, parent: None,
-                rect: [1., 2., 160., 36.],
-                z: 0,
-                size: None,
-            },
-        ];
-        move_space(&mut space, &mut cards, &["a".into()], [10., -5.]);
-        assert_eq!(space.rect, [10., -5., 960., 640.]);
-        assert_eq!(cards[0].rect, [34., 19., 160., 36.]);
-        assert_eq!(cards[1].rect, [1., 2., 160., 36.]);
-    }
-    #[test]
-    fn new_card_clamps_at_click_point() {
-        assert_eq!(
-            clamp([900., 620., 240., 36.], [0., 0., 960., 640.]),
-            [696., 580., 240., 36.]
-        );
-    }
+    
+    
     #[test]
     fn random_color_uses_unused_palette_entries() {
         let spaces: Vec<_> = COLORS[..7]
@@ -1027,20 +1234,8 @@ mod tests {
         c.step(1, [0., 0.]);
         assert_eq!(c.zoom, 0.67);
     }
-    #[test]
-    fn card_clamps_into_space() {
-        assert_eq!(
-            clamp([-100., 900., 160., 36.], [0., 0., 960., 640.]),
-            [24., 580., 160., 36.]
-        );
-    }
-    #[test]
-    fn space_minimum_contains_cards() {
-        assert_eq!(
-            min_size([0., 0., 960., 640.], &[[24., 24., 160., 36.]]),
-            [208., 84.]
-        );
-    }
+    
+    
     #[test]
     fn child_is_beside_parent() {
         assert_eq!(
@@ -1060,18 +1255,81 @@ mod tests {
         );
     }
     #[test]
-    fn edge_joins_right_child() {
-        assert_eq!(
-            edge_ends([24., 24., 160., 36.], [264., 24., 160., 36.]),
-            ([184., 42.], [264., 42.])
-        );
+    fn route_picks_facing_sides() {
+        let side_by_side = route([24., 24., 160., 36.], [264., 24., 160., 36.], &[]);
+        assert_eq!((side_by_side[0], *side_by_side.last().unwrap()), ([184., 42.], [264., 42.]));
+        // A cell straight below joins bottom to top, whichever way the wire was drawn.
+        let below = route([0., 300., 100., 40.], [0., 0., 100., 40.], &[]);
+        assert_eq!((below[0], *below.last().unwrap()), ([50., 300.], [50., 40.]));
     }
     #[test]
-    fn edge_mirrors_for_left_child() {
-        assert_eq!(
-            edge_ends([264., 24., 160., 36.], [24., 24., 160., 36.]),
-            ([264., 42.], [184., 42.])
-        );
+    fn route_goes_around_a_cell_in_the_way() {
+        let (a, b, block) = ([0., 0., 100., 40.], [400., 0., 100., 40.], [180., -40., 140., 120.]);
+        let path = route(a, b, &[block]);
+        assert!(path.windows(2).all(|w| !segment_hits(w[0], w[1], block)), "{path:?}");
+        assert!(path.windows(2).all(|w| w[0][0] == w[1][0] || w[0][1] == w[1][1]), "orthogonal: {path:?}");
+    }
+    #[test]
+    fn tile_fills_the_area_without_overlap_and_grows_the_active_tile() {
+        let area = [0., 0., 1200., 800.];
+        for n in 1..=7 {
+            for active in std::iter::once(None).chain((0..n).map(Some)) {
+                let (out, _) = tile(area, n, active, &[], 24.);
+                for (i, a) in out.iter().enumerate() {
+                    assert!(a[0] >= 23.9 && a[1] >= 23.9 && a[0] + a[2] <= 1176.1 && a[1] + a[3] <= 776.1, "n={n} {a:?} leaves the area");
+                    for b in &out[i + 1..] { assert!(separated(*a, *b, 23.9), "n={n} {a:?} {b:?} overlap"); }
+                }
+                let area_of = |r: &Rect| r[2] * r[3];
+                if let Some(k) = active && n > 1 {
+                    assert!(out.iter().enumerate().all(|(j, r)| j == k || area_of(r) < area_of(&out[k])), "n={n} active {k} is the largest");
+                }
+                // Filled: the tiles and gaps cover the inner area.
+                let covered: f32 = out.iter().map(area_of).sum();
+                assert!(covered > 1152. * 752. * 0.85, "n={n} covers {covered}");
+            }
+        }
+    }
+
+    #[test]
+    fn tile_keeps_the_given_order_and_lines_pills_along_the_bottom() {
+        // The tiles sit in the order given, whichever is active.
+        let pills = [[0., 0., 220., 36.], [0., 0., 220., 36.]];
+        for active in [None, Some(0), Some(1)] {
+            let (out, _) = tile([0., 0., 1000., 600.], 2, active, &pills, 20.);
+            assert!(out[0][0] < out[1][0], "{active:?}");
+        }
+        let (out, placed) = tile([0., 0., 1000., 600.], 2, None, &pills, 20.);
+        assert!(placed.iter().all(|p| p[2] == 220. && p[3] == 36. && p[1] + p[3] <= 580.1 && p[1] > out[0][1] + out[0][3]));
+        assert!(separated(placed[0], placed[1], 19.9));
+        // Pills alone sit at the top of the area.
+        let (_, alone) = tile([0., 0., 1000., 600.], 0, None, &pills, 20.);
+        assert_eq!(alone[0][1], 20.);
+    }
+
+    #[test]
+    fn reading_order_is_top_to_bottom_then_left_to_right() {
+        assert_eq!(reading(&[[500., 0., 1., 1.], [0., 100., 1., 1.], [0., 0., 1., 1.]]), vec![2, 0, 1]);
+    }
+
+    #[test]
+    fn smooth_keeps_straight_lines_and_rounds_bends_inside_the_route() {
+        assert_eq!(smooth(&[[0., 0.], [0., 16.], [0., 100.]]), vec![[0., 0.], [0., 100.]]);
+        // A Z: down, across, down. The curve stays in the route's box and keeps both ends.
+        let z = [[0., 0.], [0., 50.], [100., 50.], [100., 100.]];
+        let s = smooth(&z);
+        assert_eq!((s[0], *s.last().unwrap()), ([0., 0.], [100., 100.]));
+        assert!(s.iter().all(|p| (0. ..=100.).contains(&p[0]) && (0. ..=100.).contains(&p[1])));
+        // Rounded as far as the runs allow: no sample sits on the sharp corners.
+        assert!(!s.contains(&[0., 50.]) && !s.contains(&[100., 50.]));
+        // Through the middle of the shared run, like the old S-curve.
+        assert!(path_distance(&s, [50., 50.]) < 1.);
+    }
+
+    #[test]
+    fn path_measures() {
+        let path = [[0., 0.], [10., 0.], [10., 10.]];
+        assert_eq!(along(&path, 0.5), [10., 0.]);
+        assert_eq!(path_distance(&path, [5., 3.]), 3.);
     }
     #[test]
     fn free_spot_skips_occupied() {
@@ -1092,7 +1350,7 @@ mod tests {
     fn crossing_curve_is_kept() {
         assert!(edge_visible(
             Camera::default(),
-            ([-1000., 200.], [2000., 200.]),
+            &[[-1000., 200.], [2000., 200.]],
             [800., 600.]
         ));
     }
@@ -1112,10 +1370,7 @@ mod tests {
         c.fit(&[[0., 0., 100., 100.]], [800., 600.]);
         assert_eq!(c.zoom, 2.);
     }
-    #[test]
-    fn space_minimum_without_cards() {
-        assert_eq!(min_size([0., 0., 960., 640.], &[]), [48., 48.]);
-    }
+    
     #[test]
     fn valid_document_round_trips() {
         let path =
@@ -1136,7 +1391,7 @@ mod tests {
     fn unsupported_version_is_untouched() {
         let path = std::env::temp_dir().join(format!("canopy-version-{}.json", std::process::id()));
         Document {
-            version: 2,
+            version: 3,
             ..Document::default()
         }
         .save(&path)
@@ -1286,8 +1541,7 @@ mod cell_tests {
         doc.spaces.push(Space { space: "s".into(), rect: [-24., -24., 368., 84.], color: "gray".into(), frame: true });
         assert!(doc.sync_subs(&subs));
         assert_eq!(doc.cards.len(), 2);
-        let (space, child) = (doc.spaces[0].rect, doc.cards[1].rect);
-        assert!(child[0] + child[2] <= space[0] + space[2] && child[1] + child[3] <= space[1] + space[3], "the parent's space grows to hold its sub cell");
+        assert_eq!(doc.cards[1].space, doc.cards[0].space, "a sub cell lives in its parent's space");
         let key = doc.cards[1].key();
         doc.place(&key, [600., 200.], [320., 36.]);
         subs.get_mut("t1").unwrap()[0].done = true;
@@ -1358,5 +1612,104 @@ mod keyboard_tests {
         camera.x += 50.;
         focus_fit(&mut camera, &mut previous, &[space], visible);
         assert_eq!(camera, fitted);
+    }
+}
+
+
+/// Where the next ⌘T pane goes: `step` down and right of the last one, back at the view's
+/// top-left when it would leave `view` ([x, y, w, h] world px), never on another pane's origin.
+pub fn cascade(last: Option<Point>, view: Rect, size: Point, taken: &[Point], step: f32) -> Point {
+    let start = [view[0] + step, view[1] + step];
+    let fits = |p: Point| p[0] + size[0] <= view[0] + view[2] && p[1] + size[1] <= view[1] + view[3];
+    let free = |p: Point| !taken.iter().any(|t| (t[0] - p[0]).abs() < 1. && (t[1] - p[1]).abs() < 1.);
+    let mut p = last.map_or(start, |l| [l[0] + step, l[1] + step]);
+    if !fits(p) { p = start; }
+    // At most one step per pane: every free spot is reached before the walk repeats.
+    for _ in 0..=taken.len() {
+        if free(p) { break; }
+        p = [p[0] + step, p[1] + step];
+        if !fits(p) && fits(start) { p = start; }
+    }
+    p
+}
+
+/// Drags a pane edge or corner. `zone` is (-1 left, 0, 1 right) and (-1 top, 0, 1 bottom).
+/// Left and top move the origin so the opposite edge stays put; size never drops below `min`.
+pub fn resize_from(origin: Point, size: Point, zone: (i8, i8), d: Point, min: Point) -> (Point, Point) {
+    let axis = |o: f32, s: f32, z: i8, d: f32, m: f32| match z {
+        1 => (o, (s + d).max(m)),
+        -1 => { let n = (s - d).max(m); (o + s - n, n) }
+        _ => (o, s),
+    };
+    let (x, w) = axis(origin[0], size[0], zone.0, d[0], min[0]);
+    let (y, h) = axis(origin[1], size[1], zone.1, d[1], min[1]);
+    ([x, y], [w, h])
+}
+
+#[cfg(test)]
+mod cascade_tests {
+    use super::cascade;
+
+    #[test]
+    fn new_panes_step_down_right_wrap_and_never_share_an_origin() {
+        let view = [0., 0., 1000., 800.];
+        let size = [400., 300.];
+        assert_eq!(cascade(None, view, size, &[], 32.), [32., 32.]);
+        assert_eq!(cascade(Some([32., 32.]), view, size, &[[32., 32.]], 32.), [64., 64.]);
+        // No room at the bottom right: back to the top left.
+        assert_eq!(cascade(Some([580., 480.]), view, size, &[], 32.), [32., 32.]);
+        // The top left is taken: the next free step.
+        assert_eq!(cascade(Some([580., 480.]), view, size, &[[32., 32.], [64., 64.]], 32.), [96., 96.]);
+        // A view smaller than a pane still never stacks two exactly.
+        assert_eq!(cascade(None, [0., 0., 100., 100.], size, &[[32., 32.]], 32.), [64., 64.]);
+    }
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::resize_from;
+
+    #[test]
+    fn every_edge_and_corner_moves_only_its_own_sides() {
+        let (o, s, d, min) = ([100., 100.], [400., 300.], [10., 20.], [50., 50.]);
+        for (zone, want) in [
+            ((1, 1), ([100., 100.], [410., 320.])),
+            ((-1, -1), ([110., 120.], [390., 280.])),
+            ((1, -1), ([100., 120.], [410., 280.])),
+            ((-1, 1), ([110., 100.], [390., 320.])),
+            ((1, 0), ([100., 100.], [410., 300.])),
+            ((-1, 0), ([110., 100.], [390., 300.])),
+            ((0, 1), ([100., 100.], [400., 320.])),
+            ((0, -1), ([100., 120.], [400., 280.])),
+        ] {
+            assert_eq!(resize_from(o, s, zone, d, min), want, "zone {zone:?}");
+        }
+        // Shrinking past the minimum stops there, and the right/bottom edge stays put.
+        assert_eq!(resize_from(o, s, (-1, -1), [1000., 1000.], min), ([450., 350.], [50., 50.]));
+    }
+}
+
+#[cfg(test)]
+mod stacking_tests {
+    use super::*;
+
+    #[test]
+    fn pane_stack_preserves_group_order_geometry_and_document_roundtrip() {
+        let mut doc = Document::default();
+        for (i, key) in ["t1", "t2", "t3", "t4"].iter().enumerate() {
+            doc.place(key, [i as f32 * 300., 0.], [220., 36.]);
+        }
+        let geometry: std::collections::HashMap<_, _> = doc.cards.iter().map(|c| (c.key(), c.rect)).collect();
+        let targets = vec!["t3".into(), "t1".into()];
+        assert!(doc.stack(&targets, true));
+        let order = |doc: &Document| { let mut cards: Vec<_> = doc.cards.iter().collect(); cards.sort_by_key(|c| c.z); cards.iter().map(|c| c.key()).collect::<Vec<_>>() };
+        assert_eq!(order(&doc), ["t2", "t4", "t1", "t3"]);
+        assert!(!doc.stack(&targets, true), "a second press need not save again");
+        assert!(doc.stack(&targets, false));
+        assert_eq!(order(&doc), ["t1", "t3", "t2", "t4"]);
+        let restored: Document = serde_json::from_value(serde_json::to_value(&doc).unwrap()).unwrap();
+        assert_eq!(order(&restored), order(&doc));
+        assert!(restored.cards.iter().all(|c| c.rect == geometry[&c.key()]));
+        assert!(!doc.stack(&["missing".into()], true));
     }
 }

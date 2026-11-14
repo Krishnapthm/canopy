@@ -51,9 +51,15 @@ Restore geometry before the last canvas move, resize or arrange.
 
 No arguments.
 
+## `canvas.tile`
+
+Tile view: fit every expanded cell of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed cells line up below. Repeat to put everything back.
+
+No arguments.
+
 ## `canvas.fit`
 
-Fit the current space in the visible canvas; repeat to restore the previous camera.
+Fit the selection, else everything in the current space or Home; repeat to restore the previous camera.
 
 No arguments.
 
@@ -85,11 +91,29 @@ Select the nearest shown cell left, right, up or down without expanding it.
 
 ## `canvas.space`
 
-Select the next or prev canvas space and its first shown cell.
+Go into the next or prev space, space N (1-based, top strip order) or a space id, or the recent / oldest one entered; its cells fill the canvas.
 
 | Argument | Required |
 |---|---|
 | `direction` | yes |
+
+## `canvas.home`
+
+Leave the space for Home: space cards and cells outside any space.
+
+No arguments.
+
+## `canvas.select_all`
+
+Select every terminal and agent cell in the current place; only with canvas focus, so an entered terminal keeps its own select-all.
+
+No arguments.
+
+## `canvas.fit_all`
+
+Fit everything in the current place, whatever is selected; repeat to restore the previous camera.
+
+No arguments.
 
 ## `canvas.collapse`
 
@@ -119,9 +143,11 @@ Move the selected cell left, right, up or down by one canvas gap, with one undo 
 
 ## `canvas.new`
 
-Create a terminal beside the selected cell, in its space.
+Create a terminal beside the selected cell, in its space. With like: true, start what the selected cell runs (an agent or other startable program), else a plain terminal.
 
-No arguments.
+| Argument | Required |
+|---|---|
+| `like` | no |
 
 ## `canvas.agents`
 
@@ -143,13 +169,42 @@ Open the quote popover listing running agents, at point or the pointer.
 
 ## `canvas.close`
 
-Close the selected canvas cell or terminal, asking before termination; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
+Close every selected pane (else the focused one) behind one dialog listing them, or the named terminal; terminals is the confirmed list, ending them all without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
 
 | Argument | Required |
 |---|---|
 | `terminal` | no |
+| `terminals` | no |
 | `confirmed` | no |
 | `dont_ask` | no |
+
+## `canvas.sync`
+
+Sync input (like tmux synchronize-panes) for the selected panes, or turn it off: typing in one goes to all. Esc or deselecting ends it.
+
+No arguments.
+
+## `canvas.equalize`
+
+Give the selected panes (else the focused pane) the standard size (settings terminal_size); tile view re-tiles.
+
+No arguments.
+
+## `canvas.front`
+
+Bring the selected panes (else the focused pane, or a named terminal outside the selection) in front of every other pane; the order is saved.
+
+| Argument | Required |
+|---|---|
+| `terminal` | no |
+
+## `canvas.back`
+
+Send the selected panes (else the focused pane, or a named terminal outside the selection) behind every other pane; the order is saved.
+
+| Argument | Required |
+|---|---|
+| `terminal` | no |
 
 ## `canvas.clear_finished`
 
@@ -262,22 +317,23 @@ No arguments.
 
 ## `canvas.space_style`
 
-Set a space color or toggle its frame.
+Set a space color.
 
 | Argument | Required |
 |---|---|
 | `id` | yes |
-| `color` | no |
+| `color` | yes |
 
 ## `panel.editor`
 
-Choose a file panel editor, or return to the read-only view after saving.
+Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state.
 
 | Argument | Required |
 |---|---|
 | `choice` | no |
 | `done` | no |
 | `path` | no |
+| `dirty` | no |
 
 ## `preview.open`
 
@@ -446,15 +502,6 @@ Take a terminal's pane away and disable core keep; it keeps running (a sub-agent
 | Argument | Required |
 |---|---|
 | `terminal` | yes |
-
-## `terminal.right_click`
-
-Where right-clicks in a terminal (default: the focused one) go when its program takes the mouse: "program" or "menu" (Canopy's, the default). Shift+right-click is always the menu.
-
-| Argument | Required |
-|---|---|
-| `to` | yes |
-| `terminal` | no |
 
 ## `terminal.pin`
 
@@ -767,7 +814,7 @@ No arguments.
 
 ## `app.settings`
 
-Open the settings (section: look, keyboard, machines, alerts).
+Open the settings (section: look, keyboard, shortcuts, machines, alerts).
 
 | Argument | Required |
 |---|---|

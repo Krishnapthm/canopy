@@ -1,7 +1,7 @@
 // A pane's header, for layouts that frame their panes:
 //   { "tab": "active", "pane": { "header": { "content": { "mod": "pane" } } } }
-// Shows the program's icon (the app's program table), the agent's name or
-// the terminal's title, the folder, and the agent's status; buttons split, zoom and close
+// Shows the program's icon (the app's program table), the tab's name, else the agent's
+// name or "terminal", the folder, and the agent's status; buttons split, zoom and close
 // this pane. Props from the app: { pane, terminal }. Click: focus the pane.
 
 import { View, div, svg, image } from "gpui-kit";
@@ -60,7 +60,9 @@ export default class Pane extends View {
     const t = theme();
     const p = this.me();
     if (!p) return div();
-    const name = ((p.program?.agent || p.program?.shell) && p.program.name) || p.title || p.program?.name || "shell";
+    // Same order as the canvas pill: the tab's name, an agent's program name, "terminal" for a shell, else the program.
+    const generic = !p.name || [p.program?.key, p.program?.name, "shell", "terminal"].includes(p.name);
+    const name = (!generic && p.name) || (p.program?.agent && p.program.name) || (p.program?.shell && "terminal") || p.program?.name || "terminal";
     const pic = icon(p.program, 14, t.dim);
     const st = p.status;
     const pane = p.pane;
