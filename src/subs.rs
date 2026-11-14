@@ -249,18 +249,20 @@ mod tests {
 
     #[test]
     fn hook_payload_and_ids() {
-        let bytes = serde_json::to_vec(&json!({"agent_id":"abc_1-Z","agent_type":"review","transcript_path":"/tmp/session.jsonl"})).unwrap();
+        // Absolute on every OS: "/tmp/..." has no drive letter on Windows.
+        let tmp = std::env::temp_dir();
+        let bytes = serde_json::to_vec(&json!({"agent_id":"abc_1-Z","agent_type":"review","transcript_path":tmp.join("session.jsonl")})).unwrap();
         let (id, data) = payload(&bytes, false).unwrap();
         assert_eq!(id, "abc_1-Z");
         let children = hooks(&json!({"program":{"icon":"icons/agent.svg"},"labels":{"canopy.sub.abc_1-Z":serde_json::to_string(&data).unwrap()}}));
         assert_eq!(children[0].id, id);
         assert_eq!(children[0].program["icon"], "icons/agent.svg");
         assert_eq!(data.name, "review");
-        assert_eq!(data.transcript, PathBuf::from("/tmp/session/subagents/agent-abc_1-Z.jsonl"));
+        assert_eq!(data.transcript, tmp.join("session").join("subagents").join("agent-abc_1-Z.jsonl"));
         assert!(payload(&bytes, true).unwrap().1.done, "a stopped sub-agent stays, done");
         for id in ["", "../escape", "a/b", "a b", "é", &"x".repeat(65)] { assert!(!valid_id(id)); }
-        let stop = json!({"agent_id":"abc", "agent_transcript_path":"/tmp/done.jsonl", "agent_type":"helper"});
-        assert_eq!(payload(&serde_json::to_vec(&stop).unwrap(), false).unwrap().1.transcript, PathBuf::from("/tmp/done.jsonl"));
+        let stop = json!({"agent_id":"abc", "agent_transcript_path":tmp.join("done.jsonl"), "agent_type":"helper"});
+        assert_eq!(payload(&serde_json::to_vec(&stop).unwrap(), false).unwrap().1.transcript, tmp.join("done.jsonl"));
         assert!(payload(&vec![b' '; PAYLOAD_LIMIT as usize + 1], false).is_none());
         assert!(payload(b"broken", false).is_none());
         assert!(hooks(&json!({"labels":{"canopy.sub.bad":"{}"}})).is_empty());

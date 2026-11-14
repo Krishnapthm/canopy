@@ -72,6 +72,8 @@ pub fn watch(home: &Path, #[cfg(test)] executor: gpui::BackgroundExecutor) -> Op
     static WATCHER: OnceLock<std::sync::Mutex<notify::RecommendedWatcher>> = OnceLock::new();
     let (tx, rx) = async_channel::unbounded();
     #[cfg(test)]
+    TEST_EXECUTOR.set(Some(executor.clone()));
+    #[cfg(test)]
     let tx = test_notifications(tx, executor);
     let root = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
     let base = root.clone();
@@ -97,6 +99,12 @@ pub fn watch(home: &Path, #[cfg(test)] executor: gpui::BackgroundExecutor) -> Op
 }
 
 // Native callbacks cannot wake GPUI's deterministic test scheduler directly.
+#[cfg(test)]
+thread_local! {
+    /// The scheduler of the GPUI test on this thread, once its app watches files.
+    static TEST_EXECUTOR: std::cell::RefCell<Option<gpui::BackgroundExecutor>> = const { std::cell::RefCell::new(None) };
+}
+
 #[cfg(test)]
 fn test_notifications(tx: async_channel::Sender<Changed>, executor: gpui::BackgroundExecutor) -> std::sync::mpsc::Sender<Changed> {
     let (pending, events) = std::sync::mpsc::channel();
@@ -189,6 +197,18 @@ pub async fn next_change(path: String) -> Result<Vec<String>, String> {
         (rx, weak)
     };
     let _waiting = FolderWait { root, sender };
+    // Under a GPUI test scheduler, poll on its clock so the watcher thread
+    // never wakes it (that aborts the test as nondeterministic).
+    #[cfg(test)]
+    if let Some(executor) = TEST_EXECUTOR.with_borrow(Clone::clone) {
+        loop {
+            match rx.try_recv() {
+                Ok(changes) => return Ok(changes),
+                Err(async_channel::TryRecvError::Closed) => return Err("stopped watching".to_owned()),
+                Err(async_channel::TryRecvError::Empty) => executor.timer(std::time::Duration::from_millis(10)).await,
+            }
+        }
+    }
     rx.recv().await.map_err(|_| "stopped watching".to_owned())
 }
 
@@ -570,6 +590,31 @@ mod tests {
         remove_folder(&root, &generation);
         cx.run_until_parked();
         assert_eq!(*result.lock().unwrap(), Some(Err("stopped watching".to_owned())));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[gpui::test]
+    fn a_folder_change_reaches_a_wait_on_the_test_scheduler(cx: &mut gpui::TestAppContext) {
+        let dir = std::env::temp_dir().join(format!("herdr-watch-scheduler-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        TEST_EXECUTOR.set(Some(cx.background_executor.clone()));
+        let result = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let received = result.clone();
+        let path = dir.to_string_lossy().into_owned();
+        cx.background_executor.spawn(async move {
+            *received.lock().unwrap() = Some(next_change(path).await);
+        }).detach();
+        cx.run_until_parked();
+        // Rewritten until the watcher is live. Its thread delivers each batch;
+        // the wait must not be woken by it, or the scheduler aborts the test.
+        let deadline = std::time::Instant::now() + EVENT_WAIT;
+        while result.lock().unwrap().is_none() && std::time::Instant::now() < deadline {
+            std::fs::write(dir.join("changed"), "x").unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            cx.executor().advance_clock(std::time::Duration::from_millis(10));
+            cx.run_until_parked();
+        }
+        assert!(result.lock().unwrap().as_ref().is_some_and(Result::is_ok), "the change arrived");
         std::fs::remove_dir_all(dir).unwrap();
     }
 
