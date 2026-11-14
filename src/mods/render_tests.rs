@@ -212,6 +212,9 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
         module = module.async_function(name, move |a| {
             let first = a.get(0).map(from_host).unwrap_or(Value::Null);
             let reply = match name {
+                "readTextFile" if first == "/fixture/app/keys.json" => Some(json!(crate::keys::DEFAULTS)),
+                "readTextFile" if first == "/fixture/app/frame/settings/keys.json" => Some(json!(include_str!("../../defaults/keys.json"))),
+                "readTextFile" if first == "/fixture/app/frame/settings/keys.macos.json" => Some(json!(include_str!("../../defaults/keys.macos.json"))),
                 "readTextFile" if first == "/fixture/hello.rs" => Some(json!("fn main() {}")),
                 "readTextFile" if first == "/fixture/app/settings.json" || first == "/fixture/.ssh/config" => Some(Value::Null),
                 "readTextFile" => first
@@ -821,7 +824,7 @@ fn settings_sections(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let start = Instant::now();
     let staged = Staged::new();
-    for section in ["look", "alerts", "keyboard", "machines"] {
+    for section in ["look", "alerts", "keyboard", "shortcuts", "machines"] {
         let mut p = props();
         p["section"] = json!(section);
         describe(cx, &staged, "frame/settings", true, p, None).unwrap();

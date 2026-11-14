@@ -784,7 +784,7 @@ No arguments.
 
 ## `app.settings`
 
-Open the settings (section: look, keyboard, machines, alerts).
+Open the settings (section: look, keyboard, shortcuts, machines, alerts).
 
 | Argument | Required |
 |---|---|

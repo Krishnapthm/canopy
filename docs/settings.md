@@ -74,3 +74,21 @@ the renderer’s opaque RGB palette. Editors inherit the canvas color.
 Herdr Dark ANSI black changes from `#45484F` (1.922:1) to `#7F8186`
 (4.514:1), the first passing step when mixing toward white in 1/255 increments.
 All supplied Canopy values remain exact.
+
+## Shortcuts
+
+Settings > Shortcuts lists actions, their command descriptions, current keys
+and shipped defaults for this OS. Rows are grouped by keys.json section;
+argument-bearing actions keep separate rows. A warning identifies equivalent
+keys assigned to different actions in the same section.
+
+Search by action, description or key. Click a key to record a replacement;
+Esc cancels and Backspace clears. Changes save immediately to app-home
+`keys.json` on every OS and use the existing live config reload. Invalid JSON,
+conflicts and failed saves raise a toast without overwriting the file.
+
+Reset to default restores a row's shipped keys (or clears an unshipped action).
+Reset all shortcuts uses the confirmation dialog, restoring built-in actions
+while keeping custom mod actions and unrelated entries. Clear conflicting
+custom keys before resetting. The recorder retains existing command arguments;
+configure new argument-bearing actions in keys.json.

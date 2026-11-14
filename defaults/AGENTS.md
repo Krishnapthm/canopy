@@ -634,7 +634,7 @@ The main ones:
   `layout.reset {name?}` (reset a shipped layout and its clicks),
   `layout.clone {name, as?}` (duplicate, then switch; default `<name>-copy`).
 - App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help` (again: closes it), `app.palette` (again: closes it), `app.settings {section?}`
-  (sections: `look`, `keyboard`, `machines`, `alerts`; Machines lists, updates, renames and removes ssh machines; settings edit the same files you do).
+  (sections: `look`, `keyboard`, `shortcuts`, `machines`, `alerts`; Shortcuts searches and edits app-home keys.json, records one combination and resets defaults; Machines lists, updates, renames and removes ssh machines; settings edit the same files you do).
   `app.theme {name}`, `app.zoom_in`, `app.zoom_out`, `app.zoom_reset`,
   Add machine lists all named ssh-config hosts in a scrollable list. Machines
   that need a password, a new host key or herdr-core installed show what to run

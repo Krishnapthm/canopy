@@ -31,6 +31,13 @@ fn embed(base: &Path, folder: &str, name: &str, file: &str) {
     let mut lines = Vec::new();
     let root = base.join(folder);
     walk(&root, base, &root, &mut lines);
+    if folder == "defaults/frame" {
+        // Settings reads shipped keys without copying their source of truth.
+        for name in ["keys.json", "keys.macos.json"] {
+            println!("cargo:rerun-if-changed=defaults/{name}");
+            lines.push(format!("    (\"settings/{name}\", include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/defaults/{name}\"))),"));
+        }
+    }
     let code = format!("pub const {name}: &[(&str, &[u8])] = &[\n{}\n];\n", lines.join("\n"));
     std::fs::write(Path::new(&std::env::var("OUT_DIR").unwrap()).join(file), code).unwrap();
 }
