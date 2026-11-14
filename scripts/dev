@@ -17,6 +17,7 @@ umask 077
 mkdir -p "$HERDR_APP_HOME" "$XDG_STATE_HOME" "$XDG_CONFIG_HOME"
 # A core this script reserved is still answering (the window was closed, not dev-stop):
 # attach to it, so the saved layout and running terminals come back. Without nc, a socket file counts.
+# shortcut: an open dev window is not detected, so a second run starts a second app on the same home; close it first.
 if [[ -f $root/owned/hc && -S $HC_SOCKET ]] && { ! command -v nc >/dev/null || nc -U -z "$HC_SOCKET" 2>/dev/null; }; then
     echo 'reusing the running scratch core' >&2
     exec "$repo/target/debug/canopy"

@@ -1643,10 +1643,7 @@ impl AppWindow {
             .any(|n| matches!(n.kind, Kind::Canvas))
     }
     pub(super) fn sync_canvas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Until the core's document has loaded the model has no spaces, and pruning
-        // would wipe every saved space card; `sync` runs again when it arrives.
-        let loaded = self.documents.get("").is_some_and(|s| s.document.is_some());
-        if !self.has_canvas() || !self.listed_once || !loaded {
+        if !self.has_canvas() || !self.listed_once || !core_layout_answered(self.documents.get("")) {
             return;
         }
         self.load_previews(cx);
@@ -3257,6 +3254,13 @@ impl AppWindow {
     }
 }
 
+/// Whether the core has answered for this machine's layout (with a document, or that it has none).
+/// Before that the model has no spaces, and pruning would wipe every saved space card; `sync`
+/// runs again when the answer arrives.
+fn core_layout_answered(slot: Option<&crate::mirror_sync::Slot>) -> bool {
+    slot.is_some_and(|s| s.document.is_some() || s.read_attempted)
+}
+
 /// The window slot of an expanded cell's terminal view.
 pub(super) fn cell_slot(addr: &str) -> String {
     format!("canvas:{addr}")
@@ -3483,6 +3487,20 @@ mod quote_tests {
         assert_eq!(format_quote(&json!({"path":"/a.md","start":12,"end":12,"text":"a\n"}), None), "@/a.md:12\n> a");
         assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","message":"  why?\n"}), None), "@/a.md\n> a\n\nwhy?");
         assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","message":" "}), None), "@/a.md\n> a");
+    }
+}
+
+#[cfg(test)]
+mod layout_answer_tests {
+    use super::core_layout_answered;
+    use crate::mirror_sync::Slot;
+    #[test]
+    fn space_cards_wait_for_the_cores_answer_even_when_it_has_no_layout() {
+        assert!(!core_layout_answered(None));
+        assert!(!core_layout_answered(Some(&Slot::default())), "a slow core start must not prune");
+        let mut tried = Slot::default();
+        tried.read_attempted = true;
+        assert!(core_layout_answered(Some(&tried)), "an unavailable layout still lets the canvas sync");
     }
 }
 

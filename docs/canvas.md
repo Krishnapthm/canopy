@@ -143,7 +143,9 @@ back where they were.
   its terminal.
 - `tile_gap` in [settings](settings.md) sets the space between tiles (default 0,
   edge to edge); editing it re-tiles live.
-- Tiles resize their programs like any cell: columns and rows follow the tile.
+- Tiles size their terminals like any cell: by default (`canvas_resize_terminals`
+  off in [settings](settings.md)) the program keeps its grid and the text scales
+  to fit the tile; with it on, columns and rows follow the tile.
 - How it works: when tile view starts it records the members in reading order
   (top to bottom, then left to right). `canvas::tile` places them in that order
   and picks `ceil(sqrt(n))` columns, with the last row short and stretched, as
