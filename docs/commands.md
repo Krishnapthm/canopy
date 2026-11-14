@@ -91,7 +91,7 @@ Select the nearest shown cell left, right, up or down without expanding it.
 
 ## `canvas.space`
 
-Go into the next or prev space, or space N (1-based); its cells fill the canvas.
+Go into the next or prev space, space N (1-based, top strip order) or a space id, or the recent / oldest one entered; its cells fill the canvas.
 
 | Argument | Required |
 |---|---|
@@ -105,7 +105,7 @@ No arguments.
 
 ## `canvas.select_all`
 
-Select every cell, preview and (on Home) space card in the current place.
+Select every terminal and agent cell in the current place; only with canvas focus, so an entered terminal keeps its own select-all.
 
 No arguments.
 
@@ -169,13 +169,42 @@ Open the quote popover listing running agents, at point or the pointer.
 
 ## `canvas.close`
 
-Close the selected canvas cell or terminal, asking before termination; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
+Close every selected pane (else the focused one) behind one dialog listing them, or the named terminal; terminals is the confirmed list, ending them all without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
 
 | Argument | Required |
 |---|---|
 | `terminal` | no |
+| `terminals` | no |
 | `confirmed` | no |
 | `dont_ask` | no |
+
+## `canvas.sync`
+
+Sync input (like tmux synchronize-panes) for the selected panes, or turn it off: typing in one goes to all. Esc or deselecting ends it.
+
+No arguments.
+
+## `canvas.equalize`
+
+Give the selected panes (else the focused pane) the standard size (settings terminal_size); tile view re-tiles.
+
+No arguments.
+
+## `canvas.front`
+
+Bring the selected panes (else the focused pane, or a named terminal outside the selection) in front of every other pane; the order is saved.
+
+| Argument | Required |
+|---|---|
+| `terminal` | no |
+
+## `canvas.back`
+
+Send the selected panes (else the focused pane, or a named terminal outside the selection) behind every other pane; the order is saved.
+
+| Argument | Required |
+|---|---|
+| `terminal` | no |
 
 ## `canvas.clear_finished`
 
@@ -297,13 +326,14 @@ Set a space color.
 
 ## `panel.editor`
 
-Choose a file panel editor, or return to the read-only view after saving.
+Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state.
 
 | Argument | Required |
 |---|---|
 | `choice` | no |
 | `done` | no |
 | `path` | no |
+| `dirty` | no |
 
 ## `preview.open`
 
