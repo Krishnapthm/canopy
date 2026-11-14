@@ -402,7 +402,8 @@ person_settings! {
     canvas_color: Option<String> = None => "Canvas background; null follows the theme.";
     canvas_gap: f32 = 24. => "Cell and space gap in world pixels (0..1024).";
     tile_gap: f32 = 0. => "Gap between cells in tile view in world pixels (0..1024).";
-    canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live or only on drop (live, drop).";
+    canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live, only on drop, or never so cells overlap (live, drop, off).";
+    canvas_resize_terminals: bool = false => "Refit a canvas terminal's grid to its cell as the cell resizes; off keeps the grid and scales it.";
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
     #[serde(skip_serializing_if = "is_default_wire_limit")]
@@ -444,6 +445,7 @@ pub enum CanvasPush {
     #[default]
     Live,
     Drop,
+    Off,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -499,6 +501,8 @@ pub struct Settings {
     pub canvas_gap: f32,
     /// Whether neighbours move during a drag or on release.
     pub canvas_push: CanvasPush,
+    /// Whether canvas terminals refit their grid to the cell.
+    pub canvas_resize_terminals: bool,
     /// Space background opacity.
     pub space_fill: f32,
     /// Columns and rows of a newly expanded terminal.
@@ -560,6 +564,7 @@ impl Default for Settings {
         Settings {
             canvas_gap: person.canvas_gap,
             canvas_push: person.canvas_push,
+            canvas_resize_terminals: person.canvas_resize_terminals,
             space_fill: person.space_fill,
             terminal_size: person.terminal_size,
             font_family: DEFAULT_FONT.into(),
@@ -603,6 +608,7 @@ impl Settings {
         Settings {
             canvas_gap: person.canvas_gap,
             canvas_push: person.canvas_push,
+            canvas_resize_terminals: person.canvas_resize_terminals,
             space_fill: person.space_fill,
             terminal_size: person.terminal_size,
             // The layout's own, else the person's, else Canopy's.
@@ -1056,6 +1062,9 @@ mod tests {
         let defaults = parse_person("{}").unwrap();
         assert_eq!(defaults.canvas_gap, 24.);
         assert_eq!(defaults.canvas_push, CanvasPush::Live);
+        assert!(!defaults.canvas_resize_terminals);
+        assert_eq!(parse_person(r#"{"canvas_push":"off","canvas_resize_terminals":true}"#).map(|p| (p.canvas_push, p.canvas_resize_terminals)),
+            Ok((CanvasPush::Off, true)));
         assert_eq!(defaults.space_fill, 0.04);
         assert_eq!(defaults.terminal_size, [100, 30]);
         for invalid in [r#"{"canvas_gap":-1}"#, r#"{"canvas_gap":1025}"#,

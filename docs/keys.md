@@ -44,7 +44,13 @@ Enter on a sub-agent opens its transcript; on a file card it opens the file.
 | Zoom in / out / 100% | Cmd+= / Cmd+- / Cmd+0 | Ctrl+= / Ctrl+- / Ctrl+0 |
 | Agents / All / Terminals | Cmd+Shift+1/2/3 | Ctrl+Shift+1/2/3 |
 
-Cmd+T / Ctrl+Shift+T is `tab.new`, Cmd+N / Ctrl+Shift+N `space.new` and
+On a canvas, Cmd+T / Ctrl+Shift+T opens `canvas.new {like: true}`: a terminal
+beside the selected cell running what that cell runs (an agent, say), else a
+plain one; Cmd+Shift+T / Ctrl+Alt+T is a plain `canvas.new`. Both shadow
+`tab.new` while a canvas layout is shown (Ctrl+T stays the terminal's own).
+With a cell entered, zoom in / out / 100% (Cmd or Ctrl, plus Ctrl+= / Ctrl+- /
+Ctrl+0 on macOS too) resize that terminal's text, in memory, instead of the
+canvas. Cmd+N / Ctrl+Shift+N `space.new` and
 Cmd+B / Ctrl+Shift+B `layout.toggle:sidebar`. On Linux and Windows,
 Ctrl+Shift+F is terminal search while a terminal has focus.
 

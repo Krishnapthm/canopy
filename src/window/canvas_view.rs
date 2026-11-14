@@ -355,7 +355,8 @@ impl AppWindow {
                 cells[i][3] = sizes[i][3];
             }
         }
-        if let Some(i) = pinned {
+        // Push off lets cells overlap; spaces and root cells on Home still separate below.
+        if let (Some(i), false) = (pinned, self.person.canvas_push == settings::CanvasPush::Off) {
             let indices: Vec<_> = (0..cells.len())
                 .filter(|j| members[*j] == members[i])
                 .collect();
@@ -1952,6 +1953,15 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // An entered cell takes the zoom keys (and the View menu) for its own text.
+        if matches!(name, "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset") && !self.canvas_state.mode {
+            let entered = self.canvas_state.selected.last().filter(|k| self.canvas_state.doc.cards.iter().any(|c| &c.terminal == *k && c.sub.is_none()));
+            if let Some(t) = entered.and_then(|k| self.terms.get(&cell_slot(k))) {
+                let factor = match name { "canvas.zoom_in" => Some(1.1), "canvas.zoom_out" => Some(1. / 1.1), _ => None };
+                t.view.update(cx, |v, cx| v.zoom_text(factor, cx));
+                return;
+            }
+        }
         let bounds = self
             .bounds
             .borrow()
@@ -2715,7 +2725,7 @@ impl AppWindow {
                 let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.terminal);
                 // The grid follows the cell only once the zoom rests, else a pinch resizes the program every frame.
                 let settled = !resizing && !compact && self.camera_rested();
-                t.view.update(cx, |v, cx| v.set_scale(z, settled.then_some(body_size), cx));
+                t.view.update(cx, |v, cx| v.set_scale(z, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx));
             }
             let (select_addr, resize_addr, mode_addr) = (card.terminal.clone(), card.terminal.clone(), card.terminal.clone());
             let body = div()
@@ -3245,6 +3255,13 @@ fn canvas_agent(rec: &Value) -> bool {
             .is_some_and(|s| matches!(s, "idle" | "working" | "blocked" | "done"))
 }
 
+/// The argv that starts what a live cell runs: its program's `run` among the startable agents (None for a plain shell).
+fn like_run(rec: &Value, startable: &[Value]) -> Option<Vec<String>> {
+    let key = rec["program"]["key"].as_str()?;
+    let entry = startable.iter().find(|e| e["key"] == key)?;
+    serde_json::from_value(entry["run"].clone()).ok()
+}
+
 /// The space a cell belongs to; unkept children have no pane, so they share their ancestor's.
 fn cell_space<'a>(model: &'a model::Model, live: &HashMap<String,Value>, terminal: &str) -> Option<&'a model::Space> {
     let mut address = terminal;
@@ -3571,5 +3588,18 @@ mod bar_tests {
         assert_eq!(bar_inset(true, false), 76.);
         assert_eq!(bar_inset(true, true), 12.);
         assert_eq!(bar_inset(false, false), 12.);
+    }
+}
+
+#[cfg(test)]
+mod like_tests {
+    use super::like_run;
+    use serde_json::json;
+    #[test]
+    fn like_resolves_to_the_programs_run_or_nothing() {
+        let startable = [json!({"key":"uv","run":["uv","run","python"]})];
+        assert_eq!(like_run(&json!({"program":{"key":"uv"}}), &startable), Some(vec!["uv".into(), "run".into(), "python".into()]));
+        assert_eq!(like_run(&json!({"program":{"key":"shell"}}), &startable), None);
+        assert_eq!(like_run(&json!({}), &startable), None);
     }
 }

@@ -92,7 +92,12 @@ and sub-agent transcripts only.
 - PTY size: columns and rows are what fits the cell as drawn once the zoom
   rests (glyphs round to whole pixels at each zoom, so measuring at zoom 1
   would leave a strip); a corner drag applies them on release. The grid is
-  centred, so the padding is even on all sides.
+  centred, so the padding is even on all sides. With `canvas_resize_terminals`
+  off (the default) the grid is measured once, when the terminal is made or after a
+  text zoom, and kept: resizing the cell scales the whole grid to fit it, centered.
+  Set it to true to refit the grid to the cell as above.
+- Text zoom: with a cell entered, the zoom keys and View menu resize that
+  terminal's text (not the canvas) until the app restarts; the grid refits.
 - Input: keys go to the terminal once it is focused, as in any terminal, so
   Backspace, Delete and Cmd+Z belong to it. The wheel scrolls a focused
   expanded terminal; over any other cell, or with Cmd (Ctrl) held, it pans or

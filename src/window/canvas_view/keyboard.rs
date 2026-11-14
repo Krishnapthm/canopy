@@ -201,7 +201,14 @@ impl AppWindow {
                         at["machine"] = json!(machine);
                     }
                     self.open_menu("canvas-agents", at, None, window, cx);
-                } else { self.create_canvas(at, window, cx); }
+                } else {
+                    // `like`: start what the selected cell runs (in its space, so its folder), else a plain terminal.
+                    if args["like"] == true {
+                        let rec = selected.as_deref().and_then(|key| self.live.get(key));
+                        if let Some(run) = rec.and_then(|rec| super::like_run(rec, &crate::programs::startable())) { at["argv"] = json!(run); }
+                    }
+                    self.create_canvas(at, window, cx);
+                }
             }
             _ => unreachable!(),
         }

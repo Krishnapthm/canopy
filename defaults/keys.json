@@ -72,6 +72,8 @@
     "shift-insert": "terminal.paste"
   },
   "layout:main": {
+    "ctrl-shift-t": {"command": "canvas.new", "args": {"like": true}},
+    "ctrl-alt-t": "canvas.new",
     "ctrl-=": "canvas.zoom_in",
     "ctrl-+": "canvas.zoom_in",
     "ctrl--": "canvas.zoom_out",

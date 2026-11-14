@@ -72,6 +72,12 @@
     "cmd-backspace": "send:\u0015"
   },
   "layout:main": {
+    "cmd-t": {"command": "canvas.new", "args": {"like": true}},
+    "cmd-shift-t": "canvas.new",
+    "ctrl-=": "canvas.zoom_in",
+    "ctrl-+": "canvas.zoom_in",
+    "ctrl--": "canvas.zoom_out",
+    "ctrl-0": "canvas.zoom_reset",
     "cmd-=": "canvas.zoom_in",
     "cmd-+": "canvas.zoom_in",
     "cmd--": "canvas.zoom_out",

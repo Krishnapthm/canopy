@@ -496,6 +496,9 @@ export default class Settings extends View {
       .child(this.themePicker(t, true))
       .child(div().h(18))
       .child(this.row(t, "Canvas color", "Hex color or theme default.", h_flex().gap(8).child(Input.new(this.canvasColorInput).w(120).h(28)).child(this.button(t, "canvas-color-default", "Default", (_e, cx) => this.change((q) => { q.canvas_color = null; }, cx)))))
+      .child(this.heading(t, "Canvas"))
+      .child(this.row(t, "Push neighbours", "Cells nudge each other apart. Off lets them overlap. For drop-on-release, set canvas_push to \"drop\" in settings.json.", this.toggle(t, "st-canvas-push", this.person.canvas_push !== "off", (_e, cx) => this.change((q) => { if (q.canvas_push === "off") delete q.canvas_push; else q.canvas_push = "off"; }, cx))))
+      .child(this.row(t, "Resize terminals with cells", "Off keeps each terminal's grid and scales it to fit. On refits it to the cell.", this.toggle(t, "st-canvas-resize", this.person.canvas_resize_terminals === true, (_e, cx) => this.change((q) => { if (q.canvas_resize_terminals) delete q.canvas_resize_terminals; else q.canvas_resize_terminals = true; }, cx))))
       .child(this.heading(t, "Size and fonts"))
       .child(
         this.row(

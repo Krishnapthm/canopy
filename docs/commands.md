@@ -143,9 +143,11 @@ Move the selected cell left, right, up or down by one canvas gap, with one undo 
 
 ## `canvas.new`
 
-Create a terminal beside the selected cell, in its space.
+Create a terminal beside the selected cell, in its space. With like: true, start what the selected cell runs (an agent or other startable program), else a plain terminal.
 
-No arguments.
+| Argument | Required |
+|---|---|
+| `like` | no |
 
 ## `canvas.agents`
 

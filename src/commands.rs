@@ -48,7 +48,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.connect", &[], "Start a keyboard connection from the selected cell; move to the other cell and press Enter."),
     cmd("canvas.thread", &[], "Open the selected wire thread, or the first wire of the selected cell."),
     cmd("canvas.nudge", &[req("direction")], "Move the selected cell left, right, up or down by one canvas gap, with one undo step."),
-    cmd("canvas.new", &[], "Create a terminal beside the selected cell, in its space."),
+    cmd("canvas.new", &[opt("like")], "Create a terminal beside the selected cell, in its space. With like: true, start what the selected cell runs (an agent or other startable program), else a plain terminal."),
     cmd("canvas.agents", &[], "Open the installed agent list beside the selected cell."),
     cmd("quote.menu", &[req("path"), opt("start"), opt("end"), req("text"), opt("point")], "Open the quote popover listing running agents, at point or the pointer."),
     cmd("canvas.close", &[opt("terminal"), opt("confirmed"), opt("dont_ask")], "Close the selected canvas cell or terminal, asking before termination; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts."),
