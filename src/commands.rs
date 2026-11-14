@@ -66,7 +66,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("view.all", &[], "Show all cards."),
     cmd("view.terminals", &[], "Show terminal cards."),
     cmd("canvas.space_style", &[req("id"), req("color")], "Set a space color."),
-    cmd("panel.editor", &[opt("choice"), opt("done"), opt("path")], "Choose a file panel editor, or return to the read-only view after saving."),
+    cmd("panel.editor", &[opt("choice"), opt("done"), opt("path"), opt("dirty")], "Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state."),
     cmd("preview.open", &[opt("path"), opt("point"), opt("place")], "Open a file tab, or choose a file; place canvas or point pins a canvas card."),
     cmd("canvas.create", &[opt("point"), opt("kind"), opt("space"), opt("argv"), opt("name"), opt("folder")], "Create a canvas terminal or space at a world point (default: the middle of the view); a space with a folder (empty: the root) is made directly, without one the Choose space dialog opens."),
     cmd("panel.pop_out", &[opt("terminal")], "Pop a terminal cell into its own window (default: the last selected cell)."),
@@ -233,6 +233,7 @@ mod tests {
         assert_eq!(validate_args(close, &json!({"space": "X", "confirmed": true})),
             Err("space.close: unknown argument(s): space; valid arguments: id, confirmed".into()));
         assert!(validate_args(close, &json!({"id": "X", "confirmed": true})).is_ok());
+        assert!(validate_args(find("panel.editor").unwrap(), &json!({"path":"/tmp/file.rs", "dirty":true})).is_ok());
         // The space dialog's call; a missing `folder` once made every Create a silent no-op.
         let create = find("canvas.create").unwrap();
         assert!(validate_args(create, &json!({"kind": "space", "point": [1, 2], "name": "", "folder": "/tmp"})).is_ok());

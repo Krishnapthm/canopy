@@ -154,7 +154,7 @@ export default class Files extends View {
   }
 
   show(path, cx) {
-    this.code?.release(); this.code = null; this.file = path; this.fileError = null;
+    this.code?.release(); this.code = null; this.file = path; this.fileError = null; this.reportedDirty = undefined;
     if (!path || !cx) return;
     const context = this.context, root = this.root, on = this.on;
     cx.spawn(async cx => {
@@ -169,10 +169,20 @@ export default class Files extends View {
           value: !props()?.editing && text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text,
           font_family: settings().font_family, font_size: 12,
           syntax: { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 } });
-        this.code.on("change", (_e, cx) => cx.notify());
+        this.code.on("change", (_e, cx) => { this.reportDirty(); cx.notify(); });
+        this.reportDirty();
       } catch { if (this.file === path && this.current(context)) this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; }
       finally { cx.notify(); }
     });
+  }
+
+  // Only transitions reach the native strip, never a timer or the file contents.
+  reportDirty() {
+    if (props()?.canvas !== "viewer" || !props()?.editing || !this.code) return;
+    const dirty = this.code.value() !== this.original;
+    if (dirty === this.reportedDirty) return;
+    this.reportedDirty = dirty;
+    run("panel.editor", { path: `${this.root}/${this.file}`, dirty });
   }
 
   save(done, cx) {
@@ -186,6 +196,7 @@ export default class Files extends View {
         await writeTextFile(path, text, this.original);
         if (this.code !== code) return;
         this.original = text;
+        this.reportDirty();
         if (done && code.value() === text) run("panel.editor", { done: true, path });
       } catch (e) { if (this.code === code) this.saveError = String(e); }
       finally { this.saving = false; cx.notify(); }

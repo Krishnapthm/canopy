@@ -32,6 +32,10 @@ pub(super) struct State {
     preview_drag: Option<(String, bool, Point<Pixels>)>,
     pub file: Option<String>,
     pub(super) editing: Option<String>,
+    /// The Files editor reports transitions between saved and unsaved text.
+    dirty: Option<String>,
+    /// Width before expanding to the panel's maximum resize width.
+    panel_restore: Option<Option<f32>>,
     editors: Vec<crate::programs::Editor>,
     pub tabs: Vec<String>,
     /// The folder button opened the panel for the file tree, with no tab needed.
@@ -135,6 +139,8 @@ impl State {
             preview_drag: None,
             file: None,
             editing: None,
+            dirty: None,
+            panel_restore: None,
             editors: Vec::new(),
             tabs: Vec::new(),
             files: false,
@@ -845,12 +851,21 @@ impl AppWindow {
     pub(super) fn panel_editor(&mut self, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
         let Some(path) = self.canvas_state.file.clone() else { return };
         if args["path"].as_str().is_some_and(|p| p != path) { return; }
+        if let Some(dirty) = args["dirty"].as_bool() {
+            if self.canvas_state.editing.as_ref() == Some(&path) {
+                self.canvas_state.dirty = dirty.then_some(path);
+                cx.notify();
+            }
+            return;
+        }
         if args["done"].as_bool() == Some(true) {
+            self.canvas_state.dirty = None;
             self.canvas_state.editing = None;
         } else {
             let choice = args["choice"].as_str().unwrap_or("here");
             if choice == "here" {
                 self.canvas_state.editing = Some(path.clone());
+                self.canvas_state.dirty = None;
             } else {
                 let Some(editor) = self.panel_editors().into_iter().find(|e| e.key == choice) else { return };
                 cx.spawn_in(window, async move |this, cx| {
@@ -1049,6 +1064,7 @@ impl AppWindow {
                 .to_string_lossy()
                 .into_owned();
             canvas::open_panel_tab(&mut self.canvas_state.tabs, &path);
+            if self.canvas_state.file.as_ref() != Some(&path) { self.canvas_state.dirty = None; }
             self.canvas_state.file = Some(path);
             self.focus.focus(window, cx);
             self.sync(window, cx);
@@ -2040,6 +2056,7 @@ impl AppWindow {
                 self.focus.focus(window, cx);
             }
             "panel.close" => {
+                state.dirty = None;
                 if !state.tabs.is_empty() {
                     state.closed = Some((state.file.take(), std::mem::take(&mut state.tabs)));
                 }
@@ -2127,13 +2144,7 @@ impl AppWindow {
             .map(|b| [f32::from(b.size.width), f32::from(b.size.height)])
             .unwrap_or([1200., 800.]);
         let maps = self.bounds.clone();
-        let bg = self.person.canvas_color.as_deref().unwrap_or(
-            if !settings::theme_is_light(&settings::get().theme) {
-                "#1E1E1E"
-            } else {
-                "#F5F5F5"
-            },
-        );
+        let bg = self.person.canvas_color.as_deref().unwrap_or("canvas");
         let panning = matches!(state.drag, Some((None, _)));
         let view = cx.entity();
         let mut area = div()
@@ -2875,46 +2886,51 @@ impl AppWindow {
         }
         // The bar's controls opt out of window dragging.
         let control = || div().flex().items_center().gap(px(4.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-        let mut crumbs = control();
-        let mut tabs = control();
-        // Inside a space: Home, then the space's name (a breadcrumb), on the bar's left.
-        if let Some(room) = &state.doc.room {
-            let name = self.model.space(room).map(|s| self.model.space_name(s, &home())).unwrap_or_default();
-            let color = state.doc.spaces.iter().find(|s| &s.space == room).map(|s| s.color.clone()).unwrap_or_default();
-            crumbs = crumbs.child(
-                div()
-                    .id("canvas-home")
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .px(px(8.))
-                    .rounded(px(ui::RADIUS_SM))
-                    .cursor_pointer()
-                    .text_size(px(12.))
-                    .text_color(c("muted-foreground"))
-                    .hover(|d| d.bg(c("surface")).text_color(c("foreground")))
-                    .child(svg().path("icons/house.svg").size(px(14.)).text_color(c("foreground")))
-                    .child("Home")
-                    .on_click(cx.listener(|this, _, window, cx| this.go_room(None, window, cx))),
-            )
-            .child(div().flex().items_center().text_size(px(12.)).text_color(c("muted-foreground")).child("/"))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .px(px(8.))
-                    .text_size(px(12.))
-                    .text_color(c("foreground"))
-                    .child(div().size(px(8.)).rounded_full().bg(c(&color)))
-                    .child(name),
-            );
+        let home_tab = div().id("canvas-home").role(gpui::Role::Tab).aria_label("Home").aria_selected(state.doc.room.is_none()).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
+            .rounded_t(px(6.)).cursor_pointer()
+            .text_color(c(if state.doc.room.is_none() { "foreground" } else { "muted-foreground" }))
+            .when(state.doc.room.is_none(), |d| d.bg(c(bg)))
+            .hover(|d| d.text_color(c("foreground")))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .tooltip(strip_tooltip("Home".into(), Some("canvas.home")))
+            .child(svg().path("icons/house.svg").size(px(14.)))
+            .on_click(cx.listener(|this, _, window, cx| this.go_room(None, window, cx)));
+        let mut space_tabs = div().id("canvas-space-tabs").role(gpui::Role::TabList).flex().min_w_0().h_full().overflow_x_scroll();
+        for space in self.model.spaces.iter().filter(|s| !root_space(s)) {
+            let active = state.doc.room.as_ref() == Some(&space.id);
+            let id = space.id.clone();
+            let close = id.clone();
+            let group = SharedString::from(format!("space-tab-{id}"));
+            let status = self.model.rollup(&space.tabs.iter().flat_map(|t| crate::model::addresses(&t.root)).collect::<Vec<_>>());
+            let name = self.model.space_name(space, &home());
+            space_tabs = space_tabs.child(div().id(group.clone()).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(name.clone()).flex().items_center()
+                .h_full().w(px(180.)).min_w(px(96.)).gap(px(6.)).px(px(12.)).rounded_t(px(6.))
+                .text_size(px(12.)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
+                .when(active, |d| d.bg(c(bg))).hover(|d| d.text_color(c("foreground"))).cursor_pointer()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |this, _, window, cx| this.go_room(Some(id.clone()), window, cx)))
+                .child(svg().path("mods/files/folder.svg").flex_none().size(px(14.)))
+                .child(div().flex_1().min_w_0().truncate().child(name))
+                .when(matches!(status, Some("working" | "blocked")), |d| d.child(div().flex_none().size(px(6.)).rounded_full().bg(c("accent"))))
+                .child(panel_button("space-tab-close", "mods/pane/close.svg", c("muted-foreground"), c("hover"))
+                    .flex_none().aria_label("Close space").when(!active, |d| d.opacity(0.).group_hover(group, |d| d.opacity(1.)))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.run_key("space.close", json!({"id":close}), window, cx);
+                    }))));
         }
+        let crumbs = div().flex().flex_1().min_w_0().h_full().items_center()
+            .child(home_tab).child(space_tabs)
+            .child(panel_button("canvas-space-new", "mods/workspace-chrome/plus.svg", c("muted-foreground"), c("hover"))
+                .flex_none().aria_label("New space").tooltip(strip_tooltip("New space".into(), Some("space.new")))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(|this, _, window, cx| this.run_key("space.new", json!({}), window, cx))));
+        let mut tabs = control();
         // Like Claude's titlebar: the folder opens or closes the files pane (tree and preview).
         let open = state.file.is_some() || state.files;
         tabs = tabs.child(
-            panel_button("canvas-files", "mods/files/folder.svg", c("foreground"), c("hover"))
-                .when(open, |d| d.bg(c("hover")))
+            panel_button("canvas-files", "mods/files/folder.svg", c("muted-foreground"), c("hover"))
+                .aria_label("Files").tooltip(strip_tooltip("Files".into(), None))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     if open {
                         this.canvas_command("panel.close", window, cx);
@@ -2931,15 +2947,14 @@ impl AppWindow {
                     }
                 })),
         );
-        tabs = tabs.child(panel_button("canvas-focus", "mods/pane/zoom.svg", c("foreground"), c("hover"))
-            .on_click(cx.listener(|this, _, window, cx| this.canvas_command("canvas.fit", window, cx))));
-        tabs = tabs.child(panel_button("canvas-tile", "icons/layout-grid.svg", c("foreground"), c("hover"))
-            .when(state.tile.is_some(), |d| d.bg(c("hover")))
-            .on_click(cx.listener(|this, _, window, cx| this.tile_canvas(true, window, cx))));
-        let bar = self.window_drag(div().flex().flex_none().items_center().justify_between().w_full().h(px(BAR))
-            .pl(px(bar_inset(cfg!(target_os = "macos"), self.fullscreen))).pr(px(12.))
-            .bg(c("background")).border_b_1().border_color(c("border")), cx)
-            .child(crumbs).child(tabs);
+        tabs = control().child(panel_button("canvas-tile", "icons/layout-grid.svg", c("muted-foreground"), c("hover"))
+            .aria_label("Tile view").tooltip(strip_tooltip("Tile view".into(), Some("canvas.tile")))
+            .on_click(cx.listener(|this, _, window, cx| this.tile_canvas(true, window, cx))))
+            .child(tabs);
+        let mut bar = self.window_drag(div().flex().flex_none().items_center().justify_between().w_full().h(px(BAR))
+            .pl(px(bar_inset(cfg!(target_os = "macos"), self.fullscreen)))
+            .bg(c("chrome")), cx)
+            .child(crumbs.child(tabs).child(div().flex_1().h_full()));
         if state.actions.is_some() || state.connecting.is_some() {
             area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(72.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -2954,6 +2969,7 @@ impl AppWindow {
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
                 if this.canvas_state.resizing {
                     let width = f32::from(window.viewport_size().width - e.position.x);
+                    this.canvas_state.panel_restore = None;
                     this.canvas_state.doc.panel.width = Some(width.clamp(
                         360.,
                         (f32::from(window.viewport_size().width) * 0.75).max(360.),
@@ -2991,8 +3007,7 @@ impl AppWindow {
                 .flex_none()
                 .flex()
                 .flex_col()
-                .border_l_1()
-                .border_color(c("border"));
+                .bg(c(bg));
             panel = panel.child(
                 div()
                     .id("canvas-panel-resize")
@@ -3012,66 +3027,59 @@ impl AppWindow {
                         }),
                     ),
             );
-            let mut tabs = div()
-                .id("canvas-tabs")
-                .flex()
-                .gap(px(4.))
-                .px(px(8.))
-                .py(px(6.))
-                .h(px(40.))
-                .flex_none()
-                .overflow_x_scroll()
-                .border_b_1()
-                .border_color(c("border"));
+            let mut tabs = div().id("canvas-tabs").role(gpui::Role::TabList).flex().flex_1().min_w_0().h_full().overflow_x_scroll();
             for tab in &state.tabs {
                 let tab = tab.clone();
                 let active = state.file.as_ref() == Some(&tab);
+                let dirty = state.dirty.as_ref() == Some(&tab);
                 let label = crate::subs::transcript_title(&tab).unwrap_or_else(|| std::path::Path::new(&tab).file_name().unwrap_or_default().to_string_lossy().into_owned());
                 let activate = tab.clone();
                 let close = tab.clone();
-                tabs = tabs.child(
-                    div()
-                        .id(SharedString::from(format!("panel-tab-{tab}")))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(px(7.))
-                        .px(px(8.))
-                        .rounded(px(ui::RADIUS_SM))
-                        .when(active, |d| d.bg(c("hover")))
-                        .cursor_pointer()
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.canvas_state.file = Some(activate.clone());
-                            this.focus.focus(window, cx);
-                            this.sync(window, cx);
-                            cx.notify();
-                        }))
-                        .child(icon_element("mods/files/file.svg", true, px(14.), c("muted-foreground")))
-                        .child(div().text_size(px(12.)).child(label))
-                        .child(
-                            panel_button(
-                                "tab-close",
-                                "mods/pane/close.svg",
-                                c("muted-foreground"),
-                                c("hover"),
-                            )
-                            .on_click(cx.listener(
-                                move |this, _, window, cx| {
-                                    cx.stop_propagation();
-                                    let next = canvas::close_panel_tab(
-                                        &mut this.canvas_state.tabs,
-                                        this.canvas_state.file.as_deref(),
-                                        &close,
-                                    );
-                                    this.canvas_state.file = next;
-                                    this.sync(window, cx);
-                                    cx.notify();
-                                },
-                            )),
-                        ),
-                );
+                let group = SharedString::from(format!("panel-tab-{tab}"));
+                tabs = tabs.child(div().id(group.clone()).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(label.clone()).flex().items_center().h_full()
+                    .w(px(180.)).min_w(px(96.)).px(px(12.)).gap(px(6.)).rounded_t(px(6.))
+                    .text_size(px(12.)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
+                    .when(active, |d| d.bg(c(bg))).hover(|d| d.text_color(c("foreground"))).cursor_pointer()
+                    .tooltip(strip_tooltip(tab, None))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if this.canvas_state.file.as_ref() == Some(&activate) { return; }
+                        this.canvas_state.dirty = None;
+                        this.canvas_state.file = Some(activate.clone());
+                        this.focus.focus(window, cx);
+                        this.sync(window, cx);
+                        cx.notify();
+                    }))
+                    .child(svg().path("mods/files/file.svg").flex_none().size(px(14.)))
+                    .child(div().flex_1().min_w_0().truncate().child(label))
+                    .child(div().relative().flex_none().size(px(24.)).flex().items_center().justify_center()
+                        .when(dirty, |d| d.child(div().absolute().size(px(6.)).rounded_full().bg(c("foreground"))
+                            .group_hover(group.clone(), |d| d.opacity(0.))))
+                        .child(panel_button("tab-close", "mods/pane/close.svg", c("muted-foreground"), c("hover"))
+                            .aria_label("Close file").when(dirty || !active, |d| d.opacity(0.).group_hover(group, |d| d.opacity(1.)))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                if this.canvas_state.dirty.as_ref() == Some(&close) { this.canvas_state.dirty = None; }
+                                this.canvas_state.file = canvas::close_panel_tab(
+                                    &mut this.canvas_state.tabs, this.canvas_state.file.as_deref(), &close);
+                                this.sync(window, cx);
+                                cx.notify();
+                            })))));
             }
-            panel = panel.child(tabs);
+            bar = bar.child(div().flex().flex_none().w(px(width)).h_full().items_center()
+                .child(tabs)
+                .child(panel_button("panel-expand", "mods/pane/zoom.svg", c("muted-foreground"), c("hover"))
+                    .aria_label("Expand or restore panel").tooltip(strip_tooltip(if state.panel_restore.is_some() { "Restore panel" } else { "Expand panel" }.into(), None))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        let state = &mut this.canvas_state;
+                        toggle_panel_width(&mut state.doc.panel, &mut state.panel_restore, full_width);
+                        this.canvas_changed(cx);
+                        this.sync(window, cx);
+                        cx.notify();
+                    })))
+                .child(panel_button("canvas-panel-close", "mods/pane/close.svg", c("muted-foreground"), c("hover"))
+                    .aria_label("Close panel").tooltip(strip_tooltip("Close panel".into(), Some("panel.close")))
+                    .on_click(cx.listener(|this, _, window, cx| this.canvas_command("panel.close", window, cx)))));
             let root = self.panel_root();
             let path = state.file.as_deref().or(root.as_deref()).unwrap_or("");
             // Outside the tree's folder, paths read from home.
@@ -3161,17 +3169,6 @@ impl AppWindow {
                             this.sync(window, cx);
                             cx.notify();
                         })),
-                    )
-                    .child(
-                        panel_button(
-                            "canvas-panel-close",
-                            "mods/pane/close.svg",
-                            c("muted-foreground"),
-                            c("hover"),
-                        )
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.canvas_command("panel.close", window, cx)
-                        })),
                     ),
             );
             let mut body = div().flex().flex_1().min_h_0();
@@ -3226,9 +3223,9 @@ impl AppWindow {
 }
 
 /// Height of the bar the canvas draws across the window top (px at zoom 1).
-const BAR: f32 = 40.;
+const BAR: f32 = 36.;
 
-/// Space left of the bar's breadcrumb: macOS traffic lights sit there, except in full screen.
+/// Space left of the bar's Home tab: macOS traffic lights sit there, except in full screen.
 fn bar_inset(macos: bool, fullscreen: bool) -> f32 {
     if macos && !fullscreen { 76. } else { 12. }
 }
@@ -3268,18 +3265,49 @@ pub(super) fn cell_slot(addr: &str) -> String {
     format!("canvas:{addr}")
 }
 
-/// A 24 px icon button for the side panel header.
+/// Expanding uses the existing resize limit; restoring preserves an implicit default width too.
+fn toggle_panel_width(panel: &mut canvas::Panel, restore: &mut Option<Option<f32>>, full_width: f32) {
+    panel.width = match restore.take() {
+        Some(width) => width,
+        None => {
+            *restore = Some(panel.width);
+            Some(full_width * 0.75)
+        }
+    };
+}
+
+/// Hover labels use the window-owned tooltip, including the current key binding when present.
+struct StripTooltip(SharedString);
+impl Render for StripTooltip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        gpui_base::Tooltip::new("strip-tooltip").m(px(4.)).px(px(8.)).py(px(4.))
+            .rounded(px(6.)).bg(c("popover")).text_color(c("foreground")).text_size(px(12.)).child(self.0.clone())
+    }
+}
+fn strip_tooltip(label: String, command: Option<&'static str>) -> impl Fn(&mut Window, &mut App) -> AnyView {
+    move |_, cx| {
+        let key = command.and_then(|command| crate::keys::listing().into_iter().find(|(_, _, a)| a == command).map(|(_, k, _)| k));
+        let text = key.map_or_else(|| label.clone(), |k| format!("{label} ({k})"));
+        cx.new(|_| StripTooltip(text.into())).into()
+    }
+}
+
+/// A 24 px plain icon button for canvas and panel controls.
 fn panel_button(id: &'static str, icon: &'static str, fg: Hsla, hover: Hsla) -> Stateful<Div> {
     div()
         .id(id)
+        .group(id)
+        .role(gpui::Role::Button)
         .size(px(24.))
+        .flex_none()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .flex()
         .items_center()
         .justify_center()
         .rounded(px(ui::RADIUS_SM))
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
-        .child(svg().path(icon).size(px(14.)).text_color(fg))
+        .child(svg().path(icon).size(px(14.)).text_color(fg).group_hover(id, |s| s.text_color(c("foreground"))))
 }
 
 /// What a terminal is called on its pill, panel tab and quote row: a name the
@@ -3688,7 +3716,20 @@ mod tile_tests {
 
 #[cfg(test)]
 mod bar_tests {
-    use super::bar_inset;
+    use super::{bar_inset, toggle_panel_width};
+
+    #[test]
+    fn panel_expand_restores_both_default_and_explicit_widths() {
+        for width in [None, Some(420.)] {
+            let mut panel = crate::canvas::Panel { width, ..Default::default() };
+            let mut restore = None;
+            toggle_panel_width(&mut panel, &mut restore, 1000.);
+            assert_eq!(panel.width, Some(750.));
+            toggle_panel_width(&mut panel, &mut restore, 1000.);
+            assert_eq!(panel.width, width);
+            assert_eq!(restore, None);
+        }
+    }
 
     #[test]
     fn bar_leaves_room_for_traffic_lights_only_on_macos_outside_full_screen() {

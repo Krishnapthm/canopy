@@ -141,14 +141,14 @@ test("Files filter preserves folders for lazy expansion and matches names withou
 test("Files saves the snapshot, keeps conflicts and newer edits, and Done exits only a saved draft", async () => {
   let disk = "original", draft = "draft", pending: Promise<void> | undefined;
   const calls: unknown[] = [];
-  const Files = new Function("View", "writeTextFile", "run", source.slice(source.indexOf("export default class")).replace("export default ", "") + "; return Files;")(
+  const Files = new Function("View", "writeTextFile", "run", "props", source.slice(source.indexOf("export default class")).replace("export default ", "") + "; return Files;")(
     class {},
     async (path: string, text: string, expected: string) => {
       expect(path).toBe("/fixture/hello.md");
       if (disk !== expected) throw new Error("File changed outside Canopy");
       disk = text;
     },
-    (...args: unknown[]) => calls.push(args),
+    (...args: unknown[]) => calls.push(args), () => ({}),
   );
   const files = new Files();
   files.root = "/fixture"; files.file = "hello.md"; files.original = disk;
@@ -187,4 +187,28 @@ test("Files edits full markdown source instead of the bounded read-only preview"
   editing = false;
   files.show("notes.md", cx); await pending;
   expect(options[1].readonly).toBe(true); expect(options[1].value).toContain("file truncated");
+});
+
+test("Files reports only dirty transitions to the native tab, including edits during save", async () => {
+  let draft = "saved", pending: Promise<void> | undefined;
+  const calls: unknown[] = [];
+  const Files = new Function("View", "props", "run", "writeTextFile",
+    source.slice(source.indexOf("export default class")).replace("export default ", "") + "; return Files;")(
+    class {}, () => ({ canvas: "viewer", editing: true }),
+    (...args: unknown[]) => calls.push(args), async () => {},
+  );
+  const files = new Files();
+  Object.assign(files, { root: "/fixture", file: "hello.md", original: "saved", code: { value: () => draft } });
+  const cx = { notify() {}, spawn(f: Function) { pending = f(cx); } };
+  files.reportDirty();
+  draft = "edit"; files.reportDirty();
+  draft = "more edits"; files.reportDirty();
+  files.save(false, cx); draft = "newer edit"; await pending;
+  files.reportDirty();
+  expect(calls).toEqual([
+    ["panel.editor", { path: "/fixture/hello.md", dirty: false }],
+    ["panel.editor", { path: "/fixture/hello.md", dirty: true }],
+  ]);
+  files.save(false, cx); await pending;
+  expect(calls.at(-1)).toEqual(["panel.editor", { path: "/fixture/hello.md", dirty: false }]);
 });

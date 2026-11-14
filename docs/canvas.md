@@ -3,11 +3,38 @@
 At rest, every cell, sub-agent cell and file preview keeps `canvas_gap` world
 pixels from its neighbours (default 24). On Home, space cards keep the same gap.
 
-The window has no system title bar on macOS: the canvas draws a 40 px bar across
-the top, over the canvas and the files panel. The traffic lights sit in it, the
-breadcrumb follows them (no gap in full screen), and the folder (files), fit and
-tile buttons are on the right. Drag the bar to move the window; double-click
-maximizes. Linux and Windows keep their system title bar or menu strip above it.
+The canvas owns a 36 px top strip on macOS, keeping the existing traffic-light
+inset. Linux and Windows keep their system title bar or menu strip above it.
+Drag empty strip space to move the window; double-click uses the platform's
+existing title-bar zoom behavior.
+
+## Top strip
+
+Home is an icon-only, non-closable tab that opens all spaces. Space tabs follow
+with a folder icon and name. Click one to enter its room. An accent dot uses the
+same working/blocked rollup as the spaces list. The active tab and hovered tabs
+show a close X; closing uses `space.close` and its existing confirmation. The +
+after the tabs runs `space.new`.
+
+The strip uses the theme's `chrome` (panel/sidebar) color. Active tabs use the
+canvas color, including a custom `canvas_color`, with 6 px top corners. There
+are no tab borders, dividers or strip bottom border. Inactive text is muted and
+brightens on hover. Tabs shrink to 96 px, then scroll sideways with a wheel or
+trackpad; Home, + and the control buttons stay visible.
+
+The plain grid and file icons after + toggle tile view and the files panel.
+Hover labels show the current shortcut where one exists; no keys are added.
+The file button restores the panel's closed tabs through the existing panel
+restore path. Grid uses `canvas.tile`; closing the panel uses `panel.close`.
+
+When the preview panel is open, its file tabs occupy the same strip, exactly
+above its left edge. Click a tab to select its preview, hover for the full path,
+or use its X to close that tab. Unsaved edits replace the X with a foreground
+dot until hover. The Files editor reports saved/unsaved transitions through
+`panel.editor {path, dirty}` without sending contents or polling. The section's
+right buttons expand to the existing maximum panel width (75% of the window),
+restore the previous width, or close the panel. Dragging its resize edge leaves
+expanded mode. File tab selection and close reuse the existing panel handlers.
 
 ## Spaces are rooms
 
@@ -17,8 +44,8 @@ holds, how many are working, and shows a bell when one waits for you. Double-
 click the name to rename it; right-click the card to rename, recolor or delete
 it (with a confirmation). Cards sit next to the cells outside any space.
 Double-click a card, or select it and press Enter, to go inside: the whole
-canvas belongs to that space, with no frame, so its cells grow freely. The
-bar then reads **Home / space**; click Home, or run `canvas.home`, to leave.
+canvas belongs to that space, with no frame, so its cells grow freely.
+Use Home or `canvas.home` to leave.
 `canvas.space` with `next`, `prev` or a number goes into another space. A new
 space opens straight away, and the app reopens where you closed it. Each place
 keeps its own camera. Older `canvas.json` files move each cell into the space

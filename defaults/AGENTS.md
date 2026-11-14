@@ -1137,7 +1137,10 @@ The choice is saved as `panel.editor` in canvas.json; initially it uses the firs
 editor, or Open here. Editors come from programs.json `open` argv and macOS `app`.
 Open here edits in place, including markdown source, with highlighting. Save or cmd+s
 saves and keeps editing; Done saves pending edits and returns to the read-only view.
-Unsaved marks a draft. Switching tabs or closing the tab drops it without a dialog.
+Unsaved marks a draft, also shown as a dot in its top-strip file tab (X on hover).
+The Files editor reports `panel.editor {path, dirty: boolean}` on saved/unsaved
+transitions; only the current editing file can update that dot. Switching tabs
+or closing the tab drops the draft without a dialog.
 Saves use `writeTextFile(path, text, expected)`; conflicts show inline and keep the draft.
 Canvas cards stay read-only with their existing viewer, drag header and resize grip;
 there is no card-header Edit button.
