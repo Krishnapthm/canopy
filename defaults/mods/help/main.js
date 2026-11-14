@@ -30,7 +30,7 @@ function label(action) {
 export default class Help extends View {
   init(_props, cx) {
     this.filter = "";
-    this.input = InputState.new({ placeholder: "Type to filter…" });
+    this.input = InputState.new({ placeholder: "Type to filter" });
     this.input.on("change", (_e, cx) => { this.filter = this.input.value(); cx.notify(); });
     this.input.focus();
     cx.timer.after(600, () => this.input.focus());

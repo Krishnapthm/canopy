@@ -265,7 +265,8 @@ Properties any node can have:
   without it the person sees a plain frame. New layouts and `themes/*.json`
   show up in settings by themselves.
 - Root only: `"terminal_menu": "my-menu"` chooses the mod for terminal
-  right-clicks (including Shift+right-click). Omit it for the shipped `menu`;
+  right-clicks (including Shift+right-click). A canvas cell's terminal opens
+  that mod's `canvas-card` tab; tab layouts open its `pane` tab. Omit it for the shipped `menu`;
   an unknown mod logs a warning and falls back to `menu`. Clone a shipped
   layout before changing this field. Other menus are unchanged.
 - Root only: `"toast": "my-toast"` chooses the mod that shows notifications
@@ -607,9 +608,6 @@ The main ones:
   Windows, clipboard text is pasted; otherwise Ctrl+V goes to the program, which
   reads the clipboard itself). TIFF and BMP clipboard
   images are converted to PNG before sending,
-  `terminal.right_click {to: "program" | "menu", terminal?}` (where right-clicks go
-  when the program takes the mouse; kept as its label `herdr.right-click=program`;
-  Shift+right-click is always Canopy's menu),
   `terminal.scroll {lines | pages | to: "top" | "bottom", terminal?}` (moves Canopy's view of the
   history, not the program: negative lines or pages go up, toward history; pages may be
   fractional, one page is the terminal's rows; on the alternate screen, such as vim or less,
@@ -644,7 +642,7 @@ The main ones:
   after the administrator enables lingering. Older cores show no warning.
   Login guidance includes Copy. A machine that needs a login shows
   `hc machine login <name>` with Copy in Settings > Machines, its sidebar group,
-  the welcome screen and the failed New space toast. If a remote machine was rebuilt
+  the welcome screen and the failed Open space toast. If a remote machine was rebuilt
   or replaced and a different core answers there, its sidebar offers Connect:
   explicitly forget the old identity and pair again with the same name and target.
   Other unreachable machines don't offer this.
@@ -1108,7 +1106,7 @@ Empty-canvas left-drag and middle-mouse drag also pan; an empty click focuses th
 Focused terminals still receive Space. Right-click keeps the canvas menus.
 Space cards drag on Home (what is inside stays put). Space card menus offer Rename, Color and confirmed Delete space.
 Empty-canvas menus create terminals in the space folder or home, installed agents,
-and root spaces through the Choose space dialog (previously used space folders, or New space: name, optional folder, recent folders). `canvas.create` takes an optional world
+and root spaces through the Choose space dialog (previously used space folders, or Open space: name, optional folder, recent folders). `canvas.create` takes an optional world
 `point` (default: the middle of the view), optional `space` (default: the space being shown, else the root), `argv`, or `kind: "space"`
 (a new space opens straight away); `canvas.space_style` takes `id` and a palette `color`.
 `view.agents`, `view.all`, `view.terminals` select the saved canvas view, bound to
@@ -1119,7 +1117,7 @@ takes `terminal`. Pop-outs last only for the current run and keep the terminal a
 Canvas file previews: `preview.open {path?, point?, place?}` opens an absolute local
 path in a read-only panel tab by default. Reopening activates the tab. Omit path for
 the native picker, which places a canvas card. `place: "canvas"` or an explicit
-world `point` also places a card. Open file... and Finder drops keep placing cards.
+world `point` also places a card. Open file and Finder drops keep placing cards.
 Clicking a pill expands it in place; the panel holds files and sub-agent transcripts only.
 The panel close button closes all panel tabs. Terminal pop-out is unchanged.
 The header shows a breadcrumb and a folder button toggles the right file tree,
@@ -1143,7 +1141,7 @@ execute content or load remote images.
 Preview quotes: finishing a selection in a preview opens the quote popover, also opened by `quote.menu {path, start?, end?, text, point?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv}` expands an agent's cell and pastes the quote, then a blank line and the trimmed message when given, without Enter. New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.
 
 Space cards rename inline from their menu's Rename (double-click goes inside). Person-invoked local
-`space.new` without a folder opens New space; explicit command arguments remain supported.
+`space.new` without a folder opens Open space; explicit command arguments remain supported.
 `canvas.create {kind: "space", name, folder, point?}` creates directly when `folder`
 is present (an empty string means no folder); omitting it opens the Choose space dialog.
 

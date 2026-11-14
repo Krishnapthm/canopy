@@ -57,7 +57,7 @@ test("the canvas menu lists installed agents under a label, with a note while ch
   const menu = { tab: "canvas-empty", target: { point: [1, 2], space: "s1", machine: null } };
   const label = (list: ReturnType<typeof items>) => list.findIndex(([, command, args]) => command === null && args.label);
   const checking = items(menu);
-  expect(checking[label(checking) + 1].slice(0, 2)).toEqual(["Checking installed agents...", null]);
+  expect(checking[label(checking) + 1].slice(0, 2)).toEqual(["Checking installed agents", null]);
   const none = items(menu, null, [{ name: "Gone", installed: false, run: ["gone"] }]);
   expect(none.slice(label(none) + 1).map(([text, command]) => [text, command])).toEqual([["No agents installed", null]]);
   const listed = items(menu, null, agents);

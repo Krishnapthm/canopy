@@ -170,8 +170,6 @@ pub struct TerminalView {
     pub cwd: Option<PathBuf>,
     /// The link under the pointer while the link modifier is held.
     link: Option<LinkTarget>,
-    /// Right-clicks go to the program when it takes the mouse (Shift: the menu).
-    pub right_click_to_program: bool,
     grid: Rc<RefCell<Grid>>,
     /// The canvas zoom this terminal is drawn at (see `Scaled`).
     scale: f32,
@@ -317,7 +315,6 @@ impl TerminalView {
             selection_scroll: None,
             cwd: None,
             link: None,
-            right_click_to_program: false,
             grid: Rc::new(RefCell::new(Grid {
                 vt: Vt::new(size_hint.0.max(2), size_hint.1.max(1)),
                 core: core.clone(),
@@ -995,11 +992,6 @@ impl TerminalView {
             ScrollTarget::Bottom => g.vt.scroll_to_bottom(),
         }
         cx.notify();
-    }
-
-    /// The program tracks the mouse and Shift isn't held (Shift keeps the mouse Canopy's).
-    fn takes_mouse(&self, mods: Modifiers) -> bool {
-        self.grid.borrow().vt.mouse_tracking() && !mods.shift
     }
 
     /// Sends a mouse event to a program that tracks the mouse. Returns whether it did
@@ -2271,13 +2263,13 @@ impl Render for TerminalView {
         let grid_paint = self.grid.clone();
         let selection_view = cx.entity().downgrade();
         let (input_focus, input_view) = (self.focus.clone(), cx.entity());
-        let ended = self.ended.clone().or_else(|| self.lost.then(|| "reconnecting to core…".to_owned()));
+        let ended = self.ended.clone().or_else(|| self.lost.then(|| "reconnecting to core".to_owned()));
         let search_input = self.search_open.then(|| self.search_input.clone()).flatten();
         let search_progress = self.grid.borrow().vt.search_progress();
         let search_label = if self.search_query.is_empty() {
             String::new()
         } else if !search_progress.complete {
-            if search_progress.total == 0 { "Searching…".to_owned() } else { format!("{}+", search_progress.total) }
+            if search_progress.total == 0 { "Searching".to_owned() } else { format!("{}+", search_progress.total) }
         } else if search_progress.total == 0 {
             "No matches".to_owned()
         } else if let Some(selected) = search_progress.selected {
@@ -2369,16 +2361,11 @@ impl Render for TerminalView {
                     this.start_selection(ev.position, cx);
                 }
             }))
-            // Right-click is Canopy's menu, even when the program tracks the mouse
-            // (agent TUIs do, and then a pane had no menu at all), unless the pane
-            // sends right-clicks to its program.
-            .on_mouse_down(MouseButton::Right, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+            // Right-click is always Canopy's menu, even when the program tracks the mouse
+            // (agent TUIs do, and then a pane had no menu at all).
+            .on_mouse_down(MouseButton::Right, cx.listener(|_, ev: &MouseDownEvent, _, cx| {
                 cx.stop_propagation();
-                if this.right_click_to_program && this.takes_mouse(ev.modifiers) {
-                    this.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(ev.button), ev.position, ev.modifiers);
-                } else {
-                    cx.emit(TerminalEvent::ContextMenu(ev.position));
-                }
+                cx.emit(TerminalEvent::ContextMenu(ev.position));
             }))
             .on_mouse_down(MouseButton::Middle, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
                 if !this.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(ev.button), ev.position, ev.modifiers) {

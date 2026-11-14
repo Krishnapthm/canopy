@@ -2011,20 +2011,20 @@ impl AppWindow {
             TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
             TerminalEvent::TitleChanged => this.publish(cx),
             TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
+            // A canvas cell gets its own menu; tab layouts keep the pane menu.
+            TerminalEvent::ContextMenu(at) if this.has_canvas() && this.canvas_state.doc.cards.iter().any(|c| c.terminal == addr) => {
+                this.open_card_menu(&addr, *at, window, cx)
+            }
             TerminalEvent::ContextMenu(at) => {
                 this.open_menu("pane", json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
             }
         })
     }
 
-    /// What a terminal view takes from the core's facts: its folder, where right-clicks go.
+    /// What a terminal view takes from the core's facts: its folder.
     fn tell_term(&self, view: &Entity<TerminalView>, addr: &str, cx: &mut Context<Self>) {
         let cwd = self.cwds.get(addr).map(std::path::PathBuf::from);
-        let to_program = self.live.get(addr).and_then(|r| r.pointer("/labels/herdr.right-click")).and_then(Value::as_str) == Some("program");
-        view.update(cx, |v, _| {
-            v.cwd = cwd;
-            v.right_click_to_program = to_program;
-        });
+        view.update(cx, |v, _| v.cwd = cwd);
     }
 
     fn terminals_listed(&mut self, v: Value, window: &mut Window, cx: &mut Context<Self>) {
@@ -3202,25 +3202,6 @@ impl AppWindow {
             "terminal.park" => {
                 let r = self.park_terminal(Self::arg(a, "terminal").unwrap_or_default(), window, cx);
                 self.answer(r);
-            }
-            "terminal.right_click" => {
-                let to = match Self::arg(a, "to") {
-                    Some("program") => "program",
-                    Some("menu") => "",
-                    other => return self.fail(format!("terminal.right_click to is \"program\" or \"menu\", not {other:?}")),
-                };
-                let t = Self::owned(a, "terminal").or_else(|| self.focused_terminal(window, cx).map(|t| t.address.clone()));
-                let Some(t) = t.filter(|t| self.live.contains_key(t)) else { return self.fail("no such running terminal") };
-                // Off the UI thread: a terminal on a slow machine answers late.
-                let core = self.core.clone();
-                let params = json!({ "terminal": t, "labels": { "herdr.right-click": to } });
-                cx.background_executor()
-                    .spawn(async move {
-                        if let Err(e) = core.call("terminal.label", params) {
-                            tracing::warn!("right-click label: {e:#}");
-                        }
-                    })
-                    .detach();
             }
             "terminal.pin" => {
                 let Some(pinned) = a.get("pinned").and_then(Value::as_bool) else { return self.fail("terminal.pin pinned is true or false") };
@@ -5881,17 +5862,14 @@ mod tests {
         if !running_alone("pop_out_lifecycle") { return; }
         let (view, cx) = open_window(cx, "neighbor", "", json!({"id":"root", "type":"block", "content":{"mod":"neighbor"}}));
         let pop = cx.update(|window, cx| view.update(cx, |this, cx| {
-            this.live.insert("t1".into(), json!({"pid":1, "labels":{"herdr.right-click":"program"}}));
+            this.live.insert("t1".into(), json!({"pid":1}));
             this.cwds.insert("t1".into(), "/tmp".into());
             this.pop_canvas("t1".into(), false, window, cx);
             let pop = this.canvas_state.popped["t1"];
             let terminal = pop.read(cx).unwrap().terminal.clone();
-            assert!(terminal.read(cx).right_click_to_program);
-            this.live.get_mut("t1").unwrap()["labels"] = json!({});
             terminal.update(cx, |v, _| v.ended = Some("holder_lost".into()));
             this.tend_terminals(false, window, cx);
             assert!(terminal.read(cx).ended.is_none());
-            assert!(!terminal.read(cx).right_click_to_program);
             terminal.update(cx, |v, _| v.ended = Some("holder_lost".into()));
             this.reconnected(crate::hc::offline(), cx);
             assert!(terminal.read(cx).ended.is_none());
@@ -6492,7 +6470,7 @@ export default class SystemToast extends View {
             assert!(!super::needs_model_pane(name, &json!({})), "{name}");
             assert!(!super::needs_model_pane(name, &json!({"place": "tab"})), "{name}");
         }
-        for name in ["pane.focus", "terminal.copy", "terminal.paste", "terminal.paste_image", "terminal.right_click"] {
+        for name in ["pane.focus", "terminal.copy", "terminal.paste", "terminal.paste_image"] {
             assert!(!super::needs_model_pane(name, &json!({})), "{name}");
         }
     }

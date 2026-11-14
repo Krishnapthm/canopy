@@ -1,6 +1,6 @@
 // Modified for Canopy.
 // Space dialog, props { args, folders }: first "Choose space" lists the folders of
-// earlier spaces (a click makes a space there); "New space" shows the full form.
+// earlier spaces (a click makes a space there); "Open space" shows the full form.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState } from "gpui-base";
 import { run, props, closeOverlay, theme, pickFolder, spaces, ui } from "herdr";
@@ -57,7 +57,7 @@ export default class SpaceNew extends View {
             () => this.make("", f))))
           .when(list.length === 0, el => el.child(div().px(10).py(8).text_color(t.dim).child("No matching spaces"))))
         .child(div().h(1).mx(4).my(2).bg(t.input))
-        .child(row("space-new-form", h_flex().gap(8).items_center().child(icon("plus")).child("New space"), () => {
+        .child(row("space-new-form", h_flex().gap(8).items_center().child(icon("plus")).child("Open space"), () => {
           this.choosing = false;
           this.name.focus();
           this.cx.notify();
@@ -67,7 +67,7 @@ export default class SpaceNew extends View {
     // Names of the spaces already on a folder; two spaces may share one.
     const using = folder => folder && spaces().filter(s => s.folder === folder).map(s => s.name).join(", ");
     return shell.p(20).gap(16)
-      .child(h_flex().items_center().child(div().flex_1().text_size(ui.size.title).font_semibold().child("New space"))
+      .child(h_flex().items_center().child(div().flex_1().text_size(ui.size.title).font_semibold().child("Open space"))
         .child(ui.iconButton("space-close", "mods/workspace-chrome/x.svg").on_click(close)))
       .child(v_flex().gap(6).child(ui.label("Name")).child(ui.input(this.name)))
       .child(h_flex().items_center().gap(5).child(ui.label("Folder"))
@@ -86,8 +86,7 @@ export default class SpaceNew extends View {
           v_flex().id(`recent-${i}`).p(6).rounded(ui.size.radiusSm).cursor_pointer().hover(s => s.bg(t.hover)).on_click(() => choose(f))
             .child(h_flex().gap(6).child(basename(f)).when(Boolean(using(f)), el => el.child(div().text_color(t.dim).child(`· space ${using(f)}`))))
             .child(div().text_size(ui.size.small).text_color(t.dim).child(f))))
-        .child(div().h(1).bg(t.input))
-        .child(button("folder-choose", h_flex().gap(6).child(icon("folder")).child("Choose..."), async () => {
+        .child(button("folder-choose", h_flex().gap(6).child(icon("folder")).child("Choose"), async () => {
           const folder = await pickFolder({ prompt: "Select folder" });
           if (folder) choose(folder);
         }))))
@@ -96,6 +95,6 @@ export default class SpaceNew extends View {
         .when(Boolean(this.folder), el => el.child(div().text_color(t.dim).text_size(ui.size.small).child(this.folder)))
         .when(Boolean(using(this.folder)), el => el.child(div().text_color(t.dim).text_size(ui.size.small).child(`Space ${using(this.folder)} already uses this folder. Another space here is fine.`))))
       .child(ui.footer(button("space-cancel", "Cancel", close),
-        button("space-create", "Create space", () => this.create(), "primary", Boolean(this.name.value().trim() || basename(this.folder)))));
+        button("space-create", "Open space", () => this.create(), "primary", Boolean(this.name.value().trim() || basename(this.folder)))));
   }
 }

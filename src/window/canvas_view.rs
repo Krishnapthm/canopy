@@ -236,6 +236,16 @@ impl Render for PopOut {
     }
 }
 impl AppWindow {
+    /// A cell's own menu (`canvas-card` in the menu mod): from its pill, header or terminal.
+    pub(super) fn open_card_menu(&mut self, addr: &str, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.canvas_state.selected.iter().any(|s| s == addr) { self.canvas_state.selected = vec![addr.to_owned()]; }
+        let tab = self.model.pane_of(addr).and_then(|p| self.model.tab_of(&p)).map(|t| t.id.clone());
+        let target = json!({"terminal":addr,"id":tab,"popped":self.canvas_state.popped.contains_key(addr),
+            "expanded":self.canvas_state.doc.cards.iter().any(|c| c.terminal == addr && c.size.is_some()),
+            "finished":self.canvas_state.subs.get(addr).is_some_and(|subs| subs.iter().any(|s| s.done))});
+        self.open_menu("canvas-card", target, Some(at), window, cx);
+    }
+
     fn begin_layout(&mut self) {
         self.canvas_state.motion.target = None;
         self.canvas_state.motion.velocity = [0.; 2];
@@ -2590,24 +2600,10 @@ impl AppWindow {
                 );
             }
             let menu_addr = addr.clone();
-            let tab = self
-                .model
-                .pane_of(&addr)
-                .and_then(|p| self.model.tab_of(&p))
-                .map(|t| t.id.clone());
             pill = pill.on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                    if !this.canvas_state.selected.contains(&menu_addr) { this.canvas_state.selected = vec![menu_addr.clone()]; }
-                    this.open_menu(
-                        "canvas-card",
-                        json!({"terminal":menu_addr,"id":tab,"popped":this.canvas_state.popped.contains_key(&menu_addr),
-                            "expanded":this.canvas_state.doc.cards.iter().any(|c| c.terminal == menu_addr && c.size.is_some()),
-                            "finished":this.canvas_state.subs.get(&menu_addr).is_some_and(|subs| subs.iter().any(|s| s.done))}),
-                        Some(e.position),
-                        window,
-                        cx,
-                    );
+                    this.open_card_menu(&menu_addr, e.position, window, cx);
                     cx.stop_propagation();
                 }),
             );

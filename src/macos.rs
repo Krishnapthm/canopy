@@ -30,7 +30,7 @@ pub fn set_menus(cx: &mut App) {
     let view = cx.try_global::<ActiveView>().map(|v| &v.0).cloned().unwrap_or_default();
     let mut menus = vec![
         Menu::new("Canopy").items([
-            MenuItem::action("Settings…", Settings),
+            MenuItem::action("Settings", Settings),
             MenuItem::separator(),
             MenuItem::os_submenu("Services", SystemMenuType::Services),
             MenuItem::separator(),

@@ -304,7 +304,7 @@ Focused terminals still receive Space. Right-click keeps the canvas menus.
 Canvas space labels drag the space and its cards; bottom-right handles resize with card padding.
 Space label menus offer Rename, Color, Show frame and confirmed Delete space.
 Empty-canvas menus create terminals in the space folder or home, installed agents,
-and root spaces through the Choose space dialog (previously used space folders, or New space: name, optional folder, recent folders). `canvas.create` takes an optional world
+and root spaces through the Choose space dialog (previously used space folders, or Open space: name, optional folder, recent folders). `canvas.create` takes an optional world
 `point` (default: the middle of the view), optional `space` (default: the space under the point, else the root), `argv`, or `kind: "space"`; `canvas.space_style` takes
 `id` and optional palette `color` (without color it toggles the frame).
 `view.agents`, `view.all`, `view.terminals` select the saved canvas view, bound to
@@ -315,7 +315,7 @@ takes `terminal`. Pop-outs last only for the current run and keep the terminal a
 Canvas file previews: `preview.open {path?, point?, place?}` opens an absolute local
 path in a read-only panel tab by default. Reopening activates the tab. Omit path for
 the native picker, which places a canvas card. `place: "canvas"` or an explicit
-world `point` also places a card. Open file... and Finder drops keep placing cards.
+world `point` also places a card. Open file and Finder drops keep placing cards.
 Clicking a pill expands it in place; the panel holds files and sub-agent transcripts only.
 The panel close button closes all panel tabs. Terminal pop-out is unchanged.
 The header shows a breadcrumb and a folder button toggles the right file tree,
@@ -339,7 +339,7 @@ execute content or load remote images.
 Preview quotes: finishing a selection in a preview opens the quote popover, also opened by `quote.menu {path, start?, end?, text, point?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv}` expands an agent's cell and pastes the quote, then a blank line and the trimmed message when given, without Enter. New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.
 
 Space cards rename inline from their menu's Rename (double-click goes inside). Person-invoked local
-`space.new` without a folder opens New space; explicit command arguments remain supported.
+`space.new` without a folder opens Open space; explicit command arguments remain supported.
 `canvas.create {kind: "space", name, folder, point?}` creates directly when `folder`
 is present (an empty string means no folder); omitting it opens the Choose space dialog.
 

@@ -471,15 +471,6 @@ Take a terminal's pane away and disable core keep; it keeps running (a sub-agent
 |---|---|
 | `terminal` | yes |
 
-## `terminal.right_click`
-
-Where right-clicks in a terminal (default: the focused one) go when its program takes the mouse: "program" or "menu" (Canopy's, the default). Shift+right-click is always the menu.
-
-| Argument | Required |
-|---|---|
-| `to` | yes |
-| `terminal` | no |
-
 ## `terminal.pin`
 
 Pin an agent to the top of the agent lists (pinned true) or unpin it (false). Pins are kept with the terminal, so every Canopy client shows them, and end with it.

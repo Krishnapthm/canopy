@@ -176,7 +176,7 @@ impl Render for Setup {
             Need::Install => div()
                 .flex()
                 .gap(px(10.0))
-                .child(button("choose", "I have it somewhere…", false).on_click(cx.listener(|this, _, w, cx| this.choose(w, cx)))),
+                .child(button("choose", "I have it somewhere", false).on_click(cx.listener(|this, _, w, cx| this.choose(w, cx)))),
             Need::Connect(_) => div().child(button("retry", "Retry", true).on_click(cx.listener(|this, _, w, cx| this.start(w, cx)))),
             Need::Fix(Mismatch::Newer { .. }) => div()
                 .flex()

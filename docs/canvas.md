@@ -25,7 +25,10 @@ whose frame held it, and the frame becomes that space's card.
 - Enter [canvas mode](keys.md) to select a collapsed cell without expanding it.
   Click a cell to select it. Shift-click adds or removes cells. Click empty
   canvas to clear the selection.
-- Right-click a space, a cell or empty canvas: **Arrange** repeats the last
+- Right-click a cell (its pill, header or terminal) for its own menu: Rename,
+  Pop out or Bring back, Expand or Collapse, Clear finished, Close terminal
+  (asks first) and Kill terminal (ends it and its sub-agents now).
+- Right-click a space or empty canvas: **Arrange** repeats the last
   layout, hovering **Arrange as** opens a submenu beside it to pick one
   (submenus open on hover; → and ← work too). **Tidy** is a grid in reading order with wired cells kept next to each other, **Row**
   and **Column** line cells up, **By wires** puts parents left of their
