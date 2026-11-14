@@ -68,6 +68,10 @@ changing default keys.
 
 ## Build and checks
 
+Disk is tight. Never create a per-worktree `target/`: builds in a worktree
+use the one shared `CARGO_TARGET_DIR` the orchestrator gives you. No extra
+profiles or flags unless needed. Prune a worktree once its branch merges.
+
 Zig 0.16 is required. On macOS:
 
 ```sh
