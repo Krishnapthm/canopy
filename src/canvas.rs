@@ -1616,6 +1616,43 @@ mod keyboard_tests {
 }
 
 
+/// Drags a pane edge or corner. `zone` is (-1 left, 0, 1 right) and (-1 top, 0, 1 bottom).
+/// Left and top move the origin so the opposite edge stays put; size never drops below `min`.
+pub fn resize_from(origin: Point, size: Point, zone: (i8, i8), d: Point, min: Point) -> (Point, Point) {
+    let axis = |o: f32, s: f32, z: i8, d: f32, m: f32| match z {
+        1 => (o, (s + d).max(m)),
+        -1 => { let n = (s - d).max(m); (o + s - n, n) }
+        _ => (o, s),
+    };
+    let (x, w) = axis(origin[0], size[0], zone.0, d[0], min[0]);
+    let (y, h) = axis(origin[1], size[1], zone.1, d[1], min[1]);
+    ([x, y], [w, h])
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::resize_from;
+
+    #[test]
+    fn every_edge_and_corner_moves_only_its_own_sides() {
+        let (o, s, d, min) = ([100., 100.], [400., 300.], [10., 20.], [50., 50.]);
+        for (zone, want) in [
+            ((1, 1), ([100., 100.], [410., 320.])),
+            ((-1, -1), ([110., 120.], [390., 280.])),
+            ((1, -1), ([100., 120.], [410., 280.])),
+            ((-1, 1), ([110., 100.], [390., 320.])),
+            ((1, 0), ([100., 100.], [410., 300.])),
+            ((-1, 0), ([110., 100.], [390., 300.])),
+            ((0, 1), ([100., 100.], [400., 320.])),
+            ((0, -1), ([100., 120.], [400., 280.])),
+        ] {
+            assert_eq!(resize_from(o, s, zone, d, min), want, "zone {zone:?}");
+        }
+        // Shrinking past the minimum stops there, and the right/bottom edge stays put.
+        assert_eq!(resize_from(o, s, (-1, -1), [1000., 1000.], min), ([450., 350.], [50., 50.]));
+    }
+}
+
 #[cfg(test)]
 mod stacking_tests {
     use super::*;

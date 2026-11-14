@@ -135,10 +135,9 @@ and sub-agent transcripts only.
 - PTY size: columns and rows are what fits the cell as drawn once the zoom
   rests (glyphs round to whole pixels at each zoom, so measuring at zoom 1
   would leave a strip); a corner drag applies them on release. The grid is
-  centred, so the padding is even on all sides. With `canvas_resize_terminals`
-  off (the default) the grid is measured once, when the terminal is made or after a
-  text zoom, and kept: resizing the cell scales the whole grid to fit it, centered.
-  Set it to true to refit the grid to the cell as above.
+  centred, so the padding is even on all sides. Setting `canvas_resize_terminals`
+  to false instead measures the grid once, when the terminal is made or after a
+  text zoom, and keeps it: resizing the cell scales the whole grid to fit it.
 - Text zoom: with a cell entered, the zoom keys and View menu resize that
   terminal's text (not the canvas) until the app restarts; the grid refits.
 - Input: keys go to the terminal once it is focused, as in any terminal, so
@@ -180,9 +179,9 @@ back where they were.
   its terminal.
 - `tile_gap` in [settings](settings.md) sets the space between tiles (default 0,
   edge to edge); editing it re-tiles live.
-- Tiles size their terminals like any cell: by default (`canvas_resize_terminals`
-  off in [settings](settings.md)) the program keeps its grid and the text scales
-  to fit the tile; with it on, columns and rows follow the tile.
+- Tiles size their terminals like any cell: columns and rows follow the tile
+  (with `canvas_resize_terminals` false in [settings](settings.md) the program
+  keeps its grid and the text scales to fit).
 - How it works: when tile view starts it records the members in reading order
   (top to bottom, then left to right). `canvas::tile` places them in that order
   and picks `ceil(sqrt(n))` columns, with the last row short and stretched, as

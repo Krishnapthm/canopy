@@ -70,6 +70,8 @@ pub(super) struct State {
     moves: HashMap<String, (canvas::Rest, canvas::Rest)>,
     /// The expanded cell's corner being dragged, and the pointer where it was last seen.
     cell_resize: Option<(String, Point<Pixels>)>,
+    /// Which edge or corner `cell_resize` drags (see `canvas::resize_from`).
+    resize_zone: (i8, i8),
     /// When the camera zoom last moved by gesture: expanded cells draw flat until it has rested.
     zoomed_at: Option<std::time::Instant>,
     zoom_task: Option<Task<()>>,
@@ -167,6 +169,7 @@ impl State {
             closed: None,
             moves: HashMap::new(),
             cell_resize: None,
+            resize_zone: (1, 1),
             zoomed_at: None,
             zoom_task: None,
             wheel_pan_at: None,
@@ -2366,9 +2369,11 @@ impl AppWindow {
                 if let Some((key, previous)) = this.canvas_state.cell_resize.clone() {
                     let z = this.canvas_state.doc.camera.zoom;
                     let d = [f32::from(e.position.x - previous.x) / z, f32::from(e.position.y - previous.y) / z];
-                    if let Some(size) = this.canvas_state.doc.cards.iter_mut().find(|c| c.key() == key).and_then(|c| c.size.as_mut()) {
-                        size[0] = (size[0] + d[0]).max(canvas::PILL_WIDTH * 1.5);
-                        size[1] = (size[1] + d[1]).max(canvas::HEADER * 3.);
+                    let zone = this.canvas_state.resize_zone;
+                    if let Some(card) = this.canvas_state.doc.cards.iter_mut().find(|c| c.key() == key)
+                        && let Some(size) = card.size {
+                        let (o, s) = canvas::resize_from([card.rect[0], card.rect[1]], size, zone, d, [canvas::PILL_WIDTH * 1.5, canvas::HEADER * 3.]);
+                        (card.rect[0], card.rect[1], card.size) = (o[0], o[1], Some(s));
                     }
                     this.solve_layout(Some(&key), None, cx);
                     this.animate_layout(window, cx);
@@ -2899,21 +2904,36 @@ impl AppWindow {
                         .into_any_element(),
                     None => div().size_full().bg(crate::terminal::hsla(crate::vt::theme().bg)).into_any_element(),
                 });
-            let handle = div()
-                .id(SharedString::from(format!("canvas-resize-{}", card.terminal)))
-                .absolute()
-                .right_0()
-                .bottom_0()
-                .size(px(14. * z))
-                .cursor(CursorStyle::ResizeUpLeftDownRight)
-                .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-                    this.begin_layout();
-                    this.canvas_state.shown = Some(this.canvas_state.doc.clone());
-                    this.canvas_state.selected = vec![resize_addr.clone()];
-                    this.canvas_state.cell_resize = Some((resize_addr.clone(), e.position));
-                    cx.stop_propagation();
-                    cx.notify();
-                }));
+            // Eight resize zones over the edges and corners of an expanded cell; selected cells show handles.
+            let show = state.selected.contains(&card.terminal);
+            let zones: Vec<_> = if card.size.is_none() { vec![] } else {
+                [(-1i8, -1i8), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].into_iter().map(|zone| {
+                    let addr = resize_addr.clone();
+                    let (edge, corner) = ((6. * z).max(4.), (12. * z).max(8.));
+                    let thick = |other: i8| px(if other == 0 { edge } else { corner });
+                    let cursor = match zone {
+                        (0, _) => CursorStyle::ResizeUpDown,
+                        (_, 0) => CursorStyle::ResizeLeftRight,
+                        (a, b) if a == b => CursorStyle::ResizeUpLeftDownRight,
+                        _ => CursorStyle::ResizeUpRightDownLeft,
+                    };
+                    let d = div().id(SharedString::from(format!("canvas-resize-{}-{}-{}", card.terminal, zone.0, zone.1)))
+                        .absolute().cursor(cursor).flex().items_center().justify_center();
+                    let d = match zone.0 { -1 => d.left_0().w(thick(zone.1)), 1 => d.right_0().w(thick(zone.1)), _ => d.left(px(corner)).right(px(corner)) };
+                    let d = match zone.1 { -1 => d.top_0().h(thick(zone.0)), 1 => d.bottom_0().h(thick(zone.0)), _ => d.top(px(corner)).bottom(px(corner)) };
+                    d.when(show, |d| d.child(div().size(px(6.)).bg(c("surface")).border_1().border_color(c("ring"))))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                            this.begin_layout();
+                            this.canvas_state.shown = Some(this.canvas_state.doc.clone());
+                            this.canvas_state.selected = vec![addr.clone()];
+                            this.raise_pane(&addr, cx);
+                            this.canvas_state.resize_zone = zone;
+                            this.canvas_state.cell_resize = Some((addr.clone(), e.position));
+                            cx.stop_propagation();
+                            cx.notify();
+                        }))
+                }).collect()
+            };
             pills.push((card.z, div()
                 .id(SharedString::from(format!("canvas-cell-{}", card.terminal)))
                 .absolute()
@@ -2931,7 +2951,7 @@ impl AppWindow {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(pill)
                 .child(body)
-                .child(handle)
+                .children(zones)
                 .into_any_element()));
         }
         pills.sort_by_key(|(z, _)| *z);

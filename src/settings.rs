@@ -230,6 +230,8 @@ fn shipped_theme_files() {
         let name = path.file_stem().unwrap().to_str().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         parse_theme_file(name, &text).unwrap_or_else(|e| panic!("{e}"));
+        // Built-in presets are compiled in (see `palette`), not installed into themes/.
+        if PRESETS.contains(&name) { continue; }
         assert_eq!(THEMES.iter().find(|(n, _)| *n == name).unwrap().1, text);
         found.insert(name.to_owned());
     }
@@ -386,7 +388,7 @@ person_settings! {
     canvas_gap: f32 = 24. => "Cell and space gap in world pixels (0..1024).";
     tile_gap: f32 = 0. => "Gap between cells in tile view in world pixels (0..1024).";
     canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live, only on drop, or never so cells overlap (live, drop, off).";
-    canvas_resize_terminals: bool = false => "Refit a canvas terminal's grid to its cell as the cell resizes; off keeps the grid and scales it.";
+    canvas_resize_terminals: bool = true => "Refit a canvas terminal's grid to its cell as the cell resizes (no longer in Settings; false keeps the grid and scales it).";
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
     #[serde(skip_serializing_if = "is_default_wire_limit")]
@@ -1095,9 +1097,9 @@ mod tests {
         let defaults = parse_person("{}").unwrap();
         assert_eq!(defaults.canvas_gap, 24.);
         assert_eq!(defaults.canvas_push, CanvasPush::Live);
-        assert!(!defaults.canvas_resize_terminals);
-        assert_eq!(parse_person(r#"{"canvas_push":"off","canvas_resize_terminals":true}"#).map(|p| (p.canvas_push, p.canvas_resize_terminals)),
-            Ok((CanvasPush::Off, true)));
+        assert!(defaults.canvas_resize_terminals);
+        assert_eq!(parse_person(r#"{"canvas_push":"off","canvas_resize_terminals":false}"#).map(|p| (p.canvas_push, p.canvas_resize_terminals)),
+            Ok((CanvasPush::Off, false)));
         assert_eq!(defaults.space_fill, 0.04);
         assert_eq!(defaults.terminal_size, [100, 30]);
         for invalid in [r#"{"canvas_gap":-1}"#, r#"{"canvas_gap":1025}"#,

@@ -190,7 +190,7 @@ pub struct TerminalView {
     rest: Option<(Size<Pixels>, f32)>,
     /// In-memory text zoom of this terminal (1 = the app's font size); the grid refits to it.
     font_zoom: f32,
-    /// Canvas only, with `canvas_resize_terminals` off: the body (world px) the kept grid is scaled to fit.
+    /// Canvas only, with `canvas_resize_terminals` false: the body (world px) the kept grid is scaled to fit.
     keep_in: Option<Size<Pixels>>,
     /// The grid kept in that mode: measured once, and again after a text zoom.
     kept: Option<(u16, u16)>,
