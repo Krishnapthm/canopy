@@ -18,9 +18,12 @@ mkdir -p "$HERDR_APP_HOME" "$XDG_STATE_HOME" "$XDG_CONFIG_HOME"
 # A core this script reserved is still answering (the window was closed, not dev-stop):
 # attach to it, so the saved layout and running terminals come back.
 # shortcut: an open dev window is not detected, so a second run starts a second app on the same home; close it first.
-if [[ -f $root/owned/hc && -S $HC_SOCKET ]] && "$(<"$root/owned/hc")" ls >/dev/null 2>&1; then
-    echo 'reusing the running scratch core' >&2
-    exec "$repo/target/debug/canopy"
+if [[ -f $root/owned/hc && -S $HC_SOCKET ]]; then
+    if probe=$("$(<"$root/owned/hc")" ls 2>&1); then
+        echo 'reusing the running scratch core' >&2
+        exec "$repo/target/debug/canopy"
+    fi
+    echo "scratch core not answering: $probe" >&2
 fi
 mkdir "$root/owned" || { echo 'scratch core reserved; close its window and run scripts/dev-stop' >&2; exit 1; }
 if [[ -e $HC_SOCKET || -S $HC_SOCKET ]]; then
