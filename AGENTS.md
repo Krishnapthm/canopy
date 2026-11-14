@@ -3,7 +3,7 @@
 # Canopy
 
 Canopy is a native Rust/GPUI control room for agents and terminals, based on
-herdr-app. Read docs/canopy/plan.md and docs/canopy/herdr-map.md before work.
+herdr-app. Read docs/canopy/herdr-map.md before work.
 Read AGENTS.local.md too when present.
 
 ## Rules

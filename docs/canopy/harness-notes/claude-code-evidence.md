@@ -1,5 +1,5 @@
 # claude-code installed evidence
-Executable: `/Users/krishna/.local/share/claude/versions/2.1.322`
+Executable: `~/.local/share/claude/versions/2.1.322`
 SHA256: `a9d237949db816a0b7afd88a9a8e1df36b3a597a30f5a41d1c0539eb180a3450`
 Collected 2026-11-12. Display normalization: em dashes and escaped Unicode em dashes replaced with plain dashes; control bytes rendered as escapes. Native binary excerpts below are evidence of embedded text/source, not observed runtime behavior. Byte offsets are zero-based. Reproduce with Python Path(path).read_bytes()[offset:offset+length].decode("utf-8", "replace").
 
