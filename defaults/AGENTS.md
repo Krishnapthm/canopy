@@ -680,6 +680,7 @@ when there is one); the rest of the file still applies. The corresponding `.erro
 
 - `canvas_color`: null follows the theme; a hex color overrides the canvas background.
 - `canvas_gap`: gap between cells and spaces in world pixels (default 24, 0..1024).
+- `tile_gap`: gap between cells in tile view in world pixels (default 0, 0..1024).
 - `canvas_push`: "live" (default) pushes neighbours while dragging; "drop" waits for release.
 - `space_fill`: space background opacity (default 0.04, 0..1).
 - `terminal_size`: new expanded cell [columns, rows] (default [100, 30], ranges 20..500 and 5..200).

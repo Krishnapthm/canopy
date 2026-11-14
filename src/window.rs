@@ -831,7 +831,7 @@ impl AppWindow {
     fn reload_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let s_time = mtime(&settings::path());
         if s_time.is_none() || s_time != self.watched.settings {
-            let old_gap = self.person.canvas_gap;
+            let (old_gap, old_tile_gap) = (self.person.canvas_gap, self.person.tile_gap);
             let loaded = settings::load_person();
             match loaded {
                 Ok(p) => {
@@ -853,6 +853,7 @@ impl AppWindow {
                 for space in spaces { self.solve_layout(None, Some(&space), cx); }
                 self.canvas_changed(cx);
             }
+            if old_tile_gap != self.person.tile_gap { self.tile_canvas(false, window, cx); }
         }
         let k_time = mtime(&crate::keys::path());
         if k_time.is_none() || k_time != self.watched.keys {

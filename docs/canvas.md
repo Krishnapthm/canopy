@@ -108,6 +108,8 @@ bottom. Press again, or leave the space, to put everything back where it was.
 - A tile smaller than 320 x 140 shows its icon and name instead of terminal
   text, and its program keeps its last grid size. The entered cell always shows
   its terminal.
+- `tile_gap` in [settings](settings.md) sets the space between tiles (default 0,
+  edge to edge); editing it re-tiles live.
 - Tiles resize their programs like any cell: columns and rows follow the tile.
 - How it works: `canvas::tile` keeps tiles in reading order by position and
   picks `ceil(sqrt(n))` columns, with the last row short and stretched, as in

@@ -401,6 +401,7 @@ person_settings! {
     confirm_close_terminal: bool = true => "Ask before closing a plain terminal cell.";
     canvas_color: Option<String> = None => "Canvas background; null follows the theme.";
     canvas_gap: f32 = 24. => "Cell and space gap in world pixels (0..1024).";
+    tile_gap: f32 = 0. => "Gap between cells in tile view in world pixels (0..1024).";
     canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live or only on drop (live, drop).";
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
@@ -725,6 +726,7 @@ fn parse_person(text: &str) -> Result<Person, String> {
     for (valid, problem) in [
         ((ZOOM_MIN..=ZOOM_MAX).contains(&person.zoom), "zoom must be in 0.5..3"),
         ((0.0..=1024.0).contains(&person.canvas_gap), "canvas_gap must be in 0..1024"),
+        ((0.0..=1024.0).contains(&person.tile_gap), "tile_gap must be in 0..1024"),
         ((0.0..=1.0).contains(&person.space_fill), "space_fill must be in 0..1"),
         ((20..=500).contains(&person.terminal_size[0]) && (5..=200).contains(&person.terminal_size[1]), "terminal_size must be [columns 20..500, rows 5..200]"),
     ] {

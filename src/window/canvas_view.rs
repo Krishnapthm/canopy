@@ -606,7 +606,7 @@ impl AppWindow {
         let active = self.canvas_state.selected.iter().rev().find_map(|k| keys.iter().position(|t| t == k));
         // Tiles start below the toolbar (12 px from the top, 32 px tall) so it never covers one.
         const TOOLBAR: f32 = 44.;
-        let (placed, lined) = canvas::tile([area[0], area[1] + TOOLBAR, visible[0], visible[1] - TOOLBAR], &rects, active, &pills, self.person.canvas_gap);
+        let (placed, lined) = canvas::tile([area[0], area[1] + TOOLBAR, visible[0], visible[1] - TOOLBAR], &rects, active, &pills, self.person.tile_gap);
         let state = &mut self.canvas_state;
         let unchanged = rects == placed && pilled.iter().map(|i| state.doc.cards[*i].rect).chain(spaces.iter().map(|i| state.doc.spaces[*i].rect))
             .zip(&lined).all(|(a, b)| a[0] == b[0] && a[1] == b[1]);
@@ -3468,7 +3468,7 @@ mod tile_tests {
             assert!(this.canvas_state.tile.is_some());
             assert!(area(1) > area(0) && area(1) > area(2), "the selected tile is the largest: {:?}", cards.iter().map(|c| c.rect).collect::<Vec<_>>());
             assert!(cards.iter().take(3).all(|c| c.size == Some([c.rect[2], c.rect[3]])), "tiles stay expanded at their tile size");
-            assert!(cards.iter().take(3).all(|c| c.rect[1] + c.rect[3] < cards[3].rect[1]), "the pill lines up below the tiles");
+            assert!(cards.iter().take(3).all(|c| c.rect[1] + c.rect[3] <= cards[3].rect[1]), "the pill lines up below the tiles");
             // Selecting another tile makes it the large one.
             this.canvas_state.selected = vec!["t1".into()];
             this.tile_canvas(false, window, cx);
