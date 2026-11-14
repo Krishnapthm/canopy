@@ -43,6 +43,13 @@ fn output_turn(
     })
 }
 
+/// Whether the core record's foreground program (or its argv, before one is reported) is a plain shell.
+fn is_plain_shell(record: &serde_json::Value) -> bool {
+    let name = record["foreground"]["name"].as_str().or_else(|| record["argv"][0].as_str()).unwrap_or_default();
+    let name = name.rsplit('/').next().unwrap_or_default().trim_start_matches('-');
+    matches!(name, "zsh" | "bash" | "fish" | "sh")
+}
+
 thread_local! {
     /// How much the terminal being drawn is scaled (the canvas zoom of an expanded cell), 1 elsewhere.
     static SCALE: Cell<f32> = const { Cell::new(1.0) };
@@ -207,6 +214,8 @@ pub struct TerminalView {
     search_query: String,
     search_input: Option<Entity<InputState>>,
     pending_search_nav: Option<bool>,
+    /// Set after attaching to a plain shell: its first replay is cleared and the shell redraws (see `restore_clean`).
+    restore_clean: bool,
     search_task: Option<Task<()>>,
     attach_deadline: Instant,
     _render_hold: Option<(Instant, Task<()>)>,
@@ -366,6 +375,7 @@ impl TerminalView {
             search_query: String::new(),
             search_input: None,
             pending_search_nav: None,
+            restore_clean: false,
             search_task: None,
             attach_deadline,
             _render_hold: None,
@@ -491,6 +501,7 @@ impl TerminalView {
                 let cell = device_cell(g.cell, g.scale);
                 g.refresh_theme(&vt::theme(), cell);
                 drop(g);
+                self.restore_clean = is_plain_shell(&attached.terminal);
                 if let Some(t) = attached.terminal.get("title").and_then(|t| t.as_str()).filter(|t| !t.is_empty()) {
                     self.set_title(t, cx);
                 }
@@ -628,6 +639,16 @@ impl TerminalView {
                         cx.notify();
                         return false;
                     }
+                }
+            }
+            if std::mem::take(&mut self.restore_clean) {
+                // The replay was drawn at a size the shell had not yet adopted, so it can hold a stray
+                // prompt-marker row. Drop it and make the shell redraw its prompt with a resize
+                // wiggle, never keystrokes. shortcut: assumes the replay fits the first batch.
+                g.vt.clear_for_restore();
+                if let (Some(ch), (cols, rows)) = (g.channel, (g.vt.cols, g.vt.rows)) && rows > 1 {
+                    g.core.resize(ch, cols, rows - 1);
+                    g.core.resize(ch, cols, rows);
                 }
             }
             g.vt.take_title()

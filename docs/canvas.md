@@ -79,6 +79,13 @@ only while they move. On release the result becomes the new rest, and
 `canvas.json` is saved once. Undo keeps one snapshot of rectangles by cell key,
 so it never brings back a closed cell.
 
+## Restored shells
+
+A plain shell (zsh, bash, fish, sh) reattached after the app starts opens clean
+with a fresh prompt. The app drops the replayed screen, which can hold a stray
+`%` row drawn at the wrong width, and nudges the pane size so the shell redraws
+its prompt. Agents and other programs are untouched, and nothing is typed.
+
 ## Expanded cells
 
 A terminal cell opens in place into a live terminal. Click a pill to expand
