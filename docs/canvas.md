@@ -165,10 +165,10 @@ opened later join. Collapsed cells (and space cards on Home) stay pills and line
 up along the bottom. Press again, or leave the space, to put the tiled cells
 back where they were.
 
-- The selected tile is the large one: it takes 60% of its row, and its row at
-  least 60% of the height (more when needed to stay the largest); the others
-  share the rest. Click or arrow to another
-  cell and the layout follows. Expanding, collapsing, opening or closing a cell
+- Every tile is the same size. With `tile_focus_grows` on in
+  [settings](settings.md), the selected tile is the large one instead: it takes
+  60% of its row, and its row at least 60% of the height; the others share the
+  rest, and clicking or arrowing to another cell moves it. Expanding, collapsing, opening or closing a cell
   re-tiles, and so does nudging a tile with the keyboard (it snaps back).
 - Dragging a tile ends tile view: the cells stay where the tiles put them, the
   camera stays, and the drag moves that cell as on the free canvas (one undo
@@ -177,6 +177,9 @@ back where they were.
 - A tile smaller than 320 x 140 shows its icon and name instead of terminal
   text, and its program keeps its last grid size. The entered cell always shows
   its terminal.
+- `=` (`canvas.equalize`) gives the selected panes, else the focused one, the
+  standard size: the `terminal_size` grid new panes open at. Cmd+A then `=`
+  equalizes the whole space; in tile view it re-tiles.
 - `tile_gap` in [settings](settings.md) sets the space between tiles (default 0,
   edge to edge); editing it re-tiles live.
 - Tiles size their terminals like any cell: columns and rows follow the tile

@@ -683,6 +683,7 @@ when there is one); the rest of the file still applies. The corresponding `.erro
 - `canvas_color`: null follows the theme; a hex color overrides the canvas background.
 - `canvas_gap`: gap between cells and spaces in world pixels (default 24, 0..1024).
 - `tile_gap`: gap between cells in tile view in world pixels (default 0, 0..1024).
+- `tile_focus_grows`: false (default) keeps every tile the same size; true lets the selected tile take more room.
 - `canvas_push`: "live" (default) pushes neighbours while dragging; "drop" waits for release; "off" never pushes, so cells may overlap (Home still keeps spaces apart).
 - `canvas_resize_terminals`: true (default) refits a canvas terminal's grid to the cell as it resizes; false keeps the grid and scales it to fit. Settings.json only.
 - `space_fill`: space background opacity (default 0.04, 0..1).
@@ -1273,6 +1274,7 @@ every selected pane (else the focused one) behind one dialog that lists them, wi
 without asking. `canvas.close {terminal}` closes one cell: running agents ask "Terminate agent?", plain terminals
 "Close this terminal?". Done sub-agent cells clear; working ones refuse with a toast.
 `canvas.front` and `canvas.back` raise or lower the selected panes; the order is saved.
+`canvas.equalize` gives the selected panes (else the focused one) the standard `terminal_size`; `canvas.new` opens a full terminal pane, cascading from the last one.
 
 Views are in the macOS View menu or the Linux titlebar's primary menu
 (`app.menu`, optionally with a `group`);

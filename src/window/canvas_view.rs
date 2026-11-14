@@ -70,6 +70,8 @@ pub(super) struct State {
     moves: HashMap<String, (canvas::Rest, canvas::Rest)>,
     /// The expanded cell's corner being dragged, and the pointer where it was last seen.
     cell_resize: Option<(String, Point<Pixels>)>,
+    /// The room and origin of the last ⌘T pane, for the next one's cascade step.
+    cascade: Option<(Option<String>, canvas::Point)>,
     /// Which edge or corner `cell_resize` drags (see `canvas::resize_from`).
     resize_zone: (i8, i8),
     /// When the camera zoom last moved by gesture: expanded cells draw flat until it has rested.
@@ -170,6 +172,7 @@ impl State {
             moves: HashMap::new(),
             cell_resize: None,
             resize_zone: (1, 1),
+            cascade: None,
             zoomed_at: None,
             zoom_task: None,
             wheel_pan_at: None,
@@ -687,7 +690,8 @@ impl AppWindow {
         lined_up.sort_by_key(|x| rank(&x.0));
         let rects: Vec<_> = tiles.iter().map(|x| x.1).collect();
         let pills: Vec<_> = lined_up.iter().map(|x| if x.2 < count { self.pill_rect(&doc.cards[x.2], cx) } else { x.1 }).collect();
-        let active = self.canvas_state.selected.iter().rev().find_map(|k| tiles.iter().position(|t| &t.0 == k));
+        // Every tile the same size unless `tile_focus_grows` lets the selected one take more.
+        let active = self.person.tile_focus_grows.then(|| self.canvas_state.selected.iter().rev().find_map(|k| tiles.iter().position(|t| &t.0 == k))).flatten();
         // The canvas starts under the bar, so tiles fill its whole area.
         let (placed, lined) = canvas::tile([area[0], area[1], visible[0], visible[1]], tiles.len(), active, &pills, self.person.tile_gap);
         let state = &mut self.canvas_state;
@@ -844,6 +848,23 @@ impl AppWindow {
                 }
                 self.dispatch("terminal.kill", &json!({"terminal":key}), true, window, cx);
             }
+        }
+    }
+
+    /// `canvas.equalize`: every target pane opens at the standard size; tile view re-tiles.
+    pub(super) fn equalize_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let size = self.default_pane_size(window);
+        let targets = self.targets(window);
+        let mut changed = false;
+        for card in self.canvas_state.doc.cards.iter_mut().filter(|c| c.sub.is_none() && targets.contains(&c.key())) {
+            changed |= card.size != Some(size);
+            card.size = Some(size);
+        }
+        if self.canvas_state.tile.is_some() { return self.tile_canvas(false, window, cx); }
+        if changed {
+            if let Some(first) = targets.first() { self.solve_layout(Some(first), None, cx); }
+            self.canvas_changed(cx);
+            cx.notify();
         }
     }
 
@@ -1315,6 +1336,14 @@ impl AppWindow {
         }
     }
 
+    /// The standard pane size (world px, header and frame included): the `terminal_size` grid.
+    /// New panes open at it and `canvas.equalize` returns panes to it.
+    pub(super) fn default_pane_size(&self, window: &Window) -> canvas::Point {
+        let body = crate::terminal::size_of_grid(self.person.terminal_size[0], self.person.terminal_size[1], window);
+        // The 2 px is the frame around the body.
+        [f32::from(body.width) + 2., f32::from(body.height) + canvas::HEADER + 2.]
+    }
+
     /// Grows a terminal cell into a live terminal in place (neighbours give way), or shrinks it back to a pill.
     pub(super) fn set_expanded(&mut self, addr: &str, expand: bool, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
@@ -1325,10 +1354,10 @@ impl AppWindow {
         if state.shown.is_none() { state.shown = Some(state.doc.clone()); }
         if expand {
             let before = canvas::Rest::capture(&state.doc);
-            let body = crate::terminal::size_of_grid(self.person.terminal_size[0], self.person.terminal_size[1], window);
+            let size = self.default_pane_size(window);
+            let state = &mut self.canvas_state;
             let z = state.doc.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
-            // The 2 px is the frame around the body.
-            state.doc.cards[i].size = Some([f32::from(body.width) + 2., f32::from(body.height) + canvas::HEADER + 2.]);
+            state.doc.cards[i].size = Some(size);
             state.doc.cards[i].z = z;
             state.selected = vec![addr.to_owned()];
             // Tile view re-tiles below; neighbours do not give way.
@@ -1592,8 +1621,16 @@ impl AppWindow {
                         quote["terminal"] = json!(addr);
                         self.quote_command("quote.send", &quote, window, cx);
                     }
-                    if let Err(error) = self.place_canvas_card(addr, point, cx) {
+                    // Terminals first: a new cell opens as a full terminal pane (collapse it by hand).
+                    let size = self.default_pane_size(window);
+                    let cascade = args["cascade"] == true;
+                    if let Err(error) = self.place_canvas_card(addr, point, !cascade, cx) {
                         self.fail(error);
+                    } else if let Some(card) = self.canvas_state.doc.cards.iter_mut().find(|c| c.key() == addr) {
+                        card.size = Some(size);
+                        (card.rect[2], card.rect[3]) = (size[0], size[1]);
+                        if !cascade { self.solve_layout(Some(addr), None, cx); }
+                        self.canvas_changed(cx);
                     }
                 }
             }
@@ -1686,6 +1723,7 @@ impl AppWindow {
         &mut self,
         terminal: &str,
         point: canvas::Point,
+        push: bool,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
         if !point.iter().all(|v| v.is_finite()) {
@@ -1715,7 +1753,7 @@ impl AppWindow {
         self.canvas_state
             .doc
             .place(terminal, [r[0], r[1]], [card.rect[2], card.rect[3]]);
-        if self.canvas_state.rest.is_none() { self.solve_layout(Some(terminal),None,cx); }
+        if push && self.canvas_state.rest.is_none() { self.solve_layout(Some(terminal),None,cx); }
         self.canvas_changed(cx);
         Ok(())
     }
@@ -1782,7 +1820,7 @@ impl AppWindow {
             .collect();
         for (addr, point) in ready {
             self.canvas_state.pending_points.remove(&addr);
-            if let Err(error) = self.place_canvas_card(&addr, point, cx) {
+            if let Err(error) = self.place_canvas_card(&addr, point, true, cx) {
                 self.canvas_state.error = Some(error);
             }
         }
@@ -3765,6 +3803,7 @@ mod tile_tests {
             ])).unwrap();
             for t in ["t1", "t2", "t3", "t4"] { this.live.insert(t.into(), json!({})); }
             let before: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| (c.rect, c.size)).collect();
+            this.person.tile_focus_grows = true;
             this.canvas_state.doc.camera = crate::canvas::Camera { x: 300., y: -40., zoom: 0.5 };
             this.canvas_state.selected = vec!["t2".into()];
             this.tile_canvas(true, window, cx);

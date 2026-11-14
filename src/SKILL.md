@@ -277,7 +277,7 @@ file panel. Geometry is in app-home canvas.json;
 Layouts without a theme use `canopy-dark` or `canopy-light` by appearance.
 Saved `graphite`/`paper` themes alias `herdr-dark`/`herdr-light`.
 Hand-edited canvas settings reload live: `canvas_gap` (24, 0..1024 world pixels),
-`tile_gap` (0, tile view cell gap), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `canvas_resize_terminals` (true: the grid refits to the cell; false keeps it and scales), `space_fill` (0.04, 0..1),
+`tile_gap` (0, tile view cell gap), `tile_focus_grows` (false: equal tiles), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `canvas_resize_terminals` (true: the grid refits to the cell; false keeps it and scales), `space_fill` (0.04, 0..1),
 and `terminal_size` ([100, 30], columns 20..500 and rows 5..200 for new expansions).
 They do not appear in Settings. `canopy config` prints all defaults and explanations.
 Invalid settings.json, keys.json or programs.json keeps the last good values and
@@ -363,6 +363,7 @@ every selected pane (else the focused one) behind one dialog that lists them, wi
 without asking. `canvas.close {terminal}` closes one cell: running agents ask "Terminate agent?", plain terminals
 "Close this terminal?". Done sub-agent cells clear; working ones refuse with a toast.
 `canvas.front` and `canvas.back` raise or lower the selected panes; the order is saved.
+`canvas.equalize` gives the selected panes (else the focused one) the standard `terminal_size`; `canvas.new` opens a full terminal pane, cascading from the last one.
 
 Views are in the macOS View menu or the Linux titlebar's primary menu
 (`app.menu`, optionally with a `group`);

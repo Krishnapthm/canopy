@@ -387,6 +387,7 @@ person_settings! {
     canvas_color: Option<String> = None => "Canvas background; null follows the theme.";
     canvas_gap: f32 = 24. => "Cell and space gap in world pixels (0..1024).";
     tile_gap: f32 = 0. => "Gap between cells in tile view in world pixels (0..1024).";
+    tile_focus_grows: bool = false => "In tile view the selected tile takes more room; off keeps every tile the same size.";
     canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live, only on drop, or never so cells overlap (live, drop, off).";
     canvas_resize_terminals: bool = true => "Refit a canvas terminal's grid to its cell as the cell resizes (no longer in Settings; false keeps the grid and scales it).";
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";

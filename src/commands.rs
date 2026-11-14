@@ -52,6 +52,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.agents", &[], "Open the installed agent list beside the selected cell."),
     cmd("quote.menu", &[req("path"), opt("start"), opt("end"), req("text"), opt("point")], "Open the quote popover listing running agents, at point or the pointer."),
     cmd("canvas.close", &[opt("terminal"), opt("terminals"), opt("confirmed"), opt("dont_ask")], "Close every selected pane (else the focused one) behind one dialog listing them, or the named terminal; terminals is the confirmed list, ending them all without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts."),
+    cmd("canvas.equalize", &[], "Give the selected panes (else the focused pane) the standard size (settings terminal_size); tile view re-tiles."),
     cmd("canvas.front", &[opt("terminal")], "Bring the selected panes (else the focused pane, or a named terminal outside the selection) in front of every other pane; the order is saved."),
     cmd("canvas.back", &[opt("terminal")], "Send the selected panes (else the focused pane, or a named terminal outside the selection) behind every other pane; the order is saved."),
     cmd("canvas.clear_finished", &[req("terminal"), opt("id")], "Clear finished sub-agent cells and their labels, optionally one id."),

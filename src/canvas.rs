@@ -1616,6 +1616,23 @@ mod keyboard_tests {
 }
 
 
+/// Where the next ⌘T pane goes: `step` down and right of the last one, back at the view's
+/// top-left when it would leave `view` ([x, y, w, h] world px), never on another pane's origin.
+pub fn cascade(last: Option<Point>, view: Rect, size: Point, taken: &[Point], step: f32) -> Point {
+    let start = [view[0] + step, view[1] + step];
+    let fits = |p: Point| p[0] + size[0] <= view[0] + view[2] && p[1] + size[1] <= view[1] + view[3];
+    let free = |p: Point| !taken.iter().any(|t| (t[0] - p[0]).abs() < 1. && (t[1] - p[1]).abs() < 1.);
+    let mut p = last.map_or(start, |l| [l[0] + step, l[1] + step]);
+    if !fits(p) { p = start; }
+    // At most one step per pane: every free spot is reached before the walk repeats.
+    for _ in 0..=taken.len() {
+        if free(p) { break; }
+        p = [p[0] + step, p[1] + step];
+        if !fits(p) && fits(start) { p = start; }
+    }
+    p
+}
+
 /// Drags a pane edge or corner. `zone` is (-1 left, 0, 1 right) and (-1 top, 0, 1 bottom).
 /// Left and top move the origin so the opposite edge stays put; size never drops below `min`.
 pub fn resize_from(origin: Point, size: Point, zone: (i8, i8), d: Point, min: Point) -> (Point, Point) {
@@ -1627,6 +1644,25 @@ pub fn resize_from(origin: Point, size: Point, zone: (i8, i8), d: Point, min: Po
     let (x, w) = axis(origin[0], size[0], zone.0, d[0], min[0]);
     let (y, h) = axis(origin[1], size[1], zone.1, d[1], min[1]);
     ([x, y], [w, h])
+}
+
+#[cfg(test)]
+mod cascade_tests {
+    use super::cascade;
+
+    #[test]
+    fn new_panes_step_down_right_wrap_and_never_share_an_origin() {
+        let view = [0., 0., 1000., 800.];
+        let size = [400., 300.];
+        assert_eq!(cascade(None, view, size, &[], 32.), [32., 32.]);
+        assert_eq!(cascade(Some([32., 32.]), view, size, &[[32., 32.]], 32.), [64., 64.]);
+        // No room at the bottom right: back to the top left.
+        assert_eq!(cascade(Some([580., 480.]), view, size, &[], 32.), [32., 32.]);
+        // The top left is taken: the next free step.
+        assert_eq!(cascade(Some([580., 480.]), view, size, &[[32., 32.], [64., 64.]], 32.), [96., 96.]);
+        // A view smaller than a pane still never stacks two exactly.
+        assert_eq!(cascade(None, [0., 0., 100., 100.], size, &[[32., 32.]], 32.), [64., 64.]);
+    }
 }
 
 #[cfg(test)]

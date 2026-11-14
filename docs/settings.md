@@ -12,6 +12,7 @@ The following are hand-edited only and never appear in Settings:
 |---|---|---|
 | `canvas_gap` | `24` | Cell and space gap in world pixels, 0..1024 |
 | `tile_gap` | `0` | Gap between cells in [tile view](canvas.md#tile-view), 0..1024 |
+| `tile_focus_grows` | `false` | In tile view the selected tile takes more room; off keeps every tile the same size. A toggle in Settings |
 | `canvas_push` | `"live"` | Push during a drag or resize; `"drop"` waits until release; `"off"` never pushes, so cells may overlap (space cards and root cells on Home still separate); `"off"` is a toggle in Settings |
 | `canvas_resize_terminals` | `true` | Refit a canvas terminal's grid to its cell as it resizes. False keeps the grid measured when the terminal was made (or last text-zoomed) and scales it to fit the cell, centered; settings.json only |
 | `space_fill` | `0.04` | Space background opacity, 0..1; 0 removes fill |
