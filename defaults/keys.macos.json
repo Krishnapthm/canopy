@@ -138,6 +138,7 @@
       }
     },
     "=": "canvas.equalize",
+    "cmd-enter": "canvas.sync",
     "n": "canvas.new",
     "shift-n": "canvas.agents",
     "backspace": "canvas.close",

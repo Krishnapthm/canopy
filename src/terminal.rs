@@ -223,6 +223,20 @@ pub struct TerminalView {
 }
 
 thread_local! {
+    /// Sync input (like tmux synchronize-panes): the synced terminals, by address. Typing into one
+    /// also writes the same bytes to the others. The canvas sets it from what it shows.
+    static SYNCED: RefCell<Vec<(String, SyncHandle)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A synced terminal's input side, held weakly so a closed terminal drops out.
+pub(crate) struct SyncHandle(std::rc::Weak<RefCell<Grid>>);
+
+/// Replaces the synced set; an empty list turns sync input off.
+pub(crate) fn set_synced(list: Vec<(String, SyncHandle)>) {
+    SYNCED.with_borrow_mut(|s| *s = list);
+}
+
+thread_local! {
     /// Terminals with output waiting for the next tick of the output clock.
     static OUTPUT_CLOCK: RefCell<Vec<WeakEntity<TerminalView>>> = const { RefCell::new(Vec::new()) };
 }
@@ -744,13 +758,30 @@ impl TerminalView {
 
     fn send(&self, bytes: &[u8]) {
         self.typed_at.set(Some(Instant::now()));
-        let mut g = self.grid.borrow_mut();
-        if let Some(ch) = g.channel
-            && !bytes.is_empty()
         {
-            g.vt.scroll_to_bottom();
-            g.core.input(ch, bytes);
+            let mut g = self.grid.borrow_mut();
+            if let Some(ch) = g.channel
+                && !bytes.is_empty()
+            {
+                g.vt.scroll_to_bottom();
+                g.core.input(ch, bytes);
+            }
         }
+        // Sync input: the same bytes go to every other synced terminal (written directly, never re-sent).
+        SYNCED.with_borrow(|synced| {
+            if bytes.is_empty() || !synced.iter().any(|(a, _)| *a == self.address) { return; }
+            for (_, handle) in synced.iter().filter(|(a, _)| *a != self.address) {
+                if let Some(grid) = handle.0.upgrade() && let Ok(mut g) = grid.try_borrow_mut() && let Some(ch) = g.channel {
+                    g.vt.scroll_to_bottom();
+                    g.core.input(ch, bytes);
+                }
+            }
+        });
+    }
+
+    /// This terminal's input side, for `set_synced`.
+    pub(crate) fn sync_handle(&self) -> SyncHandle {
+        SyncHandle(Rc::downgrade(&self.grid))
     }
 
     /// Files dropped on the terminal: their paths typed in, quoted, as a paste

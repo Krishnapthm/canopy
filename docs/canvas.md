@@ -177,6 +177,11 @@ back where they were.
 - A tile smaller than 320 x 140 shows its icon and name instead of terminal
   text, and its program keeps its last grid size. The entered cell always shows
   its terminal.
+- Sync input: select two or more panes and press Cmd+Enter (Ctrl+Enter;
+  `canvas.sync`). Each keystroke or paste in one synced pane goes to all of
+  them, like tmux's synchronize-panes. Synced panes show an accent border and a
+  SYNC badge. Cmd+Enter again, Esc on the canvas, or deselecting turns it off
+  (a pane that leaves the selection leaves the group).
 - `=` (`canvas.equalize`) gives the selected panes, else the focused one, the
   standard size: the `terminal_size` grid new panes open at. Cmd+A then `=`
   equalizes the whole space; in tile view it re-tiles.

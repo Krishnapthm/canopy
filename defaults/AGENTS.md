@@ -1274,6 +1274,7 @@ every selected pane (else the focused one) behind one dialog that lists them, wi
 without asking. `canvas.close {terminal}` closes one cell: running agents ask "Terminate agent?", plain terminals
 "Close this terminal?". Done sub-agent cells clear; working ones refuse with a toast.
 `canvas.front` and `canvas.back` raise or lower the selected panes; the order is saved.
+`canvas.sync` turns sync input on for the selected panes (typing in one reaches all) or off.
 `canvas.equalize` gives the selected panes (else the focused one) the standard `terminal_size`; `canvas.new` opens a full terminal pane, cascading from the last one.
 
 Views are in the macOS View menu or the Linux titlebar's primary menu

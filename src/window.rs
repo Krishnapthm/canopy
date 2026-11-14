@@ -2948,6 +2948,7 @@ impl AppWindow {
             "canvas.tile" => self.tile_canvas(true, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
             "canvas.equalize" => self.equalize_panes(window, cx),
+            "canvas.sync" => self.toggle_sync(window, cx),
             "canvas.front" | "canvas.back" => self.stack_panes(name == "canvas.front", a["terminal"].as_str(), window, cx),
             "canvas.sub_message" => self.message_sub(a, window, cx),
             "wire.connect" | "wire.remove" | "wire.reset" | "wire.open" => self.wire_command(name, a, window, cx),

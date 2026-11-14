@@ -86,8 +86,10 @@ impl AppWindow {
                 self.focus.focus(window, cx);
             }
             "canvas.leave" => {
-                // Like Figma's Escape: cancel a connection, else clear the selection, else go up to Home.
-                if self.canvas_state.connecting.take().is_none() {
+                // Esc ends sync input first. Then, like Figma: cancel a connection, else clear the selection, else go Home.
+                if !self.canvas_state.synced.borrow().is_empty() {
+                    self.canvas_state.synced.borrow_mut().clear();
+                } else if self.canvas_state.connecting.take().is_none() {
                     if !self.canvas_state.selected.is_empty() || self.canvas_state.wire.selected.is_some() {
                         self.canvas_state.selected.clear();
                         self.canvas_state.wire.selected = None;

@@ -70,6 +70,9 @@ pub(super) struct State {
     moves: HashMap<String, (canvas::Rest, canvas::Rest)>,
     /// The expanded cell's corner being dragged, and the pointer where it was last seen.
     cell_resize: Option<(String, Point<Pixels>)>,
+    /// Sync input: the synced panes. Pruned while drawing to what is still selected (a Cell
+    /// because drawing takes &self); fewer than two ends it.
+    pub(super) synced: RefCell<Vec<String>>,
     /// The room and origin of the last ⌘T pane, for the next one's cascade step.
     cascade: Option<(Option<String>, canvas::Point)>,
     /// Which edge or corner `cell_resize` drags (see `canvas::resize_from`).
@@ -173,6 +176,7 @@ impl State {
             cell_resize: None,
             resize_zone: (1, 1),
             cascade: None,
+            synced: RefCell::new(Vec::new()),
             zoomed_at: None,
             zoom_task: None,
             wheel_pan_at: None,
@@ -849,6 +853,18 @@ impl AppWindow {
                 self.dispatch("terminal.kill", &json!({"terminal":key}), true, window, cx);
             }
         }
+    }
+
+    /// `canvas.sync`: turns sync input on for the target panes (two or more), or off.
+    pub(super) fn toggle_sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.canvas_state.synced.borrow().is_empty() {
+            self.canvas_state.synced.borrow_mut().clear();
+        } else {
+            let panes: Vec<_> = self.targets(window).into_iter().filter(|k| self.live.contains_key(k)).collect();
+            if panes.len() < 2 { return self.fail("select two or more terminal panes to sync their input"); }
+            *self.canvas_state.synced.borrow_mut() = panes;
+        }
+        cx.notify();
     }
 
     /// `canvas.equalize`: every target pane opens at the standard size; tile view re-tiles.
@@ -2242,6 +2258,15 @@ impl AppWindow {
     }
     pub(super) fn render_canvas(&self, cx: &mut Context<Self>) -> AnyElement {
         let state = &self.canvas_state;
+        // A pane that leaves the selection leaves sync input; under two, sync ends.
+        let synced = {
+            let mut synced = state.synced.borrow_mut();
+            synced.retain(|a| state.selected.contains(a));
+            if synced.len() < 2 { synced.clear(); }
+            crate::terminal::set_synced(self.terms.values().filter(|t| synced.contains(&t.address))
+                .map(|t| (t.address.clone(), t.view.read(cx).sync_handle())).collect());
+            synced.clone()
+        };
         let shown_doc = state.shown.as_ref().unwrap_or(&state.doc);
         let camera = state.doc.camera;
         let bounds = self.bounds.borrow().get("canopy-canvas").copied();
@@ -2760,7 +2785,8 @@ impl AppWindow {
             // An expanded cell is a pill (its header) over a terminal; it keeps its world size at every zoom.
             let expanded = card.size.is_some();
             let [cw, ch] = [card.rect[2], card.rect[3]];
-            let frame_color = c(if state.selected.contains(&addr) { "ring" } else { "border" });
+            let is_synced = synced.contains(&addr);
+            let frame_color = c(if is_synced { "accent" } else if state.selected.contains(&addr) { "ring" } else { "border" });
             let mut pill = div()
                 .id(SharedString::from(format!("canvas-{addr}")))
                 .when(!expanded, |d| d.absolute().left(px(x)).top(px(y)).rounded(px(ui::RADIUS * z)).border_1().border_color(frame_color).bg(c("surface")))
@@ -2785,6 +2811,8 @@ impl AppWindow {
                 .when_some(editing, |d, (_, input, _)| d.child(gpui_base::Input::new(input)))
                 .when(editing.is_none(), |d| d.child(name.clone()))
                 .id(SharedString::from(format!("canvas-name-{addr}")));
+            let pill_badge = is_synced.then(|| div().flex_none().px(px(5. * z)).rounded(px(3. * z)).border_1().border_color(c("accent"))
+                .text_size(px(10. * z)).line_height(px(16. * z)).font_weight(FontWeight::SEMIBOLD).text_color(c("accent")).child("SYNC"));
             pill = pill.child(match tab_id {
                 Some(id) => name_box.on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     let editing = this.canvas_state.rename.as_ref().is_some_and(|(t, _, _)| *t == Rename::Tab(id.clone()));
@@ -2794,7 +2822,7 @@ impl AppWindow {
                     }
                 })).into_any_element(),
                 None => name_box.into_any_element(),
-            });
+            }).children(pill_badge);
             if agent && rec["status"] == "working" {
                 pill = pill.child(
                     svg()
@@ -2984,7 +3012,7 @@ impl AppWindow {
                 .w(px(card.rect[2] * z))
                 .h(px(card.rect[3] * z))
                 .rounded(px(ui::RADIUS * z))
-                .border_1()
+                .when(is_synced, |d| d.border_2()).when(!is_synced, |d| d.border_1())
                 .border_color(frame_color)
                 .bg(c("surface"))
                 .overflow_hidden()
