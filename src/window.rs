@@ -552,7 +552,9 @@ impl AppWindow {
         let owner_window = window.window_handle();
         w._canvas_keys = Some(cx.intercept_keystrokes(move |event, window, cx| {
             if window.window_handle() != owner_window { return; }
-            let swallowed = owner.update(cx, |this, cx| this.canvas_key(&event.keystroke, window, cx)).unwrap_or(false);
+            let swallowed = owner.update(cx, |this, cx| {
+                this.record_shortcut(&event.keystroke) || this.canvas_key(&event.keystroke, window, cx)
+            }).unwrap_or(false);
             if swallowed { cx.stop_propagation(); }
         }));
         w._focus_lost = Some(cx.on_focus_lost(window, |this, window, cx| this.restore_focus(window, cx)));
@@ -3745,6 +3747,19 @@ impl AppWindow {
         }), window, cx);
     }
 
+    /// Settings must record bound keys before GPUI runs their actions. Mods cannot intercept them.
+    fn record_shortcut(&self, key: &gpui::Keystroke) -> bool {
+        let Some(request) = mods::shared("settings.record-shortcut") else { return false; };
+        let Some(overlay) = self.overlays.iter().rev().find(|o| o.kind.modal_keys()) else { return false; };
+        if request.as_str() != Some(overlay.id.as_str()) { return false; }
+        let Some(copy) = self.copies.get(&overlay.slot).filter(|c| c.inst.name == "frame-settings") else { return false; };
+        if !matches!(key.key.as_str(), "shift" | "control" | "alt" | "platform" | "function") {
+            mods::set_shared("settings.record-shortcut".into(), Value::Null);
+            mods::send_command_to(copy.id, &json!({"shortcut":key.unparse()}).to_string());
+        }
+        true
+    }
+
     /// Which copies are on screen, for `<mod>.<command>` (`mods::send_command`).
     fn publish_shown_copies(&self) {
         let (_, shown) = self.visible();
@@ -3761,6 +3776,9 @@ impl AppWindow {
 
     fn remove_overlay(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(i) = self.overlays.iter().position(|o| o.id == id) {
+            if mods::shared("settings.record-shortcut").as_ref().and_then(Value::as_str) == Some(id) {
+                mods::set_shared("settings.record-shortcut".into(), Value::Null);
+            }
             let o = self.overlays.remove(i);
             if self.win_drag.as_ref().is_some_and(|d| d.id == o.id) {
                 self.win_drag = None;
@@ -5598,6 +5616,47 @@ mod tests {
         let (view, cx) = cx.add_window_view(|window, cx| super::AppWindow::new(crate::hc::offline(), requests, window, cx));
         assert_eq!(view.update(cx, |this, _| this.layout_name.clone()), "test");
         (view, cx)
+    }
+
+    #[test]
+    fn shortcuts_capture_precedes_bound_actions() {
+        in_own_process("shortcuts_capture");
+    }
+
+    #[gpui::test]
+    fn shortcuts_capture(cx: &mut TestAppContext) {
+        use serde_json::{json, Value};
+        if !running_alone("shortcuts_capture") { return; }
+        let (view, cx) = open_window(cx, "shortcuts-probe", "", json!({"id":"root", "type":"row", "children":[]}));
+        // A probe replaces only the isolated test home's settings, with no file IO or core calls.
+        std::fs::write(crate::mods::frame_dir().join("settings/main.js"), r#"
+import { View, div } from 'gpui-kit';
+import { nextCommand, setShared } from 'herdr';
+export default class Probe extends View {
+  init(_, cx) {
+    this.handle = cx.focus_handle(); this.handle.focus();
+    cx.spawn(async cx => { for (;;) {
+      const command = await nextCommand();
+      if (command.startsWith('{"shortcut":')) setShared('shortcuts-test.captured', command);
+    } });
+  }
+  render() { return div().id('probe').track_focus(this.handle); }
+}
+"#).unwrap();
+        view.update_in(cx, |this, window, cx| {
+            this.open_overlay("shortcuts-test".into(), json!({"mod":"frame-settings", "kind":"dialog"}), window, cx);
+            crate::keys::install(crate::keys::parse(r#"{"global":{"ctrl-k":"overlay.close"}}"#).unwrap(), cx);
+        });
+        cx.run_until_parked();
+        crate::mods::set_shared("settings.record-shortcut".into(), json!("shortcuts-test"));
+        cx.simulate_keystrokes("ctrl-k");
+        cx.run_until_parked();
+        assert_eq!(crate::mods::shared("shortcuts-test.captured"), Some(json!(r#"{"shortcut":"ctrl-k"}"#)));
+        assert_eq!(crate::mods::shared("settings.record-shortcut"), Some(Value::Null));
+        assert!(view.update(cx, |this, _| this.overlays.iter().any(|o| o.id == "shortcuts-test")));
+        crate::mods::set_shared("settings.record-shortcut".into(), json!("shortcuts-test"));
+        view.update_in(cx, |this, window, cx| this.close_overlay("shortcuts-test", window, cx));
+        assert_eq!(crate::mods::shared("settings.record-shortcut"), Some(Value::Null));
     }
 
     #[test]

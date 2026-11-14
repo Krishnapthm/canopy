@@ -129,7 +129,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("app.help", &[], "Toggle the keys dialog."),
     cmd("app.welcome", &[], "Show the welcome again."),
     cmd("app.palette", &[], "Toggle the command palette: every command by name, with its key; calling again closes it."),
-    cmd("app.settings", &[opt("section")], "Open the settings (section: look, keyboard, machines, alerts)."),
+    cmd("app.settings", &[opt("section")], "Open the settings (section: look, keyboard, shortcuts, machines, alerts)."),
     cmd("app.reset", &[], "The escape hatch: set the shown layout and keys aside, back to the default screen."),
     cmd("app.theme", &[req("name")], "Use a theme (a preset or themes/<name>.json)."),
     cmd("app.zoom_in", &[], "Make everything bigger."),

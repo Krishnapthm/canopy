@@ -60,3 +60,26 @@ whenever the canvas itself has the keyboard (no cell entered, no input focused),
 and an unbound key is swallowed unless it carries Ctrl, Alt or Cmd. Its
 bindings may carry modifiers but are never sequences. An entered terminal gets
 every key except the bindings in `layout:main` and `global`.
+
+Settings > Shortcuts shows current and shipped keys alongside descriptions from
+the command catalog. It includes unbound commands and custom key actions, with
+separate rows for sections and command arguments. Equivalent keys in one section
+warn when they name different actions.
+
+Use the search field to filter action names, descriptions and keys. Click a
+current key (or Unbound) and press one combination to replace that action's
+bindings in its section. Esc cancels; Backspace clears. A conflicting key is
+refused with a warning so another action is never silently replaced. The
+reserved Ctrl+Alt+Shift+Esc recovery key cannot be assigned.
+
+Reset to default restores every shipped key for that row, or clears an action
+with no default. Reset all shortcuts asks for confirmation, restores this OS's
+shipped actions and clears other bindings to built-in commands. Custom mod
+actions and unrelated sections remain; clear a conflicting custom key first.
+
+Edits use app-home `keys.json`, including on macOS. Writes re-read the file,
+preserve other entries and use the file API's atomic expected-text check.
+Concurrent edits are retried at most twice; errors raise a toast. The existing
+config reload applies saved keys and refreshes the page, with no new watcher.
+Commands needing arguments can be configured as object actions in keys.json;
+the recorder keeps existing arguments and replaces only the keys.

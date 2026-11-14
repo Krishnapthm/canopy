@@ -214,6 +214,9 @@ those files or the generated guide. The app rewrites them on start.
   `terminal_scroll_speed` (default 1, 0.1..5) adjusts wheel and trackpad
   scrolling, including mouse reports. Set them in settings.json or the
   layout's look; the layout wins.
+- `app.settings {section: "shortcuts"}` opens searchable current and shipped keys.
+  Recording and resets edit app-home keys.json live, preserving existing command
+  arguments; configure new argument-bearing actions in that file.
 - Home defaults to `~/.config/canopy`; `HERDR_APP_HOME` selects another.
 - Mods live in `mods/<name>/` with `main.js` and optional `mod.json`.
   They are trusted JavaScript with command and network access.
