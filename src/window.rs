@@ -2357,6 +2357,8 @@ impl AppWindow {
             // The program ended on its own (or was killed): its pane goes now. A
             // stream that just broke (the core died) says neither.
             let closed = matches!(why.as_str(), "exited" | "killed" | "finished");
+            // Its pane goes before the live listing drops it; until then nothing may adopt it again.
+            if closed { self.closing_terminals.insert(t.address.clone(), true); }
             if closed && self.chrome.find(block).and_then(Node::terminal) == Some(t.address.as_str()) {
                 self.chrome.remove_slot(block);
                 return self.sync(window, cx);

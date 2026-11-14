@@ -1651,8 +1651,10 @@ impl AppWindow {
             .live
             .keys()
             .filter(|a| {
+                // A killed or ended terminal stays in `live` until the next listing; it is not adopted.
                 self.model.pane_of(a).is_none()
                     && !self.changing_terminals.contains(*a)
+                    && !self.closing_terminals.contains_key(*a)
                     && !a.contains('/')
             })
             .cloned()
