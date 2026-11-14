@@ -100,13 +100,16 @@ and sub-agent transcripts only.
   terminal's text (not the canvas) until the app restarts; the grid refits.
 - Input: keys go to the terminal once it is focused, as in any terminal, so
   Backspace, Delete and Cmd+Z belong to it. The wheel scrolls a focused
-  expanded terminal; over any other cell, or with Cmd (Ctrl) held, it pans or
-  zooms the canvas.
+  expanded terminal; over any other cell it pans the canvas. Cmd (Ctrl) held
+  zooms the canvas over any cell. A pan that began on the canvas keeps panning
+  across cells until the wheel is quiet for 150 ms; a scroll that began over a
+  focused terminal stays in it. Middle or a mouse side button drags the canvas
+  too (grabbing hand while it does).
 - Zoom: `terminal::Scaled` multiplies font size, cell size and padding while a
-  terminal draws, so the text is real text at every zoom. While the zoom is
-  moving (and 160 ms after) the body is a flat fill and the header stays; text
-  returns once it rests. An expanded cell keeps its size at every zoom; below
-0.5 zoom its body stays a flat fill instead of text. No timer
+  terminal draws, so the text is real text at every zoom. The text
+  draws live at every zoom frame; the program's grid is measured only once the
+  zoom has rested for 160 ms. An expanded cell keeps its size at every zoom;
+  below 0.5 zoom its body is a flat fill instead of text. No timer
   runs while nothing moves.
 
 ## Tile view

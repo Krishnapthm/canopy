@@ -300,7 +300,7 @@ arranges selected cells or the current space; no layout repeats the last choice.
 geometry before the last move, resize or arrange. Cells keep a 24 px gap;
 spaces grow to hold them and push other spaces.
 
-Empty-canvas left-drag and middle-mouse drag also pan; an empty click focuses the canvas.
+Empty-canvas left-drag, middle-mouse and side-button drag also pan; an empty click focuses the canvas.
 Focused terminals still receive Space. Right-click keeps the canvas menus.
 Canvas space labels drag the space and its cards; bottom-right handles resize with card padding.
 Space label menus offer Rename, Color, Show frame and confirmed Delete space.

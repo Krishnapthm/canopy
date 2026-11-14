@@ -1105,7 +1105,7 @@ arranges selected cells or the current space; no layout repeats the last choice.
 geometry before the last move, resize or arrange. Cells keep a 24 px gap;
 on Home, space cards and root cells push each other the same way.
 
-Empty-canvas left-drag and middle-mouse drag also pan; an empty click focuses the canvas.
+Empty-canvas left-drag, middle-mouse and side-button drag also pan; an empty click focuses the canvas.
 Focused terminals still receive Space. Right-click keeps the canvas menus.
 Space cards drag on Home (what is inside stays put). Space card menus offer Rename, Color and confirmed Delete space.
 Empty-canvas menus create terminals in the space folder or home, installed agents,

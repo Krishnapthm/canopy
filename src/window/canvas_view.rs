@@ -59,6 +59,8 @@ pub(super) struct State {
     /// When the camera zoom last moved by gesture: expanded cells draw flat until it has rested.
     zoomed_at: Option<std::time::Instant>,
     zoom_task: Option<Task<()>>,
+    /// When a plain wheel last panned the canvas: that gesture keeps panning across cells (`claims_wheel`).
+    wheel_pan_at: Option<std::time::Instant>,
     wire: wire_view::WireUi,
     /// A box being dragged on empty canvas: where it started, where the pointer is, and the
     /// selection it adds to (Shift), in window coordinates.
@@ -150,6 +152,7 @@ impl State {
             cell_resize: None,
             zoomed_at: None,
             zoom_task: None,
+            wheel_pan_at: None,
             wire: Default::default(),
             marquee: None,
             group: vec![],
@@ -1298,6 +1301,34 @@ impl AppWindow {
         state.motion.target.is_none() && state.zoomed_at.is_none()
     }
 
+    /// One wheel or trackpad event on the canvas: Cmd (Ctrl) zooms at the pointer, else it pans.
+    fn canvas_wheel(&mut self, e: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.canvas_state.motion.target = None;
+        self.canvas_state.motion.velocity = [0.; 2];
+        let d = e.delta.pixel_delta(px(20.));
+        if d.x == px(0.) && d.y == px(0.) {
+            return;
+        }
+        let b = self.bounds.borrow().get("canopy-canvas").copied();
+        let origin = b.map(|b| b.origin).unwrap_or_default();
+        if wheel_zooms(e.modifiers) {
+            self.canvas_state.doc.camera.zoom_at(
+                canvas::rubber_band(self.canvas_state.doc.camera.zoom * canvas::zoom_factor(f32::from(d.y)*0.005)),
+                [f32::from(e.position.x - origin.x), f32::from(e.position.y - origin.y)],
+            );
+            self.zoom_moved(window, cx);
+        } else {
+            self.canvas_state.doc.camera.pan([d.x.into(), d.y.into()]);
+            self.canvas_state.wheel_pan_at = Some(std::time::Instant::now());
+        }
+        if matches!(e.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+            self.settle_zoom([f32::from(e.position.x-origin.x), f32::from(e.position.y-origin.y)], window, cx);
+        }
+        self.canvas_changed(cx);
+        cx.stop_propagation();
+        cx.notify();
+    }
+
     /// The view of the expanded cell last selected, for the keyboard to return to.
     pub(super) fn focused_cell(&self) -> Option<&Term> {
         let addr = self.canvas_state.selected.last()?;
@@ -2091,6 +2122,8 @@ impl AppWindow {
                 "#F5F5F5"
             },
         );
+        let panning = matches!(state.drag, Some((None, _)));
+        let view = cx.entity();
         let mut area = div()
             .id("canopy-canvas")
             .relative()
@@ -2099,8 +2132,7 @@ impl AppWindow {
             .overflow_hidden()
             .bg(c(bg))
             .map(|d| match (&state.drag, state.space_down) {
-                (Some((None, _)), _) => d.cursor(CursorStyle::ClosedHand),
-                (_, true) => d.cursor(CursorStyle::OpenHand),
+                (None | Some((Some(_), _)), true) => d.cursor(CursorStyle::OpenHand),
                 _ => d,
             })
             // Capture phase, before pills and space labels: middle drag, or left drag with
@@ -2109,7 +2141,7 @@ impl AppWindow {
                 this.canvas_state.motion.target = None;
                 this.canvas_state.motion.velocity = [0.; 2];
                 this.canvas_state.motion.sample = Some(std::time::Instant::now());
-                if e.button == MouseButton::Middle
+                if matches!(e.button, MouseButton::Middle | MouseButton::Navigate(_))
                     || (e.button == MouseButton::Left && this.canvas_state.space_down)
                 {
                     this.canvas_state.selected.clear();
@@ -2123,7 +2155,23 @@ impl AppWindow {
                     move |b, _, _| {
                         maps.borrow_mut().insert("canopy-canvas".into(), b);
                     },
-                    |_, _, _, _| {},
+                    move |b, _, window, _| {
+                        // Window capture, before any cell sees the wheel: Cmd zooms and a pan in
+                        // progress continues over cells; a fresh plain wheel is left to the cell
+                        // under it (an entered terminal scrolls) or to the canvas handler below.
+                        let view = view.clone();
+                        window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
+                            // shortcut: bounds only, so Cmd+wheel over a popup on the canvas zooms the canvas; check the topmost hitbox if that bites.
+                            if phase == DispatchPhase::Capture && b.contains(&e.position)
+                                && view.read(cx).claims_wheel(e.modifiers, std::time::Instant::now())
+                            {
+                                view.update(cx, |this, cx| this.canvas_wheel(e, window, cx));
+                            }
+                        });
+                        if panning {
+                            window.set_window_cursor_style(CursorStyle::ClosedHand);
+                        }
+                    },
                 )
                 .absolute()
                 .size_full(),
@@ -2145,38 +2193,7 @@ impl AppWindow {
                     this.open_preview(json!({"path":path,"point":point}), window, cx);
                 }
             }))
-            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| {
-                this.canvas_state.motion.target = None;
-                this.canvas_state.motion.velocity = [0.; 2];
-                let d = e.delta.pixel_delta(px(20.));
-                if d.x == px(0.) && d.y == px(0.) {
-                    return;
-                }
-                let b = this.bounds.borrow().get("canopy-canvas").copied();
-                let origin = b.map(|b| b.origin).unwrap_or_default();
-                if if cfg!(target_os = "macos") {
-                    e.modifiers.platform
-                } else {
-                    e.modifiers.control
-                } {
-                    this.canvas_state.doc.camera.zoom_at(
-                        canvas::rubber_band(this.canvas_state.doc.camera.zoom * canvas::zoom_factor(f32::from(d.y)*0.005)),
-                        [
-                            f32::from(e.position.x - origin.x),
-                            f32::from(e.position.y - origin.y),
-                        ],
-                    );
-                    this.zoom_moved(window, cx);
-                } else {
-                    this.canvas_state.doc.camera.pan([d.x.into(), d.y.into()]);
-                }
-                if matches!(e.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled) {
-                    this.settle_zoom([f32::from(e.position.x-origin.x), f32::from(e.position.y-origin.y)], window, cx);
-                }
-                this.canvas_changed(cx);
-                cx.stop_propagation();
-                cx.notify();
-            }))
+            .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| this.canvas_wheel(e, window, cx)))
             .on_pinch(cx.listener(|this, e: &PinchEvent, window, cx| {
                 this.canvas_state.motion.target = None;
                 this.canvas_state.motion.velocity = [0.; 2];
@@ -2393,15 +2410,15 @@ impl AppWindow {
                 if this.canvas_state.tile.is_some() {
                     cx.defer_in(window, |this, window, cx| this.tile_canvas(false, window, cx));
                 }
-            }))
-            .on_mouse_up(
-                MouseButton::Middle,
-                cx.listener(|this, _, window, cx| {
-                    this.end_canvas_drag(cx);
-                    this.animate_camera(window, cx);
-                    cx.notify();
-                }),
-            );
+            }));
+        // Middle and the side buttons pan; any of them ending the pan.
+        for button in [MouseButton::Middle, MouseButton::Navigate(NavigationDirection::Back), MouseButton::Navigate(NavigationDirection::Forward)] {
+            area = area.on_mouse_up(button, cx.listener(|this, _, window, cx| {
+                this.end_canvas_drag(cx);
+                this.animate_camera(window, cx);
+                cx.notify();
+            }));
+        }
         // Home shows each space as a card; double-click it (or Enter) to go inside.
         for space in shown_doc.spaces.iter().filter(|_| shown_doc.room.is_none()) {
             if self.model.spaces.iter().any(|s| s.id == space.space && root_space(s)) {
@@ -2713,11 +2730,11 @@ impl AppWindow {
                 pills.push((card.z, pill.into_any_element()));
                 continue;
             }
-            // The body: the terminal, or a flat stand-in while the zoom moves or is too far out to read (live text at every pinch step would fill the glyph cache).
+            // The body: the terminal, or a flat stand-in when too far out to read. It draws live at every zoom frame; its PTY grid waits for `settled`.
             let slot = cell_slot(&card.terminal);
             // The entered cell always draws live: its terminal holds the keyboard, Cmd+Esc included.
             let entered = !state.mode && state.selected.last() == Some(&card.terminal);
-            let live = self.terms.get(&slot).filter(|_| entered || (self.camera_rested() && z >= canvas::EXPANDED_MIN_ZOOM));
+            let live = self.terms.get(&slot).filter(|_| entered || z >= canvas::EXPANDED_MIN_ZOOM);
             let body_size = size(px(card.rect[2] - 2.), px(card.rect[3] - canvas::HEADER - 2.));
             // A tile squeezed below readable size shows who it is instead, and its program keeps its grid.
             let compact = state.tile.is_some() && !entered && (cw < canvas::TILE_COMPACT[0] || ch < canvas::TILE_COMPACT[1]);
@@ -2725,7 +2742,11 @@ impl AppWindow {
                 let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.terminal);
                 // The grid follows the cell only once the zoom rests, else a pinch resizes the program every frame.
                 let settled = !resizing && !compact && self.camera_rested();
-                t.view.update(cx, |v, cx| v.set_scale(z, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx));
+                t.view.update(cx, |v, cx| {
+                    // Unentered cells let the wheel through, so the canvas pans over them.
+                    v.wheel_needs_focus = true;
+                    v.set_scale(z, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
+                });
             }
             let (select_addr, resize_addr, mode_addr) = (card.terminal.clone(), card.terminal.clone(), card.terminal.clone());
             let body = div()
@@ -3184,6 +3205,26 @@ fn bar_inset(macos: bool, fullscreen: bool) -> f32 {
 /// How long the zoom must be still before an expanded cell draws live text again.
 const ZOOM_REST: Duration = Duration::from_millis(160);
 
+/// How long a plain wheel pan keeps owning the wheel after its last event (covers momentum).
+const WHEEL_GESTURE: Duration = Duration::from_millis(150);
+
+/// Whether the wheel with these modifiers zooms the canvas (Cmd on macOS, Ctrl elsewhere).
+fn wheel_zooms(m: Modifiers) -> bool {
+    if cfg!(target_os = "macos") { m.platform } else { m.control }
+}
+
+/// Whether the canvas takes a wheel event before the cell under it: always when zooming, and
+/// for a plain wheel while a pan that began on the canvas last moved less than `WHEEL_GESTURE` ago.
+fn wheel_claimed(zoom: bool, last_pan: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    zoom || last_pan.is_some_and(|t| now.saturating_duration_since(t) < WHEEL_GESTURE)
+}
+
+impl AppWindow {
+    fn claims_wheel(&self, m: Modifiers, now: std::time::Instant) -> bool {
+        wheel_claimed(wheel_zooms(m), self.canvas_state.wheel_pan_at, now)
+    }
+}
+
 /// The window slot of an expanded cell's terminal view.
 pub(super) fn cell_slot(addr: &str) -> String {
     format!("canvas:{addr}")
@@ -3410,6 +3451,20 @@ mod quote_tests {
         assert_eq!(format_quote(&json!({"path":"/a.md","start":12,"end":12,"text":"a\n"}), None), "@/a.md:12\n> a");
         assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","message":"  why?\n"}), None), "@/a.md\n> a\n\nwhy?");
         assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","message":" "}), None), "@/a.md\n> a");
+    }
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::{wheel_claimed, WHEEL_GESTURE};
+    use std::time::Instant;
+    #[test]
+    fn a_pan_in_progress_keeps_the_wheel_until_it_goes_quiet() {
+        let t = Instant::now();
+        assert!(!wheel_claimed(false, None, t), "a fresh plain wheel belongs to the cell under it");
+        assert!(wheel_claimed(true, None, t), "zoom always belongs to the canvas");
+        assert!(wheel_claimed(false, Some(t), t + WHEEL_GESTURE / 2));
+        assert!(!wheel_claimed(false, Some(t), t + WHEEL_GESTURE));
     }
 }
 
