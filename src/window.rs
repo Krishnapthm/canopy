@@ -1376,6 +1376,8 @@ impl AppWindow {
     /// Creates what's visible, drops what isn't, publishes state, saves, focuses.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.canvas_state.editing != self.canvas_state.file { self.canvas_state.editing = None; }
+        // The picker finds open file tabs by this; set_shared is a no-op when unchanged.
+        mods::set_shared("canvas.files".into(), json!(self.canvas_state.tabs));
         self.sync_canvas(window,cx);
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);

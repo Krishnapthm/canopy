@@ -154,6 +154,7 @@ impl AppWindow {
                         let Some(id) = super::recent_space(&self.canvas_state.recent, &ids, room.as_ref(), d == "oldest") else { return };
                         id
                     }
+                    Some(k) if ids.iter().any(|s| s == k) => k.to_owned(),
                     Some(k) => match k.parse::<usize>() {
                         Ok(k) if (1..=n).contains(&k) => ids[k - 1].clone(),
                         _ => return self.fail(format!("no space {k}")),
