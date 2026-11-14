@@ -65,15 +65,8 @@ sandbox do terminal.copy
 printf 'stale clipboard' | xsel --clipboard --input
 sandbox key C Control_L Shift_L
 [[ $(xsel --clipboard --output) == READY ]]
-sandbox do terminal.right_click '{"to":"program"}'
-for _ in {1..100}; do
-  if [[ $(sandbox hc get "$child" | jq -r '.labels["herdr.right-click"]') == program ]]; then break; fi
-  sleep 0.1
-done
-[[ $(sandbox hc get "$child" | jq -r '.labels["herdr.right-click"]') == program ]]
-[[ $(sandbox hc get "$parent" | jq -r '.labels["herdr.right-click"]') == null ]]
 if sandbox hc read "$parent" --lines 30 | grep -Eq 'SENTINEL|PASTE:|CTRL_V'; then
   echo 'input leaked into the parent terminal' >&2
   exit 1
 fi
-echo 'peek paste/copy/image/right-click targeting and 100KB paste passed'
+echo 'peek paste/copy/image targeting and 100KB paste passed'

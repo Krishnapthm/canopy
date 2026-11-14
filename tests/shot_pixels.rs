@@ -231,7 +231,7 @@ fn native() {
 
 fn main() {
     #[cfg(not(windows))]
-    if std::env::var_os("HERDR_SHOT_NATIVE_TEST").is_none() {
+    if std::env::var_os("CANOPY_SHOT_NATIVE_TEST").is_none() {
         return headless();
     }
     native();

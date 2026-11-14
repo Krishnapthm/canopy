@@ -9,7 +9,9 @@ a token until somebody writes.
 
 - Hover a cell: a round "+" shows at the middle of each side. Drag from one to another cell
   of the same space and let go; release on empty canvas cancels, and a cell in
-  another space says "Same space only for now". Sub-agents and agents started with
+  another space says "Same space only for now". Or click a "+" without moving:
+  the edge then follows the pointer, and the next click on a cell connects it.
+  Clicking empty canvas or pressing Esc cancels. Sub-agents and agents started with
   `canopy spawn` are wired to their parent already (the edge ends in a dot at the child).
 - Agents use `canopy wire` (their note says how; the app puts `canopy` first on every
   terminal's PATH): `tell`, `reply`, `wait`, `read`; with no arguments it lists peers

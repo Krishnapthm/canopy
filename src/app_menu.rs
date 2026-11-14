@@ -8,8 +8,8 @@ pub fn groups(view: &View) -> Vec<(&'static str, Vec<Value>)> {
     vec![
         ("File", vec![
             json!(["New Terminal", "canvas.create", {}]),
-            json!(["Open File...", "preview.open", {}]),
-            json!(["New Space…", "canvas.create", {"kind":"space"}]),
+            json!(["Open File", "preview.open", {}]),
+            json!(["Open Space", "canvas.create", {"kind":"space"}]),
             Value::Null,
             json!(["Pop Out Panel", "panel.pop_out", {}]),
             json!(["Close Panel", "panel.close", {}]),

@@ -1,10 +1,9 @@
-// Asks before something destructive, e.g. "Close space?". Opened as a
-// Props: title, detail, command?, accept?; dontAsk offers the terminal-close opt-out.
+// Asks before something destructive, e.g. "Delete space?". Opened as a dialog.
+// Props: title, detail, panes? (icon, tint, name), command?, accept?, destructive?, dontAsk?.
 // Enter confirms (runs the command), Esc cancels.
 
-import { View, div } from "gpui-kit";
-import { v_flex, h_flex, Checkbox } from "gpui-base";
-import { run, props, closeOverlay, theme } from "herdr";
+import { View, div, svg, image } from "gpui-kit";
+import { run, props, closeOverlay, theme, ui } from "herdr";
 
 export default class Confirm extends View {
   init(_props, cx) {
@@ -19,39 +18,27 @@ export default class Confirm extends View {
     if (p.command) run(p.command.name, { ...(p.command.args ?? {}), ...(p.dontAsk && this.dontAsk ? { dont_ask: true } : {}) });
   }
 
-  render(cx) {
-    const t = theme();
+  render() {
     const p = props() ?? {};
-    const button = (id, label, bg, fg, onClick) =>
-      h_flex().id(id).h(32).px(14).items_center().rounded(8).border_1().border_color(id === "no" ? t.input : bg).bg(bg).text_color(fg).cursor_pointer().hover((s) => s.opacity(0.88)).on_click(onClick).child(label);
-    return v_flex()
-      .id("confirm")
+    const close = () => closeOverlay(props().overlay);
+    return ui.panel("confirm")
       .track_focus(this.handle)
       .on_key_down((e, cx) => {
         if (e.key === "enter") this.yes();
-        else if (e.key === "escape") closeOverlay(props().overlay);
+        else if (e.key === "escape") close();
         else return;
         cx.stop_propagation();
       })
-      .size_full()
-      .min_h(0)
-      .p(18)
-      .gap(12)
-      .rounded(8)
-      .bg(t.popover)
-      .text_size(13)
-      .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child(p.title ?? "Are you sure?")).child(div().text_size(11).text_color(t.dim).child("Esc")))
-      .child(div().flex_1().min_h(0).overflow_y_scrollbar().text_color(t.muted).child(p.detail ?? ""))
-      .when(p.dontAsk, el => el.child(Checkbox.new("dont-ask").checked(this.dontAsk).accessibility_label("Don't ask again").flex().gap(8).items_center().cursor_pointer()
-        .on_change((checked, cx) => { this.dontAsk = checked; cx.notify(); })
-        .child(div().child(this.dontAsk ? "☑" : "☐")).child("Don't ask again")))
-      .child(
-        h_flex()
-          .justify_end()
-          .gap(8)
-          .text_size(12)
-          .child(button("no", p.command ? "Cancel" : "Close", t.raised, t.foreground, () => closeOverlay(props().overlay)))
-          .children(p.command ? [button("yes", p.accept ?? "Confirm", t.solid, t.solid_foreground, () => this.yes())] : []),
-      );
+      .child(ui.title(p.title ?? "Are you sure?"))
+      .when(Boolean(p.detail), (el) => el.child(ui.description(p.detail)))
+      .when(Boolean(p.panes?.length), el => el.child(div().id("confirm-panes").max_h(320).overflow_y_scroll()
+        .children(p.panes.map((pane, i) => div().id(`confirm-pane-${i}`).flex().items_center().gap(8).py(4)
+          .child(pane.tint ? svg(pane.icon).size(16).flex_none().text_color(theme().muted) : image(pane.icon).w(16).h(16).flex_none())
+          .child(div().flex_1().min_w(0).child(pane.name))))))
+      .when(p.dontAsk, (el) => el.child(ui.checkbox("dont-ask", this.dontAsk, "Don't ask again", (checked, cx) => { this.dontAsk = checked; cx.notify(); })))
+      .child(ui.footer(
+        ui.button("no", p.command ? "Cancel" : "Close").on_click(close),
+        ...(p.command ? [ui.button("yes", p.accept ?? "Confirm", p.destructive ? "destructive" : "primary").on_click(() => this.yes())] : []),
+      ));
   }
 }

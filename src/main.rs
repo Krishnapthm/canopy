@@ -222,7 +222,7 @@ pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiv
                     title: Some("Canopy".into()),
                     // Windows: hidden for good (it can't change live); the app draws it.
                     appears_transparent: cfg!(any(target_os = "macos", windows)),
-                    traffic_light_position: cfg!(target_os = "macos").then(|| point(px(12.0), px(7.0))),
+                    traffic_light_position: cfg!(target_os = "macos").then(|| point(px(12.0), px(13.0))),
                 }),
                 app_owns_titlebar_drag: cfg!(target_os = "macos"),
                 // Linux: open with the title bar the shipped layouts draw. Turning the

@@ -278,6 +278,9 @@ impl Loader for HostModuleLoader {
                 "export const {component} = globalThis.__gpui.component({module:?}, {component:?});"
             );
         }
+        if let Some(script) = found.script_source() {
+            source.push_str(script);
+        }
 
         Module::declare(ctx.clone(), name, source)
     }
@@ -290,6 +293,10 @@ fn surface_key(module: &host_modules::HostModule) -> String {
         hash.update([u8::from(module.is_async(name))]);
         hash.update(name.as_bytes());
         hash.update([0]);
+    }
+    if let Some(script) = module.script_source() {
+        hash.update([3]);
+        hash.update(script.as_bytes());
     }
     for name in module.component_names() {
         hash.update([2]);

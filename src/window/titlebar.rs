@@ -35,11 +35,17 @@ const WIN_BUTTON: f32 = 46.0;
 
 impl AppWindow {
     pub(super) fn titlebar(&self) -> Titlebar {
+        // Only macOS lets the canvas draw under the window buttons; elsewhere its menu strip and
+        // the system's buttons stay, and the canvas bar sits below them.
+        if cfg!(not(target_os = "macos")) && self.has_canvas() {
+            return Titlebar::System;
+        }
         self.chrome.titlebar.unwrap_or_default()
     }
 
     /// Makes the window match the shown layout's title bar. Cheap; runs on every render.
     pub(super) fn apply_titlebar(&mut self, window: &mut Window) {
+        self.fullscreen = window.is_fullscreen();
         let want = (self.titlebar(), self.chrome.traffic_lights);
         if self.titlebar_applied == Some(want) {
             return;

@@ -64,7 +64,6 @@ export function playSound(sound: string): null;
  *   terminal.peek {terminal} (peek over the tab, with keep-as-tab and close),
  *   terminal.show {terminal?, pane?} (shown in the pane for now, in place of its own), terminal.copy, terminal.paste,
  *   terminal.select_all {terminal?} (whole screen and scrollback, or only the alternate screen; Cmd+A on macOS).
- *   terminal.right_click {to: "program" | "menu", terminal?} (right-clicks to a program that takes the mouse; Shift: the menu).
  *   terminal.scroll {lines | pages | to: "top" | "bottom", terminal?} (Canopy's view of the history: negative goes up; pages may be fractional).
  * Agents: agent.next, agent.prev (the agents list's order), agent.focus {terminal} (sub-agents too).
  * Layout (the shown layout's nodes by id): layout.toggle|show|hide {id}, layout.resize {id, px | weight},
@@ -386,3 +385,31 @@ export interface FolderWatch extends Promise<string[]> {
   /** Resolves with [] and releases this call's watch. Safe to call again or after settlement. */
   cancel(): void;
 }
+
+type UiElement = import("gpui-kit").NativeElement;
+type UiInputState = import("gpui-base").InputState;
+
+/** The shared look of shipped mods. Every piece is an ordinary element, so keep chaining
+ *  (`ui.button("save", "Save", "primary").on_click(...)`). Colors follow theme(). */
+export const ui: {
+  /** Corner radii, control height, spacing and text sizes, in px. */
+  size: { radius: number; radiusSm: number; radiusLg: number; control: number; gap: number; pad: number; text: number; small: number; title: number };
+  button(id: string, label: string, variant?: "secondary" | "primary" | "ghost" | "destructive"): UiElement;
+  /** A square icon-only button; `icon` is an svg path. */
+  iconButton(id: string, icon: string, size?: number): UiElement;
+  /** A labelled checkbox with a 16 px box. */
+  checkbox(id: string, checked: boolean, label: string, onChange: (checked: boolean, cx: import("gpui-kit").Context) => void): UiElement;
+  /** A text field; `focused` draws the ring. */
+  input(state: UiInputState, focused?: boolean): UiElement;
+  /** A dialog or panel body: padding, gap and popover color. */
+  panel(id: string): UiElement;
+  /** A wrapping heading with a key hint at the right (default "Esc"; "" for none). */
+  title(text: string, hint?: string): UiElement;
+  description(text: string): UiElement;
+  label(text: string): UiElement;
+  /** Right-aligned dialog actions. */
+  footer(...buttons: UiElement[]): UiElement;
+  kbd(text: string): UiElement;
+  /** One list or menu row. */
+  row(id: string, selected?: boolean): UiElement;
+};

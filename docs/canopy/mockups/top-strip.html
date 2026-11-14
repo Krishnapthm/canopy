@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Canopy top strip</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css">
+<!-- Target design for the Canopy top strip in Canopy Dark. Click tabs to switch; hover file tabs for the path. -->
+<style>
+body{margin:0;padding:24px;background:#000;font-family:-apple-system,system-ui,sans-serif}
+.win{background:#0C0C0C;border:0.5px solid #2a2a2a;border-radius:10px;overflow:hidden;font-size:12px;color:#EDEDED99;max-width:1100px}
+.strip{display:flex;height:36px;background:#0C0C0C;border-bottom:0.5px solid #EDEDED14}
+.tl{display:flex;gap:7px;align-items:center;padding:0 12px}
+.tl span{width:11px;height:11px;border-radius:50%}
+.tab{position:relative;display:flex;align-items:center;gap:6px;padding:0 12px;height:36px;cursor:pointer;border-right:0.5px solid #EDEDED14;white-space:nowrap}
+.tab:hover{color:#EDEDED}
+.tab.on{background:#111111;color:#EDEDED;margin-bottom:-0.5px}
+.tab .x{opacity:0;font-size:13px}
+.tab:hover .x,.tab.on .x{opacity:1}
+.dot{width:6px;height:6px;border-radius:50%;background:#8FA8C8}
+.tip{display:none;position:absolute;top:40px;left:8px;background:#1A1A1A;border:0.5px solid #EDEDED33;border-radius:6px;padding:3px 8px;color:#EDEDED;font-size:11px;z-index:3}
+.tab:hover .tip{display:block}
+.body{display:flex;height:420px}
+.canvas{flex:1;position:relative;background:#111111}
+.pane{position:absolute;background:#0C0C0C;border:0.5px solid #EDEDED1F;border-radius:6px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:6px 8px;color:#EDEDED99}
+.pane b{font-weight:500;color:#EDEDED;font-family:-apple-system,system-ui,sans-serif;display:block;margin-bottom:4px}
+.prev{width:36%;border-left:0.5px solid #EDEDED14;background:#111111}
+.ln{height:5px;border-radius:2px;background:#EDEDED14;margin:9px 12px}
+.ic{margin-left:auto;display:flex;gap:10px;align-items:center;padding:0 10px}
+</style>
+<div class="win">
+<div class="strip">
+ <div class="tl"><span style="background:#FF5F57"></span><span style="background:#FEBC2E"></span><span style="background:#28C840"></span></div>
+ <div class="tab" data-g="s" aria-label="Home"><i class="ti ti-home"></i></div>
+ <div class="tab on" data-g="s"><i class="ti ti-folder"></i>api-server<span class="dot" title="agent working"></span></div>
+ <div class="tab" data-g="s"><i class="ti ti-folder"></i>web-app<i class="ti ti-x x"></i></div>
+ <div class="tab" data-g="s"><i class="ti ti-folder"></i>infra<i class="ti ti-x x"></i></div>
+ <div class="tab" style="border:none"><i class="ti ti-plus"></i></div>
+ <div class="ic"><i class="ti ti-layout-grid"></i><i class="ti ti-file"></i></div>
+ <div style="width:36%;display:flex;border-left:0.5px solid #EDEDED14">
+  <div class="tab" data-g="f"><i class="ti ti-file-code"></i>main.rs<i class="ti ti-x x"></i><span class="tip">src/main.rs</span></div>
+  <div class="tab on" data-g="f"><i class="ti ti-file-code"></i>lib.rs<span class="dot" style="background:#EDEDED"></span><span class="tip">src/lib.rs</span></div>
+  <div class="ic"><i class="ti ti-arrows-maximize"></i><i class="ti ti-x"></i></div>
+ </div>
+</div>
+<div class="body">
+ <div class="canvas">
+  <div class="pane" style="left:30px;top:30px;width:280px;height:150px"><b><i class="ti ti-terminal-2"></i> claude</b>$ cargo test<br>running 42 tests</div>
+  <div class="pane" style="left:340px;top:90px;width:240px;height:130px"><b><i class="ti ti-terminal-2"></i> zsh</b>~/api-server $</div>
+  <div class="pane" style="left:90px;top:220px;width:280px;height:140px"><b><i class="ti ti-terminal-2"></i> codex</b>thinking...</div>
+ </div>
+ <div class="prev"><div class="ln"></div><div class="ln" style="width:55%"></div><div class="ln"></div><div class="ln" style="width:70%"></div><div class="ln" style="width:40%"></div></div>
+</div>
+</div>
+<script>
+document.querySelectorAll('.tab[data-g]').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.tab[data-g="'+t.dataset.g+'"]').forEach(o=>o.classList.remove('on'));t.classList.add('on')}));
+</script>

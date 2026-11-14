@@ -2,7 +2,7 @@
 //! Live settings and the resolved layout look, including persisted app zoom.
 //!
 //! A theme is a palette plus optional color overrides: a built-in preset
-//! (graphite, ink, moss, paper) or `themes/<name>.json`. Chrome colors are
+//! (Canopy Dark/Light, Herdr Dark/Light, ink, moss) or `themes/<name>.json`. Chrome colors are
 //! derived from the palette (dark or light by its background), so every
 //! theme is consistent and overrides only need what they change.
 
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Mutex;
 
-/// A terminal palette, as herdr-app shipped them.
+/// Terminal colors before chrome derivation and overrides.
 #[derive(Clone)]
 struct Palette {
     background: u32,
@@ -30,17 +30,6 @@ struct Palette {
 
 const DARK_STATUS: Option<[u32; 3]> = Some([0xe5c07b, 0xf0705f, 0x76a8ff]);
 
-const GRAPHITE: Palette = Palette {
-    background: 0x17191d,
-    foreground: 0xd2d4d9,
-    selection: 0x394454,
-    cursor: None,
-    status: DARK_STATUS,
-    ansi: [
-        0x45484f, 0xdc8c95, 0xa6bd91, 0xd8be87, 0x96b2d7, 0xb5a2ce, 0x8cbdc3, 0xd2d4d9, 0x818793, 0xf0a5ad, 0xbad5a2, 0xead2a1, 0xb0cbef,
-        0xcbb7e6, 0xa4d5db, 0xf0f0f2,
-    ],
-};
 const INK: Palette = Palette {
     background: 0x111720,
     foreground: 0xcdd6e4,
@@ -64,32 +53,16 @@ const MOSS: Palette = Palette {
     ],
 };
 
-/// Light: white paper, dark ink. Every ANSI color stays readable on white
-/// (bright white is ink, not white: programs write it as "strong" text).
-const PAPER: Palette = Palette {
-    background: 0xffffff,
-    foreground: 0x25272c,
-    selection: 0xcfdcf5,
-    cursor: Some(0x25272c),
-    status: Some([0x9a6700, 0xc93c2c, 0x2f6fe4]),
-    ansi: [
-        0x25272c, 0xc62a2a, 0x1a7f37, 0x8f5d00, 0x1f62d0, 0x7a45c8, 0x0f6f74, 0x5f6068, 0x7b7e87, 0xd1242f, 0x1f883d, 0x9a6700, 0x0969da,
-        0x8250df, 0x1b7c83, 0x111214,
-    ],
-};
-
-pub const PRESETS: &[&str] = &["graphite", "ink", "moss", "paper"];
+pub const PRESETS: &[&str] = &["canopy-dark", "canopy-light", "herdr-dark", "herdr-light", "ink", "moss"];
 
 /// The theme a layout without one shows, by appearance.
-pub const DEFAULT_DARK: &str = "graphite";
-pub const DEFAULT_LIGHT: &str = "paper";
+pub const DEFAULT_DARK: &str = "canopy-dark";
+pub const DEFAULT_LIGHT: &str = "canopy-light";
 
 fn preset(name: &str) -> Option<&'static Palette> {
     match name {
-        "graphite" => Some(&GRAPHITE),
         "ink" => Some(&INK),
         "moss" => Some(&MOSS),
-        "paper" => Some(&PAPER),
         _ => None,
     }
 }
@@ -180,6 +153,16 @@ fn install_theme(path: &std::path::Path, name: &str, text: &str) {
 
 /// A theme by name: a preset, or `themes/<name>.json`.
 fn palette(name: &str) -> Result<(Palette, BTreeMap<String, String>), String> {
+    let builtin = match name {
+        "canopy-dark" => Some(include_str!("../defaults/themes/canopy-dark.json")),
+        "canopy-light" => Some(include_str!("../defaults/themes/canopy-light.json")),
+        "herdr-dark" | "graphite" => Some(include_str!("../defaults/themes/herdr-dark.json")),
+        "herdr-light" | "paper" => Some(include_str!("../defaults/themes/herdr-light.json")),
+        _ => None,
+    };
+    if let Some(text) = builtin {
+        return parse_theme_file(name, text);
+    }
     if let Some(p) = preset(name) {
         return Ok((p.clone(), BTreeMap::new()));
     }
@@ -247,6 +230,8 @@ fn shipped_theme_files() {
         let name = path.file_stem().unwrap().to_str().unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         parse_theme_file(name, &text).unwrap_or_else(|e| panic!("{e}"));
+        // Built-in presets are compiled in (see `palette`), not installed into themes/.
+        if PRESETS.contains(&name) { continue; }
         assert_eq!(THEMES.iter().find(|(n, _)| *n == name).unwrap().1, text);
         found.insert(name.to_owned());
     }
@@ -401,7 +386,10 @@ person_settings! {
     confirm_close_terminal: bool = true => "Ask before closing a plain terminal cell.";
     canvas_color: Option<String> = None => "Canvas background; null follows the theme.";
     canvas_gap: f32 = 24. => "Cell and space gap in world pixels (0..1024).";
-    canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live or only on drop (live, drop).";
+    tile_gap: f32 = 0. => "Gap between cells in tile view in world pixels (0..1024).";
+    tile_focus_grows: bool = false => "In tile view the selected tile takes more room; off keeps every tile the same size.";
+    canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live, only on drop, or never so cells overlap (live, drop, off).";
+    canvas_resize_terminals: bool = true => "Refit a canvas terminal's grid to its cell as the cell resizes (no longer in Settings; false keeps the grid and scales it).";
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
     #[serde(skip_serializing_if = "is_default_wire_limit")]
@@ -443,6 +431,7 @@ pub enum CanvasPush {
     #[default]
     Live,
     Drop,
+    Off,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -498,6 +487,8 @@ pub struct Settings {
     pub canvas_gap: f32,
     /// Whether neighbours move during a drag or on release.
     pub canvas_push: CanvasPush,
+    /// Whether canvas terminals refit their grid to the cell.
+    pub canvas_resize_terminals: bool,
     /// Space background opacity.
     pub space_fill: f32,
     /// Columns and rows of a newly expanded terminal.
@@ -559,6 +550,7 @@ impl Default for Settings {
         Settings {
             canvas_gap: person.canvas_gap,
             canvas_push: person.canvas_push,
+            canvas_resize_terminals: person.canvas_resize_terminals,
             space_fill: person.space_fill,
             terminal_size: person.terminal_size,
             font_family: DEFAULT_FONT.into(),
@@ -602,6 +594,7 @@ impl Settings {
         Settings {
             canvas_gap: person.canvas_gap,
             canvas_push: person.canvas_push,
+            canvas_resize_terminals: person.canvas_resize_terminals,
             space_fill: person.space_fill,
             terminal_size: person.terminal_size,
             // The layout's own, else the person's, else Canopy's.
@@ -654,6 +647,14 @@ pub fn rgb(s: &str) -> Rgb {
     Rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
 }
 
+/// Flattens a terminal color onto its opaque background.
+pub fn rgb_on(s: &str, background: Rgb) -> Rgb {
+    let Some(color) = parse_hex(s) else { return rgb(s); };
+    let color: Rgba = color.into();
+    let blend = |foreground: f32, background: u8| (foreground * 255.0 * color.a + background as f32 * (1.0 - color.a)).round() as u8;
+    Rgb(blend(color.r, background.0), blend(color.g, background.1), blend(color.b, background.2))
+}
+
 impl Settings {
     /// Problems an agent should hear about before the file is applied.
     pub fn problems(&self) -> Vec<String> {
@@ -685,7 +686,7 @@ pub fn path() -> std::path::PathBuf {
 
 thread_local! {
     static CURRENT: RefCell<(Rc<Settings>, Rc<Theme>)> =
-        RefCell::new((Rc::new(Settings::default()), Rc::new(resolve(&GRAPHITE, &BTreeMap::new()))));
+        RefCell::new((Rc::new(Settings::default()), Rc::new({ let (p, o) = palette(DEFAULT_DARK).expect("built-in dark theme"); resolve(&p, &o) })));
 }
 
 const ZOOM_MIN: f32 = 0.5;
@@ -725,6 +726,7 @@ fn parse_person(text: &str) -> Result<Person, String> {
     for (valid, problem) in [
         ((ZOOM_MIN..=ZOOM_MAX).contains(&person.zoom), "zoom must be in 0.5..3"),
         ((0.0..=1024.0).contains(&person.canvas_gap), "canvas_gap must be in 0..1024"),
+        ((0.0..=1024.0).contains(&person.tile_gap), "tile_gap must be in 0..1024"),
         ((0.0..=1.0).contains(&person.space_fill), "space_fill must be in 0..1"),
         ((20..=500).contains(&person.terminal_size[0]) && (5..=200).contains(&person.terminal_size[1]), "terminal_size must be [columns 20..500, rows 5..200]"),
     ] {
@@ -797,7 +799,7 @@ pub fn set(s: Settings) -> bool {
     CURRENT.with(|c| {
         // Read the theme even when the settings are the same: its file may
         // have new colors under the same name.
-        let (p, mut colors) = palette(&s.theme).unwrap_or_else(|_| (GRAPHITE.clone(), BTreeMap::new()));
+        let (p, mut colors) = palette(&s.theme).unwrap_or_else(|_| palette(DEFAULT_DARK).expect("built-in dark theme"));
         colors.extend(s.colors.clone());
         let theme = resolve(&p, &colors);
         if *c.borrow().0 == s && *c.borrow().1 == theme {
@@ -937,6 +939,48 @@ pub const DEFAULT_FONT: &str = "JetBrains Mono";
 #[cfg(test)]
 mod tests {
     #[test]
+    fn terminal_alpha_color_uses_its_background() {
+        assert_eq!(super::rgb_on("#ededed1f", crate::vt::Rgb(12, 12, 12)), crate::vt::Rgb(39, 39, 39));
+        assert_eq!(super::rgb_on("#11111112", crate::vt::Rgb(239, 239, 239)), crate::vt::Rgb(223, 223, 223));
+    }
+
+    #[test]
+    fn builtin_contrast() {
+        fn rgb(value: &str, bg: [f64; 3]) -> [f64; 3] {
+            let hex = value.trim_start_matches('#');
+            let alpha = if hex.len() == 8 { u8::from_str_radix(&hex[6..8], 16).unwrap() as f64 / 255.0 } else { 1.0 };
+            std::array::from_fn(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap() as f64 / 255.0 * alpha + bg[i] * (1.0 - alpha))
+        }
+        fn luminance(rgb: [f64; 3]) -> f64 {
+            rgb.into_iter().zip([0.2126, 0.7152, 0.0722]).map(|(c, w)| w * if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }).sum()
+        }
+        for (old, new) in [("graphite", "herdr-dark"), ("paper", "herdr-light")] {
+            let (p, o) = palette(old).unwrap();
+            let (q, r) = palette(new).unwrap();
+            assert_eq!(resolve(&p, &o), resolve(&q, &r));
+        }
+        for name in ["canopy-dark", "canopy-light", "herdr-dark", "herdr-light"] {
+            let (p, o) = palette(name).unwrap();
+            let t = resolve(&p, &o);
+            let mut pairs = vec![];
+            for bg in ["canvas", "surface", "raised"] { pairs.push(("foreground".to_string(), bg, 4.5)); }
+            for bg in ["canvas", "surface"] {
+                pairs.push(("muted".to_string(), bg, 4.5));
+                pairs.push(("accent".to_string(), bg, 3.0));
+            }
+            for i in 0..16 { pairs.push((format!("ansi{i}"), "background", if [4,5,12,13].contains(&i) { 3.0 } else { 4.5 })); }
+            for (fg, bg, min) in pairs {
+                let background = rgb(&t[bg], [0.0;3]);
+                let a = luminance(rgb(&t[&fg], background));
+                let b = luminance(background);
+                let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
+                println!("{name} {fg}/{bg}: {ratio:.3}");
+                assert!(ratio >= min, "{name} {fg}/{bg}: {ratio:.3} < {min}");
+            }
+        }
+    }
+
+    #[test]
     fn terminal_ligatures_default_off_and_can_be_enabled() {
         use super::*;
         let person: Person = serde_json::from_str("{}").unwrap();
@@ -1054,6 +1098,9 @@ mod tests {
         let defaults = parse_person("{}").unwrap();
         assert_eq!(defaults.canvas_gap, 24.);
         assert_eq!(defaults.canvas_push, CanvasPush::Live);
+        assert!(defaults.canvas_resize_terminals);
+        assert_eq!(parse_person(r#"{"canvas_push":"off","canvas_resize_terminals":false}"#).map(|p| (p.canvas_push, p.canvas_resize_terminals)),
+            Ok((CanvasPush::Off, false)));
         assert_eq!(defaults.space_fill, 0.04);
         assert_eq!(defaults.terminal_size, [100, 30]);
         for invalid in [r#"{"canvas_gap":-1}"#, r#"{"canvas_gap":1025}"#,

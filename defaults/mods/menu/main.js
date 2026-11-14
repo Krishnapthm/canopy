@@ -9,7 +9,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, knownAgents } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, knownAgents, ui } from "herdr";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s) {
@@ -38,11 +38,12 @@ function items(p, git, agents) {
     case "canvas-agents": return agentItems(agents, at);
     case "canvas-empty": return [
       ["New terminal", "canvas.create", at],
-      ["Open file...", "preview.open", { point: tg.point }],
+      ["Open file", "preview.open", { point: tg.point }],
       ["Arrange", "canvas.arrange", {}],
       ["Arrange as", "sub:canvas-arrange", {}],
+      ["Tile view", "canvas.tile", {}],
       ["Undo layout", "canvas.undo", {}],
-      ...(!tg.space ? [["New space here", "canvas.create", { ...at, kind: "space" }]] : []),
+      ...(!tg.space ? [["Open space here", "canvas.create", { ...at, kind: "space" }]] : []),
       ["Agents", null, { label: true }],
       ...agentItems(agents, at),
     ];
@@ -62,22 +63,22 @@ function items(p, git, agents) {
       ...(tg.born ? [] : [["Remove", "wire.remove", { a: tg.a, b: tg.b }]]),
     ];
     case "canvas-sub": return [["Message through parent", "canvas.sub_message", { terminal: tg.terminal, id: tg.id }]];
+    // A cell's own menu: a pill or header right-click, or a right-click inside its terminal.
     case "canvas-card": return [
-      ["Arrange", "canvas.arrange", {}],
-      ["Arrange as", "sub:canvas-arrange", {}],
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],
       ...(!tg.popped ? [[tg.expanded ? "Collapse" : "Expand", "canvas.expand", { terminal: tg.terminal }]] : []),
       ...(tg.finished ? [["Clear finished", "canvas.clear_finished", { terminal: tg.terminal }]] : []),
+      ["Bring to front", "canvas.front", { terminal: tg.terminal }],
+      ["Send to back", "canvas.back", { terminal: tg.terminal }],
       ["Close terminal", "canvas.close", { terminal: tg.terminal }],
+      ["Kill terminal", "terminal.kill", { terminal: tg.terminal }],
     ];
     case "pane": {
       // A kept sub-agent can go back under its parent, still running.
       const all = terminals();
       const term = all.find((t) => t.address === tg.terminal);
       const parent = term?.parent && all.find((t) => t.address === term.parent);
-      // Once they go to the program, Shift+right-click still opens this menu.
-      const toProgram = term?.labels?.["herdr.right-click"] === "program";
       // A terminal shown outside a tab (a layout terminal block, a window) has
       // no pane to split, zoom or close: its pane is the block's id.
       const inTab = panes().some((pane) => pane.pane === tg.pane);
@@ -87,13 +88,6 @@ function items(p, git, agents) {
               ["Split right", "pane.split", { direction: "right", pane: tg.pane }],
               ["Split down", "pane.split", { direction: "down", pane: tg.pane }],
               ["Zoom", "pane.zoom", { pane: tg.pane }],
-            ]
-          : []),
-        ...(term
-          ? [
-              toProgram
-                ? ["Use Canopy right-click menu", "terminal.right_click", { terminal: term.address, to: "menu" }]
-                : ["Send right-clicks to pane", "terminal.right_click", { terminal: term.address, to: "program" }],
             ]
           : []),
         ...(parent ? [[`Send back to ${parent.name || parent.address}`, "terminal.park", { terminal: term.address }]] : []),
@@ -115,7 +109,7 @@ function items(p, git, agents) {
       ];
     default:
       return [
-        ["New space", "space.new", {}],
+        ["Open space", "space.new", {}],
         ["Keybinds", "app.help", {}],
         ["Theme: graphite", "app.theme", { name: "graphite" }],
         ["Theme: ink", "app.theme", { name: "ink" }],
@@ -127,14 +121,14 @@ function items(p, git, agents) {
 
 // Installed agents from the program table, so a newly listed agent appears with no code change.
 function agentItems(agents, at) {
-  if (!agents) return [["Checking installed agents...", null, {}]];
+  if (!agents) return [["Checking installed agents", null, {}]];
   const installed = agents.filter(a => a.installed);
   if (!installed.length) return [["No agents installed", null, {}]];
   return installed.map(a => [a.name, "canvas.create", { ...at, argv: a.run }, a]);
 }
 
 // One menu box's width and row heights, so a submenu can line up with its row.
-const WIDTH = 220, ROW = 31, LABEL = 25;
+const WIDTH = 220, ROW = 32, LABEL = 25;
 
 // A rule above row i: before closing, help and the first theme.
 function rule(list, i) {
@@ -194,7 +188,7 @@ export default class Menu extends View {
 
   // One menu box: the rows of `list`, `at` highlighted.
   box(t, list, at, row) {
-    return v_flex().w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(8).shadow_lg().text_size(12.8)
+    return v_flex().w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(ui.size.radius).shadow_lg().text_size(ui.size.text)
       // Clicks inside the box never reach the root, which closes the menu.
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .children(list.map((it, i) => !it[1]
@@ -207,7 +201,7 @@ export default class Menu extends View {
           .when(rule(list, i), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
           .child(row(h_flex()
             .id(`mi-${list === this.list ? "" : "s"}${i}`)
-            .h(ROW).px(8).gap(9).rounded(7).items_center().justify_between()
+            .h(ROW).px(8).gap(9).rounded(ui.size.radiusSm).items_center().justify_between()
             .text_color(t.foreground)
             .when(i === at, (el) => el.bg(t.selected))
             .hover((s) => s.bg(t.hover))

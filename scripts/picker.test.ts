@@ -27,6 +27,7 @@ let closed = 0;
 const values: Record<string, any> = {
   View: class {}, div: element, svg: element, v_flex: element, h_flex: element,
   Input: { new: element }, InputState: { new: () => ({ handlers: {} as Record<string, any>, on(name: string, handler: any) { this.handlers[name] = handler; }, focus() {} }) },
+  ui: { size: { radius: 8, radiusSm: 6, radiusLg: 10, control: 32, gap: 8, pad: 20, text: 13, small: 12, title: 15 } },
   agents: () => [], spaces: () => testSpaces, terminals: () => [], theme: () => ({ hover: "hover" }),
   settings: () => ({ zoom: 1.2 }), props: () => ({}), shared: () => ({}),
   setShared() {}, closeOverlay() { closed++; }, openOverlay() {}, run(...args: unknown[]) { commands.push(args); }, hc() {},
@@ -188,4 +189,14 @@ test("picker preserves small pixel touchpad deltas", () => {
     list.calls.on_scroll_wheel[0]({ delta: { y: delta } }, cx);
     expect(view.scroll).toBe(-delta);
   }
+});
+
+test("typing finds spaces, panes and open files, best match first", () => {
+  const spaces = [{ id: "s1", name: "api-server", folder: "/w/api" }, { id: "s2", name: "web-app", folder: "/w/web" }];
+  const terms = [{ address: "t1", agent: "zsh", state: "live", where: "api-server / 1" }, { address: "t2", name: "claude", state: "live" }, { address: "t3", agent: "zsh", state: "ended" }];
+  const files = ["/w/api/src/main.rs", "/w/web/app.tsx"];
+  expect(Picker.finds("api", spaces, terms, files).map((r) => r.id)).toEqual(["s1", "t1", "/w/api/src/main.rs"]);
+  expect(Picker.finds("mrs", spaces, terms, files).map((r) => r.id)).toEqual(["/w/api/src/main.rs"]);
+  expect(Picker.finds("cld", spaces, terms, files).map((r) => [r.what, r.id])).toEqual([["pane", "t2"]]);
+  expect(Picker.finds("t3", spaces, terms, files)).toEqual([]);
 });

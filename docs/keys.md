@@ -13,13 +13,18 @@ Hold Option (Alt) while the canvas has the keyboard: each selected cell, or the
 one under the pointer, shows its actions with their keys, and the bottom bar
 lists every canvas key. Release Option to hide them.
 
+Anywhere: Cmd+K or Cmd+P (Ctrl+Shift+K) opens Go to, a fuzzy search over
+spaces, terminal panes and open file tabs (then the old tab list). Cmd+1..9
+(Ctrl+1..9) goes into the Nth space tab, and Ctrl+Tab goes back to the space you
+were in last (again toggles; Ctrl+Shift+Tab walks further back).
+
 | Canvas has the keyboard | Action |
 |---|---|
 | Enter | Enter the selected cell, or go into the selected space |
 | Esc | Cancel a connection, else clear the selection, else go back Home |
 | Shift+1 / Shift+2 / Shift+0 | Fit everything / fit the selection / 100% |
 | f | Fit the selection, else everything; again restores the previous view |
-| Cmd+A (Ctrl+A) | Select everything here |
+| Cmd+A (Ctrl+Shift+A) | Select every pane in the current space |
 | Arrows | Move the selection by one gap, with one undo step |
 | h j k l, Tab / Shift+Tab | Select the nearest cell in that direction |
 | x | Collapse the selected terminal |
@@ -38,12 +43,22 @@ Enter on a sub-agent opens its transcript; on a file card it opens the file.
 | Go into space 1..9 | Cmd+1..9 | Ctrl+1..9 |
 | Home | Cmd+Shift+H | Ctrl+Shift+H |
 | Focus fit toggle | Cmd+Shift+F | Ctrl+Shift+F on canvas |
+| Tile view toggle | Cmd+Shift+G | Ctrl+Shift+G |
 | Expand / collapse | Cmd+Enter | Ctrl+Shift+Enter |
-| Arrange | Cmd+Shift+A | Ctrl+Shift+A |
+| Select every pane (canvas focus) | Cmd+A | Ctrl+Shift+A |
+| Arrange | Cmd+Shift+A | Ctrl+Alt+Shift+A |
 | Zoom in / out / 100% | Cmd+= / Cmd+- / Cmd+0 | Ctrl+= / Ctrl+- / Ctrl+0 |
 | Agents / All / Terminals | Cmd+Shift+1/2/3 | Ctrl+Shift+1/2/3 |
 
-Cmd+T / Ctrl+Shift+T is `tab.new`, Cmd+N / Ctrl+Shift+N `space.new` and
+On a canvas, Cmd+T / Ctrl+Shift+T opens a plain terminal pane (`canvas.new`),
+full size and interactive. Each one cascades 32 px down and right of the last,
+back to the view's top left when there is no room, never exactly on another
+pane. Cmd+Shift+T / Ctrl+Alt+T is `canvas.new {like: true}`: the same, running
+what the selected cell runs (an agent, say). Both shadow
+`tab.new` while a canvas layout is shown (Ctrl+T stays the terminal's own).
+With a cell entered, zoom in / out / 100% (Cmd or Ctrl, plus Ctrl+= / Ctrl+- /
+Ctrl+0 on macOS too) resize that terminal's text, in memory, instead of the
+canvas. Cmd+N / Ctrl+Shift+N `space.new` and
 Cmd+B / Ctrl+Shift+B `layout.toggle:sidebar`. On Linux and Windows,
 Ctrl+Shift+F is terminal search while a terminal has focus.
 
@@ -53,3 +68,29 @@ whenever the canvas itself has the keyboard (no cell entered, no input focused),
 and an unbound key is swallowed unless it carries Ctrl, Alt or Cmd. Its
 bindings may carry modifiers but are never sequences. An entered terminal gets
 every key except the bindings in `layout:main` and `global`.
+
+Settings > Shortcuts shows current and shipped keys alongside descriptions from
+the command catalog. It includes unbound commands and custom key actions, with
+separate rows for sections and command arguments. Equivalent keys in one section
+warn when they name different actions.
+
+Use the search field to filter action names, descriptions and keys. Click a
+current key (or Unbound) and press one combination to replace that action's
+bindings in its section. Esc cancels; Backspace clears. A conflicting key is
+refused with a warning so another action is never silently replaced. The
+reserved Ctrl+Alt+Shift+Esc recovery key cannot be assigned.
+
+Reset to default restores every shipped key for that row, or clears an action
+with no default. Reset all shortcuts asks for confirmation, restores this OS's
+shipped actions and clears other bindings to built-in commands. Custom mod
+actions and unrelated sections remain; clear a conflicting custom key first.
+
+Edits use app-home `keys.json`, including on macOS. Writes re-read the file,
+preserve other entries and use the file API's atomic expected-text check.
+Concurrent edits are retried at most twice; errors raise a toast. The existing
+config reload applies saved keys and refreshes the page, with no new watcher.
+Commands needing arguments can be configured as object actions in keys.json;
+the recorder keeps existing arguments and replaces only the keys.
+
+Select-all uses `canvas.select_all` only with canvas focus. An entered terminal
+keeps Cmd+A for `terminal.select_all`; plain Ctrl+A still reaches shells.

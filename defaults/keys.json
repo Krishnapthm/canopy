@@ -72,11 +72,15 @@
     "shift-insert": "terminal.paste"
   },
   "layout:main": {
+    "ctrl-shift-a": "canvas.select_all",
+    "ctrl-shift-t": "canvas.new",
+    "ctrl-alt-t": {"command": "canvas.new", "args": {"like": true}},
     "ctrl-=": "canvas.zoom_in",
     "ctrl-+": "canvas.zoom_in",
     "ctrl--": "canvas.zoom_out",
     "ctrl-0": "canvas.zoom_reset",
     "ctrl-shift-f": "canvas.fit",
+    "ctrl-shift-g": "canvas.tile",
     "ctrl-shift-1": "view.agents",
     "ctrl-shift-2": "view.all",
     "ctrl-shift-3": "view.terminals",
@@ -85,7 +89,7 @@
     "ctrl-shift-u": "canvas.undo",
     "ctrl-shift-j": "canvas.mode",
     "ctrl-shift-enter": "canvas.expand",
-    "ctrl-shift-a": "canvas.arrange",
+    "ctrl-alt-shift-a": "canvas.arrange",
     "ctrl-1": "canvas.space:1",
     "ctrl-2": "canvas.space:2",
     "ctrl-3": "canvas.space:3",
@@ -96,6 +100,8 @@
     "ctrl-8": "canvas.space:8",
     "ctrl-9": "canvas.space:9",
     "ctrl-escape": "canvas.mode",
+    "ctrl-tab": "canvas.space:recent",
+    "ctrl-shift-tab": "canvas.space:oldest",
     "ctrl-shift-h": "canvas.home"
   },
   "canvas-mode": {
@@ -115,7 +121,7 @@
     "shift-2": "canvas.fit",
     "shift-0": "canvas.zoom_reset",
     "f": "canvas.fit",
-    "ctrl-a": "canvas.select_all",
+    "ctrl-shift-a": "canvas.select_all",
     "x": "canvas.collapse",
     "c": "canvas.connect",
     "t": "canvas.thread",
@@ -126,6 +132,8 @@
         "picker": true
       }
     },
+    "=": "canvas.equalize",
+    "ctrl-enter": "canvas.sync",
     "n": "canvas.new",
     "shift-n": "canvas.agents",
     "backspace": "canvas.close",

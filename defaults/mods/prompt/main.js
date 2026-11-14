@@ -1,7 +1,7 @@
 // A text prompt. Enter saves, Esc cancels.
 import { View, div } from "gpui-kit";
-import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { run, props, closeOverlay, theme } from "herdr";
+import { v_flex, InputState } from "gpui-base";
+import { run, props, closeOverlay, theme, ui } from "herdr";
 
 export default class Prompt extends View {
   init(_props, cx) {
@@ -29,22 +29,13 @@ export default class Prompt extends View {
   }
 
   render() {
-    const t = theme();
     const p = props() ?? {};
-    const label = (text) => div().pt(16).pb(7).text_size(11.5).text_color(t.dim).child(text);
-    const button = (id, text, primary, action) => h_flex().id(id).h(32).px(14).items_center().rounded(8)
-      .border_1().border_color(primary ? t.solid : t.input).bg(primary ? t.solid : t.raised)
-      .text_color(primary ? t.solid_foreground : t.foreground).text_size(12.5).font_medium().cursor_pointer()
-      .hover(s => s.opacity(0.88)).on_click(action).child(text);
-    return v_flex().id("prompt").track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
-      .w_full().min_h(0).p(18).bg(t.popover).text_color(t.foreground)
-      .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().child((p.title ?? "").replace(/^./, (c) => c.toUpperCase())))
-        .child(div().text_size(11).text_color(t.dim).child("Esc")))
-      .child(label("Name"))
-      .child(Input.new(this.input).h(36).px(10).rounded(9).border_1().border_color(this.inputFocused ? t.accent : t.input).bg(t.background).text_size(12.8).text_color(t.foreground))
-      .when(Boolean(p.hint), el => el.child(div().pt(6).text_size(11.5).text_color(t.dim).child(p.hint)))
-      .child(h_flex().pt(20).gap(8).justify_end()
-        .child(button("pm-cancel", "Cancel", false, () => closeOverlay(p.overlay)))
-        .child(button("pm-save", "Save", true, () => this.submit())));
+    return ui.panel("prompt").track_focus(this.handle).on_key_down((e, cx) => this.key(e, cx))
+      .child(ui.title((p.title ?? "").replace(/^./, (c) => c.toUpperCase())))
+      .child(v_flex().gap(6).child(ui.label("Name")).child(ui.input(this.input, this.inputFocused))
+        .when(Boolean(p.hint), (el) => el.child(div().text_size(ui.size.small).text_color(theme().dim).child(p.hint))))
+      .child(ui.footer(
+        ui.button("pm-cancel", "Cancel").on_click(() => closeOverlay(p.overlay)),
+        ui.button("pm-save", "Save", "primary").on_click(() => this.submit())));
   }
 }

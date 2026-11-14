@@ -89,6 +89,75 @@ impl Camera {
         self.y = bounds[1] + bounds[3] / 2. - viewport[1] / self.zoom / 2.;
     }
 }
+/// Screen px a pressed cell must move before the press is a drag; less is a click.
+pub const DRAG_THRESHOLD: f32 = 3.;
+/// A tile smaller than this (world px) shows its icon and name instead of terminal text.
+pub const TILE_COMPACT: Point = [320., 140.];
+/// The active tile's share of its row, and (at least) its row's share of the height.
+const TILE_ACTIVE: f32 = 0.6;
+
+/// The indices of `rects` in reading order: top to bottom, then left to right.
+pub fn reading(rects: &[Rect]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..rects.len()).collect();
+    order.sort_by(|a, b| (rects[*a][1], rects[*a][0]).partial_cmp(&(rects[*b][1], rects[*b][0])).unwrap_or(std::cmp::Ordering::Equal));
+    order
+}
+
+/// Tile view: fills `area` with `tiles` tiles like tmux's tiled layout, and lines `pills`
+/// (sizes) up along its bottom. Both are placed in the order given (the caller keeps it, so
+/// nothing swaps when the active one changes or a rect jitters). The `active` tile's row is
+/// taller and the tile wider, so it is always the largest; the rest share what is left.
+/// Returns the tiles' and pills' rects in the order given.
+pub fn tile(area: Rect, tiles: usize, active: Option<usize>, pills: &[Rect], gap: f32) -> (Vec<Rect>, Vec<Rect>) {
+    let [x0, y0, w, h] = [area[0] + gap, area[1] + gap, (area[2] - 2. * gap).max(1.), (area[3] - 2. * gap).max(1.)];
+    // Pills wrap into rows along the bottom; the tiles get what is above them.
+    let mut placed = vec![[0.; 4]; pills.len()];
+    let (mut x, mut row_h, mut rows) = (0., 0., vec![]);
+    for i in 0..pills.len() {
+        let [pw, ph] = [pills[i][2], pills[i][3]];
+        if x > 0. && x + pw > w { rows.push(row_h); x = 0.; row_h = 0.; }
+        placed[i] = [x, rows.iter().map(|r| r + gap).sum::<f32>(), pw, ph];
+        x += pw + gap;
+        row_h = f32::max(row_h, ph);
+    }
+    if !pills.is_empty() { rows.push(row_h); }
+    let strip = rows.iter().sum::<f32>() + gap * rows.len() as f32;
+    for r in &mut placed { r[0] += x0; r[1] += y0 + h - strip + gap; }
+    if !pills.is_empty() && tiles == 0 { for r in &mut placed { r[1] -= h - strip + gap; } }
+    let th = (h - strip).max(1.);
+    // A run of `k` where the active one (if any) takes `big` of it and the others share the rest:
+    // (offset, length) of item `i`, as fractions.
+    let share = |k: usize, i: usize, active: Option<usize>, big: f32| {
+        let size = |j: usize| match active { Some(a) if k > 1 => if j == a { big } else { (1. - big) / (k - 1) as f32 }, _ => 1. / k as f32 };
+        ((0..i).map(size).sum::<f32>(), size(i))
+    };
+    let n = tiles;
+    let mut out = vec![[0.; 4]; n];
+    if n == 0 { return (out, placed); }
+    // tmux's tiled grid: the last row is the short one and stretches.
+    let cols = (n as f32).sqrt().ceil() as usize;
+    let row_count = n.div_ceil(cols);
+    let in_row = |r: usize| cols.min(n - r * cols);
+    let at = active.map(|p| (p / cols, p % cols));
+    // The active row is TILE_ACTIVE tall, or taller when a shorter row's stretched tiles would
+    // otherwise outgrow the active tile.
+    let tall = at.map_or(TILE_ACTIVE, |(r, _)| {
+        let wide = if in_row(r) > 1 { TILE_ACTIVE } else { 1. };
+        let fewest = (0..row_count).filter(|o| *o != r).map(in_row).min().unwrap_or(1) as f32;
+        let needed = 1. / (1. + wide * (row_count - 1) as f32 * fewest);
+        TILE_ACTIVE.max(needed + 0.05).min(0.9)
+    });
+    for p in 0..n {
+        let (r, c) = (p / cols, p % cols);
+        let k = in_row(r);
+        let (ry, rh) = share(row_count, r, at.map(|a| a.0), tall);
+        let (cx, cw) = share(k, c, at.filter(|a| a.0 == r).map(|a| a.1), TILE_ACTIVE);
+        let (aw, ah) = (w - gap * (k - 1) as f32, th - gap * (row_count - 1) as f32);
+        out[p] = [x0 + cx * aw + gap * c as f32, y0 + ry * ah + gap * r as f32, cw * aw, rh * ah];
+    }
+    (out, placed)
+}
+
 /// Toggle a space fit in the visible canvas: a second press restores the camera from before
 /// the fit, unless the camera moved since, in which case it fits again.
 pub fn focus_fit(camera: &mut Camera, previous: &mut Option<(Camera, Camera)>, rects: &[Rect], visible: Point) {
@@ -491,6 +560,40 @@ fn segment_hits(p: Point, q: Point, r: Rect) -> bool {
     x1 > r[0] + 0.5 && x0 < r[0] + r[2] - 0.5 && y1 > r[1] + 0.5 && y0 < r[1] + r[3] - 0.5
 }
 
+/// A routed path as the soft curve that is drawn and clicked: straight runs merge, and every
+/// bend is rounded as far as both of its runs allow (half of each), so a Z route reads as the
+/// old side-to-side S-curve and a detour as an arc around the cell. Returns sampled points.
+pub fn smooth(path: &[Point]) -> Vec<Point> {
+    let mut pts: Vec<Point> = Vec::with_capacity(path.len());
+    for &p in path {
+        if pts.last() == Some(&p) { continue; }
+        // Drop the middle of three collinear points.
+        if let [.., a, b] = pts[..] && ((a[0] == b[0] && b[0] == p[0]) || (a[1] == b[1] && b[1] == p[1])) { pts.pop(); }
+        pts.push(p);
+    }
+    if pts.len() < 3 { return pts; }
+    let len = |a: Point, b: Point| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
+    let toward = |v: Point, to: Point, r: f32| { let d = len(v, to); [v[0] + (to[0] - v[0]) * r / d, v[1] + (to[1] - v[1]) * r / d] };
+    let mut out = vec![pts[0]];
+    for (i, w) in pts.windows(3).enumerate() {
+        let (o, v, q) = (w[0], w[1], w[2]);
+        // The first and last runs end at a cell: they may be used whole; inner runs are shared by two bends.
+        let share = |end: bool| if end { 1. } else { 0.5 };
+        let r = (len(o, v) * share(i == 0)).min(len(v, q) * share(i + 3 == pts.len()));
+        let (a, b) = (toward(v, o, r), toward(v, q, r));
+        const STEPS: usize = 10;
+        for s in 0..=STEPS {
+            let t = s as f32 / STEPS as f32;
+            let u = 1. - t;
+            // A quadratic with its control on the corner: tangent to both runs.
+            out.push([u * u * a[0] + 2. * u * t * v[0] + t * t * b[0], u * u * a[1] + 2. * u * t * v[1] + t * t * b[1]]);
+        }
+    }
+    out.push(pts[pts.len() - 1]);
+    out.dedup();
+    out
+}
+
 /// The point `t` (0 to 1) of the way along a path, by length.
 pub fn along(path: &[Point], t: f32) -> Point {
     let lens: Vec<f32> = path.windows(2).map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt()).collect();
@@ -730,6 +833,20 @@ impl Document {
         self.wires.retain(|w| has(&w.a) && has(&w.b));
         before != self.wires.len()
     }
+    /// Move panes to the front or back, keeping each group's order and saved geometry.
+    pub fn stack(&mut self, keys: &[String], front: bool) -> bool {
+        if !self.cards.iter().any(|c| keys.contains(&c.key())) { return false; }
+        // Only `z` changes: the cards keep their stored order.
+        let mut order: Vec<usize> = (0..self.cards.len()).collect();
+        order.sort_by_key(|&i| (keys.contains(&self.cards[i].key()) == front, self.cards[i].z));
+        let mut changed = false;
+        for (rank, i) in order.into_iter().enumerate() {
+            changed |= self.cards[i].z != rank as u64;
+            self.cards[i].z = rank as u64;
+        }
+        changed
+    }
+
     pub fn place(&mut self, terminal: &str, point: Point, size: Point) {
         let z = self
             .cards
@@ -1153,6 +1270,62 @@ mod tests {
         assert!(path.windows(2).all(|w| w[0][0] == w[1][0] || w[0][1] == w[1][1]), "orthogonal: {path:?}");
     }
     #[test]
+    fn tile_fills_the_area_without_overlap_and_grows_the_active_tile() {
+        let area = [0., 0., 1200., 800.];
+        for n in 1..=7 {
+            for active in std::iter::once(None).chain((0..n).map(Some)) {
+                let (out, _) = tile(area, n, active, &[], 24.);
+                for (i, a) in out.iter().enumerate() {
+                    assert!(a[0] >= 23.9 && a[1] >= 23.9 && a[0] + a[2] <= 1176.1 && a[1] + a[3] <= 776.1, "n={n} {a:?} leaves the area");
+                    for b in &out[i + 1..] { assert!(separated(*a, *b, 23.9), "n={n} {a:?} {b:?} overlap"); }
+                }
+                let area_of = |r: &Rect| r[2] * r[3];
+                if let Some(k) = active && n > 1 {
+                    assert!(out.iter().enumerate().all(|(j, r)| j == k || area_of(r) < area_of(&out[k])), "n={n} active {k} is the largest");
+                }
+                // Filled: the tiles and gaps cover the inner area.
+                let covered: f32 = out.iter().map(area_of).sum();
+                assert!(covered > 1152. * 752. * 0.85, "n={n} covers {covered}");
+            }
+        }
+    }
+
+    #[test]
+    fn tile_keeps_the_given_order_and_lines_pills_along_the_bottom() {
+        // The tiles sit in the order given, whichever is active.
+        let pills = [[0., 0., 220., 36.], [0., 0., 220., 36.]];
+        for active in [None, Some(0), Some(1)] {
+            let (out, _) = tile([0., 0., 1000., 600.], 2, active, &pills, 20.);
+            assert!(out[0][0] < out[1][0], "{active:?}");
+        }
+        let (out, placed) = tile([0., 0., 1000., 600.], 2, None, &pills, 20.);
+        assert!(placed.iter().all(|p| p[2] == 220. && p[3] == 36. && p[1] + p[3] <= 580.1 && p[1] > out[0][1] + out[0][3]));
+        assert!(separated(placed[0], placed[1], 19.9));
+        // Pills alone sit at the top of the area.
+        let (_, alone) = tile([0., 0., 1000., 600.], 0, None, &pills, 20.);
+        assert_eq!(alone[0][1], 20.);
+    }
+
+    #[test]
+    fn reading_order_is_top_to_bottom_then_left_to_right() {
+        assert_eq!(reading(&[[500., 0., 1., 1.], [0., 100., 1., 1.], [0., 0., 1., 1.]]), vec![2, 0, 1]);
+    }
+
+    #[test]
+    fn smooth_keeps_straight_lines_and_rounds_bends_inside_the_route() {
+        assert_eq!(smooth(&[[0., 0.], [0., 16.], [0., 100.]]), vec![[0., 0.], [0., 100.]]);
+        // A Z: down, across, down. The curve stays in the route's box and keeps both ends.
+        let z = [[0., 0.], [0., 50.], [100., 50.], [100., 100.]];
+        let s = smooth(&z);
+        assert_eq!((s[0], *s.last().unwrap()), ([0., 0.], [100., 100.]));
+        assert!(s.iter().all(|p| (0. ..=100.).contains(&p[0]) && (0. ..=100.).contains(&p[1])));
+        // Rounded as far as the runs allow: no sample sits on the sharp corners.
+        assert!(!s.contains(&[0., 50.]) && !s.contains(&[100., 50.]));
+        // Through the middle of the shared run, like the old S-curve.
+        assert!(path_distance(&s, [50., 50.]) < 1.);
+    }
+
+    #[test]
     fn path_measures() {
         let path = [[0., 0.], [10., 0.], [10., 10.]];
         assert_eq!(along(&path, 0.5), [10., 0.]);
@@ -1439,5 +1612,104 @@ mod keyboard_tests {
         camera.x += 50.;
         focus_fit(&mut camera, &mut previous, &[space], visible);
         assert_eq!(camera, fitted);
+    }
+}
+
+
+/// Where the next ⌘T pane goes: `step` down and right of the last one, back at the view's
+/// top-left when it would leave `view` ([x, y, w, h] world px), never on another pane's origin.
+pub fn cascade(last: Option<Point>, view: Rect, size: Point, taken: &[Point], step: f32) -> Point {
+    let start = [view[0] + step, view[1] + step];
+    let fits = |p: Point| p[0] + size[0] <= view[0] + view[2] && p[1] + size[1] <= view[1] + view[3];
+    let free = |p: Point| !taken.iter().any(|t| (t[0] - p[0]).abs() < 1. && (t[1] - p[1]).abs() < 1.);
+    let mut p = last.map_or(start, |l| [l[0] + step, l[1] + step]);
+    if !fits(p) { p = start; }
+    // At most one step per pane: every free spot is reached before the walk repeats.
+    for _ in 0..=taken.len() {
+        if free(p) { break; }
+        p = [p[0] + step, p[1] + step];
+        if !fits(p) && fits(start) { p = start; }
+    }
+    p
+}
+
+/// Drags a pane edge or corner. `zone` is (-1 left, 0, 1 right) and (-1 top, 0, 1 bottom).
+/// Left and top move the origin so the opposite edge stays put; size never drops below `min`.
+pub fn resize_from(origin: Point, size: Point, zone: (i8, i8), d: Point, min: Point) -> (Point, Point) {
+    let axis = |o: f32, s: f32, z: i8, d: f32, m: f32| match z {
+        1 => (o, (s + d).max(m)),
+        -1 => { let n = (s - d).max(m); (o + s - n, n) }
+        _ => (o, s),
+    };
+    let (x, w) = axis(origin[0], size[0], zone.0, d[0], min[0]);
+    let (y, h) = axis(origin[1], size[1], zone.1, d[1], min[1]);
+    ([x, y], [w, h])
+}
+
+#[cfg(test)]
+mod cascade_tests {
+    use super::cascade;
+
+    #[test]
+    fn new_panes_step_down_right_wrap_and_never_share_an_origin() {
+        let view = [0., 0., 1000., 800.];
+        let size = [400., 300.];
+        assert_eq!(cascade(None, view, size, &[], 32.), [32., 32.]);
+        assert_eq!(cascade(Some([32., 32.]), view, size, &[[32., 32.]], 32.), [64., 64.]);
+        // No room at the bottom right: back to the top left.
+        assert_eq!(cascade(Some([580., 480.]), view, size, &[], 32.), [32., 32.]);
+        // The top left is taken: the next free step.
+        assert_eq!(cascade(Some([580., 480.]), view, size, &[[32., 32.], [64., 64.]], 32.), [96., 96.]);
+        // A view smaller than a pane still never stacks two exactly.
+        assert_eq!(cascade(None, [0., 0., 100., 100.], size, &[[32., 32.]], 32.), [64., 64.]);
+    }
+}
+
+#[cfg(test)]
+mod resize_tests {
+    use super::resize_from;
+
+    #[test]
+    fn every_edge_and_corner_moves_only_its_own_sides() {
+        let (o, s, d, min) = ([100., 100.], [400., 300.], [10., 20.], [50., 50.]);
+        for (zone, want) in [
+            ((1, 1), ([100., 100.], [410., 320.])),
+            ((-1, -1), ([110., 120.], [390., 280.])),
+            ((1, -1), ([100., 120.], [410., 280.])),
+            ((-1, 1), ([110., 100.], [390., 320.])),
+            ((1, 0), ([100., 100.], [410., 300.])),
+            ((-1, 0), ([110., 100.], [390., 300.])),
+            ((0, 1), ([100., 100.], [400., 320.])),
+            ((0, -1), ([100., 120.], [400., 280.])),
+        ] {
+            assert_eq!(resize_from(o, s, zone, d, min), want, "zone {zone:?}");
+        }
+        // Shrinking past the minimum stops there, and the right/bottom edge stays put.
+        assert_eq!(resize_from(o, s, (-1, -1), [1000., 1000.], min), ([450., 350.], [50., 50.]));
+    }
+}
+
+#[cfg(test)]
+mod stacking_tests {
+    use super::*;
+
+    #[test]
+    fn pane_stack_preserves_group_order_geometry_and_document_roundtrip() {
+        let mut doc = Document::default();
+        for (i, key) in ["t1", "t2", "t3", "t4"].iter().enumerate() {
+            doc.place(key, [i as f32 * 300., 0.], [220., 36.]);
+        }
+        let geometry: std::collections::HashMap<_, _> = doc.cards.iter().map(|c| (c.key(), c.rect)).collect();
+        let targets = vec!["t3".into(), "t1".into()];
+        assert!(doc.stack(&targets, true));
+        let order = |doc: &Document| { let mut cards: Vec<_> = doc.cards.iter().collect(); cards.sort_by_key(|c| c.z); cards.iter().map(|c| c.key()).collect::<Vec<_>>() };
+        assert_eq!(order(&doc), ["t2", "t4", "t1", "t3"]);
+        assert!(!doc.stack(&targets, true), "a second press need not save again");
+        assert!(doc.stack(&targets, false));
+        assert_eq!(order(&doc), ["t1", "t3", "t2", "t4"]);
+        let restored: Document = serde_json::from_value(serde_json::to_value(&doc).unwrap()).unwrap();
+        assert_eq!(order(&restored), order(&doc));
+        assert!(restored.cards.iter().all(|c| c.rect == geometry[&c.key()]));
+        assert!(!doc.stack(&["missing".into()], true));
     }
 }

@@ -212,6 +212,9 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
         module = module.async_function(name, move |a| {
             let first = a.get(0).map(from_host).unwrap_or(Value::Null);
             let reply = match name {
+                "readTextFile" if first == "/fixture/app/keys.json" => Some(json!(crate::keys::DEFAULTS)),
+                "readTextFile" if first == "/fixture/app/frame/settings/keys.json" => Some(json!(include_str!("../../defaults/keys.json"))),
+                "readTextFile" if first == "/fixture/app/frame/settings/keys.macos.json" => Some(json!(include_str!("../../defaults/keys.macos.json"))),
                 "readTextFile" if first == "/fixture/hello.rs" => Some(json!("fn main() {}")),
                 "readTextFile" if first == "/fixture/app/settings.json" || first == "/fixture/.ssh/config" => Some(Value::Null),
                 "readTextFile" => first
@@ -256,7 +259,7 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
             Ok(std::future::ready(result))
         });
     }
-    module.declarations(DECLARATIONS)
+    module.declarations(DECLARATIONS).script(UI_KIT)
 }
 
 #[gpui::test]
@@ -611,11 +614,30 @@ fn confirm_dialog_background_follows_the_frame_corners(cx: &mut TestAppContext) 
     cx.update(gpui_shell::init);
     let staged = Staged::new();
     let mut p = props();
-    p["title"] = json!("Close space?");
+    p["title"] = json!("Delete space?");
     p["command"] = json!({"name": "space.close", "args": {"id": "s1"}});
     let tree = describe(cx, &staged, "mods/confirm", true, p, None).unwrap();
     let root = tree.lines().find(|l| l.contains(":id[Str(\"confirm\")]")).unwrap();
     assert!(root.contains(".rounded[Number(8.0)]"), "the dialog background must follow the frame's corners: {root}");
+}
+
+#[gpui::test]
+fn confirm_dialog_wraps_long_titles_and_keeps_its_detail(cx: &mut TestAppContext) {
+    cx.update(gpui_shell::init);
+    let staged = Staged::new();
+    let mut p = props();
+    p["title"] = json!("Terminate agent?");
+    p["detail"] = json!("Explain Herd maintainer commits | canopy stops and its cell closes.");
+    p["dontAsk"] = json!(true);
+    p["command"] = json!({"name": "canvas.close", "args": {"terminal": "t1"}});
+    let tree = describe(cx, &staged, "mods/confirm", true, p, None).unwrap();
+    // A content-sized dialog gives a flex_1 child no height: the detail must not grow, only wrap.
+    let detail = tree.lines().find(|l| l.contains("Explain Herd")).unwrap();
+    assert!(!detail.contains(".flex_1"), "the detail must keep its natural height: {detail}");
+    let title = tree.lines().find(|l| l.contains("font_semibold")).unwrap();
+    assert!(title.contains(".min_w[Number(0.0)]"), "a long title must wrap, not overflow: {title}");
+    let check = tree.lines().find(|l| l.contains(".size[Number(16.0)]")).unwrap();
+    assert!(check.contains(".border_1"), "the checkbox is a drawn 16 px box: {check}");
 }
 
 #[gpui::test]
@@ -802,7 +824,7 @@ fn settings_sections(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let start = Instant::now();
     let staged = Staged::new();
-    for section in ["look", "alerts", "keyboard", "machines"] {
+    for section in ["look", "alerts", "keyboard", "shortcuts", "machines"] {
         let mut p = props();
         p["section"] = json!(section);
         describe(cx, &staged, "frame/settings", true, p, None).unwrap();
@@ -945,7 +967,7 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
         ("mods/space-new", json!({"args":{"kind":"space","point":[10,20]},"folders":[]})),
         (
             "mods/confirm",
-            json!({"title":"Close space?","command":{"name":"space.close","args":{"id":"s1"}}}),
+            json!({"title":"Delete space?","command":{"name":"space.close","args":{"id":"s1"}}}),
         ),
         (
             "mods/toast",

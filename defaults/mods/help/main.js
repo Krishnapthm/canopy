@@ -3,7 +3,7 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { keys, props, closeOverlay, theme } from "herdr";
+import { keys, props, closeOverlay, theme, ui } from "herdr";
 
 const GROUPS = [
   ["spaces", /^space\./],
@@ -30,7 +30,7 @@ function label(action) {
 export default class Help extends View {
   init(_props, cx) {
     this.filter = "";
-    this.input = InputState.new({ placeholder: "Type to filter…" });
+    this.input = InputState.new({ placeholder: "Type to filter" });
     this.input.on("change", (_e, cx) => { this.filter = this.input.value(); cx.notify(); });
     this.input.focus();
     cx.timer.after(600, () => this.input.focus());
@@ -64,9 +64,9 @@ export default class Help extends View {
           .items_center()
           .justify_between()
           .child(div().text_size(15).font_semibold().text_color(t.foreground).child("Keybinds"))
-          .child(div().id("help-esc").px(6).py(2).rounded(5).text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => closeOverlay(props().overlay)).child("Esc")),
+          .child(div().id("help-esc").px(6).py(2).rounded(ui.size.radiusSm).text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => closeOverlay(props().overlay)).child("Esc")),
       )
-      .child(Input.new(this.input).h(36).flex_none().px(10).rounded(9).border_1().border_color(t.accent).bg(t.background).text_size(12.8).text_color(t.foreground))
+      .child(Input.new(this.input).h(ui.size.control).flex_none().px(10).rounded(ui.size.radius).border_1().border_color(t.accent).bg(t.background).text_size(ui.size.text).text_color(t.foreground))
       .child(
         v_flex()
           .flex_1()
@@ -82,9 +82,9 @@ export default class Help extends View {
                 .children(
                   rows.map((k) =>
                     h_flex()
-                      .h(32)
+                      .h(ui.size.control)
                       .px(8)
-                      .rounded(7)
+                      .rounded(ui.size.radiusSm)
                       .items_center()
                       .child(div().w(190).text_color(t.accent).child(k.keys + (k.section !== "global" ? `  (${k.section})` : "")))
                       .child(div().text_color(t.foreground).child(label(k.action))),

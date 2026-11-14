@@ -43,6 +43,13 @@ fn output_turn(
     })
 }
 
+/// Whether the core record's foreground program (or its argv, before one is reported) is a plain shell.
+fn is_plain_shell(record: &serde_json::Value) -> bool {
+    let name = record["foreground"]["name"].as_str().or_else(|| record["argv"][0].as_str()).unwrap_or_default();
+    let name = name.rsplit('/').next().unwrap_or_default().trim_start_matches('-');
+    matches!(name, "zsh" | "bash" | "fish" | "sh")
+}
+
 thread_local! {
     /// How much the terminal being drawn is scaled (the canvas zoom of an expanded cell), 1 elsewhere.
     static SCALE: Cell<f32> = const { Cell::new(1.0) };
@@ -72,15 +79,23 @@ fn pad() -> (f32, f32) {
     (p[0] * zoom, p[1] * zoom)
 }
 
-/// The columns and rows of a pane `bounds` big at scale 1, however the canvas is zoomed.
-pub fn grid_at_rest(bounds: Size<Pixels>, window: &Window) -> (u16, u16) {
-    let _rest = Scaled::new(1.0);
-    grid_size(bounds, cell_size(window))
+/// The columns and rows that fill a pane `rest` big in world pixels at canvas zoom `scale`,
+/// with the text drawn at `font` (the zoom times the terminal's own text zoom).
+/// Measured with the cell as drawn (glyph advances round to whole pixels per scale), so
+/// the grid fills the body at every zoom instead of leaving a strip on the right.
+fn grid_at_scale(rest: Size<Pixels>, scale: f32, font: f32, window: &Window) -> (u16, u16) {
+    let _drawn = Scaled::new(font);
+    grid_size(size(rest.width * scale, rest.height * scale), cell_size(window))
 }
 
 /// The pane size that holds `cols` x `rows` at scale 1.
 pub fn size_of_grid(cols: u16, rows: u16, window: &Window) -> Size<Pixels> {
-    let _rest = Scaled::new(1.0);
+    size_of_grid_at(cols, rows, 1.0, window)
+}
+
+/// The pane size that holds `cols` x `rows` drawn at `scale`.
+fn size_of_grid_at(cols: u16, rows: u16, scale: f32, window: &Window) -> Size<Pixels> {
+    let _rest = Scaled::new(scale);
     let (cell, (px_, py_)) = (cell_size(window), pad());
     size(cell.width * cols as f32 + px(2.0 * px_), cell.height * rows as f32 + px(2.0 * py_))
 }
@@ -168,13 +183,17 @@ pub struct TerminalView {
     pub cwd: Option<PathBuf>,
     /// The link under the pointer while the link modifier is held.
     link: Option<LinkTarget>,
-    /// Right-clicks go to the program when it takes the mouse (Shift: the menu).
-    pub right_click_to_program: bool,
     grid: Rc<RefCell<Grid>>,
     /// The canvas zoom this terminal is drawn at (see `Scaled`).
     scale: f32,
-    /// The pane size at scale 1 that sets the PTY's columns and rows; None fits the PTY to what is drawn.
-    rest: Option<Size<Pixels>>,
+    /// None fits the PTY to what is drawn. Some: the canvas body (world px) and the scale its PTY grid was measured at.
+    rest: Option<(Size<Pixels>, f32)>,
+    /// In-memory text zoom of this terminal (1 = the app's font size); the grid refits to it.
+    font_zoom: f32,
+    /// Canvas only, with `canvas_resize_terminals` false: the body (world px) the kept grid is scaled to fit.
+    keep_in: Option<Size<Pixels>>,
+    /// The grid kept in that mode: measured once, and again after a text zoom.
+    kept: Option<(u16, u16)>,
     /// The wheel only scrolls this terminal while it has the keyboard (the canvas pans otherwise).
     pub wheel_needs_focus: bool,
     focus: FocusHandle,
@@ -195,10 +214,26 @@ pub struct TerminalView {
     search_query: String,
     search_input: Option<Entity<InputState>>,
     pending_search_nav: Option<bool>,
+    /// Set after attaching to a plain shell: its first replay is cleared and the shell redraws (see `restore_clean`).
+    restore_clean: bool,
     search_task: Option<Task<()>>,
     attach_deadline: Instant,
     _render_hold: Option<(Instant, Task<()>)>,
     _reader: Option<Task<()>>,
+}
+
+thread_local! {
+    /// Sync input (like tmux synchronize-panes): the synced terminals, by address. Typing into one
+    /// also writes the same bytes to the others. The canvas sets it from what it shows.
+    static SYNCED: RefCell<Vec<(String, SyncHandle)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A synced terminal's input side, held weakly so a closed terminal drops out.
+pub(crate) struct SyncHandle(std::rc::Weak<RefCell<Grid>>);
+
+/// Replaces the synced set; an empty list turns sync input off.
+pub(crate) fn set_synced(list: Vec<(String, SyncHandle)>) {
+    SYNCED.with_borrow_mut(|s| *s = list);
 }
 
 thread_local! {
@@ -315,7 +350,6 @@ impl TerminalView {
             selection_scroll: None,
             cwd: None,
             link: None,
-            right_click_to_program: false,
             grid: Rc::new(RefCell::new(Grid {
                 vt: Vt::new(size_hint.0.max(2), size_hint.1.max(1)),
                 core: core.clone(),
@@ -340,6 +374,9 @@ impl TerminalView {
             })),
             scale: 1.0,
             rest: None,
+            font_zoom: 1.0,
+            keep_in: None,
+            kept: None,
             wheel_needs_focus: false,
             focus: cx.focus_handle(),
             was_focused: false,
@@ -352,6 +389,7 @@ impl TerminalView {
             search_query: String::new(),
             search_input: None,
             pending_search_nav: None,
+            restore_clean: false,
             search_task: None,
             attach_deadline,
             _render_hold: None,
@@ -477,6 +515,7 @@ impl TerminalView {
                 let cell = device_cell(g.cell, g.scale);
                 g.refresh_theme(&vt::theme(), cell);
                 drop(g);
+                self.restore_clean = is_plain_shell(&attached.terminal);
                 if let Some(t) = attached.terminal.get("title").and_then(|t| t.as_str()).filter(|t| !t.is_empty()) {
                     self.set_title(t, cx);
                 }
@@ -528,13 +567,25 @@ impl TerminalView {
         &self.focus
     }
 
-    /// Draws at `scale` (the canvas zoom), with a PTY of the columns and rows `rest` holds at scale 1.
-    pub fn set_scale(&mut self, scale: f32, rest: Option<Size<Pixels>>, cx: &mut Context<Self>) {
-        if self.scale != scale || (rest.is_some() && self.rest != rest) {
+    /// Draws at `scale` (the canvas zoom). `rest` is the body size (world px) whose PTY grid is
+    /// measured at this scale; None keeps the last grid, so a zoom gesture or a corner drag
+    /// changes the program's size once, when it settles.
+    /// `keep_in` is Some (the body in world px) when the grid is kept and scaled to fit the body instead of refit.
+    pub fn set_scale(&mut self, scale: f32, rest: Option<Size<Pixels>>, keep_in: Option<Size<Pixels>>, cx: &mut Context<Self>) {
+        let rest = rest.map(|r| (r, scale)).or(self.rest);
+        if self.scale != scale || self.rest != rest || self.keep_in != keep_in {
             self.scale = scale;
-            self.rest = rest.or(self.rest);
+            self.rest = rest;
+            self.keep_in = keep_in;
             cx.notify();
         }
+    }
+
+    /// Multiplies this terminal's text size by `factor` (clamped 0.5..4), or resets it with None.
+    pub fn zoom_text(&mut self, factor: Option<f32>, cx: &mut Context<Self>) {
+        self.font_zoom = factor.map_or(1.0, |f| (self.font_zoom * f).clamp(0.5, 4.0));
+        self.kept = None;
+        cx.notify();
     }
 
     /// The focused terminal remains the action target while its local find
@@ -602,6 +653,16 @@ impl TerminalView {
                         cx.notify();
                         return false;
                     }
+                }
+            }
+            if std::mem::take(&mut self.restore_clean) {
+                // The replay was drawn at a size the shell had not yet adopted, so it can hold a stray
+                // prompt-marker row. Drop it and make the shell redraw its prompt with a resize
+                // wiggle, never keystrokes. shortcut: assumes the replay fits the first batch.
+                g.vt.clear_for_restore();
+                if let (Some(ch), (cols, rows)) = (g.channel, (g.vt.cols, g.vt.rows)) && rows > 1 {
+                    g.core.resize(ch, cols, rows - 1);
+                    g.core.resize(ch, cols, rows);
                 }
             }
             g.vt.take_title()
@@ -697,13 +758,30 @@ impl TerminalView {
 
     fn send(&self, bytes: &[u8]) {
         self.typed_at.set(Some(Instant::now()));
-        let mut g = self.grid.borrow_mut();
-        if let Some(ch) = g.channel
-            && !bytes.is_empty()
         {
-            g.vt.scroll_to_bottom();
-            g.core.input(ch, bytes);
+            let mut g = self.grid.borrow_mut();
+            if let Some(ch) = g.channel
+                && !bytes.is_empty()
+            {
+                g.vt.scroll_to_bottom();
+                g.core.input(ch, bytes);
+            }
         }
+        // Sync input: the same bytes go to every other synced terminal (written directly, never re-sent).
+        SYNCED.with_borrow(|synced| {
+            if bytes.is_empty() || !synced.iter().any(|(a, _)| *a == self.address) { return; }
+            for (_, handle) in synced.iter().filter(|(a, _)| *a != self.address) {
+                if let Some(grid) = handle.0.upgrade() && let Ok(mut g) = grid.try_borrow_mut() && let Some(ch) = g.channel {
+                    g.vt.scroll_to_bottom();
+                    g.core.input(ch, bytes);
+                }
+            }
+        });
+    }
+
+    /// This terminal's input side, for `set_synced`.
+    pub(crate) fn sync_handle(&self) -> SyncHandle {
+        SyncHandle(Rc::downgrade(&self.grid))
     }
 
     /// Files dropped on the terminal: their paths typed in, quoted, as a paste
@@ -990,11 +1068,6 @@ impl TerminalView {
             ScrollTarget::Bottom => g.vt.scroll_to_bottom(),
         }
         cx.notify();
-    }
-
-    /// The program tracks the mouse and Shift isn't held (Shift keeps the mouse Canopy's).
-    fn takes_mouse(&self, mods: Modifiers) -> bool {
-        self.grid.borrow().vt.mouse_tracking() && !mods.shift
     }
 
     /// Sends a mouse event to a program that tracks the mouse. Returns whether it did
@@ -1943,11 +2016,12 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
     let cell = g.cell;
     let metrics = cell_metrics(window);
     let (pad_x, pad_y) = pad();
-    // Rows rarely fill the height exactly: split what's left above and below.
+    // The grid rarely fills the pane exactly: split what's left on both sides, so padding is even.
+    let spare_x = (f32::from(bounds.size.width) - 2.0 * pad_x - f32::from(cell.width) * g.vt.cols as f32).max(0.0);
     let spare = (f32::from(bounds.size.height) - 2.0 * pad_y - f32::from(cell.height) * g.vt.rows as f32).max(0.0);
     let scale = window.scale_factor();
     let snap = |v: Pixels| px((f32::from(v) * scale).round() / scale);
-    let origin = bounds.origin + point(px(pad_x), px(pad_y + (spare / 2.0).floor()));
+    let origin = bounds.origin + point(px(pad_x + (spare_x / 2.0).floor()), px(pad_y + (spare / 2.0).floor()));
     let origin = point(snap(origin.x), snap(origin.y));
     g.origin = origin;
     let frame = g.vt.frame();
@@ -2251,7 +2325,21 @@ impl Render for TerminalView {
                 g.core.focus(ch, focused);
             }
         }
-        let (scale, rest) = (self.scale, self.rest);
+        let (zoom, rest, font_zoom) = (self.scale, self.rest, self.font_zoom);
+        if self.keep_in.is_some() && self.kept.is_none() {
+            self.kept = rest.map(|(rest, at)| grid_at_scale(rest, at, at * font_zoom, window));
+        }
+        // A kept grid is drawn at the scale that fits it into the body, centered; else the zoom and text zoom.
+        let kept = self.keep_in.zip(self.kept);
+        let (scale, fit_box) = match kept {
+            Some((body, (cols, rows))) => {
+                let grid = size_of_grid_at(cols, rows, font_zoom, window);
+                let fit = (body.width / grid.width).min(body.height / grid.height);
+                let drawn = zoom * fit * font_zoom;
+                (drawn, Some(size_of_grid_at(cols, rows, drawn, window)))
+            }
+            None => (zoom * font_zoom, None),
+        };
         let cell = {
             let _scaled = Scaled::new(scale);
             cell_size(window)
@@ -2265,13 +2353,13 @@ impl Render for TerminalView {
         let grid_paint = self.grid.clone();
         let selection_view = cx.entity().downgrade();
         let (input_focus, input_view) = (self.focus.clone(), cx.entity());
-        let ended = self.ended.clone().or_else(|| self.lost.then(|| "reconnecting to core…".to_owned()));
+        let ended = self.ended.clone().or_else(|| self.lost.then(|| "reconnecting to core".to_owned()));
         let search_input = self.search_open.then(|| self.search_input.clone()).flatten();
         let search_progress = self.grid.borrow().vt.search_progress();
         let search_label = if self.search_query.is_empty() {
             String::new()
         } else if !search_progress.complete {
-            if search_progress.total == 0 { "Searching…".to_owned() } else { format!("{}+", search_progress.total) }
+            if search_progress.total == 0 { "Searching".to_owned() } else { format!("{}+", search_progress.total) }
         } else if search_progress.total == 0 {
             "No matches".to_owned()
         } else if let Some(selected) = search_progress.selected {
@@ -2287,6 +2375,7 @@ impl Render for TerminalView {
             .key_context("Terminal")
             .size_full()
             .relative()
+            .when(fit_box.is_some(), |d| d.flex().items_center().justify_center())
             // Below 1, the layout's background shows through (cells a program colors stay solid).
             .bg(hsla(vt::theme().bg).opacity(crate::settings::get().terminal_opacity))
             .on_action(cx.listener(|this, a: &gpui_shell::action::ShellAction, window, cx| {
@@ -2363,16 +2452,11 @@ impl Render for TerminalView {
                     this.start_selection(ev.position, cx);
                 }
             }))
-            // Right-click is Canopy's menu, even when the program tracks the mouse
-            // (agent TUIs do, and then a pane had no menu at all), unless the pane
-            // sends right-clicks to its program.
-            .on_mouse_down(MouseButton::Right, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
+            // Right-click is always Canopy's menu, even when the program tracks the mouse
+            // (agent TUIs do, and then a pane had no menu at all).
+            .on_mouse_down(MouseButton::Right, cx.listener(|_, ev: &MouseDownEvent, _, cx| {
                 cx.stop_propagation();
-                if this.right_click_to_program && this.takes_mouse(ev.modifiers) {
-                    this.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(ev.button), ev.position, ev.modifiers);
-                } else {
-                    cx.emit(TerminalEvent::ContextMenu(ev.position));
-                }
+                cx.emit(TerminalEvent::ContextMenu(ev.position));
             }))
             .on_mouse_down(MouseButton::Middle, cx.listener(|this, ev: &MouseDownEvent, _, cx| {
                 if !this.mouse(GHOSTTY_MOUSE_ACTION_PRESS, Some(ev.button), ev.position, ev.modifiers) {
@@ -2392,7 +2476,7 @@ impl Render for TerminalView {
                 canvas(
                     move |bounds, window, _cx| {
                         let _scaled = Scaled::new(scale);
-                        let (cols, rows) = rest.map_or_else(|| grid_size(bounds.size, cell), |rest| grid_at_rest(rest, window));
+                        let (cols, rows) = kept.map(|(_, grid)| grid).unwrap_or_else(|| rest.map_or_else(|| grid_size(bounds.size, cell), |(rest, at)| grid_at_scale(rest, at, at * font_zoom, window)));
                         grid.borrow_mut().fit(cols, rows, cell, window.scale_factor());
                     },
                     move |bounds, _, window, cx| {
@@ -2459,7 +2543,7 @@ impl Render for TerminalView {
                         }
                     },
                 )
-                .size_full(),
+                .map(|c| match fit_box { Some(b) => c.w(b.width).h(b.height), None => c.size_full() }),
             )
             .when_some(search_input, |d, input| {
                 d.child(
@@ -4364,15 +4448,32 @@ mod tests {
         let rest = super::grid_size(bounds, cell);
         for zoom in [0.5, 1.5, 2.0] {
             let _outer = super::Scaled::new(zoom);
-            // The PTY size is taken at scale 1 from the cell's size at rest, whatever is drawn.
-            let at_rest = { let _one = super::Scaled::new(1.0); super::grid_size(bounds, cell) };
-            assert_eq!(at_rest, rest);
+            // With a cell that scales exactly, the drawn body holds the same grid as at scale 1.
+            let drawn_grid = super::grid_size(gpui::size(bounds.width * zoom, bounds.height * zoom), gpui::size(cell.width * zoom, cell.height * zoom));
+            assert_eq!(drawn_grid, rest);
             assert_eq!(super::pad().0, crate::settings::get().terminal_padding[0] * crate::settings::zoom() * zoom);
             // Drawn at `zoom`, the cell is `zoom` times bigger and so is the pixel under the pointer.
             let drawn = gpui::size(cell.width * zoom, cell.height * zoom);
             assert_eq!(super::cell_at((8.0 * zoom * 3.0 + 1.0, 16.0 * zoom * 2.0 + 1.0), drawn), (3, 2));
         }
         assert_eq!(super::pad().0, crate::settings::get().terminal_padding[0] * crate::settings::zoom());
+    }
+
+    #[test]
+    fn the_grid_is_measured_with_the_cell_as_drawn() {
+        // Glyph advances round to whole device pixels per scale: 8.4 px at 1x draws 7.5 px at 0.9x (2x screen).
+        let body = gpui::size(gpui::px(1000.0), gpui::px(600.0));
+        let (at_one, drawn) = (gpui::size(gpui::px(8.4), gpui::px(17.0)), gpui::size(gpui::px(7.5), gpui::px(15.5)));
+        let wide = |cols: u16| 7.5 * cols as f32;
+        let drawn_body = gpui::size(body.width * 0.9, body.height * 0.9);
+        let _scaled = super::Scaled::new(0.9);
+        let pad = 2.0 * super::pad().0;
+        // Measured at scale 1, the grid leaves more than a cell empty on screen (the old strip).
+        let (old, _) = { let _one = super::Scaled::new(1.0); super::grid_size(body, at_one) };
+        assert!(900.0 - pad - wide(old) > 7.5);
+        // Measured as drawn, it fills the body to within one cell.
+        let (cols, _) = super::grid_size(drawn_body, drawn);
+        assert!((0.0..7.5).contains(&(900.0 - pad - wide(cols))));
     }
 
     #[test]

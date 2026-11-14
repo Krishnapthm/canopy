@@ -8,7 +8,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, TextView } from "gpui-base";
-import { hc, exec, home, readTextFile, theme, props, closeOverlay } from "herdr";
+import { hc, exec, home, readTextFile, theme, props, closeOverlay, ui } from "herdr";
 
 const I = (name) => `mods/workspace-chrome/${name}.svg`;
 const shellArg = (target) => /^[a-z0-9_@%+=:,./-]+$/i.test(target) ? target : "'" + target.replace(/'/g, "'\\''") + "'";
@@ -160,9 +160,9 @@ export default class MachineAdd extends View {
 
   logoutCard(t, m) {
     const command = `sudo loginctl enable-linger -- ${shellArg(m.logout_linger_user ?? "<user>")}`;
-    return v_flex().id(`ma-logout-${m.name}`).mx(10).mb(8).p(12).gap(8).rounded(10)
+    return v_flex().id(`ma-logout-${m.name}`).mx(10).mb(8).p(12).gap(8).rounded(ui.size.radiusLg)
       .bg(t.blocked + "14").border_1().border_color(t.blocked + "40")
-      .child(div().text_size(12.8).font_semibold().text_color(t.foreground).child(`Agents on ${m.name} stop when you disconnect`))
+      .child(div().text_size(ui.size.text).font_semibold().text_color(t.foreground).child(`Agents on ${m.name} stop when you disconnect`))
       .child(div().text_size(12.5).line_height("18px").text_color(t.muted)
         .child("The server ends your programs when your last login closes, for example when your laptop sleeps."))
       .child(div().text_size(12.5).text_color(t.muted).child(`Run this on ${m.name} once:`))
@@ -181,11 +181,11 @@ export default class MachineAdd extends View {
       .mb(8)
       .p(12)
       .gap(8)
-      .rounded(10)
+      .rounded(ui.size.radiusLg)
       .bg(t.blocked + "14")
       .border_1()
       .border_color(t.blocked + "40")
-      .child(div().text_size(12.8).font_semibold().text_color(t.foreground).child(`${mac.name} is a Mac: allow its folders once`))
+      .child(div().text_size(ui.size.text).font_semibold().text_color(t.foreground).child(`${mac.name} is a Mac: allow its folders once`))
       .child(
         div()
           .text_size(12.5)
@@ -205,7 +205,7 @@ export default class MachineAdd extends View {
               .px(12)
               .flex()
               .items_center()
-              .rounded(7)
+              .rounded(ui.size.radiusSm)
               .bg(t.solid)
               .text_color(t.solid_foreground)
               .text_size(12)
@@ -257,7 +257,7 @@ export default class MachineAdd extends View {
               .h(26)
               .flex()
               .items_center()
-              .rounded(7)
+              .rounded(ui.size.radiusSm)
               .border_1()
               .border_color(t.input)
               .bg(t.raised)
@@ -277,7 +277,7 @@ export default class MachineAdd extends View {
           .px(10)
           .gap(10)
           .items_center()
-          .rounded(8)
+          .rounded(ui.size.radius)
           .hover((s) => s.bg(t.hover))
           .when(idle, (el) => el.cursor_pointer().on_click((_e, cx) => this.add(target, cx)))
           .child(svg(I("server")).size(15).text_color(t.muted))
@@ -302,11 +302,11 @@ export default class MachineAdd extends View {
       .p(18)
       .bg(t.popover)
       .text_color(t.foreground)
-      .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().child("Add a machine")).child(div().id("ma-esc").px(6).py(2).rounded(5).text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => this.close()).child("Esc")))
+      .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().child("Add a machine")).child(div().id("ma-esc").px(6).py(2).rounded(ui.size.radiusSm).text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => this.close()).child("Esc")))
       .child(
         div()
           .pt(6)
-          .text_size(12.8)
+          .text_size(ui.size.text)
           .line_height("19px")
           .text_color(t.muted)
           .child("A VPS, a Mac mini, a box at home: Canopy reaches it over ssh, and agents there keep running while your laptop sleeps."),
@@ -321,7 +321,7 @@ export default class MachineAdd extends View {
           .overflow_y_scroll()
           .children(
             this.hosts === null
-              ? [div().px(10).py(8).text_size(12.5).text_color(t.dim).child("Reading ~/.ssh/config…")]
+              ? [div().px(10).py(8).text_size(12.5).text_color(t.dim).child("Reading ~/.ssh/config")]
               : hosts.filter(h => !this.isAdded(h.alias)).map((h) => this.row(t, h.alias, h.alias, [h.user, h.hostname].filter(Boolean).join("@") || (h.aliases.length ? `also ${h.aliases.join(", ")}` : ""))),
           ),
       )
@@ -334,11 +334,11 @@ export default class MachineAdd extends View {
           .child(
             Input.new(this.input)
               .flex_1()
-              .h(34)
+              .h(ui.size.control)
               .px(10)
               .gap(6)
               .items_center()
-              .rounded(8)
+              .rounded(ui.size.radius)
               .border_1()
               .border_color(this.inputFocused ? t.accent : t.input)
               .bg(t.background)
@@ -348,11 +348,11 @@ export default class MachineAdd extends View {
           .child(
             div()
               .id("ma-add-typed")
-              .h(34)
+              .h(ui.size.control)
               .px(14)
               .flex()
               .items_center()
-              .rounded(8)
+              .rounded(ui.size.radius)
               .bg(t.solid)
               .text_color(t.solid_foreground)
               .text_size(12.5)

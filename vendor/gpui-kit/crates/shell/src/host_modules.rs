@@ -423,6 +423,8 @@ pub struct HostModule {
     /// The module's TypeScript face, if the host wrote one. See
     /// [`HostModule::declarations`].
     declarations: Option<String>,
+    /// JavaScript appended to the generated module. See [`HostModule::script`].
+    script: Option<&'static str>,
 }
 
 impl HostModule {
@@ -440,6 +442,7 @@ impl HostModule {
             components: BTreeMap::new(),
             cancellation_values: BTreeMap::new(),
             declarations: None,
+            script: None,
         }
     }
 
@@ -627,6 +630,18 @@ impl HostModule {
         self
     }
 
+    /// Module source appended after the generated exports: helpers written in
+    /// JavaScript (for example styled components) that every importer shares.
+    /// It may import built-in modules and use this module's own exports by name.
+    pub fn script(mut self, source: &'static str) -> Self {
+        self.script = Some(source);
+        self
+    }
+
+    pub(crate) fn script_source(&self) -> Option<&'static str> {
+        self.script
+    }
+
     /// The TypeScript body [`Self::declarations`] was given.
     pub fn declared(&self) -> Option<&str> {
         self.declarations.as_deref()
@@ -698,19 +713,9 @@ impl HostModule {
             return Ok(());
         };
 
-        let declared: Vec<&str> = declarations
-            .lines()
-            .filter_map(|line| {
-                let line = line.trim_start();
-                let rest = line
-                    .strip_prefix("export function ")
-                    .or_else(|| line.strip_prefix("export declare function "))
-                    .or_else(|| line.strip_prefix("export const "))?;
-                let end =
-                    rest.find(|it: char| !it.is_ascii_alphanumeric() && it != '_' && it != '$');
-                Some(&rest[..end.unwrap_or(rest.len())])
-            })
-            .collect();
+        let declared = exported_names(declarations);
+        // A script's own exports are real exports, declared like the rest.
+        let scripted = self.script.map(exported_names).unwrap_or_default();
 
         let missing: Vec<&str> = self
             .function_names()
@@ -721,7 +726,7 @@ impl HostModule {
         let extra: Vec<&str> = declared
             .iter()
             .copied()
-            .filter(|name| !self.has_export(name))
+            .filter(|name| !self.has_export(name) && !scripted.contains(name))
             .collect();
 
         if missing.is_empty() && extra.is_empty() {
@@ -878,6 +883,23 @@ impl HostModules {
     ) -> HostResult {
         self.get(module)?.call(function, arguments)
     }
+}
+
+/// The names a source exports through `export function` or `export const` at
+/// the start of a line.
+fn exported_names(source: &str) -> Vec<&str> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim_start();
+            let rest = line
+                .strip_prefix("export function ")
+                .or_else(|| line.strip_prefix("export declare function "))
+                .or_else(|| line.strip_prefix("export const "))?;
+            let end = rest.find(|it: char| !it.is_ascii_alphanumeric() && it != '_' && it != '$');
+            Some(&rest[..end.unwrap_or(rest.len())])
+        })
+        .collect()
 }
 
 fn list(names: &[&str]) -> String {

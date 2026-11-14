@@ -8,6 +8,7 @@
 use crate::hc::Core;
 mod floats;
 mod canvas_view;
+mod ui;
 mod movable;
 mod pane_drag;
 mod pane_size;
@@ -432,6 +433,8 @@ pub struct AppWindow {
     /// Where a press on a `window_drag` node started, until it moves the window.
     drag_from: Option<Point<Pixels>>,
     titlebar_applied: Option<(crate::layout::Titlebar, Option<[f32; 2]>)>,
+    /// Whether the window was full screen at the last render (the canvas bar drops its traffic-light inset).
+    fullscreen: bool,
     focused_pane: Option<String>,
     /// The mod block holding the keyboard for directional navigation.
     focused_block: Option<String>,
@@ -527,6 +530,7 @@ impl AppWindow {
             pointer: Point::default(),
             drag_from: None,
             titlebar_applied: None,
+            fullscreen: false,
             focused_pane: None,
             focused_block: None,
             synced_model_pane: None,
@@ -548,7 +552,9 @@ impl AppWindow {
         let owner_window = window.window_handle();
         w._canvas_keys = Some(cx.intercept_keystrokes(move |event, window, cx| {
             if window.window_handle() != owner_window { return; }
-            let swallowed = owner.update(cx, |this, cx| this.canvas_key(&event.keystroke, window, cx)).unwrap_or(false);
+            let swallowed = owner.update(cx, |this, cx| {
+                this.record_shortcut(&event.keystroke) || this.canvas_key(&event.keystroke, window, cx)
+            }).unwrap_or(false);
             if swallowed { cx.stop_propagation(); }
         }));
         w._focus_lost = Some(cx.on_focus_lost(window, |this, window, cx| this.restore_focus(window, cx)));
@@ -830,7 +836,7 @@ impl AppWindow {
     fn reload_config(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let s_time = mtime(&settings::path());
         if s_time.is_none() || s_time != self.watched.settings {
-            let old_gap = self.person.canvas_gap;
+            let (old_gap, old_tile_gap) = (self.person.canvas_gap, self.person.tile_gap);
             let loaded = settings::load_person();
             match loaded {
                 Ok(p) => {
@@ -852,6 +858,7 @@ impl AppWindow {
                 for space in spaces { self.solve_layout(None, Some(&space), cx); }
                 self.canvas_changed(cx);
             }
+            if old_tile_gap != self.person.tile_gap { self.tile_canvas(false, window, cx); }
         }
         let k_time = mtime(&crate::keys::path());
         if k_time.is_none() || k_time != self.watched.keys {
@@ -1369,6 +1376,8 @@ impl AppWindow {
     /// Creates what's visible, drops what isn't, publishes state, saves, focuses.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.canvas_state.editing != self.canvas_state.file { self.canvas_state.editing = None; }
+        // The picker finds open file tabs by this; set_shared is a no-op when unchanged.
+        mods::set_shared("canvas.files".into(), json!(self.canvas_state.tabs));
         self.sync_canvas(window,cx);
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
@@ -1723,7 +1732,7 @@ impl AppWindow {
                         self.live.get(addr).and_then(|r| r.get("title")).and_then(Value::as_str).map(str::to_owned)
                     });
                     panes.push(json!({
-                        "pane": p.id, "terminal": addr, "tab": ctx.id, "title": title.clone().unwrap_or_default(),
+                        "pane": p.id, "terminal": addr, "tab": ctx.id, "name": ctx.name, "title": title.clone().unwrap_or_default(),
                         "cwd": self.cwds.get(addr), "branch": m.folder_info.get(addr).and_then(|f| f.branch.clone()),
                         "status": m.status(addr), "app": a.and_then(|a| a.app.clone()), "program": self.program(addr),
                         "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id),
@@ -2009,20 +2018,20 @@ impl AppWindow {
             TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
             TerminalEvent::TitleChanged => this.publish(cx),
             TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
+            // A canvas cell gets its own menu; tab layouts keep the pane menu.
+            TerminalEvent::ContextMenu(at) if this.has_canvas() && this.canvas_state.doc.cards.iter().any(|c| c.terminal == addr) => {
+                this.open_card_menu(&addr, *at, window, cx)
+            }
             TerminalEvent::ContextMenu(at) => {
                 this.open_menu("pane", json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
             }
         })
     }
 
-    /// What a terminal view takes from the core's facts: its folder, where right-clicks go.
+    /// What a terminal view takes from the core's facts: its folder.
     fn tell_term(&self, view: &Entity<TerminalView>, addr: &str, cx: &mut Context<Self>) {
         let cwd = self.cwds.get(addr).map(std::path::PathBuf::from);
-        let to_program = self.live.get(addr).and_then(|r| r.pointer("/labels/herdr.right-click")).and_then(Value::as_str) == Some("program");
-        view.update(cx, |v, _| {
-            v.cwd = cwd;
-            v.right_click_to_program = to_program;
-        });
+        view.update(cx, |v, _| v.cwd = cwd);
     }
 
     fn terminals_listed(&mut self, v: Value, window: &mut Window, cx: &mut Context<Self>) {
@@ -2352,6 +2361,8 @@ impl AppWindow {
             // The program ended on its own (or was killed): its pane goes now. A
             // stream that just broke (the core died) says neither.
             let closed = matches!(why.as_str(), "exited" | "killed" | "finished");
+            // Its pane goes before the live listing drops it; until then nothing may adopt it again.
+            if closed { self.closing_terminals.insert(t.address.clone(), true); }
             if closed && self.chrome.find(block).and_then(Node::terminal) == Some(t.address.as_str()) {
                 self.chrome.remove_slot(block);
                 return self.sync(window, cx);
@@ -2856,7 +2867,7 @@ impl AppWindow {
         }
         if person && name == "space.rename" && args.get("name").is_none_or(Value::is_null) {
             if let Some(id) = Self::owned(&args, "id").filter(|id| self.canvas_state.doc.spaces.iter().any(|s| &s.space == id)) {
-                self.rename_canvas_space(id, window, cx);
+                self.rename_canvas(canvas_view::Rename::Space(id), window, cx);
                 return json!({"asked":"name"});
             }
         }
@@ -2934,7 +2945,11 @@ impl AppWindow {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "canvas.fit_all" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
             "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.select_all" | "canvas.collapse" | "canvas.connect" | "canvas.thread" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
+            "canvas.tile" => self.tile_canvas(true, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
+            "canvas.equalize" => self.equalize_panes(window, cx),
+            "canvas.sync" => self.toggle_sync(window, cx),
+            "canvas.front" | "canvas.back" => self.stack_panes(name == "canvas.front", a["terminal"].as_str(), window, cx),
             "canvas.sub_message" => self.message_sub(a, window, cx),
             "wire.connect" | "wire.remove" | "wire.reset" | "wire.open" => self.wire_command(name, a, window, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
@@ -2990,8 +3005,8 @@ impl AppWindow {
                         return self.fail("space.close ends its terminals: pass confirmed: true");
                     }
                     let panes: usize = p.tabs.iter().map(|c| c.root.panes().len()).sum();
-                    let detail = format!("{} \u{2014} {} tabs, {} terminals", self.model.space_name(p, &home()), p.tabs.len(), panes);
-                    self.confirm("Close space?", &detail, "space.close", json!({ "id": id, "confirmed": true }), window, cx);
+                    let detail = format!("{} and its {panes} terminal{} close. This cannot be undone.", self.model.space_name(p, &home()), if panes == 1 { "" } else { "s" });
+                    self.confirm("Delete space?", &detail, "Delete", "space.close", json!({ "id": id, "confirmed": true }), window, cx);
                     return;
                 }
                 let addrs = self.model.remove_space(&id);
@@ -3199,25 +3214,6 @@ impl AppWindow {
             "terminal.park" => {
                 let r = self.park_terminal(Self::arg(a, "terminal").unwrap_or_default(), window, cx);
                 self.answer(r);
-            }
-            "terminal.right_click" => {
-                let to = match Self::arg(a, "to") {
-                    Some("program") => "program",
-                    Some("menu") => "",
-                    other => return self.fail(format!("terminal.right_click to is \"program\" or \"menu\", not {other:?}")),
-                };
-                let t = Self::owned(a, "terminal").or_else(|| self.focused_terminal(window, cx).map(|t| t.address.clone()));
-                let Some(t) = t.filter(|t| self.live.contains_key(t)) else { return self.fail("no such running terminal") };
-                // Off the UI thread: a terminal on a slow machine answers late.
-                let core = self.core.clone();
-                let params = json!({ "terminal": t, "labels": { "herdr.right-click": to } });
-                cx.background_executor()
-                    .spawn(async move {
-                        if let Err(e) = core.call("terminal.label", params) {
-                            tracing::warn!("right-click label: {e:#}");
-                        }
-                    })
-                    .detach();
             }
             "terminal.pin" => {
                 let Some(pinned) = a.get("pinned").and_then(Value::as_bool) else { return self.fail("terminal.pin pinned is true or false") };
@@ -3596,9 +3592,11 @@ impl AppWindow {
 
     // ---- overlays ----------------------------------------------------------
 
-    fn confirm(&mut self, title: &str, detail: &str, command: &str, args: Value, window: &mut Window, cx: &mut Context<Self>) {
-        let spec = json!({ "mod": "confirm", "kind": "dialog", "width": 380,
-            "props": { "title": title, "detail": detail, "command": { "name": command, "args": args } } });
+    /// A destructive confirmation: `accept` (in red) runs `command`.
+    #[allow(clippy::too_many_arguments)]
+    fn confirm(&mut self, title: &str, detail: &str, accept: &str, command: &str, args: Value, window: &mut Window, cx: &mut Context<Self>) {
+        let spec = json!({ "mod": "confirm", "kind": "dialog", "width": 400,
+            "props": { "title": title, "detail": detail, "accept": accept, "destructive": true, "command": { "name": command, "args": args } } });
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
     }
 
@@ -3754,6 +3752,19 @@ impl AppWindow {
         }), window, cx);
     }
 
+    /// Settings must record bound keys before GPUI runs their actions. Mods cannot intercept them.
+    fn record_shortcut(&self, key: &gpui::Keystroke) -> bool {
+        let Some(request) = mods::shared("settings.record-shortcut") else { return false; };
+        let Some(overlay) = self.overlays.iter().rev().find(|o| o.kind.modal_keys()) else { return false; };
+        if request.as_str() != Some(overlay.id.as_str()) { return false; }
+        let Some(copy) = self.copies.get(&overlay.slot).filter(|c| c.inst.name == "frame-settings") else { return false; };
+        if !matches!(key.key.as_str(), "shift" | "control" | "alt" | "platform" | "function") {
+            mods::set_shared("settings.record-shortcut".into(), Value::Null);
+            mods::send_command_to(copy.id, &json!({"shortcut":key.unparse()}).to_string());
+        }
+        true
+    }
+
     /// Which copies are on screen, for `<mod>.<command>` (`mods::send_command`).
     fn publish_shown_copies(&self) {
         let (_, shown) = self.visible();
@@ -3770,6 +3781,9 @@ impl AppWindow {
 
     fn remove_overlay(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(i) = self.overlays.iter().position(|o| o.id == id) {
+            if mods::shared("settings.record-shortcut").as_ref().and_then(Value::as_str) == Some(id) {
+                mods::set_shared("settings.record-shortcut".into(), Value::Null);
+            }
             let o = self.overlays.remove(i);
             if self.win_drag.as_ref().is_some_and(|d| d.id == o.id) {
                 self.win_drag = None;
@@ -4915,7 +4929,7 @@ impl Render for AppWindow {
             .font_family(settings::get().ui_font_family.clone())
             .on_action(cx.listener(|this, a: &ShellAction, w, cx| {
                 // Canvas-only keys reach a focused terminal untouched.
-                if matches!(a.id(), "canvas.close" | "canvas.undo") && !this.focus.is_focused(w) {
+                if matches!(a.id(), "canvas.close" | "canvas.undo" | "canvas.select_all") && !this.focus.is_focused(w) {
                     cx.propagate();
                     return;
                 }
@@ -4931,7 +4945,7 @@ impl Render for AppWindow {
             .on_action(cx.listener(|this, a: &crate::keys::CommandBinding, w, cx| {
                 match a.command() {
                     Ok((name, args)) => {
-                        if matches!(name.as_str(), "canvas.close" | "canvas.undo") && args.get("terminal").is_none() && !this.focus.is_focused(w) {
+                        if matches!(name.as_str(), "canvas.close" | "canvas.undo" | "canvas.select_all") && args.get("terminal").is_none() && !this.focus.is_focused(w) {
                             cx.propagate();
                             return;
                         }
@@ -5610,6 +5624,47 @@ mod tests {
     }
 
     #[test]
+    fn shortcuts_capture_precedes_bound_actions() {
+        in_own_process("shortcuts_capture");
+    }
+
+    #[gpui::test]
+    fn shortcuts_capture(cx: &mut TestAppContext) {
+        use serde_json::{json, Value};
+        if !running_alone("shortcuts_capture") { return; }
+        let (view, cx) = open_window(cx, "shortcuts-probe", "", json!({"id":"root", "type":"row", "children":[]}));
+        // A probe replaces only the isolated test home's settings, with no file IO or core calls.
+        std::fs::write(crate::mods::frame_dir().join("settings/main.js"), r#"
+import { View, div } from 'gpui-kit';
+import { nextCommand, setShared } from 'herdr';
+export default class Probe extends View {
+  init(_, cx) {
+    this.handle = cx.focus_handle(); this.handle.focus();
+    cx.spawn(async cx => { for (;;) {
+      const command = await nextCommand();
+      if (command.startsWith('{"shortcut":')) setShared('shortcuts-test.captured', command);
+    } });
+  }
+  render() { return div().id('probe').track_focus(this.handle); }
+}
+"#).unwrap();
+        view.update_in(cx, |this, window, cx| {
+            this.open_overlay("shortcuts-test".into(), json!({"mod":"frame-settings", "kind":"dialog"}), window, cx);
+            crate::keys::install(crate::keys::parse(r#"{"global":{"ctrl-k":"overlay.close"}}"#).unwrap(), cx);
+        });
+        cx.run_until_parked();
+        crate::mods::set_shared("settings.record-shortcut".into(), json!("shortcuts-test"));
+        cx.simulate_keystrokes("ctrl-k");
+        cx.run_until_parked();
+        assert_eq!(crate::mods::shared("shortcuts-test.captured"), Some(json!(r#"{"shortcut":"ctrl-k"}"#)));
+        assert_eq!(crate::mods::shared("settings.record-shortcut"), Some(Value::Null));
+        assert!(view.update(cx, |this, _| this.overlays.iter().any(|o| o.id == "shortcuts-test")));
+        crate::mods::set_shared("settings.record-shortcut".into(), json!("shortcuts-test"));
+        view.update_in(cx, |this, window, cx| this.close_overlay("shortcuts-test", window, cx));
+        assert_eq!(crate::mods::shared("settings.record-shortcut"), Some(Value::Null));
+    }
+
+    #[test]
     fn canvas_mouse_works_like_figma() {
         in_own_process("figma_mouse");
     }
@@ -5876,17 +5931,14 @@ mod tests {
         if !running_alone("pop_out_lifecycle") { return; }
         let (view, cx) = open_window(cx, "neighbor", "", json!({"id":"root", "type":"block", "content":{"mod":"neighbor"}}));
         let pop = cx.update(|window, cx| view.update(cx, |this, cx| {
-            this.live.insert("t1".into(), json!({"pid":1, "labels":{"herdr.right-click":"program"}}));
+            this.live.insert("t1".into(), json!({"pid":1}));
             this.cwds.insert("t1".into(), "/tmp".into());
             this.pop_canvas("t1".into(), false, window, cx);
             let pop = this.canvas_state.popped["t1"];
             let terminal = pop.read(cx).unwrap().terminal.clone();
-            assert!(terminal.read(cx).right_click_to_program);
-            this.live.get_mut("t1").unwrap()["labels"] = json!({});
             terminal.update(cx, |v, _| v.ended = Some("holder_lost".into()));
             this.tend_terminals(false, window, cx);
             assert!(terminal.read(cx).ended.is_none());
-            assert!(!terminal.read(cx).right_click_to_program);
             terminal.update(cx, |v, _| v.ended = Some("holder_lost".into()));
             this.reconnected(crate::hc::offline(), cx);
             assert!(terminal.read(cx).ended.is_none());
@@ -6487,7 +6539,7 @@ export default class SystemToast extends View {
             assert!(!super::needs_model_pane(name, &json!({})), "{name}");
             assert!(!super::needs_model_pane(name, &json!({"place": "tab"})), "{name}");
         }
-        for name in ["pane.focus", "terminal.copy", "terminal.paste", "terminal.paste_image", "terminal.right_click"] {
+        for name in ["pane.focus", "terminal.copy", "terminal.paste", "terminal.paste_image"] {
             assert!(!super::needs_model_pane(name, &json!({})), "{name}");
         }
     }

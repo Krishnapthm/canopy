@@ -11,6 +11,9 @@ it resolves with `[]` and releases that call without stopping other mods' watche
 
 The generated `herdr.d.ts` and `gpui-kit.d.ts` beside your installed guide describe the full API for your version.
 
+To match the app's look, build from `ui` in the `herdr` module (buttons,
+checkbox, input, dialog pieces, rows, sizes); every shipped dialog uses it.
+
 Start with Settings for fonts, colors and sounds.
 For deeper changes, duplicate a shipped layout or mod from the command palette, then edit the copy.
 Shipped files update on start; personal copies do not.

@@ -18,6 +18,10 @@ pub(in crate::window) struct WireUi {
     pub(super) hover: Option<String>,
     /// A wire being drawn: the cell it starts at, where it starts (world) and the pointer (window).
     drag: Option<(String, canvas::Point, Point<Pixels>)>,
+    /// Where the button went down on the "+" handle, to tell a click from a drag.
+    down: Point<Pixels>,
+    /// The handle was clicked, not dragged: the wire follows the pointer until a click picks a cell.
+    sticky: bool,
     pub(super) selected: Option<(String, String)>,
     pulses: HashMap<(String, String), Instant>,
     stats: HashMap<(String, String), Stat>,
@@ -26,11 +30,19 @@ pub(in crate::window) struct WireUi {
     thread: Option<(Vec<String>, Entity<InputState>, Subscription)>,
 }
 
-/// One edge as drawn: its cells in the order stored (a is the parent of a born edge), and its route.
+/// One edge as drawn: its cells in the order stored (a is the parent of a born edge), and its smoothed route.
 struct Edge {
     key: (String, String),
     born: bool,
     path: Vec<canvas::Point>,
+}
+
+/// How far (screen px) the pointer may move between press and release on a handle and still be a click.
+const CLICK: f32 = 4.;
+
+/// A release this close to where the button went down on a handle is a click, not a drag.
+fn is_click(down: Point<Pixels>, up: Point<Pixels>) -> bool {
+    f32::from(up.x - down.x).hypot(f32::from(up.y - down.y)) < CLICK
 }
 
 /// The pointer's line while a wire is drawn: a cubic leaving `a` sideways.
@@ -82,7 +94,7 @@ impl AppWindow {
         for w in all.iter().filter(|w| w.born).chain(all.iter().filter(|w| !w.born)) {
             if out.iter().any(|e| (e.key.0 == w.a && e.key.1 == w.b) || (e.key.0 == w.b && e.key.1 == w.a)) { continue; }
             if let (Some(a), Some(b)) = (self.wire_cell(doc, &w.a), self.wire_cell(doc, &w.b)) {
-                out.push(Edge { key: (w.a.clone(), w.b.clone()), born: w.born, path: canvas::route(a, b, &cells) });
+                out.push(Edge { key: (w.a.clone(), w.b.clone()), born: w.born, path: canvas::smooth(&canvas::route(a, b, &cells)) });
             }
         }
         out
@@ -114,6 +126,12 @@ impl AppWindow {
     /// Mouse moves on the canvas: shows the "+" handles of the cell under the pointer and
     /// follows a wire being drawn. True when the move was part of drawing.
     pub(in crate::window) fn wire_pointer(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) -> bool {
+        let wire = &mut self.canvas_state.wire;
+        if let Some(drag) = wire.drag.as_mut().filter(|_| wire.sticky) {
+            drag.2 = e.position;
+            cx.notify();
+            return true;
+        }
         if let Some((from, start, _)) = self.canvas_state.wire.drag.take() {
             // The button came up outside the window: nothing was released on a cell, so cancel.
             if e.pressed_button.is_some() { self.canvas_state.wire.drag = Some((from, start, e.position)); }
@@ -154,11 +172,41 @@ impl AppWindow {
     }
 
     /// The left button came up: a wire being drawn connects to the cell under it, or is dropped.
+    /// A release on the handle it started from, without moving, keeps the wire (see `wire_pick`).
     pub(in crate::window) fn wire_release(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let wire = &mut self.canvas_state.wire;
+        if wire.drag.is_none() || wire.sticky { return false; }
+        if is_click(wire.down, position) {
+            wire.sticky = true;
+            cx.notify();
+            return true;
+        }
         let Some((from, ..)) = self.canvas_state.wire.drag.take() else { return false };
         if let Some(to) = self.wire_cell_at(position, 0.).filter(|to| *to != from) {
             if let Err(why) = self.wire_connect(&from, &to, window, cx) { self.wire_toast(why, window, cx); }
         }
+        cx.notify();
+        true
+    }
+
+    /// A left press while a wire follows the pointer (capture phase, so an entered terminal cannot
+    /// swallow it): the cell under it is wired to, anywhere else cancels. True when it was taken.
+    pub(in crate::window) fn wire_pick(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if !self.canvas_state.wire.sticky { return false; }
+        let drag = self.canvas_state.wire.drag.take();
+        self.canvas_state.wire.sticky = false;
+        if let Some(to) = drag.and_then(|(from, ..)| self.wire_cell_at(position, 0.).filter(|to| *to != from).map(|to| (from, to))) {
+            if let Err(why) = self.wire_connect(&to.0, &to.1, window, cx) { self.wire_toast(why, window, cx); }
+        }
+        cx.notify();
+        true
+    }
+
+    /// Escape drops a wire that follows the pointer. True when there was one.
+    pub(in crate::window) fn wire_cancel(&mut self, cx: &mut Context<Self>) -> bool {
+        let wire = &mut self.canvas_state.wire;
+        if !wire.sticky { return false; }
+        (wire.drag, wire.sticky) = (None, false);
         cx.notify();
         true
     }
@@ -368,9 +416,13 @@ impl AppWindow {
                 .size(px(HANDLE)).rounded_full().bg(c("surface")).border_1().border_color(c("muted-foreground")).cursor_pointer()
                 .hover(|d| d.border_color(c("foreground")))
                 .child(line(6., 1.)).child(line(1., 6.))
-                .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     this.canvas_state.selected.clear();
+                    // Focus the canvas so Escape can cancel a wire that ends up following the pointer.
+                    this.canvas_state.mode = true;
+                    this.focus.focus(window, cx);
                     this.canvas_state.wire.drag = Some((key.clone(), start, e.position));
+                    this.canvas_state.wire.down = e.position;
                     cx.stop_propagation();
                     cx.notify();
                 })).into_any_element());
@@ -430,18 +482,11 @@ impl AppWindow {
                         if let Ok(piece) = piece.build() { window.paint_path(piece, color); }
                     }
                 } else {
-                    // Straight runs with rounded bends.
+                    // The smoothed route: soft curves around cells (canvas::smooth).
                     let mut line = PathBuilder::stroke(px(width));
-                    line.move_to(p(screen[0]));
-                    for w in screen.windows(3) {
-                        let (o, v, q) = (w[0], w[1], w[2]);
-                        let (din, dout) = (((v[0] - o[0]).abs() + (v[1] - o[1]).abs()), ((q[0] - v[0]).abs() + (q[1] - v[1]).abs()));
-                        let r = (8. * camera.zoom).min(din / 2.).min(dout / 2.);
-                        let towards = |from: [f32; 2], d: f32| if d > 0. { [v[0] + (from[0] - v[0]) * r / d, v[1] + (from[1] - v[1]) * r / d] } else { v };
-                        line.line_to(p(towards(o, din)));
-                        line.curve_to(p(towards(q, dout)), p(v));
-                    }
-                    if let Some(last) = screen.last() { line.line_to(p(*last)); }
+                    let Some((first, rest)) = screen.split_first() else { continue };
+                    line.move_to(p(*first));
+                    for v in rest { line.line_to(p(*v)); }
                     if let Ok(line) = line.build() { window.paint_path(line, color); }
                 }
                 let dot = |window: &mut Window, v: [f32; 2], r: f32| window.paint_quad(fill(Bounds::new(p([v[0] - r, v[1] - r]), size(px(2. * r), px(2. * r))), c("muted-foreground")).corner_radii(px(r)));
@@ -463,5 +508,53 @@ impl AppWindow {
             if animating && !cx.reduce_motion() { window.request_animation_frame(); }
         }).absolute().size_full().into_any_element();
         (layer, marks)
+    }
+}
+
+#[cfg(test)]
+mod sticky_tests {
+    use super::{AppWindow, MouseMoveEvent, TestAppContext, json, point, px};
+    use crate::window::tests::{in_own_process, open_window, running_alone};
+    const TEST: &str = "window::canvas_view::wire_view::sticky_tests::sticky_wire";
+
+    #[test]
+    fn a_clicked_handle_keeps_the_wire_until_a_cell_is_clicked() { in_own_process(TEST); }
+
+    #[gpui::test]
+    fn sticky_wire(cx: &mut TestAppContext) {
+        if !running_alone(TEST) { return; }
+        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
+        view.update_in(cx, |this, window, cx| {
+            this.canvas_state.doc.cards = serde_json::from_value(json!([
+                {"terminal":"t1","rect":[0,0,200,100],"z":0,"size":[200,100]},
+                {"terminal":"t2","rect":[400,0,200,100],"z":1,"size":[200,100]}
+            ])).unwrap();
+            for t in ["t1", "t2"] { this.live.insert(t.into(), json!({})); }
+            let (down, over_t2) = (point(px(200.), px(50.)), point(px(450.), px(50.)));
+            let start = |this: &mut AppWindow| {
+                this.canvas_state.wire.drag = Some(("t1".into(), [200., 50.], down));
+                this.canvas_state.wire.down = down;
+            };
+            // A release where the press was keeps the wire, and it follows the pointer.
+            start(this);
+            assert!(this.wire_release(down, window, cx));
+            assert!(this.canvas_state.wire.sticky);
+            let moved = MouseMoveEvent { position: over_t2, pressed_button: None, modifiers: Default::default() };
+            assert!(this.wire_pointer(&moved, cx));
+            assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| d.2), Some(over_t2));
+            // Escape drops it.
+            assert!(this.wire_cancel(cx));
+            assert!(this.canvas_state.wire.drag.is_none() && this.canvas_state.doc.wires.is_empty());
+            // The next click on a cell connects.
+            start(this);
+            this.wire_release(down, window, cx);
+            assert!(this.wire_pick(over_t2, window, cx));
+            assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
+            assert_eq!(this.canvas_state.doc.wires.len(), 1);
+            // A drag released on empty canvas still just drops.
+            start(this);
+            assert!(this.wire_release(point(px(900.), px(900.)), window, cx));
+            assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
+        });
     }
 }

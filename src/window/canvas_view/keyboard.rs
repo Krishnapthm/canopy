@@ -16,6 +16,7 @@ impl AppWindow {
         if !self.canvas_state.mode || !self.has_canvas() || self.overlays.iter().any(|o| o.kind.modal_keys()) { return false; }
         // Something else on the canvas has the keyboard (a rename, the thread input, the files panel).
         if !self.focus.is_focused(window) { return false; }
+        if key.key == "escape" && self.wire_cancel(cx) { return true; }
         // A lone modifier tap (GPUI sends releasing Option as an "alt" key) is never swallowed:
         // its release must still reach the modifier listeners.
         if matches!(key.key.as_str(), "shift" | "control" | "alt" | "platform" | "function") { return false; }
@@ -63,6 +64,7 @@ impl AppWindow {
             self.canvas_state.doc.panel.space = Some(id);
         }
         self.focus.focus(window, cx);
+        self.tile_canvas(false, window, cx);
         cx.notify();
     }
 
@@ -84,8 +86,10 @@ impl AppWindow {
                 self.focus.focus(window, cx);
             }
             "canvas.leave" => {
-                // Like Figma's Escape: cancel a connection, else clear the selection, else go up to Home.
-                if self.canvas_state.connecting.take().is_none() {
+                // Esc ends sync input first. Then, like Figma: cancel a connection, else clear the selection, else go Home.
+                if !self.canvas_state.synced.borrow().is_empty() {
+                    self.canvas_state.synced.borrow_mut().clear();
+                } else if self.canvas_state.connecting.take().is_none() {
                     if !self.canvas_state.selected.is_empty() || self.canvas_state.wire.selected.is_some() {
                         self.canvas_state.selected.clear();
                         self.canvas_state.wire.selected = None;
@@ -97,7 +101,9 @@ impl AppWindow {
                 self.focus.focus(window, cx);
             }
             "canvas.select_all" => {
-                self.canvas_state.selected = self.keyboard_cells(cx).into_iter().map(|(k, _)| k).collect();
+                if !self.focus.is_focused(window) { return; }
+                let doc = &self.canvas_state.doc;
+                self.canvas_state.selected = doc.cards.iter().filter(|c| c.sub.is_none() && doc.shows(c.space.as_ref())).map(|c| c.key()).collect();
             }
             "canvas.enter" => {
                 if let Some(from) = self.canvas_state.connecting.clone() {
@@ -138,21 +144,27 @@ impl AppWindow {
                 if let Some((key, _)) = next.and_then(|i| cells.get(i)) { self.keyboard_select(key.clone(), window, cx); }
             }
             "canvas.space" => {
-                // next / prev step through the spaces' rooms; a number goes into that space.
-                let doc = &self.canvas_state.doc;
-                let n = doc.spaces.len();
+                // In top strip tab order: next / prev step, a number goes into that space,
+                // recent / oldest walk the spaces by when they were last entered.
+                let ids = super::strip_spaces(&self.model);
+                let n = ids.len();
                 if n == 0 { return self.fail("no spaces yet"); }
-                let i = doc.room.as_ref().and_then(|id| doc.spaces.iter().position(|s| &s.space == id));
-                let j = match args["direction"].as_str() {
-                    Some("next") => i.map_or(0, |i| (i + 1) % n),
-                    Some("prev") => i.map_or(n - 1, |i| (i + n - 1) % n),
+                let room = self.canvas_state.doc.room.clone();
+                let i = room.as_ref().and_then(|id| ids.iter().position(|s| s == id));
+                let id = match args["direction"].as_str() {
+                    Some("next") => ids[i.map_or(0, |i| (i + 1) % n)].clone(),
+                    Some("prev") => ids[i.map_or(n - 1, |i| (i + n - 1) % n)].clone(),
+                    Some(d @ ("recent" | "oldest")) => {
+                        let Some(id) = super::recent_space(&self.canvas_state.recent, &ids, room.as_ref(), d == "oldest") else { return };
+                        id
+                    }
+                    Some(k) if ids.iter().any(|s| s == k) => k.to_owned(),
                     Some(k) => match k.parse::<usize>() {
-                        Ok(k) if (1..=n).contains(&k) => k - 1,
+                        Ok(k) if (1..=n).contains(&k) => ids[k - 1].clone(),
                         _ => return self.fail(format!("no space {k}")),
                     },
-                    None => return self.fail("use next, prev or a number"),
+                    None => return self.fail("use next, prev, recent, oldest or a number"),
                 };
-                let id = doc.spaces[j].space.clone();
                 self.go_room(Some(id), window, cx);
                 return;
             }
@@ -180,25 +192,43 @@ impl AppWindow {
                 self.canvas_state.end_drag();
                 self.begin_layout();
                 if self.canvas_state.nudge(&key, d, self.person.canvas_gap) {
-                    self.solve_layout(Some(&key), None, cx);
+                    // Tile view puts the tile back instead of pushing neighbours.
+                    if self.canvas_state.tile.is_some() { self.tile_canvas(false, window, cx); }
+                    else { self.solve_layout(Some(&key), None, cx); }
                     self.canvas_state.end_drag();
                     self.canvas_changed(cx);
                 } else { self.canvas_state.end_drag(); }
             }
             "canvas.new" | "canvas.agents" => {
                 let space = self.canvas_state.doc.room.clone();
-                let rect = selected.as_deref().and_then(|key| self.keyboard_cells(cx).into_iter().find(|(k, _)| k == key)).map(|(_,r)|r);
-                let gap = self.person.canvas_gap;
-                let point = rect.map(|r| [r[0] + gap, r[1] + gap]);
                 let mut at = json!({});
-                if let Some(point) = point { at["point"] = json!(point); }
+                if name == "canvas.new" {
+                    // Cascade: a fixed step down and right of the last new pane, within the view.
+                    let [w, h] = self.bounds.borrow().get("canopy-canvas").map_or([1200., 800.], |b| [f32::from(b.size.width), f32::from(b.size.height)]);
+                    let camera = self.canvas_state.doc.camera;
+                    let (a, b) = (camera.to_world([0., 0.]), camera.to_world([w, h]));
+                    let doc = &self.canvas_state.doc;
+                    let taken: Vec<_> = doc.cards.iter().filter(|c| doc.shows(c.space.as_ref())).map(|c| [c.rect[0], c.rect[1]]).collect();
+                    let last = self.canvas_state.cascade.as_ref().filter(|(room, _)| *room == space).map(|(_, p)| *p);
+                    let point = canvas::cascade(last, [a[0], a[1], b[0] - a[0], b[1] - a[1]], self.default_pane_size(window), &taken, CASCADE_STEP);
+                    self.canvas_state.cascade = Some((space.clone(), point));
+                    at["point"] = json!(point);
+                    at["cascade"] = json!(true);
+                }
                 if let Some(id) = space { at["space"] = json!(id); }
                 if name == "canvas.agents" {
                     if let Some(machine) = at["space"].as_str().and_then(|id| self.model.space(id)).and_then(|s| s.machine.as_ref()) {
                         at["machine"] = json!(machine);
                     }
                     self.open_menu("canvas-agents", at, None, window, cx);
-                } else { self.create_canvas(at, window, cx); }
+                } else {
+                    // `like`: start what the selected cell runs (in its space, so its folder), else a plain terminal.
+                    if args["like"] == true {
+                        let rec = selected.as_deref().and_then(|key| self.live.get(key));
+                        if let Some(run) = rec.and_then(|rec| super::like_run(rec, &crate::programs::startable())) { at["argv"] = json!(run); }
+                    }
+                    self.create_canvas(at, window, cx);
+                }
             }
             _ => unreachable!(),
         }
@@ -207,6 +237,9 @@ impl AppWindow {
         cx.notify();
     }
 }
+
+/// How far each ⌘T pane steps down and right from the last (world px).
+const CASCADE_STEP: f32 = 32.;
 
 impl State {
     fn nudge(&mut self, key: &str, direction: canvas::Point, gap: f32) -> bool {

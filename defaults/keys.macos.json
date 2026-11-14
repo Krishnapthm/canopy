@@ -15,6 +15,7 @@
     "cmd-[": "agent.prev",
     "cmd-shift-l": "layout.switch",
     "cmd-n": "space.new",
+    "cmd-k": "mod.open:picker",
     "cmd-p": "mod.open:picker",
     "cmd-shift-p": "app.palette",
     "cmd-,": "app.settings",
@@ -72,11 +73,19 @@
     "cmd-backspace": "send:\u0015"
   },
   "layout:main": {
+    "cmd-a": "canvas.select_all",
+    "cmd-t": "canvas.new",
+    "cmd-shift-t": {"command": "canvas.new", "args": {"like": true}},
+    "ctrl-=": "canvas.zoom_in",
+    "ctrl-+": "canvas.zoom_in",
+    "ctrl--": "canvas.zoom_out",
+    "ctrl-0": "canvas.zoom_reset",
     "cmd-=": "canvas.zoom_in",
     "cmd-+": "canvas.zoom_in",
     "cmd--": "canvas.zoom_out",
     "cmd-0": "canvas.zoom_reset",
     "cmd-shift-f": "canvas.fit",
+    "cmd-shift-g": "canvas.tile",
     "cmd-shift-1": "view.agents",
     "cmd-shift-2": "view.all",
     "cmd-shift-3": "view.terminals",
@@ -96,6 +105,8 @@
     "cmd-8": "canvas.space:8",
     "cmd-9": "canvas.space:9",
     "cmd-escape": "canvas.mode",
+    "ctrl-tab": "canvas.space:recent",
+    "ctrl-shift-tab": "canvas.space:oldest",
     "cmd-shift-h": "canvas.home"
   },
   "canvas-mode": {
@@ -126,6 +137,8 @@
         "picker": true
       }
     },
+    "=": "canvas.equalize",
+    "cmd-enter": "canvas.sync",
     "n": "canvas.new",
     "shift-n": "canvas.agents",
     "backspace": "canvas.close",
