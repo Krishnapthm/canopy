@@ -1,6 +1,6 @@
 """Distribution architecture guards, without downloads or release builds.
 
-Run: uv run --no-project python -m unittest discover -s scripts -p test_distribution.py
+Run: python3 -I -m unittest discover -s scripts -p test_distribution.py
 """
 
 import hashlib
@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class DistributionTests(unittest.TestCase):
     def setUp(self):
-        self.work = tempfile.TemporaryDirectory(prefix="herdr-distribution-")
+        self.work = tempfile.TemporaryDirectory(prefix="canopy-distribution-")
         self.addCleanup(self.work.cleanup)
         self.bin = Path(self.work.name)
         self.stub("uname", 'case "$1" in -s) echo "$TEST_OS";; -m) echo "$TEST_ARCH";; esac')
@@ -32,20 +32,22 @@ class DistributionTests(unittest.TestCase):
         path.chmod(0o755)
 
     def run_script(self, script, os_name, arch, *args):
-        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", TEST_OS=os_name, TEST_ARCH=arch, HERDR_RELEASES_URL="https://releases.example")
+        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", TEST_OS=os_name, TEST_ARCH=arch, CANOPY_RELEASES_URL="https://releases.example")
         return subprocess.run(
             [str(ROOT / script), *args], cwd=ROOT, env=env,
             capture_output=True, text=True, check=False,
         )
 
-    def test_installer_requires_explicit_release_source(self):
-        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}")
-        env.pop("HERDR_RELEASES_URL", None)
+    def test_installer_defaults_to_the_latest_github_release(self):
+        log = self.bin / "urls"
+        self.stub("curl", f'for a; do case $a in -*) ;; *) echo "$a" >> "{log}" ;; esac; done; exit 22')
+        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", TEST_OS="Linux", TEST_ARCH="x86_64")
+        env.pop("CANOPY_RELEASES_URL", None)
         result = subprocess.run([str(ROOT / "distribution/install.sh")], env=env,
                                 capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("set HERDR_RELEASES_URL", result.stderr)
-        self.assertNotIn("unexpected download", result.stderr)
+        self.assertEqual(log.read_text().splitlines()[0],
+                         "https://github.com/Krishnapthm/canopy/releases/latest/download/SHA256SUMS")
 
     def test_intel_mac_installer_stops_before_download(self):
         for arch in ("x86_64", "amd64"):
@@ -60,7 +62,7 @@ class DistributionTests(unittest.TestCase):
             with self.subTest(os_name=os_name):
                 result = self.run_script("distribution/install.sh", os_name, "x86_64")
                 self.assertEqual(result.returncode, 1)
-                self.assertIn("/app/install.ps1 | iex", result.stderr)
+                self.assertIn("https://releases.example/install.ps1 | iex", result.stderr)
                 self.assertNotIn("unexpected download", result.stderr)
 
     def test_unknown_os_installer_names_it(self):
@@ -75,7 +77,7 @@ class DistributionTests(unittest.TestCase):
                 self.stub("sysctl", f'[ "$2" = "{key}" ] && echo 1')
                 self.stub("curl", '''while [ "$#" -gt 0 ]; do
   if [ "$1" = -o ]; then
-    printf '%s' '{"version":"test","macos-aarch64":{"url":"test","sha256":"test"}}' > "$2"
+    printf '%064d  canopy-macos-aarch64.tar.gz\n' 0 > "$2"
     exit 0
   fi
   shift
@@ -83,49 +85,67 @@ done
 exit 97''')
                 result = self.run_script("distribution/install.sh", "Darwin", "x86_64")
                 self.assertEqual(result.returncode, 1)
-                self.assertIn("Installing Canopy test for macos-aarch64", result.stdout)
+                self.assertIn("Installing Canopy for macos-aarch64", result.stdout)
                 self.assertIn("download is damaged", result.stderr)
                 self.assertNotIn("Intel Macs", result.stderr)
 
-    def download_url(self, url, releases="https://releases.example", installed=False):
-        """The URL install.sh downloads the app from, for a manifest giving `url`."""
-        home = Path(self.work.name) / "home"
-        data = home / ".local/share"
-        shutil.rmtree(data / "canopy", ignore_errors=True)
-        (data / "canopy" if installed else data).mkdir(parents=True, exist_ok=True)
-        log = Path(self.work.name) / "urls"
-        log.unlink(missing_ok=True)
-        manifest = Path(self.work.name) / "latest.json"
-        manifest.write_text('{"version":"1.0.0","targets":{"linux-x86_64":{"url":"%s","sha256":"x"}}}' % url)
+    def linux_install(self, core_installer="ok", have_core=False):
+        """Runs install.sh for Linux against a stub release and core installer."""
+        home = self.bin / "home"
+        local_bin = home / ".local/bin"
+        local_bin.mkdir(parents=True, exist_ok=True)
+        if have_core:
+            (local_bin / "herdr-core").touch()
+        source = self.bin / "source/canopy"
+        source.mkdir(parents=True)
+        (source / "canopy").write_text("app")
+        (source / "canopy.svg").write_text("<svg/>")
+        archive = self.bin / "release.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(source, arcname="canopy")
+        sums = self.bin / "sums"
+        sums.write_text(f"{'0' * 64}  canopy-linux-aarch64.tar.gz\n"
+                        f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  canopy-linux-x86_64.tar.gz\n")
+        core = self.bin / "core.sh"
+        core.write_text('echo "core into $HC_INSTALL_DIR"; touch "$HC_INSTALL_DIR/herdr-core"\n')
+        log = self.bin / "urls"
+        get_core = {"ok": f'cp "{core}" "$out"', "unreachable": "exit 6"}[core_installer]
         self.stub("curl", f'''out=; url=; prev=
 for a; do
   if [ "$prev" = -o ]; then out=$a; else case $a in -*) ;; *) url=$a ;; esac; fi
   prev=$a
 done
 echo "$url" >> "{log}"
-case $url in */latest.json) cp "{manifest}" "$out"; exit 0 ;; esac
-exit 22''')
-        env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", TEST_OS="Linux", TEST_ARCH="x86_64",
-                   HOME=str(home), XDG_DATA_HOME=str(data), HERDR_RELEASES_URL=releases)
-        result = subprocess.run([str(ROOT / "distribution/install.sh")], cwd=ROOT, env=env,
+case $url in
+  https://releases.example/SHA256SUMS) cp "{sums}" "$out" ;;
+  https://releases.example/canopy-linux-x86_64.tar.gz) cp "{archive}" "$out" ;;
+  https://releases.herdr.dev/core/install.sh) {get_core} ;;
+  *) exit 97 ;;
+esac''')
+        # A bare system PATH: a herdr-core installed on this machine must not count.
+        env = dict(PATH=f"{self.bin}:/usr/bin:/bin", TEST_OS="Linux", TEST_ARCH="x86_64", HOME=str(home),
+                   XDG_DATA_HOME=str(home / ".local/share"), CANOPY_RELEASES_URL="https://releases.example")
+        result = subprocess.run(["sh", str(ROOT / "distribution/install.sh")], env=env,
                                 capture_output=True, text=True, check=False)
-        self.assertIn("download failed", result.stderr)
-        return log.read_text().splitlines()[-1]
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((home / ".local/share/canopy/canopy").read_text(), "app")
+        return result, log.read_text().splitlines(), local_bin
 
-    def test_installer_marks_plain_release_downloads_for_the_counter(self):
-        r = "https://releases.example"
-        tarball = f"{r}/app/1.0.0/canopy-linux-x86_64.tar.gz"
-        self.assertEqual(self.download_url(tarball), f"{tarball}?src=install")
-        self.assertEqual(self.download_url(tarball, installed=True), f"{tarball}?src=reinstall")
-        # A mirror's query (a signed URL) or fragment, or another host: exactly as given.
-        for url in (f"{tarball}?sig=a%2Fb&exp=1", f"{tarball}?src=update", f"{tarball}#x",
-                    "https://mirror.example/app/1.0.0/canopy-linux-x86_64.tar.gz",
-                    "https://releases.example.evil/app/1.0.0/canopy-linux-x86_64.tar.gz"):
-            with self.subTest(url=url):
-                self.assertEqual(self.download_url(url), url)
-        # A test server elsewhere marks its own URLs.
-        local = "http://127.0.0.1:8000/e2e"
-        self.assertEqual(self.download_url(f"{local}/app/1.0.0/a.tar.gz", releases=local), f"{local}/app/1.0.0/a.tar.gz?src=install")
+    def test_installer_adds_herdr_core_when_missing(self):
+        result, urls, local_bin = self.linux_install()
+        self.assertIn("https://releases.herdr.dev/core/install.sh", urls)
+        self.assertIn(f"core into {local_bin}", result.stdout)
+        self.assertTrue((local_bin / "herdr-core").exists())
+
+    def test_installer_keeps_an_existing_herdr_core(self):
+        result, urls, _ = self.linux_install(have_core=True)
+        self.assertNotIn("https://releases.herdr.dev/core/install.sh", urls)
+        self.assertNotIn("herdr-core", result.stdout)
+
+    def test_unreachable_core_installer_still_installs_the_app(self):
+        result, _, local_bin = self.linux_install(core_installer="unreachable")
+        self.assertIn("Cannot reach releases.herdr.dev", result.stdout)
+        self.assertFalse((local_bin / "herdr-core").exists())
 
     def mac_installer(self, signature, status, verify_status=0):
         home = self.bin / "home"
@@ -139,14 +159,14 @@ exit 22''')
         with tarfile.open(archive, "w:gz") as tar:
             tar.add(source.parent, arcname="Canopy.app")
         sha = hashlib.sha256(archive.read_bytes()).hexdigest()
-        manifest = self.bin / "manifest.json"
-        manifest.write_text('{"version":"1.0.0","targets":{"macos-aarch64":{"url":"release","sha256":"%s"}}}' % sha)
+        sums = self.bin / "sums"
+        sums.write_text(f"{sha}  canopy-macos-aarch64.tar.gz\n")
         self.stub("curl", f'''url=; out=; prev=
 for a; do
   if [ "$prev" = -o ]; then out=$a; else case $a in -*) ;; *) url=$a ;; esac; fi
   prev=$a
 done
-case $url in */latest.json) cp "{manifest}" "$out" ;; release) cp "{archive}" "$out" ;; *) exit 97 ;; esac''')
+case $url in */SHA256SUMS) cp "{sums}" "$out" ;; */canopy-macos-aarch64.tar.gz) cp "{archive}" "$out" ;; *) exit 97 ;; esac''')
         installed = home / "Applications/Canopy.app/Contents/Info.plist"
         installed.parent.mkdir(parents=True)
         installed.write_bytes(b"previous installed app")
@@ -171,7 +191,7 @@ printf 'dev PATH added' >> "$3"''')
         installer = self.bin / "install.sh"
         installer.write_text(script)
         env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}", TEST_OS="Darwin",
-                   TEST_ARCH="arm64", HOME=str(home), HERDR_RELEASES_URL="https://releases.example")
+                   TEST_ARCH="arm64", HOME=str(home), CANOPY_RELEASES_URL="https://releases.example")
         result = subprocess.run(["sh", str(installer)], cwd=ROOT, env=env,
                                 capture_output=True, text=True, check=False)
         return result, installed.read_bytes(), log.read_text().splitlines(), plist_log.exists(), plist
