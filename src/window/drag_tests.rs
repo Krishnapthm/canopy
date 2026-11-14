@@ -59,3 +59,34 @@ fn squeezed_layout_drag(cx: &mut gpui::TestAppContext) {
         });
     }
 }
+
+#[test]
+fn a_press_is_a_click_until_it_moves_three_pixels() {
+    in_own_process("canvas_drag_threshold");
+}
+
+#[gpui::test]
+fn canvas_drag_threshold(cx: &mut gpui::TestAppContext) {
+    use serde_json::json;
+    if !running_alone("canvas_drag_threshold") { return; }
+    let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
+    view.update_in(cx, |this, window, cx| {
+        this.canvas_state.doc.cards = serde_json::from_value(json!([
+            {"terminal":"t1","rect":[0,0,600,400],"z":0,"size":[600,400]},
+            {"terminal":"t2","rect":[700,0,600,400],"z":1,"size":[600,400]}
+        ])).unwrap();
+        for t in ["t1", "t2"] { this.live.insert(t.into(), json!({})); }
+        this.tile_canvas(true, window, cx);
+        this.canvas_state.settle_for_test();
+        let tiled: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| c.rect).collect();
+        // Jitter stays a click: tile view stays on.
+        assert!(!this.canvas_state.drag_live([2., 2.]) && this.canvas_state.tile.is_some());
+        // Past 3 px it is a drag: tile view ends and the tiled rects stay as the free layout.
+        assert!(this.canvas_state.drag_live([3., 1.]) && this.canvas_state.tile.is_none());
+        assert!(this.canvas_state.drag_live([0., 0.]), "it stays a drag until release");
+        let free: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| c.rect).collect();
+        assert_eq!(free, tiled);
+        this.canvas_state.end_drag();
+        assert!(!this.canvas_state.drag_live([0., 0.]), "a new press starts as a click");
+    });
+}

@@ -98,26 +98,35 @@ and sub-agent transcripts only.
 ## Tile view
 
 Press Cmd+Shift+G (Ctrl+Shift+G), the grid icon beside the focus icon, or
-**Tile view** in the canvas menu to fit every expanded cell and preview of the
-current space into the visible canvas at 100% zoom, like tmux's tiled layout.
-Collapsed cells (and space cards on Home) stay pills and line up along the
-bottom. Press again, or leave the space, to put everything back where it was.
+**Tile view** in the canvas menu to fit the expanded cells and previews into the
+visible canvas at 100% zoom, like tmux's tiled layout. With two or more cells
+selected only those tile: the others stay where they are, under the tiles.
+Otherwise every expanded cell and preview of the current space tiles, and cells
+opened later join. Collapsed cells (and space cards on Home) stay pills and line
+up along the bottom. Press again, or leave the space, to put the tiled cells
+back where they were.
 
 - The selected tile is the large one: it takes 60% of its row, and its row at
   least 60% of the height (more when needed to stay the largest); the others
   share the rest. Click or arrow to another
   cell and the layout follows. Expanding, collapsing, opening or closing a cell
-  re-tiles; a dragged tile snaps back.
+  re-tiles, and so does nudging a tile with the keyboard (it snaps back).
+- Dragging a tile ends tile view: the cells stay where the tiles put them, the
+  camera stays, and the drag moves that cell as on the free canvas (one undo
+  step). A press only becomes a drag after 3 px of movement, on the free canvas
+  too, so a click never shifts a cell.
 - A tile smaller than 320 x 140 shows its icon and name instead of terminal
   text, and its program keeps its last grid size. The entered cell always shows
   its terminal.
 - `tile_gap` in [settings](settings.md) sets the space between tiles (default 0,
   edge to edge); editing it re-tiles live.
 - Tiles resize their programs like any cell: columns and rows follow the tile.
-- How it works: `canvas::tile` keeps tiles in reading order by position and
-  picks `ceil(sqrt(n))` columns, with the last row short and stretched, as in
-  tmux. Changing the selection only changes sizes, never the order. The geometry from before
-  is kept in memory only; after a restart the tiled layout is just the layout.
+- How it works: when tile view starts it records the members in reading order
+  (top to bottom, then left to right). `canvas::tile` places them in that order
+  and picks `ceil(sqrt(n))` columns, with the last row short and stretched, as
+  in tmux. New cells are appended, closed ones dropped; changing the selection
+  only changes sizes, never the order. The geometry from before is kept in
+  memory only; after a restart the tiled layout is just the layout.
 
 ## Focus fit
 

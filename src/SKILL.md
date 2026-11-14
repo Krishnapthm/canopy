@@ -265,7 +265,8 @@ Never stop a server or session you didn't start.
 
 Canopy main layout is a canvas. `canvas.zoom_in`, `canvas.zoom_out`,
 `canvas.zoom_reset`, `canvas.fit` control its camera. `canvas.tile` toggles tile
-view: the current space's expanded cells fill the view, the selected one largest.
+view: the selected cells (two or more) or else the current space's expanded cells
+fill the view, the selected one largest; dragging a tile ends tile view in place.
 `panel.close` closes the
 file panel. Geometry is in app-home canvas.json;
 `canvas_color` in settings.json overrides the theme background (null resets).

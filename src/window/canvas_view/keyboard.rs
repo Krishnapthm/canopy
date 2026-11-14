@@ -181,7 +181,9 @@ impl AppWindow {
                 self.canvas_state.end_drag();
                 self.begin_layout();
                 if self.canvas_state.nudge(&key, d, self.person.canvas_gap) {
-                    self.solve_layout(Some(&key), None, cx);
+                    // Tile view puts the tile back instead of pushing neighbours.
+                    if self.canvas_state.tile.is_some() { self.tile_canvas(false, window, cx); }
+                    else { self.solve_layout(Some(&key), None, cx); }
                     self.canvas_state.end_drag();
                     self.canvas_changed(cx);
                 } else { self.canvas_state.end_drag(); }

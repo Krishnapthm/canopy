@@ -69,14 +69,21 @@ pub(super) struct State {
     pub(super) actions: Option<Vec<(String, String, String)>>,
     /// Tile view is on (`canvas.tile`): what it fills, and the geometry to put back.
     pub(super) tile: Option<Tile>,
+    /// The pressed cell has moved `canvas::DRAG_THRESHOLD` px, so the press is a drag (see `drag_live`).
+    drag_live: bool,
 }
 
 /// Tile view of the current place (leaving it calls `State::untile`): the camera from before
-/// (its top-left is where the tiles start, at zoom 1) and each object's rect and expanded size
+/// (its top-left is where the tiles start, at zoom 1) and each member's rect and expanded size
 /// from before, by key (cell, preview path or space id).
 pub(super) struct Tile {
     camera: canvas::Camera,
     before: Vec<(String, canvas::Rect, Option<canvas::Point>)>,
+    /// Keys of the members in layout order, fixed when tile view starts. A selection of two or
+    /// more tiles only those (the others stay put, under them); otherwise `all` is set and cells
+    /// opened later join at the end. Closed ones drop out.
+    order: Vec<String>,
+    all: bool,
 }
 #[derive(Default)]
 struct Motion {
@@ -148,6 +155,7 @@ impl State {
             group: vec![],
             actions: None,
             tile: None,
+            drag_live: false,
         }
     }
     /// The requested camera before animation finishes, for keyboard integration tests.
@@ -181,8 +189,21 @@ impl State {
         flipped
     }
 
+    /// Whether a cell or preview press, moved by `d` screen px since the press, is a drag. Smaller
+    /// movement is a click and moves nothing. The first drag in tile view ends tile view without
+    /// putting anything back: cells keep their tiled rects as the free layout and the camera stays.
+    pub(super) fn drag_live(&mut self, d: [f32; 2]) -> bool {
+        if !self.drag_live {
+            if d[0].hypot(d[1]) < canvas::DRAG_THRESHOLD { return false; }
+            self.drag_live = true;
+            self.tile = None;
+        }
+        true
+    }
+
     /// End any drag, returning whether geometry was committed.
     pub(super) fn end_drag(&mut self) -> bool {
+        self.drag_live = false;
         let mut changed = false;
         let resized = self.cell_resize.take();
         if let Some(rest) = self.rest.take() {
@@ -247,6 +268,7 @@ impl AppWindow {
     }
 
     fn begin_layout(&mut self) {
+        self.canvas_state.drag_live = false;
         self.canvas_state.motion.target = None;
         self.canvas_state.motion.velocity = [0.; 2];
         if self.canvas_state.rest.is_none() {
@@ -573,10 +595,11 @@ impl AppWindow {
             self.animate_layout(window, cx);
         }
     }
-    /// `canvas.tile` (`toggle`): turns tile view on, fitting the current place's expanded cells
-    /// and previews into the visible canvas at zoom 1, or off, putting everything back. With
+    /// `canvas.tile` (`toggle`): turns tile view on, fitting the selected cells (two or more) or else
+    /// the current place's expanded cells and previews into the visible canvas at zoom 1, or off,
+    /// putting everything back. With
     /// `toggle` false it only re-tiles when tile view is on and the layout would change: the
-    /// active (last selected) tile, the members or the visible size moved, or a tile was dragged.
+    /// active (last selected) tile, the members or the visible size moved, or a tile was nudged.
     pub(super) fn tile_canvas(&mut self, toggle: bool, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
         if toggle && state.tile.is_some() {
@@ -610,34 +633,64 @@ impl AppWindow {
         let previews: Vec<usize> = (0..doc.previews.len()).filter(|i| doc.shows(doc.previews[*i].space.as_ref())).collect();
         let spaces: Vec<usize> = (0..doc.spaces.len()).filter(|i| doc.room.is_none()
             && !self.model.spaces.iter().any(|s| s.id == doc.spaces[*i].space && root_space(s))).collect();
-        let keys: Vec<String> = tiled.iter().map(|i| doc.cards[*i].key()).chain(previews.iter().map(|i| doc.previews[*i].path.clone())).collect();
-        let rects: Vec<_> = tiled.iter().map(|i| doc.cards[*i].rect).chain(previews.iter().map(|i| doc.previews[*i].rect)).collect();
-        let pills: Vec<_> = pilled.iter().map(|i| self.pill_rect(&doc.cards[*i], cx)).chain(spaces.iter().map(|i| doc.spaces[*i].rect)).collect();
-        let active = self.canvas_state.selected.iter().rev().find_map(|k| keys.iter().position(|t| t == k));
+        let count = doc.cards.len();
+        // (key, rect, index): an index below `count` is a card, above it a preview (tiles) or space (pills).
+        let mut tiles: Vec<(String, canvas::Rect, usize)> = tiled.iter().map(|i| (doc.cards[*i].key(), doc.cards[*i].rect, *i))
+            .chain(previews.iter().map(|i| (doc.previews[*i].path.clone(), doc.previews[*i].rect, count + i))).collect();
+        let mut lined_up: Vec<(String, canvas::Rect, usize)> = pilled.iter().map(|i| (doc.cards[*i].key(), doc.cards[*i].rect, *i))
+            .chain(spaces.iter().map(|i| (doc.spaces[*i].space.clone(), doc.spaces[*i].rect, count + i))).collect();
+        // Who is tiled and in what order is fixed when tile view starts (a selection of two or more,
+        // else everything, in reading order); later layouts keep it, so a click or a jitter never swaps tiles.
+        let started = self.canvas_state.tile.is_none();
+        let (mut order, all) = match &self.canvas_state.tile {
+            Some(t) => (t.order.clone(), t.all),
+            None => {
+                let every: Vec<_> = tiles.iter().chain(&lined_up).collect();
+                let chosen: Vec<&String> = self.canvas_state.selected.iter().filter(|k| every.iter().any(|x| &x.0 == *k)).collect();
+                let all = chosen.len() < 2;
+                let members: Vec<_> = every.iter().filter(|x| all || chosen.contains(&&x.0)).collect();
+                let rects: Vec<_> = members.iter().map(|x| x.1).collect();
+                (canvas::reading(&rects).into_iter().map(|i| members[i].0.clone()).collect(), all)
+            }
+        };
+        order.retain(|k| tiles.iter().chain(&lined_up).any(|x| &x.0 == k));
+        // Opened cells join a tile view that started with everything.
+        if all { for x in tiles.iter().chain(&lined_up) { if !order.contains(&x.0) { order.push(x.0.clone()); } } }
+        let rank = |k: &String| order.iter().position(|o| o == k);
+        tiles.retain(|x| rank(&x.0).is_some());
+        tiles.sort_by_key(|x| rank(&x.0));
+        lined_up.retain(|x| rank(&x.0).is_some());
+        lined_up.sort_by_key(|x| rank(&x.0));
+        let rects: Vec<_> = tiles.iter().map(|x| x.1).collect();
+        let pills: Vec<_> = lined_up.iter().map(|x| if x.2 < count { self.pill_rect(&doc.cards[x.2], cx) } else { x.1 }).collect();
+        let active = self.canvas_state.selected.iter().rev().find_map(|k| tiles.iter().position(|t| &t.0 == k));
         // Tiles start below the toolbar (12 px from the top, 32 px tall) so it never covers one.
         const TOOLBAR: f32 = 44.;
-        let (placed, lined) = canvas::tile([area[0], area[1] + TOOLBAR, visible[0], visible[1] - TOOLBAR], &rects, active, &pills, self.person.tile_gap);
+        let (placed, lined) = canvas::tile([area[0], area[1] + TOOLBAR, visible[0], visible[1] - TOOLBAR], tiles.len(), active, &pills, self.person.tile_gap);
         let state = &mut self.canvas_state;
-        let unchanged = rects == placed && pilled.iter().map(|i| state.doc.cards[*i].rect).chain(spaces.iter().map(|i| state.doc.spaces[*i].rect))
-            .zip(&lined).all(|(a, b)| a[0] == b[0] && a[1] == b[1]);
+        let unchanged = rects == placed && lined_up.iter().zip(&lined).all(|(a, b)| a.1[0] == b[0] && a.1[1] == b[1]);
         if !toggle && unchanged { return; }
-        if state.tile.is_none() {
-            let doc = &state.doc;
+        if started {
+            let doc = &mut state.doc;
             let before = doc.cards.iter().map(|c| (c.key(), c.rect, c.size))
                 .chain(doc.previews.iter().map(|p| (p.path.clone(), p.rect, None)))
-                .chain(doc.spaces.iter().map(|s| (s.space.clone(), s.rect, None))).collect();
-            state.tile = Some(Tile { camera, before });
-        }
+                .chain(doc.spaces.iter().map(|s| (s.space.clone(), s.rect, None)))
+                .filter(|(k, ..)| order.contains(k)).collect();
+            // Members draw above the cells that stay put.
+            if !all {
+                let top = doc.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
+                for c in &mut doc.cards { if let Some(r) = rank(&c.key()) { c.z = top + r as u64; } }
+            }
+            state.tile = Some(Tile { camera, before, order, all });
+        } else if let Some(t) = &mut state.tile { t.order = order; }
         if state.shown.is_none() { state.shown = Some(state.doc.clone()); }
         let doc = &mut state.doc;
-        let n = tiled.len();
-        for (j, r) in placed.into_iter().enumerate() {
-            if j < n { let c = &mut doc.cards[tiled[j]]; c.rect = r; c.size = Some([r[2], r[3]]); }
-            else { doc.previews[previews[j - n]].rect = r; }
+        for ((_, _, i), r) in tiles.iter().zip(placed) {
+            if *i < count { doc.cards[*i].rect = r; doc.cards[*i].size = Some([r[2], r[3]]); }
+            else { doc.previews[*i - count].rect = r; }
         }
-        let m = pilled.len();
-        for (j, r) in lined.into_iter().enumerate() {
-            let rect = if j < m { &mut doc.cards[pilled[j]].rect } else { &mut doc.spaces[spaces[j - m]].rect };
+        for ((_, _, i), r) in lined_up.iter().zip(lined) {
+            let rect = if *i < count { &mut doc.cards[*i].rect } else { &mut doc.spaces[*i - count].rect };
             rect[0] = r[0];
             rect[1] = r[1];
         }
@@ -1184,14 +1237,18 @@ impl AppWindow {
             state.doc.cards[i].size = Some([f32::from(body.width) + 2., f32::from(body.height) + canvas::HEADER + 2.]);
             state.doc.cards[i].z = z;
             state.selected = vec![addr.to_owned()];
-            self.solve_layout(Some(addr), None, cx);
-            let state = &mut self.canvas_state;
-            let moved = before.changed(&canvas::Rest::capture(&state.doc));
-            state.moves.insert(addr.to_owned(), (before, moved));
+            // Tile view re-tiles below; neighbours do not give way.
+            if self.canvas_state.tile.is_none() {
+                self.solve_layout(Some(addr), None, cx);
+                let state = &mut self.canvas_state;
+                let moved = before.changed(&canvas::Rest::capture(&state.doc));
+                state.moves.insert(addr.to_owned(), (before, moved));
+            }
         } else {
-            if let Some((base, moved)) = state.moves.remove(addr) { base.put_back(&moved, &mut state.doc); }
+            let tiled = state.tile.is_some();
+            if let Some((base, moved)) = state.moves.remove(addr) { if !tiled { base.put_back(&moved, &mut state.doc); } }
             state.doc.cards[i].size = None;
-            self.solve_layout(Some(addr), None, cx);
+            if !tiled { self.solve_layout(Some(addr), None, cx); }
         }
         self.animate_layout(window, cx);
         self.canvas_changed(cx);
@@ -1737,7 +1794,8 @@ impl AppWindow {
         state.doc.cameras.retain(|id, _| id.is_empty() || spaces.iter().any(|s| &s.space == id));
         if changed {
             state.doc.sync_subs(&state.subs);
-            if self.canvas_state.rest.is_none() {
+            // Tile view re-tiles below instead.
+            if self.canvas_state.rest.is_none() && self.canvas_state.tile.is_none() {
                 let members = self.canvas_members();
                 let mut groups = std::collections::HashSet::new();
                 let pins: Vec<_> = self.canvas_state.doc.cards.iter().zip(members)
@@ -2208,11 +2266,10 @@ impl AppWindow {
                         this.end_canvas_drag(cx);
                         return;
                     }
+                    let screen = [f32::from(e.position.x - previous.x), f32::from(e.position.y - previous.y)];
+                    if !resize && !this.canvas_state.drag_live(screen) { return; }
                     let z = this.canvas_state.doc.camera.zoom;
-                    let d = [
-                        f32::from(e.position.x - previous.x) / z,
-                        f32::from(e.position.y - previous.y) / z,
-                    ];
+                    let d = [screen[0] / z, screen[1] / z];
                     if let Some(card) = this
                         .canvas_state
                         .doc
@@ -2276,6 +2333,7 @@ impl AppWindow {
                     f32::from(e.position.x - previous.x),
                     f32::from(e.position.y - previous.y),
                 ];
+                if card.is_some() && !this.canvas_state.drag_live(d) { return; }
                 this.canvas_state.pan_moved |= d != [0., 0.];
                 if let Some(id) = card {
                     // The whole selection moves together when the dragged cell is part of it.
@@ -3471,11 +3529,32 @@ mod tile_tests {
             this.canvas_state.settle_for_test();
             let cards = &this.canvas_state.doc.cards;
             assert!(cards[0].rect[2] * cards[0].rect[3] > cards[1].rect[2] * cards[1].rect[3]);
+            assert!(cards[0].rect[0] < cards[1].rect[0] && cards[0].rect[1] < cards[2].rect[1], "the active tile grows in its own slot");
+            // Jittered rects (a click that nudged tiles) do not reorder them.
+            let this_cards = &mut this.canvas_state.doc.cards;
+            this_cards[0].rect[1] += 30.;
+            this_cards[1].rect[1] -= 30.;
+            this.tile_canvas(false, window, cx);
+            this.canvas_state.settle_for_test();
+            let cards = &this.canvas_state.doc.cards;
+            assert!(cards[0].rect[0] < cards[1].rect[0] && cards[0].rect[1] == cards[1].rect[1], "same slots after jitter");
             // Off: everything is back where it was.
             this.tile_canvas(true, window, cx);
             this.canvas_state.settle_for_test();
             assert!(this.canvas_state.tile.is_none());
             assert_eq!(this.canvas_state.motion_target_for_test(), crate::canvas::Camera { x: 300., y: -40., zoom: 0.5 }, "the camera goes back too");
+            let after: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| (c.rect, c.size)).collect();
+            assert_eq!(after, before);
+            // Two selected cells tile alone: the others stay put, under them, and everything returns on exit.
+            this.canvas_state.selected = vec!["t1".into(), "t3".into()];
+            this.tile_canvas(true, window, cx);
+            this.canvas_state.settle_for_test();
+            let cards = &this.canvas_state.doc.cards;
+            assert_eq!((cards[1].rect, cards[3].rect), (before[1].0, before[3].0), "non-members keep their place");
+            assert!(cards[0].rect != before[0].0 && cards[2].rect != before[2].0, "members tile");
+            assert!(cards[0].z > cards[1].z && cards[2].z > cards[1].z, "members draw above the rest");
+            this.tile_canvas(true, window, cx);
+            this.canvas_state.settle_for_test();
             let after: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| (c.rect, c.size)).collect();
             assert_eq!(after, before);
         });

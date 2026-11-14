@@ -89,27 +89,31 @@ impl Camera {
         self.y = bounds[1] + bounds[3] / 2. - viewport[1] / self.zoom / 2.;
     }
 }
+/// Screen px a pressed cell must move before the press is a drag; less is a click.
+pub const DRAG_THRESHOLD: f32 = 3.;
 /// A tile smaller than this (world px) shows its icon and name instead of terminal text.
 pub const TILE_COMPACT: Point = [320., 140.];
 /// The active tile's share of its row, and (at least) its row's share of the height.
 const TILE_ACTIVE: f32 = 0.6;
 
-/// Tile view: fills `area` with `tiles` like tmux's tiled layout, and lines `pills` (sizes)
-/// up along its bottom. Both keep their reading order by current position, so a tile stays
-/// where it was when the active one changes. The `active` tile's row is taller and the tile
-/// wider, so it is always the largest; the rest share what is left. Returns the tiles' and
-/// pills' rects in the order given.
-pub fn tile(area: Rect, tiles: &[Rect], active: Option<usize>, pills: &[Rect], gap: f32) -> (Vec<Rect>, Vec<Rect>) {
-    let reading = |rects: &[Rect]| {
-        let mut order: Vec<usize> = (0..rects.len()).collect();
-        order.sort_by(|a, b| (rects[*a][1], rects[*a][0]).partial_cmp(&(rects[*b][1], rects[*b][0])).unwrap_or(std::cmp::Ordering::Equal));
-        order
-    };
+/// The indices of `rects` in reading order: top to bottom, then left to right.
+pub fn reading(rects: &[Rect]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..rects.len()).collect();
+    order.sort_by(|a, b| (rects[*a][1], rects[*a][0]).partial_cmp(&(rects[*b][1], rects[*b][0])).unwrap_or(std::cmp::Ordering::Equal));
+    order
+}
+
+/// Tile view: fills `area` with `tiles` tiles like tmux's tiled layout, and lines `pills`
+/// (sizes) up along its bottom. Both are placed in the order given (the caller keeps it, so
+/// nothing swaps when the active one changes or a rect jitters). The `active` tile's row is
+/// taller and the tile wider, so it is always the largest; the rest share what is left.
+/// Returns the tiles' and pills' rects in the order given.
+pub fn tile(area: Rect, tiles: usize, active: Option<usize>, pills: &[Rect], gap: f32) -> (Vec<Rect>, Vec<Rect>) {
     let [x0, y0, w, h] = [area[0] + gap, area[1] + gap, (area[2] - 2. * gap).max(1.), (area[3] - 2. * gap).max(1.)];
     // Pills wrap into rows along the bottom; the tiles get what is above them.
     let mut placed = vec![[0.; 4]; pills.len()];
     let (mut x, mut row_h, mut rows) = (0., 0., vec![]);
-    for i in reading(pills) {
+    for i in 0..pills.len() {
         let [pw, ph] = [pills[i][2], pills[i][3]];
         if x > 0. && x + pw > w { rows.push(row_h); x = 0.; row_h = 0.; }
         placed[i] = [x, rows.iter().map(|r| r + gap).sum::<f32>(), pw, ph];
@@ -119,7 +123,7 @@ pub fn tile(area: Rect, tiles: &[Rect], active: Option<usize>, pills: &[Rect], g
     if !pills.is_empty() { rows.push(row_h); }
     let strip = rows.iter().sum::<f32>() + gap * rows.len() as f32;
     for r in &mut placed { r[0] += x0; r[1] += y0 + h - strip + gap; }
-    if !pills.is_empty() && tiles.is_empty() { for r in &mut placed { r[1] -= h - strip + gap; } }
+    if !pills.is_empty() && tiles == 0 { for r in &mut placed { r[1] -= h - strip + gap; } }
     let th = (h - strip).max(1.);
     // A run of `k` where the active one (if any) takes `big` of it and the others share the rest:
     // (offset, length) of item `i`, as fractions.
@@ -127,15 +131,14 @@ pub fn tile(area: Rect, tiles: &[Rect], active: Option<usize>, pills: &[Rect], g
         let size = |j: usize| match active { Some(a) if k > 1 => if j == a { big } else { (1. - big) / (k - 1) as f32 }, _ => 1. / k as f32 };
         ((0..i).map(size).sum::<f32>(), size(i))
     };
-    let n = tiles.len();
+    let n = tiles;
     let mut out = vec![[0.; 4]; n];
     if n == 0 { return (out, placed); }
-    let order = reading(tiles);
     // tmux's tiled grid: the last row is the short one and stretches.
     let cols = (n as f32).sqrt().ceil() as usize;
     let row_count = n.div_ceil(cols);
     let in_row = |r: usize| cols.min(n - r * cols);
-    let at = active.and_then(|a| order.iter().position(|i| *i == a)).map(|p| (p / cols, p % cols));
+    let at = active.map(|p| (p / cols, p % cols));
     // The active row is TILE_ACTIVE tall, or taller when a shorter row's stretched tiles would
     // otherwise outgrow the active tile.
     let tall = at.map_or(TILE_ACTIVE, |(r, _)| {
@@ -144,13 +147,13 @@ pub fn tile(area: Rect, tiles: &[Rect], active: Option<usize>, pills: &[Rect], g
         let needed = 1. / (1. + wide * (row_count - 1) as f32 * fewest);
         TILE_ACTIVE.max(needed + 0.05).min(0.9)
     });
-    for (p, i) in order.iter().enumerate() {
+    for p in 0..n {
         let (r, c) = (p / cols, p % cols);
         let k = in_row(r);
         let (ry, rh) = share(row_count, r, at.map(|a| a.0), tall);
         let (cx, cw) = share(k, c, at.filter(|a| a.0 == r).map(|a| a.1), TILE_ACTIVE);
         let (aw, ah) = (w - gap * (k - 1) as f32, th - gap * (row_count - 1) as f32);
-        out[*i] = [x0 + cx * aw + gap * c as f32, y0 + ry * ah + gap * r as f32, cw * aw, rh * ah];
+        out[p] = [x0 + cx * aw + gap * c as f32, y0 + ry * ah + gap * r as f32, cw * aw, rh * ah];
     }
     (out, placed)
 }
@@ -1256,9 +1259,8 @@ mod tests {
     fn tile_fills_the_area_without_overlap_and_grows_the_active_tile() {
         let area = [0., 0., 1200., 800.];
         for n in 1..=7 {
-            let tiles: Vec<Rect> = (0..n).map(|i| [i as f32 * 50., 0., 100., 100.]).collect();
             for active in std::iter::once(None).chain((0..n).map(Some)) {
-                let (out, _) = tile(area, &tiles, active, &[], 24.);
+                let (out, _) = tile(area, n, active, &[], 24.);
                 for (i, a) in out.iter().enumerate() {
                     assert!(a[0] >= 23.9 && a[1] >= 23.9 && a[0] + a[2] <= 1176.1 && a[1] + a[3] <= 776.1, "n={n} {a:?} leaves the area");
                     for b in &out[i + 1..] { assert!(separated(*a, *b, 23.9), "n={n} {a:?} {b:?} overlap"); }
@@ -1275,17 +1277,24 @@ mod tests {
     }
 
     #[test]
-    fn tile_keeps_reading_order_and_lines_pills_along_the_bottom() {
-        // Given right-to-left, the tiles still read left to right by position.
-        let tiles = [[500., 0., 10., 10.], [0., 0., 10., 10.]];
+    fn tile_keeps_the_given_order_and_lines_pills_along_the_bottom() {
+        // The tiles sit in the order given, whichever is active.
         let pills = [[0., 0., 220., 36.], [0., 0., 220., 36.]];
-        let (out, placed) = tile([0., 0., 1000., 600.], &tiles, None, &pills, 20.);
-        assert!(out[1][0] < out[0][0]);
+        for active in [None, Some(0), Some(1)] {
+            let (out, _) = tile([0., 0., 1000., 600.], 2, active, &pills, 20.);
+            assert!(out[0][0] < out[1][0], "{active:?}");
+        }
+        let (out, placed) = tile([0., 0., 1000., 600.], 2, None, &pills, 20.);
         assert!(placed.iter().all(|p| p[2] == 220. && p[3] == 36. && p[1] + p[3] <= 580.1 && p[1] > out[0][1] + out[0][3]));
         assert!(separated(placed[0], placed[1], 19.9));
         // Pills alone sit at the top of the area.
-        let (_, alone) = tile([0., 0., 1000., 600.], &[], None, &pills, 20.);
+        let (_, alone) = tile([0., 0., 1000., 600.], 0, None, &pills, 20.);
         assert_eq!(alone[0][1], 20.);
+    }
+
+    #[test]
+    fn reading_order_is_top_to_bottom_then_left_to_right() {
+        assert_eq!(reading(&[[500., 0., 1., 1.], [0., 100., 1., 1.], [0., 0., 1., 1.]]), vec![2, 0, 1]);
     }
 
     #[test]
