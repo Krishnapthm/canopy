@@ -81,7 +81,8 @@ cargo test --locked
 ```
 
 just build builds; just test also runs Bun mod tests; just check aliases test.
-CI tests Linux, macOS and Windows. Test OS behavior on its actual OS.
+CI tests Linux on PRs; pushes to main add macOS and Windows. Test OS behavior
+on its actual OS.
 just install installs the app and affects the user's installation, so leave
 that to the orchestrator.
 
