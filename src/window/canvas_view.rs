@@ -848,8 +848,12 @@ impl AppWindow {
     }
 
     /// `canvas.front` / `canvas.back`: moves the target panes above or below every other pane.
-    pub(super) fn stack_panes(&mut self, front: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let targets = self.targets(window);
+    /// A `terminal` outside the selection (a right-clicked pane) moves alone.
+    pub(super) fn stack_panes(&mut self, front: bool, terminal: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+        let targets = match terminal {
+            Some(t) if !self.canvas_state.selected.iter().any(|s| s == t) => vec![t.to_owned()],
+            _ => self.targets(window),
+        };
         if self.canvas_state.doc.stack(&targets, front) { self.canvas_changed(cx); cx.notify(); }
     }
 
