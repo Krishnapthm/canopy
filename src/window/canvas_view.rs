@@ -6,6 +6,13 @@ use gpui::AnimationExt as _;
 mod wire_view;
 mod keyboard;
 
+/// What an inline name edit renames: a space (by id) or the tab of a cell (by tab id).
+#[derive(Clone, PartialEq)]
+pub(super) enum Rename {
+    Space(String),
+    Tab(String),
+}
+
 pub(super) struct State {
     pub doc: Document,
     pub(super) mode: bool,
@@ -44,7 +51,8 @@ pub(super) struct State {
     /// The current left-button pan moved: its mouse-up is not a click.
     pan_moved: bool,
     motion: Motion,
-    rename: Option<(String, Entity<gpui_base::input::InputState>, Subscription)>,
+    /// The name being edited inline: a space label's or a cell header's.
+    rename: Option<(Rename, Entity<gpui_base::input::InputState>, Subscription)>,
     /// The preview text a quote popover was opened from, kept highlighted, and that popover's id.
     quote_mark: Option<(Entity<gpui_base::TextViewState>, String)>,
     /// A finished selection waiting behind a small quote icon: the quote (with its
@@ -1335,9 +1343,13 @@ impl AppWindow {
         self.terms.get(&cell_slot(addr))
     }
 
-    pub(super) fn rename_canvas_space(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(space) = self.model.space(&id) else { return };
-        let value = space.name.clone();
+    /// Swaps a name for an input; Enter or blur dispatches `space.rename` / `tab.rename`.
+    pub(super) fn rename_canvas(&mut self, target: Rename, window: &mut Window, cx: &mut Context<Self>) {
+        let value = match &target {
+            Rename::Space(id) => self.model.space(id).map(|s| s.name.clone()),
+            Rename::Tab(id) => self.model.tab(id).map(|t| t.name.clone()),
+        };
+        let Some(value) = value else { return };
         let input = cx.new(|cx| {
             let mut input = gpui_base::input::InputState::new(window, cx);
             input.set_value(value, window, cx);
@@ -1347,14 +1359,15 @@ impl AppWindow {
         });
         let sub = cx.subscribe_in(&input, window, |this, input, event, window, cx| {
             if matches!(event, gpui_base::input::InputEvent::PressEnter { .. } | gpui_base::input::InputEvent::Blur) {
-                if let Some((id, _, _)) = this.canvas_state.rename.take() {
+                if let Some((target, _, _)) = this.canvas_state.rename.take() {
                     let name = input.read(cx).value().to_string();
-                    this.dispatch("space.rename", &json!({"id":id,"name":name}), true, window, cx);
+                    let (command, id) = match target { Rename::Space(id) => ("space.rename", id), Rename::Tab(id) => ("tab.rename", id) };
+                    this.dispatch(command, &json!({"id":id,"name":name}), true, window, cx);
                     cx.notify();
                 }
             }
         });
-        self.canvas_state.rename = Some((id, input, sub));
+        self.canvas_state.rename = Some((target, input, sub));
         cx.notify();
     }
     fn animate_camera(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2137,7 +2150,11 @@ impl AppWindow {
             })
             // Capture phase, before pills and space labels: middle drag, or left drag with
             // Space held, pans from anywhere on the canvas.
-            .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, cx| {
+            .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, window, cx| {
+                if e.button == MouseButton::Left && this.wire_pick(e.position, window, cx) {
+                    cx.stop_propagation();
+                    return;
+                }
                 this.canvas_state.motion.target = None;
                 this.canvas_state.motion.velocity = [0.; 2];
                 this.canvas_state.motion.sample = Some(std::time::Instant::now());
@@ -2450,14 +2467,14 @@ impl AppWindow {
                 .child(div().flex_none().size(px(8.)).rounded_full().bg(color))
                 .child(div().flex_1().min_w_0().truncate().map(|d| {
                     if let Some((editing, input, _)) = &state.rename {
-                        if editing == &id { return d.child(gpui_base::Input::new(input)); }
+                        if *editing == Rename::Space(id.clone()) { return d.child(gpui_base::Input::new(input)); }
                     }
                     d.child(label)
                 }))
                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     // Double-click the name to rename, as in Figma; the box's double-click goes inside.
                     if e.click_count == 2 {
-                        this.rename_canvas_space(rename_id.clone(), window, cx);
+                        this.rename_canvas(Rename::Space(rename_id.clone()), window, cx);
                         cx.stop_propagation();
                     }
                 }));
@@ -2498,7 +2515,7 @@ impl AppWindow {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                            if this.canvas_state.rename.as_ref().is_some_and(|(editing, _, _)| editing == &id) {
+                            if this.canvas_state.rename.as_ref().is_some_and(|(editing, _, _)| *editing == Rename::Space(id.clone())) {
                                 cx.stop_propagation(); return;
                             }
                             if e.click_count == 2 {
@@ -2644,15 +2661,23 @@ impl AppWindow {
             let (icon, tint) = program_icon(rec);
             // Glyphs sit on the first line, so a two-line name keeps its icon top-left.
             pill = pill.child(div().flex_none().mt(px(1. * z)).child(icon_element(&icon, tint, px(16. * z), c("foreground"))));
-            pill = pill.child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .line_clamp(if expanded { 1 } else { 2 })
-                    .text_ellipsis()
-                    .child(name.clone())
-                    .id(SharedString::from(format!("canvas-name-{addr}"))),
-            );
+            // On an expanded cell, double-clicking the name edits its tab's name in place (a pill enters instead).
+            let tab_id = self.model.pane_of(&addr).and_then(|p| self.model.tab_of(&p)).map(|t| t.id.clone()).filter(|_| expanded);
+            let editing = tab_id.as_ref().and_then(|id| state.rename.as_ref().filter(|(t, _, _)| *t == Rename::Tab(id.clone())));
+            let name_box = div().flex_1().min_w_0().line_clamp(if expanded { 1 } else { 2 }).text_ellipsis()
+                .when_some(editing, |d, (_, input, _)| d.child(gpui_base::Input::new(input)))
+                .when(editing.is_none(), |d| d.child(name.clone()))
+                .id(SharedString::from(format!("canvas-name-{addr}")));
+            pill = pill.child(match tab_id {
+                Some(id) => name_box.on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    let editing = this.canvas_state.rename.as_ref().is_some_and(|(t, _, _)| *t == Rename::Tab(id.clone()));
+                    if editing || e.click_count == 2 {
+                        if !editing { this.rename_canvas(Rename::Tab(id.clone()), window, cx); }
+                        cx.stop_propagation();
+                    }
+                })).into_any_element(),
+                None => name_box.into_any_element(),
+            });
             if agent && rec["status"] == "working" {
                 pill = pill.child(
                     svg()
@@ -2687,6 +2712,13 @@ impl AppWindow {
                 );
             }
             let menu_addr = addr.clone();
+            pill = pill.capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
+                if e.keystroke.key == "escape" && this.canvas_state.rename.as_ref().is_some_and(|(t, _, _)| matches!(t, Rename::Tab(_))) {
+                    this.canvas_state.rename = None;
+                    this.focus.focus(window, cx);
+                    cx.stop_propagation(); cx.notify();
+                }
+            }));
             pill = pill.on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |this, e: &MouseDownEvent, window, cx| {

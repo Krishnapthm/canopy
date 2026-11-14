@@ -2861,7 +2861,7 @@ impl AppWindow {
         }
         if person && name == "space.rename" && args.get("name").is_none_or(Value::is_null) {
             if let Some(id) = Self::owned(&args, "id").filter(|id| self.canvas_state.doc.spaces.iter().any(|s| &s.space == id)) {
-                self.rename_canvas_space(id, window, cx);
+                self.rename_canvas(canvas_view::Rename::Space(id), window, cx);
                 return json!({"asked":"name"});
             }
         }

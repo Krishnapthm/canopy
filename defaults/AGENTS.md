@@ -1081,7 +1081,8 @@ Canvas commands: `canvas.zoom_in`, `canvas.zoom_out`, `canvas.zoom_reset`, `canv
 Canvas keys: Cmd (Ctrl on Linux) +=, +-, +0, +Shift+F, +Shift+G (tile view).
 
 Canvas mouse (Figma style): click selects, drag moves the selection, a drag on empty canvas draws a
-selection box (Shift adds), double-click enters a cell (expands it, focuses its terminal). Clicking
+selection box (Shift adds), double-click enters a cell (expands it, focuses its terminal; on an
+expanded cell's header name it renames the tab in place instead). Clicking
 empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. Holding Option/Alt on
 the canvas shows each selected or hovered cell's actions with their keys. Expanded cells are
 100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
@@ -1180,7 +1181,8 @@ its sub-agent labels. These cells describe work, not terminal processes.
 ## Wire
 
 Wire is how wired cells talk. The person draws an edge between two cells of one
-space (hover a cell, drag from a side "+" to another cell); the edge is the
+space (hover a cell, drag from a side "+" to another cell, or click the "+" and then the
+other cell); the edge is the
 address book and the permission. Sub-agents and spawned helpers are wired to
 their parent already. Wiring types nothing into anyone. The person starts at
 `docs/wire.md`; you work through `canopy wire`:

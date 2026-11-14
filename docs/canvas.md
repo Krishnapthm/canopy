@@ -31,6 +31,12 @@ whose frame held it, and the frame becomes that space's card.
 - Enter [canvas mode](keys.md) to select a collapsed cell without expanding it.
   Click a cell to select it. Shift-click adds or removes cells. Click empty
   canvas to clear the selection.
+- Double-click the name in an expanded cell's header (or a tile's) to rename
+  it in place: Enter or clicking away saves, Esc cancels. A pill's double-click
+  still enters it; rename a pill from its menu.
+- Wire two cells by clicking a "+" at the side of a hovered cell and then the
+  other cell, or by dragging between them. Esc or a click on empty canvas
+  cancels. See [Wire](wire.md).
 - Right-click a cell (its pill, header or terminal) for its own menu: Rename,
   Pop out or Bring back, Expand or Collapse, Clear finished, Close terminal
   (asks first) and Kill terminal (ends it and its sub-agents now).
