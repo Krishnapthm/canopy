@@ -1,3 +1,4 @@
+# Modified for Canopy.
 [workspace]
 members = ["crates/ghostty-sys"]
 exclude = ["vendor/gpui-kit", "vendor/gpui-pre", "vendor/gpui-pre-wgpu", "vendor/gpui-pre-apple", "vendor/gpui-pre-linux", "vendor/gpui-pre-macos", "vendor/gpui-pre-windows", "vendor/taffy", "vendor/quickjs-jit-runtime", "vendor/zed-xim", "vendor/xim-ctext"]
@@ -9,7 +10,7 @@ license = "Apache-2.0"
 publish = false
 
 [package]
-name = "herdr-app"
+name = "canopy"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true

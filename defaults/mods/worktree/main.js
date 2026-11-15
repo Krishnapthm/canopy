@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // Worktree dialog: { space, action: "new" | "open" | "remove" } or
 // { folder, machine } for a repo without a space; optional { branch, tab, argv }.
 

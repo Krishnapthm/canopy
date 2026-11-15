@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! What runs in a terminal, as people see it: a name, an icon and a tile.
 //! One table for every mod: `defaults/programs.json` (built in), with the
 //! person's `programs.json` in the home folder on top (entry by entry). The

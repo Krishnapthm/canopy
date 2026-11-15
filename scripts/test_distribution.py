@@ -1,3 +1,4 @@
+# Modified for Canopy.
 """Distribution architecture guards, without downloads or release builds.
 
 Run: python3 -I -m unittest discover -s scripts -p test_distribution.py

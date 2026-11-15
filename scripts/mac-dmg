@@ -1,4 +1,5 @@
 #!/bin/bash
+# Modified for Canopy.
 # A notarized download, independent of the tarballs used by app updates.
 # Requires create-dmg (brew install create-dmg), jq, and Apple's command line tools.
 # Uses the same APPLE_CERTIFICATE_* and APPLE_API_* secrets as mac-sign/notary-test.
@@ -17,7 +18,7 @@ out=${2:?usage: mac-dmg signed-Canopy.app output.dmg}
 for tool in create-dmg jq tiffutil xcrun; do command -v "$tool" >/dev/null; done
 root=$(cd "$(dirname "$0")/.." && pwd)
 umask 077
-work=$(mktemp -d "${TMPDIR:-/tmp}/herdr-dmg.XXXXXX")
+work=$(mktemp -d "${TMPDIR:-/tmp}/canopy-dmg.XXXXXX")
 # hdiutil reports physical paths (e.g. /private/tmp instead of /tmp).
 work=$(cd "$work" && pwd -P)
 start=$(date -u +%Y-%m-%dT%H:%M:%SZ)

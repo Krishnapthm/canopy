@@ -1,3 +1,4 @@
+# Modified for Canopy.
 # Fake pointer input for the sandbox's private X display (XTest). Coordinates
 # are in the Canopy window, px. Run through `scripts/sandbox`, not directly.
 #   move x0 y0 x1 y1        glide the pointer, no buttons

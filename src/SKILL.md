@@ -253,7 +253,7 @@ shown correctly in the running window with `shot`; don't claim a visual
 check you haven't made.
 
 `canopy shot [file.png]` saves the window's last frame and prints its
-absolute path (default: `herdr-shot.png` in your current folder). It is the
+absolute path (default: `canopy-shot.png` in your current folder). It is the
 app's own rendering at full pixel size: terminals, images, overlays and
 floats included, even when the window is covered or minimized. No screen
 capture or permissions. It needs a running window that has drawn a frame;

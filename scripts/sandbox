@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Modified for Canopy.
 # A throwaway Canopy app on its own core, home and display, so changes get tried
 # without touching the real one. The display is a headless Weston with
 # Xwayland: nothing shows on the desktop, frames never stall, and screenshots

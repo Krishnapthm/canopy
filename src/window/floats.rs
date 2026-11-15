@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Floating blocks: mods (or terminals) over a node, snapped to one of its
 //! edges and a third along it. Drag one anywhere; let go and it springs to
 //! the nearest edge. Left and right make it vertical, top and bottom

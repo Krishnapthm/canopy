@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Canopy's view of a core terminal: libghostty-vt fed with the relayed bytes,
 //! read back as frames to draw, and asked to encode keys and mouse input.
 

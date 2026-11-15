@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // Add a machine: the hosts in ~/.ssh/config to pick from (or type one),
 // each added with one click (`hc machine add`). When the machine needs
 // something first (herdr-core installed there, a password, a new host

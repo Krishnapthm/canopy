@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Modified for Canopy.
 """How much CPU the app uses, and how often it draws, in fixed scenarios.
 
     scripts/bench.py [--bin target/release/canopy] [--seconds 20] [--sample]

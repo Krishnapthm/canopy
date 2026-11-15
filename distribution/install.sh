@@ -1,4 +1,5 @@
 #!/bin/sh
+# Modified for Canopy.
 # Installs Canopy, and herdr-core if there's none yet:
 #
 #   curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/install.sh | sh

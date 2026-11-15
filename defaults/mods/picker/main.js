@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // ⌘K / ⌘P: typing also finds spaces, terminal panes and open file tabs (fuzzy).
 // Go to a tab. Drops from the Terminals layout's space chip (popup, at: "top"). Spaces with
 // something that needs you come first, quiet spaces (no agent running)

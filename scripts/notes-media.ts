@@ -1,3 +1,4 @@
+// Modified for Canopy.
 import { S3Client } from "bun";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";

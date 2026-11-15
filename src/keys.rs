@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! ~/.config/canopy/keys.json: string or object actions, reloaded live.
 //!
 //! ```json

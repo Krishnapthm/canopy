@@ -1,3 +1,4 @@
+// Modified for Canopy.
 import { describe, expect, test } from "bun:test";
 import { checkExample, checkMarkdown, commandPage, type Reference } from "./docs";
 
