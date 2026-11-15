@@ -11,7 +11,7 @@ Layouts can load mods. Check those references too.
 
 ## What stays on disk
 
-The default app home is `~/.config/herdr-app`, including on macOS and Windows (under your user home).
+The default app home is `~/.config/canopy`, including on macOS and Windows (under your user home).
 `XDG_CONFIG_HOME` changes the config root. `HERDR_APP_HOME` selects an app home directly and takes precedence.
 
 This folder holds your settings, keys, layouts, mods, generated agent guide and API types.
@@ -36,8 +36,8 @@ A checksum from the same release detects a damaged download; it is not an indepe
 
 The app never updates itself. Run the installer again to update the app; the core has its own updater.
 
-Releases are unsigned for now: macOS bundles carry an ad hoc signature and are not notarized,
-Windows binaries are unsigned. Installing with the one-line installers avoids the macOS quarantine
+Releases are unsigned for now: macOS bundles carry an ad hoc signature and are not notarized, and
+there is no Windows release. Installing with the one-line installers avoids the macOS quarantine
 flag; a browser download of the archive may need right-click > Open the first time.
 
 ## Network and telemetry

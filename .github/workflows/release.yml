@@ -1,14 +1,15 @@
 # A release: push a tag `v<version>` matching Cargo.toml once ci has passed
 # on main. Each platform builds and packs the app (scripts/package; no core
 # inside, the installers fetch herdr-core's own release). Then one GitHub
-# Release gets the archives, SHA256SUMS and both installers, so
+# Release gets the archives, SHA256SUMS and install.sh, so
 # releases/latest/download/install.sh always installs the newest version.
 #
 # Manual runs (Actions tab > release > Run workflow) only build and keep the
 # archives as run artifacts for a week: a dry run that publishes nothing.
 #
 # Unsigned for now: macOS gets an ad hoc signature and no notarization, which
-# curl installs don't need (curl sets no quarantine flag); Windows is unsigned.
+# curl installs don't need (curl sets no quarantine flag). No Windows build:
+# it isn't worth its runner minutes yet; scripts/package still supports it.
 name: release
 run-name: ${{ github.ref_type == 'tag' && format('release {0}', github.ref_name) || format('build {0}', github.ref_name) }}
 
@@ -40,7 +41,6 @@ jobs:
           - { target: linux-x86_64, runner: ubuntu-22.04 }
           - { target: linux-aarch64, runner: ubuntu-22.04-arm }
           - { target: macos-aarch64, runner: macos-15 }
-          - { target: windows-x86_64, runner: windows-2022 }
     runs-on: ${{ matrix.runner }}
     # shortcut: no build cache, so each release builds cold (tags can't save
     # caches for later tags); add a main-branch warm-up job if this gets slow.
@@ -67,9 +67,6 @@ jobs:
           scripts/ci-apt pkg-config clang libclang-dev \
             libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libvulkan-dev libfontconfig-dev libfreetype-dev
-      - name: Windows libclang
-        if: runner.os == 'Windows'
-        run: echo "LIBCLANG_PATH=C:/Program Files/LLVM/bin" >> "$GITHUB_ENV"
       - name: Version matches the tag
         if: github.ref_type == 'tag'
         run: |
@@ -130,7 +127,7 @@ jobs:
       - name: Checksums and installers
         run: |
           (cd dist && sha256sum canopy-*.tar.gz > SHA256SUMS && cat SHA256SUMS)
-          cp distribution/install.sh distribution/install.ps1 dist/
+          cp distribution/install.sh dist/
       # Notes come from the merged PRs; edit them on GitHub afterwards.
       - name: Publish
         env:

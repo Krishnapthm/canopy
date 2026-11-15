@@ -23,7 +23,7 @@ need tar
 case "$(uname -s)" in
   Linux) os=linux ;;
   Darwin) os=macos ;;
-  MINGW* | MSYS* | CYGWIN*) fail "this installer is for Linux and macOS; on Windows, run this in PowerShell: irm $releases/install.ps1 | iex" ;;
+  MINGW* | MSYS* | CYGWIN*) fail "there is no Windows build yet; build from source: https://github.com/Krishnapthm/canopy#build-from-source" ;;
   *) fail "no build for $(uname -s)" ;;
 esac
 case "$(uname -m)" in

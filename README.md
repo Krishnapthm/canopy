@@ -16,12 +16,6 @@ macOS (Apple Silicon) and Linux:
 curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/install.sh | sh
 ```
 
-Windows (PowerShell):
-
-```powershell
-irm https://github.com/Krishnapthm/canopy/releases/latest/download/install.ps1 | iex
-```
-
 This installs Canopy and, if you don't have it yet, herdr-core, the terminal engine it runs on.
 Then open Canopy from your apps or run `canopy`. Run the installer again to update.
 
@@ -31,8 +25,6 @@ To uninstall, delete the app and its config in `~/.config/canopy`:
 - Linux: `~/.local/share/canopy`, `~/.local/bin/canopy`,
   `~/.local/share/applications/canopy.desktop` and
   `~/.local/share/icons/hicolor/scalable/apps/canopy.svg`.
-- Windows: `%LOCALAPPDATA%\Programs\canopy`, the Canopy Start menu shortcut, and that
-  folder's entry in your user PATH.
 
 herdr-core stays, as other apps may use it.
 
