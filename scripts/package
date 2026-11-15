@@ -8,7 +8,7 @@
 # macOS: Canopy.app, signed with APPLE_CERTIFICATE_P12 when available,
 # otherwise ad hoc. The notarized DMG is a separate, non-blocking CI job.
 # Windows (Git Bash): a folder holding canopy.exe and the icon.
-# No core inside: users install herdr-core separately
+# No core inside: the installers fetch herdr-core's own release
 # (distribution/core-version is the oldest core this app works with).
 set -euo pipefail
 cd "$(dirname "$0")/.."

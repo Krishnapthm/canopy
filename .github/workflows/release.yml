@@ -1,0 +1,140 @@
+# A release: push a tag `v<version>` matching Cargo.toml once ci has passed
+# on main. Each platform builds and packs the app (scripts/package; no core
+# inside, the installers fetch herdr-core's own release). Then one GitHub
+# Release gets the archives, SHA256SUMS and both installers, so
+# releases/latest/download/install.sh always installs the newest version.
+#
+# Manual runs (Actions tab > release > Run workflow) only build and keep the
+# archives as run artifacts for a week: a dry run that publishes nothing.
+#
+# Unsigned for now: macOS gets an ad hoc signature and no notarization, which
+# curl installs don't need (curl sets no quarantine flag); Windows is unsigned.
+name: release
+run-name: ${{ github.ref_type == 'tag' && format('release {0}', github.ref_name) || format('build {0}', github.ref_name) }}
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a release halfway.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUST_TOOLCHAIN: 1.95.0
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Linux on the oldest Ubuntu we can: the app links the system's
+          # glibc, so this sets how old a distro it runs on.
+          - { target: linux-x86_64, runner: ubuntu-22.04 }
+          - { target: linux-aarch64, runner: ubuntu-22.04-arm }
+          - { target: macos-aarch64, runner: macos-15 }
+          - { target: windows-x86_64, runner: windows-2022 }
+    runs-on: ${{ matrix.runner }}
+    # shortcut: no build cache, so each release builds cold (tags can't save
+    # caches for later tags); add a main-branch warm-up job if this gets slow.
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+          use-cache: false
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        run: |
+          scripts/ci-apt pkg-config clang libclang-dev \
+            libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libvulkan-dev libfontconfig-dev libfreetype-dev
+      - name: Windows libclang
+        if: runner.os == 'Windows'
+        run: echo "LIBCLANG_PATH=C:/Program Files/LLVM/bin" >> "$GITHUB_ENV"
+      - name: Version matches the tag
+        if: github.ref_type == 'tag'
+        run: |
+          want="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          [ "$want" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $want"; exit 1; }
+      # Also checks LICENSE and THIRD-PARTY-NOTICES inside the archive.
+      - name: Build and pack
+        run: scripts/package
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: canopy-${{ matrix.target }}
+          path: dist/canopy-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # ci.yml runs on the commit once it is on main; a tag publishes only after
+  # it passed. Waits while ci is still running (a timer only while work is
+  # pending), fails if ci failed or never ran for this commit.
+  ci-passed:
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+    steps:
+      - name: Wait for ci on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          while :; do
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=1" \
+              --jq '.workflow_runs[0] // {} | "\(.status) \(.conclusion)"') || run="api error"
+            echo "ci for $GITHUB_SHA: $run"
+            case "$run" in
+              "completed success") exit 0 ;;
+              "null null") echo "no ci run for this commit: push it to main first"; exit 1 ;;
+              "completed cancelled") echo "cancelled by a newer push: rerun that ci run, this job keeps waiting" ;;
+              completed*) exit 1 ;;
+            esac
+            sleep 30
+          done
+
+  publish:
+    needs: [build, ci-passed]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and installers
+        run: |
+          (cd dist && sha256sum canopy-*.tar.gz > SHA256SUMS && cat SHA256SUMS)
+          cp distribution/install.sh distribution/install.ps1 dist/
+      # Notes come from the merged PRs; edit them on GitHub afterwards.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "Canopy ${GITHUB_REF_NAME#v}" --generate-notes

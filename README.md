@@ -8,6 +8,34 @@ filter and terminal pop-outs. The classic layout retains the original spaces and
 Based on herdr-app: https://github.com/herdrdev/herdr-app.
 Licensed under Apache-2.0. See LICENSE, NOTICE and THIRD-PARTY-NOTICES.
 
+## Install
+
+macOS (Apple Silicon) and Linux:
+
+```sh
+curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://github.com/Krishnapthm/canopy/releases/latest/download/install.ps1 | iex
+```
+
+This installs Canopy and, if you don't have it yet, herdr-core, the terminal engine it runs on.
+Then open Canopy from your apps or run `canopy`. Run the installer again to update.
+
+To uninstall, delete the app and its config in `~/.config/canopy`:
+
+- macOS: `~/Applications/Canopy.app` and the `~/.local/bin/canopy` link.
+- Linux: `~/.local/share/canopy`, `~/.local/bin/canopy`,
+  `~/.local/share/applications/canopy.desktop` and
+  `~/.local/share/icons/hicolor/scalable/apps/canopy.svg`.
+- Windows: `%LOCALAPPDATA%\Programs\canopy`, the Canopy Start menu shortcut, and that
+  folder's entry in your user PATH.
+
+herdr-core stays, as other apps may use it.
+
 ## Build from source
 
 Install Rust and Zig 0.16. On macOS, use Homebrew's keg-only zig@0.16:
@@ -19,14 +47,15 @@ cargo build --locked
 cargo test --locked
 ```
 
-Install herdr-core yourself using its documented installer:
+A source build needs herdr-core too; the installer above sets it up, or run its
+own installer:
 
 ```sh
 curl -fsSL https://releases.herdr.dev/core/install.sh | sh
 ```
 
-Canopy never installs or updates the core, collects telemetry, or checks for
-app updates. Its config lives in ~/.config/canopy; HERDR_APP_HOME overrides it.
+The app never installs or updates the core, collects telemetry, or checks for
+updates; only the installers fetch the core. Its config lives in ~/.config/canopy; HERDR_APP_HOME overrides it.
 The internal mod API and environment variable names retain their upstream names.
 
 ## Development
@@ -47,3 +76,12 @@ An older Canopy CLI may already be on PATH; the scripts use target/debug/canopy
 directly. Builds do not install over that CLI.
 
 just test also runs Bun mod tests. See AGENTS.md for sandbox and platform checks.
+
+## Releasing
+
+1. Set `version` in Cargo.toml, merge to main and wait for ci on main to pass.
+2. `git tag v<version> && git push origin v<version>`.
+
+The release workflow builds every platform, waits for that ci run, and publishes a GitHub
+Release with the archives, `SHA256SUMS` and both installers. Actions > release > Run workflow
+builds everything without publishing.

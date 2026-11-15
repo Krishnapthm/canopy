@@ -1,25 +1,29 @@
 #!/bin/sh
-# Installs Canopy from an explicit release source. Canopy has no default endpoint.
-#   HERDR_RELEASES_URL=https://your-release-source sh distribution/install.sh
-# Linux: ~/.local/share/canopy, with canopy in ~/.local/bin.
-# macOS: ~/Applications/Canopy.app. Install herdr-core separately.
-# Running this again updates the app.
+# Installs Canopy, and herdr-core if there's none yet:
+#
+#   curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/install.sh | sh
+#
+# Linux: the app into ~/.local/share/canopy, `canopy` in ~/.local/bin, a
+# launcher entry and icon. macOS: Canopy.app into ~/Applications, keeping a
+# Developer ID signature intact (ad hoc for unsigned builds). The core, with
+# its own installer, into ~/.local/bin only if none is there yet; a core you
+# already have is left alone. Running this again updates the app.
+# CANOPY_RELEASES_URL serves the app from elsewhere (tests, mirrors).
 set -eu
 
-releases=${HERDR_RELEASES_URL:-}
+releases=${CANOPY_RELEASES_URL:-https://github.com/Krishnapthm/canopy/releases/latest/download}
 bin="$HOME/.local/bin"
 
 say() { printf '%s\n' "$*"; }
-fail() { say "herdr: $*" >&2; exit 1; }
+fail() { say "canopy: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || fail "needs $1"; }
-[ -n "$releases" ] || fail "set HERDR_RELEASES_URL to an explicit Canopy release source; Canopy has no default release endpoint"
 need curl
 need tar
 
 case "$(uname -s)" in
   Linux) os=linux ;;
   Darwin) os=macos ;;
-  MINGW* | MSYS* | CYGWIN*) fail "this installer is for Linux and macOS; on Windows, run this in PowerShell: irm $releases/app/install.ps1 | iex" ;;
+  MINGW* | MSYS* | CYGWIN*) fail "this installer is for Linux and macOS; on Windows, run this in PowerShell: irm $releases/install.ps1 | iex" ;;
   *) fail "no build for $(uname -s)" ;;
 esac
 case "$(uname -m)" in
@@ -33,7 +37,7 @@ if [ "$os" = macos ] && [ "$arch" = x86_64 ]; then
      [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ]; then
     arch=aarch64
   else
-    fail "Intel Macs aren't supported; build from source: https://github.com/herdrdev/canopy#build-from-source"
+    fail "Intel Macs aren't supported; build from source: https://github.com/Krishnapthm/canopy#build-from-source"
   fi
 fi
 target="$os-$arch"
@@ -46,30 +50,14 @@ sha256() {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-curl -fsSL "$releases/app/latest.json" -o "$tmp/latest.json" || fail "cannot reach $releases"
-# Read without jq: the manifest is flat enough for sed once spaces are gone.
-entry=$(tr -d '\n ' < "$tmp/latest.json" | sed -n "s/.*\"$target\":{\([^}]*\)}.*/\1/p")
-url=$(printf '%s' "$entry" | sed -n 's/.*"url":"\([^"]*\)".*/\1/p')
-want=$(printf '%s' "$entry" | sed -n 's/.*"sha256":"\([^"]*\)".*/\1/p')
-version=$(tr -d '\n ' < "$tmp/latest.json" | sed -n 's/^{"version":"\([^"]*\)".*/\1/p')
-[ -n "$url" ] && [ -n "$want" ] || fail "no build for $target yet"
+# SHA256SUMS lists every archive of the release; `sha256sum -c` format.
+curl -fsSL "$releases/SHA256SUMS" -o "$tmp/SHA256SUMS" || fail "cannot reach $releases"
+archive="canopy-$target.tar.gz"
+want=$(sed -n "s/^\([0-9a-f]\{64\}\)  $archive\$/\1/p" "$tmp/SHA256SUMS")
+[ -n "$want" ] || fail "no build for $target yet"
 
-# Tells the release server's download counter a new install from a reinstall;
-# the file is the same either way. Only plain URLs on the release server in
-# use are marked: one with a query or fragment (a mirror's signed URL) is
-# fetched exactly as the manifest gives it.
-src=install
-for have in "${XDG_DATA_HOME:-$HOME/.local/share}/canopy" "$HOME/Applications/Canopy.app" /Applications/Canopy.app; do
-  if [ -e "$have" ]; then src=reinstall; fi
-done
-case $url in
-  *[?#]*) download=$url ;;
-  "$releases"/*) download="$url?src=$src" ;;
-  *) download=$url ;;
-esac
-
-say "Installing Canopy ${version:-} for $target..."
-curl -fsSL "$download" -o "$tmp/app.tar.gz" || fail "download failed"
+say "Installing Canopy for $target..."
+curl -fsSL "$releases/$archive" -o "$tmp/app.tar.gz" || fail "download failed"
 [ "$(sha256 "$tmp/app.tar.gz")" = "$want" ] || fail "download is damaged (checksum mismatch); try again"
 tar -xzf "$tmp/app.tar.gz" -C "$tmp"
 mkdir -p "$bin"
@@ -130,6 +118,18 @@ else
   mv "$tmp/Canopy.app" "$app"
   ln -sfn "$app/Contents/MacOS/Canopy" "$bin/canopy"
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$app" 2>/dev/null || true
+fi
+
+# The core: installed only if there's none yet. One that's already there
+# (yours, herdr's, or a package manager's) is left alone. Its own installer,
+# saved first: a failed download piped into sh would look like success.
+if [ ! -e "$bin/herdr-core" ] && ! command -v herdr-core >/dev/null 2>&1; then
+  say "Installing herdr-core, the terminal engine Canopy runs on..."
+  if curl -fsSL https://releases.herdr.dev/core/install.sh -o "$tmp/core.sh"; then
+    HC_INSTALL_DIR="$bin" sh "$tmp/core.sh" || say "herdr-core didn't install; Canopy will show how when it opens."
+  else
+    say "Cannot reach releases.herdr.dev; Canopy will show how to install herdr-core when it opens."
+  fi
 fi
 
 say "Canopy is installed. Open it from your apps, or run: canopy"
