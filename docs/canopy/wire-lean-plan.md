@@ -185,7 +185,7 @@ ponytail-review, and updates its docs in the same change.
    thread panel, `wire.reset`, `wire.open`, `canvas.thread`,
    `canvas.sub_message`, the menu items, the `t` key and both settings.
    Regenerate `docs/commands.md` with `scripts/docs.ts`.
-3. **Parent-child glow.** Change 3. Test the "status changed and has a
+3. **Parent-child glow.** Done. Change 3. Test the "status changed and has a
    parent on the canvas" decision as a pure function.
 4. **Docs.** Done. Rewrite `docs/wire.md`; update the Wire and helper sections of
    `src/SKILL.md` and `defaults/AGENTS.md`, `docs/sub-agents.md`,

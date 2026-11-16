@@ -38,7 +38,7 @@ When you are done or stuck, report to your parent with: hc send <parent> "<what 
 ```
 
 In-process sub-agents also have parent edges; talk to them through their
-parent's terminal. Planned: the edge to a parent glows when the child's status changes.
+parent's terminal. A parent edge glows briefly each time the child's status changes.
 
 Right-click a drawn edge and choose Remove, or select it and press Delete.
 Parent-child edges are automatic. Closing a cell removes its edges.
