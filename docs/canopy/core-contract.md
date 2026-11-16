@@ -157,7 +157,7 @@ socket. State is `$XDG_STATE_HOME/herdr-core/<session>`; config is
 `$XDG_CONFIG_HOME/herdr-core/config.toml` (Unix defaults ~/.local/state and
 ~/.config). Never test with only a different session: set all four variables,
 unset inherited `HC_TERMINAL_ID` and `HC_TERMINAL_SOCKET`, and explicitly
-start the server before connecting (`scripts/dev:8`, `scripts/dev:25`,
+start the server before connecting (`scripts/dev:19`, `scripts/dev:46`,
 `scripts/dev-stop:7`; source provenance: `docs/canopy/herdr-map.md:49`).
 `HC_TERMINAL_ID` identifies the caller for default parent and sender tagging;
 hooks require it and an existing HC_SOCKET (`src/subs.rs:56`).
