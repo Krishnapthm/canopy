@@ -98,7 +98,7 @@ size uses cols, rows; foreground replaces foreground. Label tracking reads
 `herdr.seen` (`src/hc.rs:67`, `src/hc.rs:157`). Terminal records supply address,
 state, argv, name, cwd, parent, labels, keep, title, status, records, reported,
 turn, foreground (argv/cwd), pid, created_ms and exit/reason/size fields. Status may be an object with
-state/app or a legacy string (`src/window.rs:2037`, `src/wire.rs:442`).
+state/app or a legacy string (`src/window.rs:2037`, `src/wire.rs`, `Rec::parse`).
 
 ### CLI consumed by app and shipped mods
 
@@ -113,10 +113,10 @@ JSON is the default when piped. Errors use `error.kind`, `error.message`,
 | `exec --json --on M --timeout S [--cwd DIR] -- CMD ARGS` | code, stdout/stderr (base64), timed_out, error.message | `src/mods.rs:795` |
 | `exec -- SHELL ARGS` | exit code and plain stdout/stderr for Windows installed-agent detection | `src/programs.rs:301` |
 | `put --json T FILE` | path | `src/terminal.rs:811` |
-| `get T --json` | labels (sub-agent cleanup); terminal record above for Wire | `src/subs.rs:60`, `src/wire.rs:458` |
+| `get T --json` | labels (sub-agent cleanup); terminal record above for Wire | `src/subs.rs:60`, `src/wire.rs`, `Rec::get` |
 | `label T K=V...` | exit code; empty value removes a label | `src/subs.rs:63` |
-| `ls --json` | terminals with address, parent and the terminal record fields above | `src/wire.rs:511` |
-| `run --bg --name NAME --parent T [--cwd DIR] [--label K=V] -- ARGV...` | terminal address text | `src/wire.rs:812` |
+| `ls --json` | terminals with address, parent and the terminal record fields above | `src/wire.rs`, `Me::new` |
+| `run --bg --name NAME [--cwd DIR] [--label K=V] -- ARGV...` | success or error; caller becomes parent | `src/wire.rs`, `spawn` |
 | `machine ls --json` | machines: name, id, host, target, version, state, temporary, via, session, why, keeps_running_after_logout, logout_linger_user | `defaults/mods/picker/main.js:84`, `defaults/mods/spaces/main.js:149`, `defaults/frame/settings/main.js:775`, `defaults/mods/machine-add/main.js:98` |
 | `machine add [TARGET | --via CMD] [--name NAME] [--session S] [--temp] --json` | exit code, error.kind/message | `defaults/mods/machine-add/main.js:127`, `defaults/mods/spaces/main.js:181` |
 | `machine rm NAME --json`, `machine rename NAME NEW_NAME` | exit code, error.message | `defaults/mods/spaces/main.js:177`, `defaults/frame/settings/main.js:799` |
@@ -126,8 +126,6 @@ Welcome and win98 also use `machine ls --json`, filtering temporary and
 reading name (`defaults/frame/welcome/main.js:69`,
 `defaults/mods/win98/dialog.js:68`). `herdr.hc(args)` accepts arbitrary args;
 the table inventories shipped consumers, not third-party mods (`src/mods.rs:956`).
-Pre-rework Wire additionally uses `send --if idle`, `read --lines 0`, and
-get/ls above (`src/wire.rs:411`, `src/wire.rs:710`).
 
 ### Agent commands after the Wire rework
 
@@ -138,10 +136,19 @@ Required commands: `hc send T TEXT` (paste plus Enter), `hc send --if idle T TEX
 Send/wait support `--timeout S`. Read prints text, run --bg prints an address,
 ls/get print JSON when piped, events prints one JSON notification per line.
 Wait reasons include message and timeout; timeout is a check-in, not completion.
-The agent note and parent-report sentence belong to the rework
-(`docs/canopy/wire-lean-plan.md:122`). Installed `hc 0.1.20` help and schema
-confirm this CLI surface; live results are recorded in
-[harness notes](harness-notes/hc.md).
+`canopy wire` takes no arguments and lists the caller and wired peers with
+their hc addresses and states. Messaging goes directly through hc; an edge
+is an introduction, not a gate. `canopy spawn` appends this sentence to a
+task, replacing `<parent>` with the caller's terminal address:
+
+```text
+When you are done or stuck, report to your parent with: hc send <parent> "<what you did or need>"
+```
+
+Without a task it adds nothing. The agent note teaches send, wait, read,
+peer listing and spawning; the parent can wait with `hc wait --children any`.
+Installed `hc 0.1.20` help and schema confirm this CLI surface; live results
+are recorded in [harness notes](harness-notes/hc.md).
 
 ### Environment and agent status
 
