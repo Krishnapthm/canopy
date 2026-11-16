@@ -171,23 +171,23 @@ Expected size: about 200 lines in `src/wire.rs` plus tests, about 350 in
 Each phase builds, passes `cargo test --locked` and `just test`, gets a
 ponytail-review, and updates its docs in the same change.
 
-0. **Core contract.** Write `docs/canopy/core-contract.md` from the app's
+0. **Core contract.** Done. Write `docs/canopy/core-contract.md` from the app's
    real calls (`src/hc.rs`, `src/core_bin.rs`, mods' `hc()`, the agent
    note). Reuse the existing generation/method/minimum-version checks and setup
    screen. Log what `hello` returns today; pin the verified minimum only
    after the conformance check passes. Add the conformance script, run against
    an isolated core. Phases 1 to 3 add their `hc` uses to the page.
-1. **Spawn and note.** Change 1, 2 and 4. Remove the `Stop` hook and
+1. **Spawn and note.** Done. Change 1, 2 and 4. Remove the `Stop` hook and
    `"wire":"queue"` from `defaults/programs.json`, and `hook idle`,
    `queues`, `reports_idle`. Test: spawn argv carries the report sentence
    only when a task is given.
-2. **Remove delivery.** Delete the CLI subcommands, thread store, postman,
+2. **Remove delivery.** Done. Delete the CLI subcommands, thread store, postman,
    thread panel, `wire.reset`, `wire.open`, `canvas.thread`,
    `canvas.sub_message`, the menu items, the `t` key and both settings.
    Regenerate `docs/commands.md` with `scripts/docs.ts`.
 3. **Parent-child glow.** Change 3. Test the "status changed and has a
    parent on the canvas" decision as a pure function.
-4. **Docs.** Rewrite `docs/wire.md`; update the Wire and helper sections of
+4. **Docs.** Done. Rewrite `docs/wire.md`; update the Wire and helper sections of
    `src/SKILL.md` and `defaults/AGENTS.md`, `docs/sub-agents.md`,
    `docs/settings.md`, `docs/keys.md`, `docs/canvas.md`. Add the hc facts
    below to `docs/canopy/harness-notes/hc.md` once verified.

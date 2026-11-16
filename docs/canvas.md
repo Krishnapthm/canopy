@@ -69,7 +69,8 @@ whose frame held it, and the frame becomes that space's card.
   still enters it; rename a pill from its menu.
 - Wire two cells by clicking a "+" at the side of a hovered cell and then the
   other cell, or by dragging between them. Esc or a click on empty canvas
-  cancels. See [Wire](wire.md).
+  cancels. An edge introduces peers; agents message with `hc` directly.
+  See [Wire](wire.md).
 - Right-click a cell (its pill, header or terminal) for its own menu: Rename,
   Pop out or Bring back, Expand or Collapse, Clear finished, Close terminal
   (asks first) and Kill terminal (ends it and its sub-agents now).
