@@ -68,8 +68,12 @@ Closing the window leaves the scratch core running, so running `scripts/dev`
 again reattaches to it with your layout and terminals; `scripts/dev-stop` ends it.
 These scripts use a scratch home, config, core socket and state under
 TMPDIR/canopy-dev. Never run a bare debug binary against a daily herdr setup.
+`scripts/dev` starts from a clean environment (HOME, USER, LOGNAME, SHELL, LANG,
+TERM, PATH, TMPDIR, SSH_AUTH_SOCK, HERDR_APP_LOG), so a launch from an agent
+session does not pass that session's variables to the window's agents.
 An older Canopy CLI may already be on PATH; the scripts use target/debug/canopy
-directly. Builds do not install over that CLI.
+directly, and a `canopy` run by name in a dev terminal hands off to it (from
+the next installed release on). Builds do not install over that CLI.
 
 just test also runs Bun mod tests. See AGENTS.md for sandbox and platform checks.
 

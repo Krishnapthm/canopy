@@ -35,7 +35,8 @@ shell. Your built-in sub-agent tool is still fine for your own quick lookups.
 Your core terminal is `$HC_TERMINAL_ID`; `canopy --skill` explains how to work
 with the window. Canopy gives agents this short note through per-session
 flags, without editing harness configuration, and puts `canopy` on every
-terminal's PATH (`<app home>/bin`).
+terminal's PATH (`<app home>/bin`). When a shell profile puts another install
+first, a `canopy` run by name in a terminal hands off to that terminal's app.
 
 Helpers started through hc are real child terminals, joined to their parent
 on the canvas. The person can open them and send terminal input. hc itself
