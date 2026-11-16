@@ -127,12 +127,6 @@ Start a keyboard connection from the selected cell; move to the other cell and p
 
 No arguments.
 
-## `canvas.thread`
-
-Open the selected wire thread, or the first wire of the selected cell.
-
-No arguments.
-
 ## `canvas.nudge`
 
 Move the selected cell left, right, up or down by one canvas gap, with one undo step.
@@ -215,16 +209,6 @@ Clear finished sub-agent cells and their labels, optionally one id.
 | `terminal` | yes |
 | `id` | no |
 
-## `canvas.sub_message`
-
-Send a Wire postcard from you to a sub-agent cell (its parent agent relays it); without text, open the thread to type it.
-
-| Argument | Required |
-|---|---|
-| `terminal` | yes |
-| `id` | yes |
-| `text` | no |
-
 ## `wire.connect`
 
 Draw a Wire edge between two cells of one space (cell keys: a terminal address, or sub:<parent>:<id>). Cells in different spaces are refused.
@@ -242,24 +226,6 @@ Remove a drawn Wire edge between two cells.
 |---|---|
 | `a` | yes |
 | `b` | yes |
-
-## `wire.reset`
-
-Reset a tripped Wire edge so its agents can send postcards again.
-
-| Argument | Required |
-|---|---|
-| `a` | yes |
-| `b` | yes |
-
-## `wire.open`
-
-Open the Wire thread of a cell's space in the file panel; typing there writes a postcard from you to a and b.
-
-| Argument | Required |
-|---|---|
-| `a` | yes |
-| `b` | no |
 
 ## `quote.send`
 

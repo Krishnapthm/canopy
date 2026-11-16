@@ -17,8 +17,6 @@ The following are hand-edited only and never appear in Settings:
 | `canvas_resize_terminals` | `true` | Refit a canvas terminal's grid to its cell as it resizes. False keeps the grid measured when the terminal was made (or last text-zoomed) and scales it to fit the cell, centered; settings.json only |
 | `space_fill` | `0.04` | Space background opacity, 0..1; 0 removes fill |
 | `terminal_size` | `[100, 30]` | Newly expanded terminal columns (20..500) and rows (5..200) |
-| `wire_limit` | `1000` | Maximum postcard length in characters |
-| `wire_budget` | `8` | Agent postcards before the breaker trips; 0 disables it |
 
 `confirm_close_terminal` defaults to true. The close dialog’s “Don't ask again”
 checkbox writes false; edit it back to true to restore prompts.

@@ -918,18 +918,6 @@ impl AppWindow {
             "command":{"name":"canvas.close","args":{"terminals":panes}}}}), window, cx);
     }
 
-    /// `canvas.sub_message`: a Wire postcard from you to a sub-agent cell (its parent relays it);
-    /// without `text` it opens the thread, where you type it.
-    pub(super) fn message_sub(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
-        let (Some(parent), Some(id)) = (a["terminal"].as_str(), a["id"].as_str()) else { return };
-        let key = format!("sub:{parent}:{id}");
-        if !self.canvas_state.doc.cards.iter().any(|c| c.key() == key) { return self.fail("No such sub-agent cell"); }
-        match a["text"].as_str() {
-            Some(text) => self.wire_say(&[key], text, window, cx),
-            None => self.wire_open(vec![key], window, cx),
-        }
-    }
-
     pub(super) fn check_editors(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let editors = crate::programs::editors();
         cx.spawn_in(window, async move |this, cx| {
@@ -1031,7 +1019,6 @@ impl AppWindow {
                 ("Enter", "canvas.enter"),
                 (if expanded { "Collapse" } else { "Expand" }, if expanded { "canvas.collapse" } else { "canvas.expand" }),
                 ("Connect", "canvas.connect"),
-                ("Thread", "canvas.thread"),
                 ("Close", "canvas.close"),
             ];
             let mut row = div().absolute().left(px(x)).top(px(y + 6.)).flex().gap(px(2.)).p(px(3.))
@@ -2033,8 +2020,6 @@ impl AppWindow {
                     let Some(term) = this.terms.get(&cell_slot(&addr)) else { return false };
                     if !term.view.read(cx).paste_quote(&text) { return false; }
                     term.focus.focus(window, cx);
-                    // A quote is a postcard from you that was pasted, not submitted.
-                    if !quote.is_string() { this.wire_log_quote(&addr, &quote, &text, window, cx); }
                     true
                 });
                 if !matches!(done, Ok(false)) { break; }
@@ -2735,7 +2720,7 @@ impl AppWindow {
                 if canvas::visible(camera, card.rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), card.clone())); }
             }
         }
-        let (edge_layer, edge_marks) = self.wire_layer(viewport, cx);
+        let edge_layer = self.wire_layer(viewport);
         let mut pills = Vec::new();
         for (parent, sub, card) in sub_pills {
             let rect = card.rect;
@@ -2765,12 +2750,7 @@ impl AppWindow {
                 cx.notify();
                 cx.stop_propagation();
             }));
-            pill = pill.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                if sub.transcript.is_some() {
-                    this.open_menu("canvas-sub", json!({"terminal":parent,"id":sub.id}), Some(e.position), window, cx);
-                }
-                cx.stop_propagation();
-            }));
+            pill = pill.on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
             pills.push((card.z, pill.into_any_element()));
         }
         let mut shown = shown;
@@ -3029,7 +3009,7 @@ impl AppWindow {
         pills.sort_by_key(|(z, _)| *z);
         for (_, pill) in pills { area = area.child(pill); }
         // Edges paint above cells: they route around them, and stay visible when they cannot.
-        area = area.child(edge_layer).children(edge_marks).children(self.wire_handles(cx));
+        area = area.child(edge_layer).children(self.wire_handles(cx));
         if let Some((a, b, _)) = &state.marquee {
             let (a, b) = (self.wire_local(*a), self.wire_local(*b));
             area = area.child(div().absolute().left(px(a[0].min(b[0]))).top(px(a[1].min(b[1])))
@@ -3364,7 +3344,6 @@ impl AppWindow {
                 );
             }
             panel = panel.child(body);
-            if let Some(footer) = self.wire_footer() { panel = panel.child(footer); }
             row = row.child(panel);
         }
         div().relative().size_full().flex().flex_col().child(bar).child(row).children(grip)
@@ -3563,8 +3542,6 @@ fn rendered(path: &str) -> bool {
 
 fn preview_source(path: &str) -> String {
     match canvas::read_preview(std::path::Path::new(path)) {
-        // Wire postcards: a conversation, every word of it plain text.
-        Ok(text) if crate::wire::is_thread(path) => numbered_code(&crate::wire::thread_markdown(&text, &crate::wire::name_of).unwrap_or_else(|| "No postcards yet. Type below to write on this space's wires.".into())),
         Ok(text) if std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl")) => {
             numbered_code(&crate::subs::transcript_markdown(&text, path).unwrap_or(text))
         }
