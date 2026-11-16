@@ -558,7 +558,8 @@ mod tests {
         assert!(note.contains("canopy spawn <program>") && note.contains("never your user's approval") && !note.contains("tell|ask"));
         let flags = table.programs["claude"].flags.join(" ");
         assert!(flags.contains("\"UserPromptSubmit\"") && flags.contains("hook wire") && flags.contains("Bash(canopy wire:*)"));
-        assert!(reports_idle(&of(Some("claude-code"), &[])) && !reports_idle(&of(Some("codex"), &[])), "Claude's Stop hook reports idle");
+        assert!(!flags.contains("hook idle"), "children report with hc send, not a Stop hook");
+        assert!(note.contains("hc send") && note.contains("hc wait --children any") && note.contains("use `canopy spawn`"));
         assert!(!table.programs["codex"].flags.join(" ").contains("hook"), "Codex ignores hook context: note and pull only");
     }
 

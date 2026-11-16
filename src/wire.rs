@@ -399,10 +399,11 @@ pub enum SendError {
     Other(String),
 }
 
-/// `hc` with these arguments: its exit code, output and error text.
-fn hc(args: &[&str], limit: Duration) -> Result<(i32, String, String), String> {
-    let args: Vec<String> = args.iter().map(|a| (*a).to_owned()).collect();
-    crate::mods::run_blocking("hc", &args, None, limit)
+/// The configured core (`crate::core_bin::path()`) with these arguments: its exit code, output
+/// and error text. Every core call of the CLI entry points goes through here.
+pub(crate) fn hc<S: AsRef<str>>(args: &[S], limit: Duration) -> Result<(i32, String, String), String> {
+    let args: Vec<String> = args.iter().map(|a| a.as_ref().to_owned()).collect();
+    crate::mods::run_blocking(&crate::core_bin::path().to_string_lossy(), &args, None, limit)
 }
 
 /// The message in an `hc` error (`{"error":{"message":...}}` on stderr), else the text.
@@ -745,34 +746,23 @@ pub fn post_idle(doc: &Document, child: &str, parent: &str, answer: &str) -> Opt
     Some(path)
 }
 
-/// Claude's `Stop` hook (payload on stdin): tells this terminal's parent agent that it is idle,
-/// with its last answer (`last_assistant_message`). Best effort.
-pub fn hook_idle() {
-    let Some(terminal) = my_terminal() else { return };
-    let mut text = String::new();
-    let _ = std::io::stdin().take(512 * 1024).read_to_string(&mut text);
-    let payload: Value = serde_json::from_str(&text).unwrap_or_default();
-    let answer = payload["last_assistant_message"].as_str().unwrap_or_default();
-    let _ = crate::programs::load();
-    let Some(me) = Rec::get(&terminal) else { return };
-    let Some(parent) = me.parent.as_deref().and_then(Rec::get).filter(|p| p.agent) else { return };
-    let Ok(doc) = load_doc() else { return };
-    if let Some(path) = post_idle(&doc, &terminal, &parent.addr, answer) {
-        ring(&path, &parent.addr, &parent.door(), &|k| if k == terminal { me.name.clone() } else { k.to_owned() }, &hc_send);
-    }
-}
+/// Sessions started before this change still run Claude's `Stop` hook with this command. It does
+/// nothing now (a spawned child reports with `hc send`); drop it one release after.
+pub fn hook_idle() {}
 
 // ---- `canopy spawn` -----------------------------------------------------------------
 
 /// The argv `canopy spawn` runs: the program's `run` from programs.json, Canopy's flags, the
-/// model, then the first message. `path` keeps `canopy` reachable when the core's PATH lacks it.
-fn spawn_argv(run: &[String], model: Option<&str>, prompt: Option<&str>, exe: &str, path: Option<&str>) -> Vec<String> {
+/// model, then the first message with one sentence telling the child to report to `parent`
+/// (the terminal that spawned it) with `hc send` (nothing is added without a first message).
+/// `path` keeps `canopy` reachable when the core's PATH lacks it.
+fn spawn_argv(run: &[String], model: Option<&str>, prompt: Option<&str>, parent: &str, exe: &str, path: Option<&str>) -> Vec<String> {
     let mut argv = run.to_vec();
     crate::programs::append_flags(&mut argv, exe);
     if let Some(m) = model {
         argv.extend(["--model".into(), m.into()]);
     }
-    argv.extend(prompt.map(str::to_owned));
+    argv.extend(prompt.map(|p| format!("{p}\n\nWhen you are done or stuck, report to your parent with: hc send {parent} \"<what you did or need>\"")));
     match path {
         Some(p) => ["env".to_owned(), format!("PATH={p}")].into_iter().chain(argv).collect(),
         None => argv,
@@ -808,7 +798,7 @@ fn spawn(args: &[String]) -> Result<String, Failed> {
     let me = Me::new()?;
     let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| "canopy".into());
     let path = std::env::var("PATH").ok();
-    let argv = spawn_argv(&run, model.as_deref(), prompt.as_deref(), &exe, path.as_deref());
+    let argv = spawn_argv(&run, model.as_deref(), prompt.as_deref(), &me.rec.addr, &exe, path.as_deref());
     let mut hc_args = vec!["run".to_owned(), "--bg".into(), "--name".into(), name.clone(), "--parent".into(), me.rec.addr.clone()];
     // `hc` runs from the home folder; the child works where its parent does.
     if let Ok(cwd) = std::env::current_dir() {
@@ -822,7 +812,7 @@ fn spawn(args: &[String]) -> Result<String, Failed> {
     hc_args.extend(argv);
     let refs: Vec<&str> = hc_args.iter().map(String::as_str).collect();
     match hc(&refs, Duration::from_secs(30)) {
-        Ok((0, ..)) => Ok(format!("started {name}, wired to you. When its turn ends you get a line \"{name}\" is idle; talk to it with canopy wire tell {name} \"...\"")),
+        Ok((0, ..)) => Ok(format!("started {name}, wired to you. It reports back with hc send; wait for it with hc wait --children any, and find its address with canopy wire")),
         Ok((_, _, err)) => fail(hc_message(&err)),
         Err(e) => fail(e),
     }
@@ -1049,10 +1039,12 @@ mod tests {
     #[test]
     fn spawn_runs_the_program_with_flags_model_and_task_and_keeps_canopy_on_path() {
         let run = vec!["claude".to_owned()];
-        let argv = spawn_argv(&run, Some("haiku"), Some("review src/x.rs"), "/c", Some("/home/bin:/usr/bin"));
+        let argv = spawn_argv(&run, Some("haiku"), Some("review src/x.rs"), "t7", "/c", Some("/home/bin:/usr/bin"));
         assert_eq!(argv[..3], ["env", "PATH=/home/bin:/usr/bin", "claude"]);
-        assert_eq!(argv[argv.len() - 3..], ["--model", "haiku", "review src/x.rs"]);
-        assert_eq!(spawn_argv(&["pi".to_owned()], None, None, "/c", None), ["pi"]);
+        assert_eq!(argv[argv.len() - 3..argv.len() - 1], ["--model", "haiku"]);
+        let task = argv.last().unwrap();
+        assert!(task.starts_with("review src/x.rs\n\n") && task.contains("hc send t7 "), "{task}");
+        assert_eq!(spawn_argv(&["pi".to_owned()], None, None, "t7", "/c", None), ["pi"], "no task, nothing appended");
     }
 
     #[test]
