@@ -191,7 +191,11 @@ ponytail-review, and updates its docs in the same change.
    `src/SKILL.md` and `defaults/AGENTS.md`, `docs/sub-agents.md`,
    `docs/settings.md`, `docs/keys.md`, `docs/canvas.md`. Add the hc facts
    below to `docs/canopy/harness-notes/hc.md` once verified.
-5. **Live check** (orchestrator, isolated app home and core, ask before any
+5. **Live check.** Done 2026-11-16 in an isolated dev window with plain `sh`
+   children reporting OSC 7501 (no agent session): the born edge shows, it
+   glows on status changes, `canopy wire` lists the child then the drawn
+   peer, `wire.connect`/`wire.remove` save. The glow now uses `foreground`;
+   that color change was not seen on screen. Original plan: (orchestrator, isolated app home and core, ask before any
    paid agent session): spawn a child, child reports with `hc send`, parent
    edge glows, drawn edge connect and remove still work, old `canvas.json`
    loads.

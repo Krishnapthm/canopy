@@ -78,6 +78,8 @@ impl AppWindow {
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
         let on_canvas = [child, parent].iter().all(|k| doc.cards.iter().any(|c| c.key() == *k));
         if status_pulses(prev, word, on_canvas) {
+            // Spent glows go first, so closed children leave nothing behind.
+            self.canvas_state.wire.pulses.retain(|_, t| t.elapsed() < PULSE);
             self.canvas_state.wire.pulses.insert((parent.to_owned(), child.to_owned()), Instant::now());
             cx.notify();
         }
@@ -297,7 +299,8 @@ impl AppWindow {
                 let screen: Vec<_> = path.iter().map(|v| camera.to_screen(*v)).collect();
                 let glow = pulse.map(|t| 1. - t.elapsed().as_secs_f32() / PULSE.as_secs_f32()).filter(|g| *g > 0.);
                 animating |= glow.is_some();
-                let color = if glow.is_some() { c("ring") } else if *strong { c("foreground").opacity(0.7) } else { c("muted-foreground").opacity(if *born { 0.5 } else { 0.7 }) };
+                // Foreground, not `ring`: themes give `ring` a low alpha, which reads dimmer than a resting edge.
+                let color = if glow.is_some() { c("foreground") } else if *strong { c("foreground").opacity(0.7) } else { c("muted-foreground").opacity(if *born { 0.5 } else { 0.7 }) };
                 let width = if glow.is_some() { 2.5 } else if *born { 1. } else { 1.5 };
                 // The smoothed route: soft curves around cells (canvas::smooth).
                 let mut line = PathBuilder::stroke(px(width));
