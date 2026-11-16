@@ -76,6 +76,9 @@ impl Rec {
         let launch: Vec<String> = v["argv"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_owned)).collect();
         let running: Vec<String> = v.pointer("/foreground/argv").and_then(Value::as_array).into_iter().flatten().filter_map(|a| a.as_str().map(str::to_owned)).collect();
         let program = crate::programs::of(report["app"].as_str(), if running.is_empty() { &launch } else { &running });
+        // An agent in the foreground runs even when its status never reached the core
+        // (an inherited agent environment can hide it, docs/canopy/harness-notes/claude-code.md).
+        let state = state.or_else(|| (!running.is_empty() && crate::programs::agent_program(&program)).then(|| "running".into()));
         // An agent that exited leaves a shell with no status: its launch program still says what it was.
         // shortcut: told apart from a plain terminal by the launch program only; use a core fact if hc reports one.
         let agent = state.is_some() || crate::programs::agent_program(&crate::programs::of(None, &launch));
@@ -408,6 +411,10 @@ mod tests {
         assert!(!shell.agent && shell.state.is_none() && shell.name == "t2");
         let gone = Rec::parse("t3", &serde_json::json!({"argv":["claude"]})).unwrap();
         assert!(gone.agent && gone.state.is_none(), "an agent that exited");
+        let back = Rec::parse("t3", &serde_json::json!({"argv":["/bin/zsh","-lic","\"$@\"; exec \"$0\" -li","/bin/zsh","claude"],"foreground":{"argv":["zsh"]}})).unwrap();
+        assert!(back.agent && back.state.is_none(), "its shell is back in front");
+        let hidden = Rec::parse("t6", &serde_json::json!({"status":null,"argv":["/bin/zsh","-lic","\"$@\"; exec \"$0\" -li","/bin/zsh","claude"],"foreground":{"argv":["claude","--settings","{}"]}})).unwrap();
+        assert!(hidden.agent && hidden.state.as_deref() == Some("running"), "live, but no status reached the core");
         assert!(Rec::parse("t4", &serde_json::json!({"state":"finished"})).is_none());
         let named = Rec::parse("t5", &serde_json::json!({"name":"reviewer","status":"idle","argv":["codex"]})).unwrap();
         assert_eq!((named.name.as_str(), named.state.as_deref()), ("reviewer", Some("idle")));
