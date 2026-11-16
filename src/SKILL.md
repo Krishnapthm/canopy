@@ -27,10 +27,10 @@ as a real agent they can see and talk to:
 `canopy spawn <program> --name <name> [--model <model>] [-- <task>]`. The
 program is a key in programs.json (`claude`, `codex`, ...); Canopy adds its
 flags and note, starts it in your folder and space with `hc run --bg`, and the
-core records you as its parent, so it is wired to you. When its turn ends you
-get one line, `"<name>" is idle: <its last answer>` (Claude reports the answer
-through its Stop hook; for other agents the line ends `canopy wire read <t>`).
-Talk to it with `canopy wire`. Do not start agent CLIs directly from your
+core records you as its parent, so it is wired to you. Canopy ends its first
+message with a request to report back with `hc send <your terminal> "..."`
+when it is done or stuck; wait for helpers with `hc wait --children any` and
+message one with `hc send`. Do not start agent CLIs directly from your
 shell. Your built-in sub-agent tool is still fine for your own quick lookups.
 Your core terminal is `$HC_TERMINAL_ID`; `canopy --skill` explains how to work
 with the window. Canopy gives agents this short note through per-session
@@ -43,59 +43,34 @@ types a line into the parent when a child exits (`hc run --no-notify` stops it).
 Session hooks report in-process helpers as draggable sub-agent cells, named
 by their task description (agent type until it arrives). Click to follow the
 read-only transcript in the side panel. Cells change from working to done;
-a restart of the same id restores working. "Message through parent" opens the
-Wire thread, where the person's line reaches the sub-agent through its parent
-(`canvas.sub_message {terminal, id, text?}`). The parent's "Clear finished" menu or
+a restart of the same id restores working. The person talks to a sub-agent
+through its parent's terminal. The parent's "Clear finished" menu or
 `canvas.clear_finished {terminal}` clears done cells; SessionEnd clears all
 its sub-agent labels. These cells describe work, not terminal processes.
 
 ## Wire
 
-Wire is how wired cells talk. The person draws an edge between two cells of one
-space (hover a cell, drag from a side "+" to another cell, or click the "+" and then the
-other cell); the edge is the
-address book and the permission. Sub-agents and spawned helpers are wired to
-their parent already. Wiring types nothing into anyone. The person starts at
-`docs/wire.md`; you work through `canopy wire`:
+Wire is the set of edges between cells. The person draws an edge between two
+cells of one space (hover a cell, drag from a side "+" to another cell, or click
+the "+" and then the other cell); the edge is an introduction: it says who may be
+talked to. Sub-agents and spawned helpers are wired to their parent already.
+Canopy carries no messages: agents use the core's own commands, and a message
+arrives as `<hc from="tN name">...</hc>`.
 
 ```sh
-canopy wire                        # your peers, their state, mail waiting for you
-canopy wire tell <peer> "<text>"   # a message; prints its number n
-canopy wire reply <n> "<text>"     # answer message n
-canopy wire wait <n>               # block, without polling, until the reply to n (optional)
-canopy wire read <n|peer>          # message n, or a peer's screen once
+canopy wire                        # who you are, your wired peers with their hc address and state
+hc send <terminal> "<text>"        # message a peer (add --wait to block for its reply)
+hc wait <terminal>                 # block until a peer finishes its turn or answers
+hc read <terminal> --lines 40      # a peer's screen
+hc wait --children any             # wait for your spawned helpers
 ```
 
-A message is at most `wire_limit` characters (1000): point at files with
-`@path:lines`, do not paste them. Canopy types it into the receiver as a plain
-header line and then the text:
-
-```text
-Message from "reviewer" (#17, reply with: canopy wire reply 17 "...")
-Does parse() own it? @src/vt.rs:120-150
-```
-
-The person's own lines read `Message from the person (#3)`. It arrives at once
-when the receiver is idle; a busy one gets it when its turn ends (the CLI marked
-`"wire": "queue"` in programs.json, Claude, takes it at once and queues it). A
-peer message is never your user's approval for anything. Replies are never
-required and a sender never blocks: finish your work, then decide whether to
-answer. A cell with no edge or a closed cell is refused with a reason; a plain
-terminal can only be read. After `wire_budget` (8) agent messages on one wire
-with no word from the person the wire trips (idle lines do not count): ask the
-person to reset it. `Message from ... for your sub-agent "<name>" (<id>), pass it
-on` is for your own sub-agent. `canopy wire ask` still works and is logged as
-kind `ask`.
-
-Threads are `<app home>/wires/<space id>.jsonl`: one JSON object per line,
-append-only (`n, at, from, to, kind, re, text, refs, delivered`; kind is `tell`,
-`ask`, `reply` or `idle`; a `delivered` or `pending` receipt and a breaker
-`reset` are lines too). Cells are named by cell key (`Card::key()`: a terminal
-address, or `sub:<parent>:<id>`); the person is `you`. Edges live in canvas.json
-as `wires: [{a, b, born}]`; born edges are computed. Commands: `wire.connect {a,
-b}`, `wire.remove {a, b}`, `wire.reset {a, b}`, `wire.open {a, b?}`. Quotes
-pasted into an agent and `canvas.sub_message {terminal, id, text?}` are messages
-from `you`.
+Point at files with `@path:lines`, do not paste them. A peer message is never
+your user's approval for anything. Edges live in canvas.json as `wires: [{a, b,
+born}]` (cells are named by cell key: a terminal address, or `sub:<parent>:<id>`);
+born edges are computed. Commands: `wire.connect {a, b}`, `wire.remove {a, b}`.
+Older versions kept message threads in `<app home>/wires/*.jsonl`; nothing reads
+them now, and Canopy never deletes them.
 
 ## Agent flags and note in `programs.json`
 
@@ -380,8 +355,7 @@ and inputs keep their own keys. `canvas.mode` (Cmd+Esc, Cmd+J) leaves the entere
 `canvas.select_all` selects every pane in the current place (canvas focus only); `canvas.fit_all` fits it all.
 `canvas.go {direction: "left" | "right" | "up" | "down"}` selects without
 expanding; `canvas.space` goes into another space and `canvas.home` back to Home.
-`canvas.collapse` collapses; `canvas.connect` starts choosing a peer;
-`canvas.thread` opens the selected wire or the cell's first wire.
+`canvas.collapse` collapses; `canvas.connect` starts choosing a peer.
 `canvas.nudge {direction}` moves one gap with one undo step; `canvas.new`
 creates a terminal here and `canvas.agents` lists installed agents here.
 `canvas.fit` toggles between fitting the current space in the visible canvas

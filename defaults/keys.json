@@ -124,7 +124,6 @@
     "ctrl-shift-a": "canvas.select_all",
     "x": "canvas.collapse",
     "c": "canvas.connect",
-    "t": "canvas.thread",
     "shift-a": "canvas.arrange",
     "a": {
       "command": "canvas.arrange",
