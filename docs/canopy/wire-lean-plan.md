@@ -34,10 +34,11 @@ Anything that implements both, under the name `hc`, is a Canopy core.
   No literal `hc` in app code.
 - **Detect features, not versions.** Read capabilities from the `hello`
   reply and switch features on from them (for example a message event
-  enables drawn-edge glow). Today `hello` is stored and never read.
-- **Minimum core version.** One constant in the app. Older core on
-  connect: a toast that says so. The installers install that version
-  instead of herdr-core's latest.
+  enables drawn-edge glow). Today `hc::check` already checks hello generation,
+  minimum version and `methods`; attach reads `features` for automatic input.
+- **Minimum core version.** `distribution/core-version` is read by `hc::core_min()`.
+  Setup already handles TooOld, Newer and Missing on connect. Installers
+  keep fetching herdr-core's latest; the app's check covers a newer one.
 - **Conformance check.** One script runs the contract against the
   configured core in an isolated session and core socket. Run it on every
   core update before raising the minimum version.
@@ -62,7 +63,8 @@ Anything that implements both, under the name `hc`, is a Canopy core.
 
 Installed `hc 0.1.20` help and `hc schema` were read. Behavior marked
 "source" was read in upstream master (0.1.21, `bb8a2f7`), not proven
-identical to the installed binary. Nothing was run against a live core.
+identical to the installed binary. Phase 0 ran `scripts/core-check` on
+0.1.20 against a scratch core (see `harness-notes/hc.md`).
 
 | Need | hc primitive | Evidence |
 |---|---|---|
@@ -171,10 +173,10 @@ ponytail-review, and updates its docs in the same change.
 
 0. **Core contract.** Write `docs/canopy/core-contract.md` from the app's
    real calls (`src/hc.rs`, `src/core_bin.rs`, mods' `hc()`, the agent
-   note). Add the minimum-version constant, the toast and the installer
-   pin. Log what `hello` returns today; read capabilities from it only once
-   a feature needs one. Add the conformance script, run by the orchestrator
-   against an isolated core. Phases 1 to 3 add their `hc` uses to the page.
+   note). Reuse the existing generation/method/minimum-version checks and setup
+   screen. Log what `hello` returns today; pin the verified minimum only
+   after the conformance check passes. Add the conformance script, run against
+   an isolated core. Phases 1 to 3 add their `hc` uses to the page.
 1. **Spawn and note.** Change 1, 2 and 4. Remove the `Stop` hook and
    `"wire":"queue"` from `defaults/programs.json`, and `hook idle`,
    `queues`, `reports_idle`. Test: spawn argv carries the report sentence
@@ -208,13 +210,13 @@ ponytail-review, and updates its docs in the same change.
 
 ## Verify before relying on it
 
+Phase 0 (2026-11-16, hc 0.1.20) verified: `hc` on PATH inside `hc run`
+terminals, and default parent and cwd from the caller. `spawn_argv` may drop
+its `env PATH=` prefix and explicit `--cwd`/`--parent`. Still open:
+
 - `<hc from>` tagging for Codex and other non-Claude agents (needs both ends
   to report status).
 - `hc wait --children any` returns when a child's turn ends.
-- `hc` is on PATH inside terminals started by `hc run`. Until checked, keep
-  the `env PATH=` prefix in `spawn_argv`.
-- `hc run` default `--cwd` and `--parent` when called from `canopy spawn`
-  (a child process of the agent). Until checked, keep passing both.
 
 ## Open questions for Krishna
 

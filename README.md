@@ -52,6 +52,10 @@ The internal mod API and environment variable names retain their upstream names.
 
 ## Development
 
+Check a core without opening the app: `scripts/core-check /absolute/path/to/hc`.
+It starts and stops a disposable core in scratch state. See
+[the core contract](docs/canopy/core-contract.md) for requirements and limits.
+
 After review, launch an isolated window and core:
 
 ```sh
