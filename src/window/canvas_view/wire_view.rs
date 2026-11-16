@@ -33,6 +33,12 @@ struct Edge {
     path: Vec<canvas::Point>,
 }
 
+/// Whether a child's status change glows its edge: the word changed and the edge is drawn.
+/// Agent-agnostic: only the core's status word and parent field count.
+fn status_pulses(prev: Option<&str>, word: Option<&str>, on_canvas: bool) -> bool {
+    on_canvas && prev != word
+}
+
 /// How far (screen px) the pointer may move between press and release on a handle and still be a click.
 const CLICK: f32 = 4.;
 
@@ -65,6 +71,16 @@ impl AppWindow {
             None => self.canvas_state.pill_sizes.borrow().get(&card.terminal).map(|v| v.3).unwrap_or([240., 36.]),
         };
         Some([card.rect[0], card.rect[1], size[0], size[1]])
+    }
+
+    /// A child's status word changed: glow its born edge to `parent` if both cells are on the canvas.
+    pub(in crate::window) fn pulse_status(&mut self, child: &str, parent: &str, prev: Option<&str>, word: Option<&str>, cx: &mut Context<Self>) {
+        let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
+        let on_canvas = [child, parent].iter().all(|k| doc.cards.iter().any(|c| c.key() == *k));
+        if status_pulses(prev, word, on_canvas) {
+            self.canvas_state.wire.pulses.insert((parent.to_owned(), child.to_owned()), Instant::now());
+            cx.notify();
+        }
     }
 
     /// Every edge between shown cells: drawn wires, and born ones (sub-agents, `hc run` children).
@@ -355,5 +371,18 @@ mod sticky_tests {
             assert!(this.wire_release(point(px(900.), px(900.)), window, cx));
             assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
         });
+    }
+}
+
+#[cfg(test)]
+mod pulse_tests {
+    use super::status_pulses;
+
+    #[test]
+    fn only_a_changed_word_on_a_drawn_edge_glows() {
+        assert!(status_pulses(Some("working"), Some("done"), true));
+        assert!(status_pulses(None, Some("working"), true));
+        assert!(!status_pulses(Some("working"), Some("working"), true));
+        assert!(!status_pulses(Some("working"), Some("done"), false));
     }
 }
