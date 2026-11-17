@@ -1,11 +1,13 @@
 # Vendored from https://github.com/longbridge/gpui-kit at 1ccf011: only the
-# crates Herdr uses. Herdr patches are marked `HERDR:`.
+# crates Herdr uses. Herdr patches are marked `HERDR:`. crates/webview comes
+# from tag v0.7.1 (87d10ae), unchanged.
 [workspace]
 members = [
     "crates/base",
     "crates/fps",
     "crates/shell",
     "crates/shell/rquickjs-compat",
+    "crates/webview",
 ]
 resolver = "2"
 
