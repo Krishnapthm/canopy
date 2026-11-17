@@ -26,7 +26,7 @@ pub(in crate::window) struct WireUi {
     pulses: HashMap<(String, String), Instant>,
 }
 
-/// One edge as drawn: its cells in the order stored (a is the parent of a born edge), and its smoothed route.
+/// One edge as drawn: its cells in the order stored (a is the parent of a born edge), and its curve.
 struct Edge {
     key: (String, String),
     born: bool,
@@ -91,12 +91,10 @@ impl AppWindow {
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
         let mut out: Vec<Edge> = vec![];
         let all = wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
-        // Every shown cell, for edges to go around.
-        let cells: Vec<_> = doc.panes.iter().filter_map(|c| self.wire_cell(doc, &c.id)).collect();
         for w in all.iter().filter(|w| w.born).chain(all.iter().filter(|w| !w.born)) {
             if out.iter().any(|e| (e.key.0 == w.a && e.key.1 == w.b) || (e.key.0 == w.b && e.key.1 == w.a)) { continue; }
             if let (Some(a), Some(b)) = (self.wire_cell(doc, &w.a), self.wire_cell(doc, &w.b)) {
-                out.push(Edge { key: (w.a.clone(), w.b.clone()), born: w.born, path: canvas::smooth(&canvas::route(a, b, &cells)) });
+                out.push(Edge { key: (w.a.clone(), w.b.clone()), born: w.born, path: canvas::curve(a, b) });
             }
         }
         out
@@ -324,7 +322,7 @@ impl AppWindow {
                 // Foreground, not `ring`: themes give `ring` a low alpha, which reads dimmer than a resting edge.
                 let color = if glow.is_some() { c("foreground") } else if *strong { c("foreground").opacity(0.7) } else { c("muted-foreground").opacity(if *born { 0.5 } else { 0.7 }) };
                 let width = if glow.is_some() { 2.5 } else if *born { 1. } else { 1.5 };
-                // The smoothed route: soft curves around cells (canvas::smooth).
+                // The sampled curve (canvas::curve).
                 let mut line = PathBuilder::stroke(px(width));
                 let Some((first, rest)) = screen.split_first() else { continue };
                 line.move_to(p(*first));
