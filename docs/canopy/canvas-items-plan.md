@@ -358,8 +358,10 @@ Disk is tight (check df first; stop and ask under 20G free):
 
 For each step:
 1. Delegate the build to a fresh Codex gpt-6.1-sol medium session in its
-   own git worktree under .claude/worktrees/ and branch (type/short-name),
-   branched from main. Run the companion from the main checkout so Codex's
+   own git worktree under .claude/worktrees/ and branch (type/short-name).
+   P1a branches from docs/canvas-items-proposal, which holds this plan and
+   the new AGENTS.md rules (main does not yet), so they land on main with
+   P1a's PR; open no separate docs PR. Later steps branch from main. Run the companion from the main checkout so Codex's
    sandbox can write the shared target; the brief names the worktree as the
    only place to edit. Give it the ponytail SKILL.md path. Anything it must
    research it researches thoroughly from primary sources and marks
