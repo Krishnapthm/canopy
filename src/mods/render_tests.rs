@@ -141,7 +141,7 @@ fn fixture(populated: bool, props: Value) -> BTreeMap<String, Value> {
     let mut values = BTreeMap::from([
         ("props".into(), props),
         ("machines".into(), json!([{ "name": null, "layout": "ready" }])),
-        ("spaces".into(), json!([])), ("agents".into(), json!([])), ("terminals".into(), json!([])), ("panes".into(), json!([])), ("focused".into(), Value::Null),
+        ("spaces".into(), json!([])), ("agents".into(), json!([])), ("terminals".into(), json!([])), ("panes".into(), json!([])), ("canvasPanes".into(), json!([])), ("paneKinds".into(), json!([{"kind":"file","verbs":["read","shot","close"]}])), ("focused".into(), Value::Null),
         ("layout".into(), serde_json::from_str(include_str!("../../defaults/layouts/classic.json")).unwrap()),
         ("layouts".into(), json!(crate::window::shipped_layouts())),
         ("theme".into(), serde_json::to_value(&*crate::settings::theme()).unwrap()),
@@ -472,6 +472,26 @@ fn shipped_initial_descriptions(cx: &mut TestAppContext) {
         entries.len(),
         start.elapsed()
     );
+}
+
+#[gpui::test]
+fn quote_popover_groups_wired_running_and_installed_agents(cx: &mut TestAppContext) {
+    cx.update(gpui_shell::init);
+    let staged = Staged::new();
+    let tree = describe(cx, &staged, "mods/quote", true, json!({
+        "quote":{"path":"/work/a.md","text":"a","pane":"p1"},
+        "agents":[
+            {"terminal":"t1","name":"Wired peer","wired":true},
+            {"terminal":"t2","name":"Other peer","wired":false}
+        ]
+    }), Some("this.known = [{name: 'Installed peer', icon: null, run: ['fixture-agent']}];")).unwrap();
+    let wired = tree.find("Wired to this pane").unwrap();
+    let running = tree.find("Running agents").unwrap();
+    let installed = tree.find("New agent with this").unwrap();
+    assert!(wired < tree.find("Wired peer").unwrap() && tree.find("Wired peer").unwrap() < running, "{tree}");
+    assert!(running < tree.find("Other peer").unwrap() && tree.find("Other peer").unwrap() < installed, "{tree}");
+    assert!(installed < tree.find("Installed peer").unwrap(), "{tree}");
+    assert!(tree.contains("pasted into the prompt, not sent"), "{tree}");
 }
 
 #[gpui::test]

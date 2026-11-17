@@ -70,6 +70,17 @@ fn raise_running_at(path: &std::path::Path) -> bool {
     true
 }
 
+/// Sends one command to the window and reads its reply.
+pub fn call(cmd: &Value) -> Result<Value, String> {
+    let mut stream = UnixStream::connect(socket()).map_err(|e| format!("no Canopy window at {}: {e}", socket().display()))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(35)));
+    let mut line = String::new();
+    if stream.write_all(format!("{cmd}\n").as_bytes()).is_err() || BufReader::new(&stream).read_line(&mut line).is_err() {
+        return Err("the window hung up".into());
+    }
+    Ok(serde_json::from_str(&line).unwrap_or(Value::Null))
+}
+
 /// The client side; returns the process exit code.
 pub fn client(args: &[String]) -> i32 {
     if args == ["commands"] {
@@ -96,16 +107,7 @@ pub fn client(args: &[String]) -> i32 {
         },
         _ => return fail("usage: canopy ls | canopy commands | canopy status | canopy shot [file.png] | canopy do <command> [--arg value ... | json]"),
     };
-    let mut stream = match UnixStream::connect(socket()) {
-        Ok(s) => s,
-        Err(e) => return fail(&format!("no Canopy window at {}: {e}", socket().display())),
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(35)));
-    let mut line = String::new();
-    if stream.write_all(format!("{cmd}\n").as_bytes()).is_err() || BufReader::new(&stream).read_line(&mut line).is_err() {
-        return fail("the window hung up");
-    }
-    let reply: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+    let reply = match call(&cmd) { Ok(r) => r, Err(e) => return fail(&e) };
     if args.first().is_some_and(|v| v == "shot") {
         if let Some(error) = reply.get("error") {
             return fail(error.as_str().unwrap_or("screenshot failed"));
@@ -141,7 +143,11 @@ fn parse_args(rest: &[String]) -> Result<Value, String> {
 
 /// Encode before opening the destination: GPU errors must not truncate a good shot.
 pub fn save_shot(window: &gpui::Window, path: &std::path::Path) -> anyhow::Result<()> {
-    let image = window.render_to_image()?;
+    save_png(&window.render_to_image()?, path)
+}
+
+/// Encodes a PNG and atomically replaces its destination.
+pub fn save_png(image: &image::RgbaImage, path: &std::path::Path) -> anyhow::Result<()> {
     let mut bytes = Vec::new();
     {
         let mut encoder = png::Encoder::new(&mut bytes, image.width(), image.height());

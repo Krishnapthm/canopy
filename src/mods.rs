@@ -544,6 +544,8 @@ pub struct Snapshot {
     pub agents: Value,
     /// Every pane: { pane, terminal, tab, title, cwd, branch, status, app, focused, zoomed }.
     pub panes: Value,
+    /// Every canvas pane, as canvas.json saves it.
+    pub canvas_panes: Value,
     pub terminals: Value,
     pub focused: Value,
     /// Floating blocks by id: { edge, align, vertical }.
@@ -555,7 +557,7 @@ pub struct Snapshot {
 impl Default for Snapshot {
     /// Lists start empty, never null, so mods can map over them right away.
     fn default() -> Self {
-        Snapshot { layout: Value::Null, spaces: json!([]), machines: json!([]), agents: json!([]), panes: json!([]), terminals: json!([]), focused: Value::Null, floats: json!({}), window: Value::Null }
+        Snapshot { layout: Value::Null, spaces: json!([]), machines: json!([]), agents: json!([]), panes: json!([]), canvas_panes: json!([]), terminals: json!([]), focused: Value::Null, floats: json!({}), window: Value::Null }
     }
 }
 
@@ -586,6 +588,9 @@ pub fn publish_agents(v: Value) -> bool {
 }
 pub fn publish_panes(v: Value) -> bool {
     publish("panes", |s| (std::mem::replace(&mut s.panes, v.clone()), v))
+}
+pub fn publish_canvas_panes(v: Value) -> bool {
+    publish("canvas_panes", |s| (std::mem::replace(&mut s.canvas_panes, v.clone()), v))
 }
 pub fn publish_terminals(v: Value) -> bool {
     publish("terminals", |s| (std::mem::replace(&mut s.terminals, v.clone()), v))
@@ -1008,6 +1013,8 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         .function("machines", reader(reads.clone(), "machines", |s| &s.machines))
         .function("agents", reader(reads.clone(), "agents", |s| &s.agents))
         .function("panes", reader(reads.clone(), "panes", |s| &s.panes))
+        .function("canvasPanes", reader(reads.clone(), "canvas_panes", |s| &s.canvas_panes))
+        .function("paneKinds", |_| Ok(to_host(&Value::Array(crate::canvas::PANE_KINDS.iter().map(|(kind, verbs)| json!({"kind": kind, "verbs": verbs})).collect()))))
         .function("setAgentOrder", |a| {
             AGENT_ORDER.with(|s| *s.borrow_mut() = strings(a.get(0)));
             Ok(HostValue::Null)

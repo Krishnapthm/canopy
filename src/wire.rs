@@ -2,8 +2,8 @@
 //! cells of one space (or a born edge, parent to child) is an introduction: it says who may be
 //! talked to. Agents message each other with the core's own `hc send`, `hc wait` and `hc read`;
 //! nothing here carries a message. This file holds the edge model (`neighbors`, `born`, `all`),
-//! `canopy wire` (who you are and your wired peers), `canopy spawn` and the peer-change hook;
-//! docs/wire.md explains it.
+//! `canopy wire` (who you are and your wired peers), `canopy spawn` and the peer-change hook.
+//! Wired peers include file panes, which agents read with `canopy pane`; docs/wire.md explains it.
 
 use crate::canvas::{Document, Wire};
 use serde_json::Value;
@@ -114,6 +114,7 @@ struct Me {
     rec: Rec,
     key: String,
     wires: Vec<Wire>,
+    doc: Document,
 }
 
 impl Me {
@@ -138,11 +139,11 @@ impl Me {
                 }
             }
         }
-        Ok(Me { rec, key, wires })
+        Ok(Me { rec, key, wires, doc })
     }
     /// Peers it can reach: wired cells, except its own sub-agents (they live inside its agent).
     fn peers(&self) -> Vec<Peer> {
-        neighbors(&self.wires, &self.key).into_iter().filter(|k| sub_parts(k).is_none_or(|(p, _)| p != self.key)).map(|k| Peer::new(&k)).collect()
+        neighbors(&self.wires, &self.key).into_iter().filter(|k| sub_parts(k).is_none_or(|(p, _)| p != self.key)).map(|k| Peer::new(&k, &self.doc)).collect()
     }
 }
 
@@ -152,24 +153,32 @@ struct Peer {
     name: String,
     /// The terminal to address: the cell's own, or a sub-agent cell's parent.
     rec: Option<Rec>,
+    /// The kind and description of a peer without a core terminal.
+    pane: Option<(&'static str, String)>,
 }
 
 impl Peer {
-    fn new(key: &str) -> Peer {
+    fn new(key: &str, doc: &Document) -> Peer {
+        if let Some(pane) = doc.panes.iter().find(|p| p.id == key && p.file().is_some()) {
+            let path = pane.file().unwrap();
+            let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned());
+            return Peer { key: key.into(), name, rec: None, pane: Some(("file", format!("file {path} - canopy pane {} {key}", pane.verbs().join("|")))) };
+        }
         match sub_parts(key) {
             Some((parent, id)) => {
                 let rec = Rec::get(parent);
                 let name = rec.as_ref().and_then(|r| crate::subs::hooks(&r.raw).into_iter().find(|s| s.id == id)).map_or_else(|| format!("sub {id}"), |s| s.name);
-                Peer { key: key.into(), name, rec }
+                Peer { key: key.into(), name, rec, pane: None }
             }
             None => {
                 let rec = Rec::get(key);
-                Peer { key: key.into(), name: rec.as_ref().map_or_else(|| key.to_owned(), |r| r.name.clone()), rec }
+                Peer { key: key.into(), name: rec.as_ref().map_or_else(|| key.to_owned(), |r| r.name.clone()), rec, pane: None }
             }
         }
     }
     /// What it is, for a list: its state, or what kind of cell it is.
     fn describe(&self) -> String {
+        if let Some((_, about)) = &self.pane { return about.clone(); }
         match &self.rec {
             None => "closed".into(),
             Some(_) if sub_parts(&self.key).is_some() => "sub-agent: message its parent agent".into(),
@@ -341,8 +350,8 @@ pub fn hook() {
     }
     let _ = crate::programs::load();
     let now: std::collections::BTreeMap<String, String> = keys.iter().map(|k| {
-        let peer = Peer::new(k);
-        let program = peer.rec.as_ref().filter(|r| !r.agent).map(|_| "terminal".to_owned()).or_else(|| peer.rec.as_ref().and_then(|r| r.raw["status"]["app"].as_str().map(crate::programs::name)));
+        let peer = Peer::new(k, &doc);
+        let program = peer.pane.as_ref().map(|(kind, _)| (*kind).to_owned()).or_else(|| peer.rec.as_ref().filter(|r| !r.agent).map(|_| "terminal".to_owned())).or_else(|| peer.rec.as_ref().and_then(|r| r.raw["status"]["app"].as_str().map(crate::programs::name)));
         (k.clone(), program.filter(|p| *p != peer.name).map_or(peer.name.clone(), |p| format!("{} ({p})", peer.name)))
     }).collect();
     if let Some(parent) = told_file.parent() {
@@ -358,6 +367,34 @@ pub fn hook() {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn file_panes_wire_to_terminals_and_round_trip() {
+        let mut d = doc(serde_json::json!({}));
+        for id in ["p1", "p2"] {
+            d.panes.push(crate::canvas::Pane { id: id.into(), kind: crate::canvas::Kind::File { path: format!("/tmp/{id}.md") }, rect: [0., 0., 560., 420.], z: 0, space: None });
+        }
+        assert!(d.connect("t1", "p1"));
+        assert!(!d.connect("p1", "p2"));
+        assert_eq!(serde_json::to_value(&d).unwrap()["wires"], serde_json::json!([{"a":"t1","b":"p1","born":false}]));
+        let mut back = Document::parse(&serde_json::to_vec(&d).unwrap()).unwrap().unwrap();
+        assert_eq!(back.wires, d.wires);
+        assert_eq!(neighbors(&back.wires, "t1"), ["p1"]);
+        back.panes.retain(|p| p.id != "p1");
+        assert!(back.prune_wires());
+        assert!(back.wires.is_empty());
+    }
+
+    #[test]
+    fn file_peers_describe_their_verbs() {
+        let mut d = doc(serde_json::json!({}));
+        d.panes.push(crate::canvas::Pane { id: "p1".into(), kind: crate::canvas::Kind::File { path: "/tmp/a.md".into() }, rect: [0.; 4], z: 0, space: None });
+        let peer = Peer::new("p1", &d);
+        assert_eq!(peer.name, "a.md");
+        assert!(peer.rec.is_none());
+        assert_eq!(peer.describe(), "file /tmp/a.md - canopy pane read|shot|close p1");
+    }
+
 
     fn doc(json: Value) -> Document {
         let mut base = serde_json::json!({"version":3,"camera":{"x":0,"y":0,"zoom":1},"view":"all","spaces":[],"panel":{"width":null},

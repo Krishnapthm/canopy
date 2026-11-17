@@ -58,6 +58,8 @@ export function playSound(sound: string): null;
  * Panes: pane.split {direction: "right" | "down", pane?}, pane.close {pane?}, pane.zoom {pane?},
  *   pane.focus {pane | terminal}, pane.go {direction}, pane.swap {pane?, direction | target}.
  *   Pane menus get target { pane, terminal }.
+ * Canvas panes: canvas.pane_new {kind: "file", path, wire?, point?}, canvas.pane_read {pane},
+ *   canvas.pane_shot {pane, path?}, canvas.pane_open {pane, target}, canvas.close {pane}.
  * Terminals: terminal.open {argv?, folder?, place?: "tab" | "right" | "down"}, terminal.kill {terminal},
  *   terminal.keep {terminal, place?} (a running one without a pane, e.g. a sub-agent, gets one),
  *   terminal.park {terminal} (its pane goes, it keeps running; the menu's "Send back"),
@@ -207,6 +209,27 @@ export interface PaneInfo {
 /** Every pane in every tab. A pane header mod finds its own with
  *  `panes().find((p) => p.pane === props().pane)`. Live. */
 export function panes(): PaneInfo[];
+
+export interface CanvasPane {
+  /** A terminal's core address (`t3`), `sub:<parent>:<id>` for a sub-agent cell, or `p<N>`
+   *  for any other pane. Wire keys use the same ids. */
+  id: string;
+  kind: "terminal" | "sub" | "file";
+  /** Kind fields: terminal { size? }, sub { parent, sub }, file { path }. */
+  props: any;
+  /** World pixels: [x, y, width, height]. */
+  rect: [number, number, number, number];
+  z: number;
+  /** The space it lives in; absent on Home. */
+  space?: string;
+}
+
+/** Every pane on the canvas, as canvas.json saves it. Live. Not panes(), which lists
+ *  the panes of tab layouts. */
+export function canvasPanes(): CanvasPane[];
+
+/** The kinds canvas.pane_new creates, with the `canopy pane` verbs each answers. */
+export function paneKinds(): { kind: string; verbs: string[] }[];
 
 /** Sets agent.next / agent.prev order to match the list a mod displays.
  *  Call when rendering the list. In memory only; missing agents are ignored, new agents
