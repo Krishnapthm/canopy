@@ -2,7 +2,7 @@
 
 Written 2026-11-17. The plan for building
 [canvas-items-proposal.md](canvas-items-proposal.md) (the design and the
-verified stack). **Not started.** Nothing below runs until Krishna says go.
+verified stack). **Go given 2026-11-17**; decisions 1, 2 and 4 are approved.
 
 ## 1. What we are building
 
@@ -21,16 +21,16 @@ Scope is locked: P1 to P3, macOS only.
 | P3 browser pane with React picker | Linux and Windows for browser and PDF polish |
 | | P6 mod canvas kinds docs, web-view mods |
 
-## 2. Decisions Krishna must make before go
+## 2. Decisions
 
-1. **Grow the core.** AGENTS.md needs your go-ahead: the pane list in
+1. **Grow the core.** Approved 2026-11-17: the pane list in
    `canvas.json`, `pane.*` commands, `canopy pane` CLI and the browser and
    PDF kinds are core. Toolbar and note stay mods.
 2. ~~User-facing word~~ Decided: **pane**, everywhere (AGENTS.md).
-3. **Toolbar keys.** Canvas mode already uses `h f a n c`. Proposal:
+3. **Toolbar keys.** Open. Canvas mode already uses `h f a n c`. Proposal:
    no new single-letter keys for Friday; the toolbar is mouse-first and
    `n` keeps opening the new menu, which gains the pane kinds.
-4. **Two new dependencies** (AGENTS.md "every dependency is a cost"):
+4. **Two new dependencies.** Approved 2026-11-17:
    `gpui-pdf` 0.7.0 (MIT, pulls `hayro`, `kurbo`) and `lb-wry` 0.53 via a
    vendored `gpui-webview` 0.7.1 (Apache-2.0). `react-grab` 0.2.0 (MIT) is
    bundled as a JS file, not a Rust dependency.
