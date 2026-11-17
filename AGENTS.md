@@ -51,6 +51,20 @@ Read AGENTS.local.md too when present.
 - Every dependency is a cost: say what it replaces, its size and its license
   (MIT, Apache-2.0, BSD, ISC or public domain) before adding it.
 
+## Panes and floating helpers
+
+- Everything on the canvas is a **pane**: terminal, agent, browser, PDF,
+  image, note, or a community pane from a mod. Say "pane" in UI, CLI, APIs
+  and docs.
+- Every pane and every canvas surface gets a **floating helper bar**: a
+  small pill of icon buttons for its common actions (a browser pane: home,
+  reload, screenshot, record, annotate). Each button has a tooltip with its
+  name and shortcut. The bar shows on hover or selection, never covers the
+  content being worked on, and is drawn by the one shared helper-bar
+  component, never hand-built per feature.
+- Mods and community panes declare their actions through the pane API; the
+  app draws the bar. A feature without its helpers is not done.
+
 ## Core vs mods
 
 The core (model, layout documents, commands, shared mod APIs) stays small;

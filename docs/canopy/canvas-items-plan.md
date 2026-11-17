@@ -1,4 +1,4 @@
-# Canvas items: implementation plan
+# Canvas panes: implementation plan
 
 Written 2026-11-17. The plan for building
 [canvas-items-proposal.md](canvas-items-proposal.md) (the design and the
@@ -7,7 +7,7 @@ verified stack). **Not started.** Nothing below runs until Krishna says go.
 ## 1. What we are building
 
 Canopy becomes "Figma for your agents": one canvas where terminals and coding
-agents sit next to PDFs, images and a live browser. You wire an item to an
+agents sit next to PDFs, images and a live browser. You wire a pane to an
 agent so the agent can read it, and you quote a selection (a PDF line, a React
 component) into any agent.
 
@@ -16,21 +16,20 @@ Scope is locked: P1 to P3, macOS only.
 
 | In for Friday | After the post |
 |---|---|
-| P1 item model, wiring, quoting, toolbar, note | P4 video |
-| P2 image and PDF items | P5 iOS simulator (section 7), then Android (adb, scrcpy) |
-| P3 browser item with React picker | Linux and Windows for browser and PDF polish |
+| P1 pane model, wiring, quoting, toolbar, note | P4 video |
+| P2 image and PDF panes | P5 iOS simulator (section 7), then Android (adb, scrcpy) |
+| P3 browser pane with React picker | Linux and Windows for browser and PDF polish |
 | | P6 mod canvas kinds docs, web-view mods |
 
 ## 2. Decisions Krishna must make before go
 
-1. **Grow the core.** AGENTS.md needs your go-ahead: the item list in
-   `canvas.json`, `item.*` commands, `canopy item` CLI and the browser and
+1. **Grow the core.** AGENTS.md needs your go-ahead: the pane list in
+   `canvas.json`, `pane.*` commands, `canopy pane` CLI and the browser and
    PDF kinds are core. Toolbar and note stay mods.
-2. **User-facing word for items.** Code says `item`. UI word: "item",
-   "card", "frame" or other. Only UI strings change later.
+2. ~~User-facing word~~ Decided: **pane**, everywhere (AGENTS.md).
 3. **Toolbar keys.** Canvas mode already uses `h f a n c`. Proposal:
    no new single-letter keys for Friday; the toolbar is mouse-first and
-   `n` keeps opening the new menu, which gains the item kinds.
+   `n` keeps opening the new menu, which gains the pane kinds.
 4. **Two new dependencies** (AGENTS.md "every dependency is a cost"):
    `gpui-pdf` 0.7.0 (MIT, pulls `hayro`, `kurbo`) and `lb-wry` 0.53 via a
    vendored `gpui-webview` 0.7.1 (Apache-2.0). `react-grab` 0.2.0 (MIT) is
@@ -41,7 +40,7 @@ Scope is locked: P1 to P3, macOS only.
 ## 3. Order of work
 
 ```text
-Wed AM   S1 spike gpui-pdf ─┐   S2 spike gpui-webview + react-grab ─┐   P1a item model (core)
+Wed AM   S1 spike gpui-pdf ─┐   S2 spike gpui-webview + react-grab ─┐   P1a pane model (core)
 Wed PM                      └──── P2 viewers ◀── P1a ──▶ P3 browser ┘   P1b commands, CLI, wire, quote
 Thu AM   P1c toolbar mod + note mod, P2 and P3 finish
 Thu PM   integration on main, review, docs, demo recording dry run
@@ -77,33 +76,38 @@ Spikes S1 and S2 are throwaway branches with a written result, not PRs.
 - Fail plans: no snapshot → resting state shows URL and title only; no
   react-grab → DOM picker only (selector, text, box, screenshot).
 
-### P1a item model (core)
+### P1a pane model (core)
 
-- `src/canvas.rs`: `items: Vec<Item>` with `id, kind, rect, z, space, props`.
+- `src/canvas.rs`: `panes: Vec<Pane>` with `id, kind, rect, z, space, props`.
   Old `previews` load as `kind: "file"`; still read, never written.
-- Undo, arrange, spaces and `canvas::solve` treat items like previews.
-- `src/window/canvas_view.rs`: draw items by kind; `file` reuses
+- Undo, arrange, spaces and `canvas::solve` treat panes like previews.
+- `src/window/canvas_view.rs`: draw panes by kind; `file` reuses
   `preview_card`.
+- Helper bar: one shared GPUI component that draws a pane's `actions` as a
+  floating pill of icon buttons, reusing gpui-kit's `tooltip.rs` for name
+  and shortcut. Shows on hover or selection, sits outside the content,
+  scales with zoom. Terminal and file panes get their bars here.
 - Tests: migration of a 0.1.0 `canvas.json`, round-trip, undo.
-- Docs: `docs/canvas.md`.
+- Docs: `docs/canvas.md`, new `docs/panes.md` (helper bar section).
 - Verify: an existing canvas with text previews opens unchanged; previews
-  move, resize, undo and arrange as before; `canvas.json` now has `items`.
+  move, resize, undo and arrange as before; `canvas.json` now has `panes`;
+  hovering a terminal or file pane shows its helper bar with tooltips.
 
 ### P1b agents and quoting (core)
 
-- `src/wire.rs`: key `item:<id>`; `canopy wire` lists items with verbs.
-- `src/control.rs`, `src/commands.rs`: `item.new | read | shot | open |
-  close`; CLI `canopy item <verb>` as sugar over `canopy do item.<verb>`.
+- `src/wire.rs`: key `pane:<id>`; `canopy wire` lists panes with verbs.
+- `src/control.rs`, `src/commands.rs`: `pane.new | read | shot | open |
+  close`; CLI `canopy pane <verb>` as sugar over `canopy do pane.<verb>`.
 - `read` output wrapped in an untrusted-content envelope.
-- Generalize `quote_selection` to any item's `selection()`; the `quote` mod
+- Generalize `quote_selection` to any pane's `selection()`; the `quote` mod
   lists wired agents first, then running agents, then "New agent with this".
-- Mod API: `items()`, `itemKinds()`, `item.new`. Regenerate the `.d.ts`.
-- Tests: wire key round-trip, `item read` envelope, quote text format.
-- Docs: `docs/wire.md`, new `docs/items.md`, `docs/security.md`,
+- Mod API: `panes()`, `paneKinds()`, `pane.new`. Regenerate the `.d.ts`.
+- Tests: wire key round-trip, `pane read` envelope, quote text format.
+- Docs: `docs/wire.md`, new `docs/panes.md`, `docs/security.md`,
   `defaults/AGENTS.md`, `src/SKILL.md`.
-- Verify: `canopy item new file ./README.md --wire` from an agent's
-  terminal puts a card beside it; `canopy wire` in that agent lists `i1`;
-  `canopy item read i1` prints the text inside the untrusted envelope;
+- Verify: `canopy pane new file ./README.md --wire` from an agent's
+  terminal puts a card beside it; `canopy wire` in that agent lists `p1`;
+  `canopy pane read p1` prints the text inside the untrusted envelope;
   quoting a text selection lists the wired agent first and pastes without
   Enter.
 
@@ -112,6 +116,10 @@ Spikes S1 and S2 are throwaway branches with a written result, not PRs.
 - `defaults/mods/toolbar`: floating bottom toolbar: select, hand, terminal,
   agent (installed CLIs via `knownAgents()`), browser, open file, note, wire.
 - `mod.json` `"place": "canvas"`; `defaults/mods/note` as the first mod kind.
+- Community pane API: a mod pane declares `actions` (icon, label,
+  shortcut, command) and the optional `read`, `shot`, `selection`, `verbs`;
+  the app draws its helper bar. The bottom toolbar is the canvas's own
+  helper bar, built on the same component.
 - Docs: `docs/mods.md`.
 - Verify: the toolbar floats bottom centre at any zoom; its agent button
   lists only installed CLIs; each button spawns its kind at the viewport
@@ -122,13 +130,14 @@ Spikes S1 and S2 are throwaway branches with a written result, not PRs.
 - `image`: GPUI `img()`; drag a region, crop with `image`, quote
   `@mock.png region x,y wxh <crop path>`.
 - `pdf`: wrap `gpui_pdf::PdfView`; `read` = page text; `selection()` from
-  its `Selection`; highlights stored in item props as `{quote, occurrence,
+  its `Selection`; highlights stored in pane props as `{quote, occurrence,
   page}`, never written into the PDF.
 - Open file picks the kind by extension.
 - Verify: open a PNG and a PDF from the toolbar; drag a region on the image
   and quote it; select a PDF line and quote it, the agent gets page and
   text; highlights survive an app restart; the PDF file is byte-identical
-  afterwards; `canopy item read` returns page text.
+  afterwards; `canopy pane read` returns page text; both panes show their
+  helper bars (image: crop, quote; PDF: search, highlight, page).
 
 ### P3 browser (built-in kind, macOS)
 
@@ -143,7 +152,8 @@ Spikes S1 and S2 are throwaway branches with a written result, not PRs.
   fetched from unpkg.
 - Verify: open a localhost React app; pan and zoom with it resting; click
   in to go live and use the page; pick a component and quote it, the agent
-  gets file and line range; a non-React page quotes selector and text; no
+  gets file and line range; a non-React page quotes selector and text; the
+  helper bar offers home, reload, screenshot, pick and open externally; no
   network request other than the page's own (check with the proxy log or
   Little Snitch).
 
@@ -157,12 +167,12 @@ Spikes S1 and S2 are throwaway branches with a written result, not PRs.
 ## 5. Cut lines if behind
 
 In this order: toolbar keys, PDF highlights (keep selection quote), react-grab
-(keep DOM picker), browser live state (keep snapshot plus `item open`),
+(keep DOM picker), browser live state (keep snapshot plus `pane open`),
 image region quote.
 
 ## 6. What is not in this plan
 
-Video (P4), simulator (P5), Linux and Windows browser, MCP server for items,
+Video (P4), simulator (P5), Linux and Windows browser, MCP server for panes,
 JSON Canvas import/export, web-view mods.
 
 ## 7. iOS simulator (after the post)
@@ -214,9 +224,9 @@ give Canopy a view.
 
 ### Plan for P5
 
-1. **Resting item, public APIs only:** `xcrun simctl io <udid> screenshot`
+1. **Resting pane, public APIs only:** `xcrun simctl io <udid> screenshot`
    on demand and after each agent action. No polling.
-2. **Live item, private APIs, same path as Claude:** a small Swift helper on
+2. **Live pane, private APIs, same path as Claude:** a small Swift helper on
    idb's `FBSimulatorControl` (MIT) hands the framebuffer IOSurface to
    Canopy over a Mach port. Canopy wraps it in a `CVPixelBuffer` and draws it
    with GPUI `surface()`: zero copy, no video encoding, zooms like any card.
@@ -239,7 +249,7 @@ Radon IDE (embeds a simulator in VS Code via a `simulator-server` helper).
 Rule: **a quote is a pointer, not a copy.** The agent gets enough to find
 the thing and decide whether to read it, never the content itself.
 
-| Item | Sends | Never sends |
+| Pane | Sends | Never sends |
 |---|---|---|
 | Browser, React | URL, component name, `file:start-end`, the opening tag (cut at 80 chars) | component source, full `outerHTML` |
 | Browser, other | URL, CSS selector, visible text (cut at 200 chars) | page HTML |
@@ -288,7 +298,7 @@ the user clicks:
 Paste this into the implementation session once Krishna says go.
 
 ```text
-You orchestrate the canvas items build in /Users/krishna/projects/canopy.
+You orchestrate the canvas panes build in /Users/krishna/projects/canopy.
 Read AGENTS.md, AGENTS.local.md, docs/canopy/herdr-map.md,
 docs/canopy/canvas-items-proposal.md and docs/canopy/canvas-items-plan.md
 first. The plan is the contract; section 2 decisions are recorded at its top.
