@@ -1,4 +1,5 @@
 #!/bin/bash
+# Modified for Canopy.
 # Builds a release of the app for this machine and packs it:
 #
 #   scripts/package            -> dist/canopy-<os>-<arch>.tar.gz

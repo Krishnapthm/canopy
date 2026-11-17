@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Watching the home folder for the files people and agents edit (settings,
 //! keys, programs, themes, layouts, mods), so changes apply live without
 //! looking at the disk on a timer. One OS watcher (FSEvents, inotify) for all.

@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // The keybind list (Canopy's prefix+?), grouped, filterable by typing.
 // Reads keys.json through keys(); edit keys.json to change any of them.
 

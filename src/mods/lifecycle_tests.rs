@@ -1,3 +1,4 @@
+// Modified for Canopy.
 use super::*;
 use gpui::{IntoElement, Render, TestAppContext, VisualTestContext};
 use std::ops::Deref;

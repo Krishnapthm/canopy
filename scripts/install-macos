@@ -1,4 +1,5 @@
 #!/bin/bash
+# Modified for Canopy.
 set -euo pipefail
 
 [[ $(uname -s) == Darwin ]] || { echo 'This installer requires macOS.' >&2; exit 1; }

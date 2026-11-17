@@ -51,7 +51,7 @@ Usage:
   canopy do <command> [args]    run a command: --name api --argv '[\"pi\"]', or one JSON object
   canopy commands               every command, its arguments, what it does
   canopy status                 what the window shows, and any errors
-  canopy shot [file.png]        save the last window frame (default: herdr-shot.png)
+  canopy shot [file.png]        save the last window frame (default: canopy-shot.png)
   canopy hook sub-start|sub-stop|session-end|wire|idle  report a session hook (JSON on stdin, best effort)
   canopy wire [tell|reply|wait|read ...]  Wire: list peers and mail, or send a message to a wired cell
   canopy spawn <program> --name <n> [--model <m>] [-- <message>]  start an agent beside this one, wired to it
@@ -82,6 +82,8 @@ fn attach_console() {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(unix)]
+    core_bin::hand_off_to_owner(&args);
     if args.get(1).is_some_and(|s| s == "hook") {
         match args.get(2).map(String::as_str) {
             Some("wire") => wire::hook(),
@@ -133,7 +135,7 @@ fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_env("HERDR_APP_LOG")
-                .unwrap_or_else(|_| "warn,herdr_app=info,gpui_shell=info".into()),
+                .unwrap_or_else(|_| "warn,canopy=info,gpui_shell=info".into()),
         )
         .init();
 

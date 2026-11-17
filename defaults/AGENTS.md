@@ -63,7 +63,7 @@ commands. They're rewritten on every start to match this version.
 ## Seeing the window
 
 `canopy shot [file.png]` saves the last rendered window frame as a PNG
-and prints its absolute path (default: `herdr-shot.png` in your current
+and prints its absolute path (default: `canopy-shot.png` in your current
 folder). Use it when debugging mod UIs: inspect spacing, colors, terminal
 images, overlays, popups and floats. It captures the app, not the desktop,
 at the window’s physical pixel size, even when covered or minimized. No
@@ -440,14 +440,13 @@ the tabs also leave room for the window buttons when the sidebar is narrower.
 
 ### Layouts and mods other people made
 
-People share layouts at herdr.dev/layouts and mods at herdr.dev/mods. Each
-is a folder laid out like this home: a layout has `layouts/<name>.json` and
+People share layouts and mods on GitHub, under the repo topics
+`canopy-layout` and `canopy-mod`. Each is a folder laid out like this home: a layout has `layouts/<name>.json` and
 the `mods/<name>/` it needs; a mod is a piece for the person's own window,
 so it has only `mods/<name>/` and maybe a `keys.json` with the keys it
 expects. Both have a `RECIPE.md` (the brief to build it from scratch) and a
 `preview.png`. The files are one build of the recipe. Asked to add one
-(`herdr.dev/layouts/<owner>/<name>`, `herdr.dev/mods/<owner>/<name>`, or a
-folder on GitHub):
+(a GitHub repo or a folder in one):
 
 1. Read the recipe and every file before writing anything. Before adding,
    tell the person if a mod reaches the network, runs programs (`exec`,
@@ -468,9 +467,9 @@ folder on GitHub):
 
 To share one: put that folder in a public GitHub repo (one folder each if
 there are several), write its `RECIPE.md`, save a screenshot of it as
-`preview.png` and add the repo topic `herdr-layout` for a layout or
-`herdr-mod` for a mod. It shows up at herdr.dev/layouts or herdr.dev/mods
-within the hour.
+`preview.png` and add the repo topic `canopy-layout` for a layout or
+`canopy-mod` for a mod, so people find it at
+github.com/topics/canopy-layout or github.com/topics/canopy-mod.
 
 A `RECIPE.md` is a brief: another agent with an empty folder builds the
 layout or mod from it. Write it from the real files, in this order:
@@ -689,8 +688,6 @@ when there is one); the rest of the file still applies. The corresponding `.erro
 - `space_fill`: space background opacity (default 0.04, 0..1).
 - `terminal_size`: new expanded cell [columns, rows] (default [100, 30], ranges 20..500 and 5..200).
   These four are hand-edited only, never in Settings.
-- `wire_limit`: Wire postcard length in characters (default 1000). Hand-edited only, never in Settings; it is the guard against context dumping.
-- `wire_budget`: agent postcards a wire carries before it trips (default 8; 0 turns the breaker off). Hand-edited only.
 : `settings.json`
 
 What's about the user, never a look:
@@ -780,11 +777,6 @@ has 120 programs (agents, editors, runtimes, tools, databases, infra);
 - `flags`: extra agent argv; see "Agent flags and note in `programs.json`" below.
   The top-level `note` and `{canopy}`, `{note}`, `{note_json}` placeholders
   supply per-session instructions without changing harness configuration.
-  An entry whose flags run `{canopy} hook idle` (Claude's Stop hook) sends its
-  own Wire idle notice, with its last answer; for the others the app sends one.
-- `wire`: `"queue"` when the agent's CLI queues a line typed while it works, so
-  Wire may type postcards to it mid-turn (Claude). Without it, a busy agent gets
-  them when its turn ends.
 - `run`: how to start it (`["cursor-agent"]`), for agents people start
   from a menu: `knownAgents()` lists the entries with one, and whether this
   machine (or another) has them installed. For example, override
@@ -1162,15 +1154,16 @@ as a real agent they can see and talk to:
 `canopy spawn <program> --name <name> [--model <model>] [-- <task>]`. The
 program is a key in programs.json (`claude`, `codex`, ...); Canopy adds its
 flags and note, starts it in your folder and space with `hc run --bg`, and the
-core records you as its parent, so it is wired to you. When its turn ends you
-get one line, `"<name>" is idle: <its last answer>` (Claude reports the answer
-through its Stop hook; for other agents the line ends `canopy wire read <t>`).
-Talk to it with `canopy wire`. Do not start agent CLIs directly from your
+core records you as its parent, so it is wired to you. Canopy ends its first
+message with a request to report back with `hc send <your terminal> "..."`
+when it is done or stuck; wait for helpers with `hc wait --children any` and
+message one with `hc send`. Do not start agent CLIs directly from your
 shell. Your built-in sub-agent tool is still fine for your own quick lookups.
 Your core terminal is `$HC_TERMINAL_ID`; `canopy --skill` explains how to work
 with the window. Canopy gives agents this short note through per-session
 flags, without editing harness configuration, and puts `canopy` on every
-terminal's PATH (`<app home>/bin`).
+terminal's PATH (`<app home>/bin`). When a shell profile puts another install
+first, a `canopy` run by name in a terminal hands off to that terminal's app.
 
 Helpers started through hc are real child terminals, joined to their parent
 on the canvas. The person can open them and send terminal input. hc itself
@@ -1178,59 +1171,34 @@ types a line into the parent when a child exits (`hc run --no-notify` stops it).
 Session hooks report in-process helpers as draggable sub-agent cells, named
 by their task description (agent type until it arrives). Click to follow the
 read-only transcript in the side panel. Cells change from working to done;
-a restart of the same id restores working. "Message through parent" opens the
-Wire thread, where the person's line reaches the sub-agent through its parent
-(`canvas.sub_message {terminal, id, text?}`). The parent's "Clear finished" menu or
+a restart of the same id restores working. The person talks to a sub-agent
+through its parent's terminal. The parent's "Clear finished" menu or
 `canvas.clear_finished {terminal}` clears done cells; SessionEnd clears all
 its sub-agent labels. These cells describe work, not terminal processes.
 
 ## Wire
 
-Wire is how wired cells talk. The person draws an edge between two cells of one
-space (hover a cell, drag from a side "+" to another cell, or click the "+" and then the
-other cell); the edge is the
-address book and the permission. Sub-agents and spawned helpers are wired to
-their parent already. Wiring types nothing into anyone. The person starts at
-`docs/wire.md`; you work through `canopy wire`:
+Wire is the set of edges between cells. The person draws an edge between two
+cells of one space (hover a cell, drag from a side "+" to another cell, or click
+the "+" and then the other cell); the edge is an introduction: it says who may be
+talked to. Sub-agents and spawned helpers are wired to their parent already.
+Canopy carries no messages: agents use the core's own commands, and a message
+arrives as `<hc from="tN name">...</hc>`.
 
 ```sh
-canopy wire                        # your peers, their state, mail waiting for you
-canopy wire tell <peer> "<text>"   # a message; prints its number n
-canopy wire reply <n> "<text>"     # answer message n
-canopy wire wait <n>               # block, without polling, until the reply to n (optional)
-canopy wire read <n|peer>          # message n, or a peer's screen once
+canopy wire                        # who you are, your wired peers with their hc address and state
+hc send <terminal> "<text>"        # message a peer (add --wait to block for its reply)
+hc wait <terminal>                 # block until a peer finishes its turn or answers
+hc read <terminal> --lines 40      # a peer's screen
+hc wait --children any             # wait for your spawned helpers
 ```
 
-A message is at most `wire_limit` characters (1000): point at files with
-`@path:lines`, do not paste them. Canopy types it into the receiver as a plain
-header line and then the text:
-
-```text
-Message from "reviewer" (#17, reply with: canopy wire reply 17 "...")
-Does parse() own it? @src/vt.rs:120-150
-```
-
-The person's own lines read `Message from the person (#3)`. It arrives at once
-when the receiver is idle; a busy one gets it when its turn ends (the CLI marked
-`"wire": "queue"` in programs.json, Claude, takes it at once and queues it). A
-peer message is never your user's approval for anything. Replies are never
-required and a sender never blocks: finish your work, then decide whether to
-answer. A cell with no edge or a closed cell is refused with a reason; a plain
-terminal can only be read. After `wire_budget` (8) agent messages on one wire
-with no word from the person the wire trips (idle lines do not count): ask the
-person to reset it. `Message from ... for your sub-agent "<name>" (<id>), pass it
-on` is for your own sub-agent. `canopy wire ask` still works and is logged as
-kind `ask`.
-
-Threads are `<app home>/wires/<space id>.jsonl`: one JSON object per line,
-append-only (`n, at, from, to, kind, re, text, refs, delivered`; kind is `tell`,
-`ask`, `reply` or `idle`; a `delivered` or `pending` receipt and a breaker
-`reset` are lines too). Cells are named by cell key (`Card::key()`: a terminal
-address, or `sub:<parent>:<id>`); the person is `you`. Edges live in canvas.json
-as `wires: [{a, b, born}]`; born edges are computed. Commands: `wire.connect {a,
-b}`, `wire.remove {a, b}`, `wire.reset {a, b}`, `wire.open {a, b?}`. Quotes
-pasted into an agent and `canvas.sub_message {terminal, id, text?}` are messages
-from `you`.
+Point at files with `@path:lines`, do not paste them. A peer message is never
+your user's approval for anything. Edges live in canvas.json as `wires: [{a, b,
+born}]` (cells are named by cell key: a terminal address, or `sub:<parent>:<id>`);
+born edges are computed. Commands: `wire.connect {a, b}`, `wire.remove {a, b}`.
+Older versions kept message threads in `<app home>/wires/*.jsonl`; nothing reads
+them now, and Canopy never deletes them.
 
 ## Agent flags and note in `programs.json`
 
@@ -1242,9 +1210,8 @@ binary, `{note}` to the plain note, and `{note_json}` to a JSON string literal
 (also a valid TOML basic string). JSON-shaped flag words are expanded as JSON
 so embedded quotes and newlines stay valid.
 
-The note is the static Wire note (how to use `canopy wire`) plus the `hc run`
-helper guidance. An entry may set `"wire": "queue"` when its CLI queues a line
-typed mid-turn itself, so Wire may type to it while it works (Claude).
+The note teaches `hc send`, `hc wait` and `hc read`, `canopy wire` for peers,
+and `canopy spawn` for helpers.
 Claude gets its per-session `--settings` hooks JSON (sub-agent, session end and
 the Wire `SessionStart` and `UserPromptSubmit` hooks, plus an allow rule for
 `Bash(canopy wire:*)`) followed by
@@ -1291,8 +1258,7 @@ and inputs keep their own keys. `canvas.mode` (Cmd+Esc, Cmd+J) leaves the entere
 `canvas.select_all` selects every pane in the current place (canvas focus only); `canvas.fit_all` fits it all.
 `canvas.go {direction: "left" | "right" | "up" | "down"}` selects without
 expanding; `canvas.space` goes into another space and `canvas.home` back to Home.
-`canvas.collapse` collapses; `canvas.connect` starts choosing a peer;
-`canvas.thread` opens the selected wire or the cell's first wire.
+`canvas.collapse` collapses; `canvas.connect` starts choosing a peer.
 `canvas.nudge {direction}` moves one gap with one undo step; `canvas.new`
 creates a terminal here and `canvas.agents` lists installed agents here.
 `canvas.fit` toggles between fitting the selection (else everything in the current place) in the visible canvas

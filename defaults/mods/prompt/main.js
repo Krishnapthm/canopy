@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // A text prompt. Enter saves, Esc cancels.
 import { View, div } from "gpui-kit";
 import { v_flex, InputState } from "gpui-base";

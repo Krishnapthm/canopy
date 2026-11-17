@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // Asks before something destructive, e.g. "Delete space?". Opened as a dialog.
 // Props: title, detail, panes? (icon, tint, name), command?, accept?, destructive?, dontAsk?.
 // Enter confirms (runs the command), Esc cancels.

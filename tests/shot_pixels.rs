@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Real GPU readback, not a mocked image. Linux CI uses Vulkan software rendering.
 use gpui::{prelude::*, *};
 

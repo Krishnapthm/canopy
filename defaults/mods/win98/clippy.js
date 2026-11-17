@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // The Office Assistant, floating over the desktop. When an agent needs you
 // (blocked) or finished while you looked away (done), it pops a balloon that
 // takes you there. Click it for a tip. Display Properties (or its balloon)

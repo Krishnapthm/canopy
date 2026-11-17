@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# Bounded conformance checks against a disposable core, never the default session.
+set -euo pipefail
+[[ $# -le 1 ]] || { echo 'usage: scripts/core-check [hc-binary]' >&2; exit 2; }
+repo=$(cd "$(dirname "$0")/.." && pwd)
+hc=$(command -v "${1:-hc}") || { echo 'FAIL hc executable missing' >&2; exit 1; }
+[[ $hc == /* && -x $hc ]] || { echo 'FAIL hc must resolve to an absolute executable' >&2; exit 1; }
+[[ ${TMPDIR:-/tmp} == /* ]] || { echo 'FAIL TMPDIR must be absolute' >&2; exit 1; }
+command -v python3 >/dev/null || { echo 'FAIL python3 required' >&2; exit 1; }
+umask 077
+root=$(mktemp -d "${TMPDIR:-/tmp}/canopy-core-check.XXXXXX")
+export HC_SESSION=canopy-check-${root##*.} HC_SOCKET=$root/c.sock
+export XDG_STATE_HOME=$root/state XDG_CONFIG_HOME=$root/config
+unset HC_TERMINAL_ID HC_TERMINAL_SOCKET
+cleanup() {
+    result=$?
+    trap - EXIT
+    if [[ $HC_SOCKET != "$root/c.sock" ]]; then
+        echo "FAIL refusing cleanup with unexpected HC_SOCKET; scratch: $root" >&2
+        exit 1
+    fi
+    if ! python3 - "$hc" <<'PY'
+import subprocess, sys
+try:
+    p = subprocess.run([sys.argv[1], 'server', 'stop'], capture_output=True, text=True, timeout=15)
+    if p.returncode:
+        raise RuntimeError(p.stderr.strip() or p.stdout.strip())
+except Exception as e:
+    print('FAIL server stop:', e)
+    sys.exit(1)
+print('ok server stop')
+PY
+    then
+        echo "FAIL scratch retained for cleanup: $root" >&2
+        exit 1
+    fi
+    rm -rf -- "$root"
+    exit "$result"
+}
+# Only this newly reserved socket may be addressed, including by the EXIT trap.
+[[ $HC_SOCKET == "$root/c.sock" && ${#HC_SOCKET} -le 100 && ! -e $HC_SOCKET ]] || {
+    rmdir "$root"
+    echo 'FAIL scratch socket invalid; use TMPDIR=/tmp for a shorter path' >&2
+    exit 1
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+python3 - "$hc" "$repo" "$root" <<'PY'
+import json, os, pathlib, re, selectors, subprocess, sys, time
+hc, repo, root = sys.argv[1:]
+assert os.environ['HC_SOCKET'] == root + '/c.sock', 'refusing non-scratch socket'
+failed = False
+
+def run(*args, **kwargs):
+    p = subprocess.run([hc, *args], capture_output=True, text=True, timeout=30, **kwargs)
+    if p.returncode:
+        raise RuntimeError(f'{" ".join(args[:2])}: {p.stderr.strip() or p.stdout.strip()}')
+    return p.stdout
+
+def check(name, action):
+    global failed
+    try:
+        action()
+        print('ok ' + name, flush=True)
+        return True
+    except Exception as e:
+        failed = True
+        print('FAIL ' + name + ': ' + str(e), flush=True)
+        return False
+
+def require(value, why):
+    if not value:
+        raise RuntimeError(why)
+
+# Positional syntax is checked through the command's usage, flags through its help.
+helps = {
+    'connect': [], 'server start': [], 'server stop': [],
+    'run': ['--bg', '--name', '--label', '--cwd', '--parent', '--'],
+    'ls': ['--json'], 'get': ['--json'], 'read': ['--lines'],
+    'send': ['--if', 'idle', '--wait', '--timeout'],
+    'wait': ['--children', 'any', 'all', '--timeout'], 'events': [],
+    'label': ['K=V'], 'put': ['--json'],
+    'exec': ['--json', '--on', '--timeout', '--cwd', '--'],
+    'machine ls': ['--json'],
+    'machine add': ['--json', '--via', '--name', '--session', '--temp'],
+    'machine rm': ['--json'], 'machine rename': ['--json'], 'machine login': [],
+}
+for command, words in helps.items():
+    def help_check():
+        help = run(*command.split(), '--help')
+        require('Usage:' in help and all(word in help for word in words), 'missing usage/flag: ' + repr(words))
+    check('help ' + command, help_check)
+
+if not check('server start', lambda: run('server', 'start')):
+    sys.exit(1)
+if not check('scratch socket', lambda: require(pathlib.Path(os.environ['HC_SOCKET']).is_socket(), 'socket not created')):
+    sys.exit(1)
+
+def hello_check():
+    source = pathlib.Path(repo, 'src/hc.rs').read_text()
+    generation = int(re.search(r'pub const GENERATION: u64 = (\d+);', source)[1])
+    uses = re.findall(r'"([^"]+)"', re.search(r'pub const USES:.*?= &\[(.*?)\];', source, re.S)[1])
+    require(bool(uses), 'empty USES parse')
+    minimum = pathlib.Path(repo, 'distribution/core-version').read_text().strip()
+    p = subprocess.Popen([hc, 'connect'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        p.stdin.write(b'{"jsonrpc":"2.0","id":0,"method":"hello","params":{"framed":true}}\n')
+        p.stdin.flush()
+        with selectors.DefaultSelector() as selector:
+            selector.register(p.stdout, selectors.EVENT_READ)
+            require(selector.select(10), 'hello timed out')
+            # Read one byte at a time so even a partial line has a bounded deadline.
+            line = bytearray()
+            deadline = time.monotonic() + 10
+            while not line.endswith(b'\n'):
+                require(selector.select(max(0, deadline - time.monotonic())), 'partial hello timed out')
+                byte = os.read(p.stdout.fileno(), 1)
+                require(byte, 'hello EOF')
+                line.extend(byte)
+                require(len(line) <= 1024 * 1024, 'hello too large')
+        reply = json.loads(line)
+        require('error' not in reply, str(reply))
+        hello = reply['result']
+        require(hello['generation'] == generation, 'generation mismatch')
+        require(set(uses) <= set(hello['methods']), 'missing USES: ' + str(set(uses) - set(hello['methods'])))
+        version = lambda v: tuple(int(n) for n in v.removeprefix('hc ').split('-')[0].split('.'))
+        require(version(hello['version']) >= version(minimum), 'version below ' + minimum)
+        print('hello ' + json.dumps(hello, sort_keys=True), flush=True)
+    finally:
+        p.terminate()
+        try:
+            p.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.communicate(timeout=5)
+check('hello generation, USES, minimum version', hello_check)
+check('version CLI', lambda: require(run('--version').startswith('hc '), 'unexpected version output'))
+
+def terminals():
+    return json.loads(run('ls', '--json'))['terminals']
+
+def named(name):
+    return next(t for t in terminals() if t.get('name') == name)
+
+def eventually(action):
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            return action()
+        except (RuntimeError, StopIteration, FileNotFoundError, json.JSONDecodeError):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)  # Only while a live assertion is pending.
+
+# Plain sh reads submitted lines and prints a distinctive acknowledgement.
+if check('run --bg --name --label --cwd', lambda: run('run', '--bg', '--name', 'a', '--label', 'check=yes', '--cwd', root, '--', 'sh', '-c', 'while IFS= read -r line; do printf "received:%s\\n" "$line"; done')):
+    check('ls --json terminal, get --json labels', lambda: require(json.loads(run('get', named('a')['address'], '--json')).get('labels', {}).get('check') == 'yes', 'terminal/label absent'))
+    check('send text', lambda: run('send', 'a', 'core-check-message'))
+    check('read submitted text', lambda: eventually(lambda: require('received:core-check-message' in run('read', 'a', '--lines', '100'), 'acknowledgement absent')))
+    check('run --parent', lambda: run('run', '--bg', '--name', 'child', '--parent', named('a')['address'], '--', 'sh', '-c', 'read -r line'))
+    check('ls --json parent', lambda: require(named('child')['parent'].split('/')[-1] == named('a')['address'], 'parent mismatch'))
+else:
+    for name in ['ls --json terminal, get --json labels', 'send text', 'read submitted text', 'run --parent', 'ls --json parent']:
+        print('FAIL ' + name + ': prerequisite launch failed', flush=True)
+
+# A core terminal invokes hc by name, with neither --parent nor --cwd.
+program = 'command -v hc > hc-path; hc run --bg --name nested -- sh -c "read -r line"; while IFS= read -r line; do :; done'
+if check('run caller terminal', lambda: run('run', '--bg', '--name', 'caller', '--cwd', root, '--', 'sh', '-c', program)):
+    check('hc on terminal PATH', lambda: eventually(lambda: require(pathlib.Path(root, 'hc-path').read_text().strip(), 'hc not found')))
+    def inherited():
+        child, parent = named('nested'), named('caller')
+        require(child['parent'].split('/')[-1] == parent['address'], 'default parent mismatch')
+        require(os.path.realpath(child['cwd']) == os.path.realpath(root), 'default cwd mismatch')
+    check('run default parent and caller cwd', lambda: eventually(inherited))
+else:
+    for name in ['hc on terminal PATH', 'run default parent and caller cwd']:
+        print('FAIL ' + name + ': prerequisite launch failed', flush=True)
+if failed:
+    for log in pathlib.Path(root, 'state').rglob('*.log'):
+        print(str(log.relative_to(root)) + ':', flush=True)
+        print('\n'.join(log.read_text(errors='replace').splitlines()[-12:]), flush=True)
+sys.exit(1 if failed else 0)
+PY

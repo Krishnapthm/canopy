@@ -77,6 +77,32 @@ pub fn put_cli_on_path() {
     }
 }
 
+/// Hands a `canopy` found by name inside a core terminal to the app that owns
+/// that terminal, `<app home>/bin/canopy` (see `put_cli_on_path`). A login
+/// shell's profile can put another install (`~/.local/bin/canopy`) first on PATH,
+/// and that one would read and rewrite this home with its own rules. Returns
+/// only when this binary is the owner or there is none.
+#[cfg(unix)]
+pub fn hand_off_to_owner(args: &[String]) {
+    use std::os::unix::process::CommandExt;
+    let in_terminal = std::env::var_os("HC_TERMINAL_ID").is_some_and(|t| !t.is_empty());
+    let Some(owner) = owner(args.first().map(String::as_str), in_terminal, &crate::mods::app_dir()) else { return };
+    let e = Command::new(&owner).args(&args[1..]).exec();
+    eprintln!("canopy: cannot run {}: {e}", owner.display());
+}
+
+/// The owner to run instead of this binary, or None. A path in `argv0` was
+/// chosen on purpose (hooks pass the absolute app), so only a bare name hands off.
+#[cfg(unix)]
+fn owner(argv0: Option<&str>, in_terminal: bool, app_dir: &Path) -> Option<PathBuf> {
+    if !in_terminal || argv0.is_none_or(|a| a.contains('/')) {
+        return None;
+    }
+    let link = app_dir.join("bin").join("canopy");
+    let me = std::env::current_exe().and_then(|e| e.canonicalize()).ok()?;
+    (link.canonicalize().ok()? != me).then_some(link)
+}
+
 /// Finder and Dock launches don't inherit the person's shell PATH.
 #[cfg(target_os = "macos")]
 pub fn fill_path() {
@@ -240,6 +266,25 @@ mod tests {
             assert_eq!(core.hello["selected"], replacement);
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_canopy_found_by_name_hands_off_to_the_terminals_app() {
+        let home = std::env::temp_dir().join(format!("canopy-owner-{}", std::process::id()));
+        let bin = home.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let link = bin.join("canopy");
+        let _ = std::fs::remove_file(&link);
+        assert_eq!(owner(Some("canopy"), true, &home), None, "no owner link");
+        std::os::unix::fs::symlink("/bin/sh", &link).unwrap();
+        assert_eq!(owner(Some("canopy"), true, &home), Some(link.clone()), "another install");
+        assert_eq!(owner(Some("/x/canopy"), true, &home), None, "a path is kept");
+        assert_eq!(owner(Some("canopy"), false, &home), None, "outside a terminal");
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(std::env::current_exe().unwrap(), &link).unwrap();
+        assert_eq!(owner(Some("canopy"), true, &home), None, "already the owner");
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     #[test]

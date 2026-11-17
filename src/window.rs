@@ -2080,25 +2080,19 @@ impl AppWindow {
         if let Some(error)=self.canvas_state.error.take() { self.layout_notice("Canvas", &error, window, cx); }
         let visible: HashSet<String> = self.visible_addresses().into_iter().collect();
         let mut alerts = Vec::new();
-        // Terminals that reached a turn boundary (idle, or an agent just started): Wire's postman rings them.
-        let mut rings = Vec::new();
-        // Spawned children whose turn just ended, and their parent agents (Wire idle notices).
-        let mut idle = Vec::new();
+        let mut glows = Vec::new();
         for (addr, rec) in &self.live {
             let word = rec.get("status").and_then(Value::as_str).map(str::to_owned);
             let app = rec.get("report").and_then(|r| r.get("app")).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_owned);
             let looking = visible.contains(addr) && self.window_active;
             let prev = self.model.agents.get(addr).and_then(|a| a.word.clone());
-            let child = rec.get("parent").and_then(Value::as_str).is_some_and(|p| !p.is_empty());
-            if prev.as_deref() != word.as_deref() && matches!(word.as_deref(), Some("idle" | "done")) { rings.push(addr.clone()); }
-            // A program whose own turn-end hook reports idle (with its answer) is left to it.
-            if prev.as_deref() == Some("working") && matches!(word.as_deref(), Some("idle" | "done")) && !crate::programs::reports_idle(&rec["program"])
-                && let Some(parent) = rec.get("parent").and_then(Value::as_str).filter(|p| self.live.get(*p).is_some_and(|r| crate::programs::agent_program(&r["program"])))
-            {
-                idle.push((addr.clone(), parent.to_owned()));
-            }
+            let parent = rec.get("parent").and_then(Value::as_str).filter(|p| !p.is_empty());
+            let child = parent.is_some();
             if let Some(alert) = self.model.alert_for(addr, child, prev.as_deref(), word.as_deref(), looking) {
                 alerts.push((addr.clone(), alert, looking));
+            }
+            if let Some(parent) = parent {
+                glows.push((addr.clone(), parent.to_owned(), prev.clone(), word.clone()));
             }
             changed |= self.model.set_word(addr, word, app, looking);
             let turn = rec.get("turn").and_then(Value::as_u64).unwrap_or(0);
@@ -2112,12 +2106,10 @@ impl AppWindow {
             for (addr, alert, looking) in alerts {
                 self.alert(&addr, alert, looking, window, cx);
             }
+            for (addr, parent, prev, word) in glows {
+                self.pulse_status(&addr, &parent, prev.as_deref(), word.as_deref(), cx);
+            }
         }
-        for (child, parent) in idle {
-            if crate::wire::post_idle(&self.canvas_state.doc, &child, &parent, "").is_some() { rings.push(parent); }
-        }
-        for addr in rings { self.wire_postman(&addr, window, cx); }
-        if !self.listed_once { self.refresh_wires(window, cx); }
         self.track_folders(cx);
         for (address, view) in self.terminal_views(cx) {
             if self.live.get(&address).is_some_and(|r| r["pid"].as_u64().is_some()) {
@@ -2943,15 +2935,14 @@ impl AppWindow {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "canvas.fit_all" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
-            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.select_all" | "canvas.collapse" | "canvas.connect" | "canvas.thread" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
+            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.select_all" | "canvas.collapse" | "canvas.connect" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
             "canvas.tile" => self.tile_canvas(true, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
             "canvas.equalize" => self.equalize_panes(window, cx),
             "canvas.sync" => self.toggle_sync(window, cx),
             "canvas.front" | "canvas.back" => self.stack_panes(name == "canvas.front", a["terminal"].as_str(), window, cx),
-            "canvas.sub_message" => self.message_sub(a, window, cx),
-            "wire.connect" | "wire.remove" | "wire.reset" | "wire.open" => self.wire_command(name, a, window, cx),
+            "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
             "app.menu" => {

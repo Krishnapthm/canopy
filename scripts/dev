@@ -2,13 +2,23 @@
 # Close the dev window before running scripts/dev-stop.
 set -euo pipefail
 [[ $# == 0 ]] || { echo 'usage: scripts/dev' >&2; exit 2; }
+# Start like a Dock launch. The core and the app pass their environment to every
+# terminal, so a launch from an agent session (CLAUDE_CODE_*, HC_TERMINAL_ID, its
+# tokens) would reach every agent in the window and hide their status.
+if [[ -z ${CANOPY_DEV_CLEAN:-} ]]; then
+    keep=()
+    for v in HOME USER LOGNAME SHELL LANG TERM PATH TMPDIR SSH_AUTH_SOCK HERDR_APP_LOG; do
+        [[ -z ${!v+x} ]] || keep+=("$v=${!v}")
+    done
+    exec env -i CANOPY_DEV_CLEAN=1 "${keep[@]}" "$0"
+fi
+unset CANOPY_DEV_CLEAN
 repo=$(cd "$(dirname "$0")/.." && pwd)
 root=${TMPDIR:-/tmp}/canopy-dev
 [[ $root == /* ]] || { echo 'TMPDIR must be absolute' >&2; exit 1; }
 export HERDR_APP_HOME=$root/home HC_SESSION=canopy-dev HC_SOCKET=$root/c.sock
 export XDG_STATE_HOME=$root/state XDG_CONFIG_HOME=$root/config
 export HERDR_APP_NO_SOUND=1
-unset HC_TERMINAL_ID HC_TERMINAL_SOCKET
 [[ ${#HC_SOCKET} -le 80 ]] || { echo 'TMPDIR socket path too long; use TMPDIR=/tmp' >&2; exit 1; }
 [[ -x $repo/target/debug/canopy ]] || { echo 'debug app missing; build it separately' >&2; exit 1; }
 hc=$(command -v hc) || { echo 'hc missing from PATH' >&2; exit 1; }
