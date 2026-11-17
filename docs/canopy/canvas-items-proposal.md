@@ -13,13 +13,9 @@ and CLI use `item`, so a later rename touches only UI text.
 
 ## 1. Status this proposal assumes
 
-- `main` at `bcb3def` (0.1.0 released).
-- PR #9 `chore/rebrand-leftovers`: merge first. The README and docs rebrand
-  waits for the next version; win98 fonts kept as a recorded exception.
-- PR #10 `refactor/wire-lean-hc-adapter`: merge second, after a rebase that
-  resolves `README.md` (its only conflict with #9).
-- Reddit post deadline: Friday 2026-11-20. What ships by then is decided
-  after research (section 9).
+- `main` at `e226dd4`: 0.1.0 plus PRs #9 (rebrand leftovers) and #10 (wire
+  on hc), both merged 2026-11-17.
+- Reddit post deadline: Friday 2026-11-20. Scope is locked in section 9.
 
 ## 2. Goal
 
@@ -262,12 +258,6 @@ as CSS variables.
 - Every user-visible error is a toast.
 
 ## 9. Merge and build order
-
-### Merges (now)
-
-1. Merge #9.
-2. Rebase #10 on main, resolve `README.md`, merge #10.
-3. Merge `main` into this branch.
 
 ### Phases
 
