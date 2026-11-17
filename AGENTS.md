@@ -55,15 +55,22 @@ Read AGENTS.local.md too when present.
 
 ## How agents learn Canopy
 
-What the app itself may write so any agent knows to read `canopy --skill`:
+Skills are not fetched by running a command: a harness discovers an
+installed skill by its name and description and loads it into context when
+the task fits. So the installed skill is how agents learn Canopy.
+`canopy --skill` only prints the same text, as a fallback for harnesses
+without skill support.
 
-- **Our skill, automatic.** Installing or updating Canopy's skill in each
+- **Our skill, automatic.** Installing or updating Canopy's skill (with
+  `name` and `description` frontmatter that says when to use it) in each
   installed harness's global skills folder happens without asking. Canopy
   writes only its own skill folder, never other entries, and removes it on
   uninstall. Verify each harness's skills path against the installed CLI.
 - **Project instruction files, only with explicit permission.** Canopy asks
-  before appending a short marked block (a few lines pointing to
-  `canopy --skill`) to the project's `AGENTS.md` or `CLAUDE.md`. A small
+  before appending a short marked block to the project's `AGENTS.md` or
+  `CLAUDE.md`. The block says the project runs in Canopy and names the
+  `canopy` skill and when to use it (panes, wiring, quotes, peers); it does
+  not tell the agent to run a command to read instructions. A small
   script picks the file: if `CLAUDE.md` imports `AGENTS.md` (an `@AGENTS.md`
   line), append to `AGENTS.md` only; if only one exists, use it; if neither,
   offer to create `AGENTS.md`. The block has begin and end markers so

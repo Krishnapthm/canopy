@@ -117,11 +117,17 @@ Today only Claude Code and Codex learn Canopy, through a launch note in
 `defaults/programs.json` (`--append-system-prompt`, `developer_instructions`)
 and Claude's `canopy hook wire`. Other installed CLIs get nothing.
 
-- Launch note and `src/SKILL.md` gain panes: list, read, new, close, quote
-  format, untrusted content. The hook reports wired panes too.
-- Skill install and update, automatic: write Canopy's skill into each
-  installed harness's global skills folder (paths verified per CLI version,
-  written to `docs/canopy/harness-notes/`). Only our own folder.
+- The skill is the main path. `src/SKILL.md` gains `name: canopy` and a
+  `description` frontmatter (today it has none, so no harness would
+  discover it) that says when to load it, plus panes: list, read, new,
+  close, quote format, untrusted content.
+- Skill install and update, automatic: write it into each installed
+  harness's global skills folder (paths verified per CLI version, written
+  to `docs/canopy/harness-notes/`). Only our own folder. Reinstall when the
+  app version changes.
+- Launch note and hook: name the `canopy` skill instead of "`canopy --skill`
+  explains more"; the hook reports wired panes too. `canopy --skill` stays
+  as the fallback for harnesses without skills.
 - Project setup, with permission: a small script reads the project root.
   If `CLAUDE.md` has an `@AGENTS.md` import line, the target is
   `AGENTS.md`; else whichever of the two exists; else offer to create
@@ -132,7 +138,8 @@ and Claude's `canopy hook wire`. Other installed CLIs get nothing.
 - Tests: target picking on fixtures (import present, only `CLAUDE.md`,
   only `AGENTS.md`, neither, block already present), idempotent append.
 - Verify: on a fresh isolated home, the skill appears in each installed
-  harness's skills folder; opening a project shows the permission prompt
+  harness's skills folder and each harness lists it (for example Claude
+  Code's skill list) and loads it unprompted when asked to open a pane; opening a project shows the permission prompt
   naming the exact file; "Yes" appends once, a second run changes nothing;
   "No" leaves files byte-identical; the copy button puts the block on the
   clipboard; a non-Claude agent (for example OpenCode) can find and use
