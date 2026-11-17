@@ -18,6 +18,7 @@ mod model;
 mod mirror;
 mod mirror_sync;
 mod panes;
+mod skill;
 mod place;
 mod persist;
 #[cfg(target_os = "macos")]
@@ -60,6 +61,7 @@ Usage:
   canopy check <mod folder>     load a mod once and report what's wrong
   canopy config                 Settings defaults and explanations
   canopy --skill                Agent Skill: driving the window, and where hc fits
+  canopy skill remove           delete the skill Canopy installed for your agents
   canopy --version
 
 The terminals run in herdr-core (`hc`), which keeps them alive when the
@@ -101,6 +103,7 @@ fn main() {
         std::process::exit(wire::spawn_cli(&args[2..]));
     }
     if args.get(1).is_some_and(|s| s == "pane") { std::process::exit(panes::cli(&args[2..])); }
+    if args.get(1).is_some_and(|s| s == "skill") { std::process::exit(skill::cli(&args[2..])); }
     #[cfg(target_os = "macos")]
     macos_check::startup(&args);
     #[cfg(windows)]

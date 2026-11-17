@@ -318,7 +318,7 @@ pub fn told_line(told: &std::collections::BTreeMap<String, String>, now: &std::c
     } else {
         now.iter().filter(|(k, _)| !told.contains_key(*k)).map(|(_, v)| format!("+{v}")).chain(told.iter().filter(|(k, _)| !now.contains_key(*k)).map(|(_, v)| format!("-{v}"))).collect()
     };
-    (!change.is_empty()).then(|| format!("Wired: {}. `canopy wire` lists your peers.", change.join(", ")))
+    (!change.is_empty()).then(|| format!("Wired: {}. `canopy wire` lists your peers and panes; the canopy skill explains them.", change.join(", ")))
 }
 
 // shortcut: one small file per terminal id, never swept; delete them when terminals end if they pile up.
@@ -478,10 +478,10 @@ mod tests {
         let map = |l: &[(&str, &str)]| l.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<BTreeMap<_, _>>();
         let (none, ab) = (map(&[]), map(&[("a", "api"), ("b", "reviewer (codex)")]));
         assert_eq!(told_line(&none, &none, true), None);
-        assert_eq!(told_line(&none, &ab, true).unwrap(), "Wired: api, reviewer (codex). `canopy wire` lists your peers.");
+        assert_eq!(told_line(&none, &ab, true).unwrap(), "Wired: api, reviewer (codex). `canopy wire` lists your peers and panes; the canopy skill explains them.");
         assert_eq!(told_line(&ab, &ab, false), None);
-        assert_eq!(told_line(&ab, &ab, true).unwrap(), "Wired: api, reviewer (codex). `canopy wire` lists your peers.");
-        assert_eq!(told_line(&ab, &map(&[("b", "reviewer (codex)"), ("c", "web")]), false).unwrap(), "Wired: +web, -api. `canopy wire` lists your peers.");
+        assert_eq!(told_line(&ab, &ab, true).unwrap(), "Wired: api, reviewer (codex). `canopy wire` lists your peers and panes; the canopy skill explains them.");
+        assert_eq!(told_line(&ab, &map(&[("b", "reviewer (codex)"), ("c", "web")]), false).unwrap(), "Wired: +web, -api. `canopy wire` lists your peers and panes; the canopy skill explains them.");
     }
 
 }

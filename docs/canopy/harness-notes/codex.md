@@ -72,3 +72,12 @@ runs inside Codex's `workspace-write` sandbox without escalation.
   not checked.
 - A Codex child's status goes `working` then `idle` in the core, which the app's
   fallback idle line relies on - verified.
+
+## Global skills, 2026-11-17 (0.169.0)
+
+- **Codex reads skills from both `$CODEX_HOME/skills` and `~/.agents/skills` - verified,
+  isolated `HOME` and `CODEX_HOME`, no model call.** With a test `SKILL.md` (`name`,
+  `description` frontmatter) in each, `codex debug prompt-input "hi"` listed both under
+  "Available skills" with aliased roots `r0` (`$CODEX_HOME/skills`) and `r1`
+  (`~/.agents/skills`). Canopy writes `~/.agents/skills/canopy/SKILL.md`, which does not
+  depend on `CODEX_HOME` and is the shared folder other harnesses may read too.

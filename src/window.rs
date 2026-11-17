@@ -588,6 +588,9 @@ impl AppWindow {
         w.watched.programs = mtime(&crate::programs::path());
         w.reload_config(window, cx);
         mods::warm_known_agents();
+        // Test windows run this startup too; they must never write the person's harness folders.
+        #[cfg(not(test))]
+        crate::skill::install_for_installed();
         w.check_editors(window, cx);
         install_layouts();
         let name = mods::shared("layout").and_then(|v| v.as_str().map(str::to_owned)).filter(|n| layout_path(n).exists());

@@ -1,3 +1,8 @@
+---
+name: canopy
+description: Use when running inside Canopy (HC_TERMINAL_ID is set) or when the person mentions Canopy, panes, the canvas, wiring, quotes, peers or helper agents. Explains how to list, open, read, wire and close panes (files, notes), how quotes arrive, how to start visible helper agents and how to message wired peers.
+---
+
 # canopy: drive the person's window
 
 Canopy shows spaces, tabs and panes. herdr-core (`hc`) runs their terminals
@@ -32,8 +37,7 @@ message with a request to report back with `hc send <your terminal> "..."`
 when it is done or stuck; wait for helpers with `hc wait --children any` and
 message one with `hc send`. Do not start agent CLIs directly from your
 shell. Your built-in sub-agent tool is still fine for your own quick lookups.
-Your core terminal is `$HC_TERMINAL_ID`; `canopy --skill` explains how to work
-with the window. Canopy gives agents this short note through per-session
+Your core terminal is `$HC_TERMINAL_ID`; this text is the `canopy` skill (`canopy --skill` prints it for harnesses without skills). Canopy gives agents this short note through per-session
 flags, without editing harness configuration, and puts `canopy` on every
 terminal's PATH (`<app home>/bin`). When a shell profile puts another install
 first, a `canopy` run by name in a terminal hands off to that terminal's app.
@@ -85,6 +89,8 @@ canopy pane shot p1 [file.png]             # the pane as drawn, as a PNG; prints
 canopy pane close p1                       # close a file pane
 ```
 
+`canopy wire` lists the panes wired to you with their ids and verbs. A quote the person sends you arrives pasted in your prompt as `@path:start-end` followed by the lines (a `> ` quote for Markdown, a fenced block otherwise); the path is relative to your folder when it can be.
+
 A note's text is what `canopy pane read` returns. `canopy pane close` refuses a note holding
 text: only the person closes it.
 
@@ -96,6 +102,8 @@ yet), `canvas.close {pane}`. Mods read `canvasPanes()` and `paneKinds()`; `panes
 the tab layouts' panes.
 
 ## Agent flags and note in `programs.json`
+
+An agent entry's optional `skills` is its global skills folder (`~` is the home folder). On start Canopy writes this text as `<skills>/canopy/SKILL.md` for each installed agent that has one, only into its own `canopy` folder, and rewrites it when the text changes. Built in: Claude Code `~/.claude/skills`, Codex `~/.agents/skills`. `canopy skill remove` deletes it.
 
 The built-in table supplies a top-level `note` string. A person's
 `programs.json` replaces it when `note` is set, including an empty string.
@@ -123,6 +131,10 @@ startup files normally. Canopy never edits the person's shell files.
 Remote terminals, bash, other shells and Windows have no typed-agent wrapper;
 remote and Windows menu launches also omit these flags.
 
+
+## Project setup
+
+When a space with a folder opens, Canopy asks the person once per folder whether to add a short marked block (`<!-- canopy:begin -->` ... `<!-- canopy:end -->`) to the project's `AGENTS.md` or `CLAUDE.md`. Never add, edit or remove that block yourself unless the person asks; it is theirs.
 
 ## Show something when asked
 

@@ -47,6 +47,9 @@ struct Entry {
     run: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     open: Vec<String>,
+    /// The agent's global skills folder (`~/` = home), where Canopy installs its skill.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skills: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     flags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -65,6 +68,7 @@ impl Entry {
         }
         if !mine.flags.is_empty() { self.flags = mine.flags; }
         self.app = mine.app.or(self.app.take());
+        self.skills = mine.skills.or(self.skills.take());
         if !mine.open.is_empty() {
             self.open = mine.open;
         }
@@ -93,6 +97,16 @@ pub fn startable() -> Vec<Value> {
             })
             .collect()
     })
+}
+
+/// Each startable agent's command (`run[0]`) and its skills folder, `~/` expanded.
+pub fn skill_folders() -> Vec<(String, std::path::PathBuf)> {
+    TABLE.with(|t| t.borrow().programs.values().filter_map(|e| {
+        let command = e.run.first()?;
+        let folder = e.skills.as_ref()?;
+        let path = folder.strip_prefix("~/").map_or_else(|| std::path::PathBuf::from(folder), |rest| crate::mods::home().join(rest));
+        Some((command.clone(), path))
+    }).collect())
 }
 
 pub fn agent_program(program: &Value) -> bool {
@@ -533,6 +547,27 @@ mod tests {
     fn key(app: Option<&str>, argv: &[&str]) -> String {
         let argv: Vec<String> = argv.iter().map(|s| s.to_string()).collect();
         resolve(&t(), app, &argv)["key"].as_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn skill_folders_follow_startable_entries_and_overrides() {
+        let mut table = t();
+        assert_eq!(table.programs["claude"].skills.as_deref(), Some("~/.claude/skills"));
+        assert_eq!(table.programs["codex"].skills.as_deref(), Some("~/.agents/skills"));
+        let entry = table.programs.get_mut("claude").unwrap();
+        entry.over(serde_json::from_str(r#"{"skills":"/custom/skills"}"#).unwrap());
+        entry.over(Entry::default());
+        assert_eq!(entry.skills.as_deref(), Some("/custom/skills"));
+        let table = serde_json::from_str(r#"{"programs":{
+            "a":{"run":["agent-a"],"skills":"~/skills"},
+            "b":{"run":["agent-b"],"skills":"/custom/skills"},
+            "c":{"skills":"/not-startable"},
+            "d":{"run":["agent-d"]}
+        }}"#).unwrap();
+        let original = TABLE.with(|t| t.replace(table));
+        let folders = skill_folders();
+        TABLE.with(|t| t.replace(original));
+        assert_eq!(folders, vec![("agent-a".into(), crate::mods::home().join("skills")), ("agent-b".into(), "/custom/skills".into())]);
     }
 
     #[test]
