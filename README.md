@@ -63,7 +63,7 @@ scripts/dev-stop
 Closing the window leaves the scratch core running, so running `scripts/dev`
 again reattaches to it with your layout and terminals; `scripts/dev-stop` ends it.
 These scripts use a scratch home, config, core socket and state under
-TMPDIR/canopy-dev. Never run a bare debug binary against a daily herdr setup.
+TMPDIR/canopy-dev. Never run a bare debug binary against your daily app home or core.
 An older Canopy CLI may already be on PATH; the scripts use target/debug/canopy
 directly. Builds do not install over that CLI.
 

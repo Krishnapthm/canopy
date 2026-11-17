@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // Win98 dialogs, one overlay each: props { kind, ... }.
 //   prompt    a name: { title, text, icon, value, command: { name, args }, machines }
 //   confirm   { title, text, icon, buttons: [{ label, default, act }] }

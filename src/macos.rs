@@ -1,3 +1,4 @@
+// Modified for Canopy.
 use crate::keys::CommandBinding;
 use gpui::*;
 use gpui_shell::action::ShellAction;

@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // Canopy 98's drawing kit: Windows 98 colors, bevels, buttons, title bars,
 // menus' bits and sounds, shared by every role of the win98 mod.
 //

@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // Terminals layout's draggable top bar: space picker, tabs, and window controls.
 
 import { View, div, svg, image } from "gpui-kit";

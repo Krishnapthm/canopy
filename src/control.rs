@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! `canopy do <command> [--arg value ... | json]`, `canopy ls`, `canopy commands`
 //! and `canopy status`: drive a running window from a shell (agents, tests)
 //! over `$HERDR_APP_HOME/herdr-app.sock`, one JSON line each way.
@@ -77,7 +78,7 @@ pub fn client(args: &[String]) -> i32 {
     }
     let cmd = match args {
         [verb, rest @ ..] if verb == "shot" && rest.len() <= 1 => {
-            let path = PathBuf::from(rest.first().map(String::as_str).unwrap_or("herdr-shot.png"));
+            let path = PathBuf::from(rest.first().map(String::as_str).unwrap_or("canopy-shot.png"));
             let path = match std::path::absolute(path) {
                 Ok(path) => path,
                 Err(e) => return fail(&format!("cannot resolve screenshot path: {e}")),
@@ -150,7 +151,7 @@ pub fn save_shot(window: &gpui::Window, path: &std::path::Path) -> anyhow::Resul
         encoder.write_header()?.write_image_data(image.as_raw())?;
     }
     // A sibling temporary file keeps publication on the same filesystem.
-    let temporary = path.with_file_name(format!(".herdr-shot-{}.png", std::process::id()));
+    let temporary = path.with_file_name(format!(".canopy-shot-{}.png", std::process::id()));
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
     let result = (|| -> anyhow::Result<()> {
         file.write_all(&bytes)?;

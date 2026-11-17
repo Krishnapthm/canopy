@@ -1,3 +1,4 @@
+// Modified for Canopy.
 import { div, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { shared, setShared } from "herdr";

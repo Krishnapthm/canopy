@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! The app's shared world, the same for every layout: spaces, each with
 //! tabs (named pieces of work), each tab holding its terminals and
 //! how they're split. Plus which pane has focus and agent attention (done vs

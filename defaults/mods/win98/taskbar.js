@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // The taskbar: Start, Quick Launch, the shown space's tabs as windows (the
 // shown one pressed in; click it to minimize = settle), open games, and the
 // tray: agents, the speaker, the clock. It also owns the layout's key

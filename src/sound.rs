@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Attention sounds, as Canopy plays them: one when an agent needs you, one
 //! when it finished while you weren't looking. Bundled sounds (Canopy's), or a
 //! file from settings.json; played with whichever MP3-capable player exists

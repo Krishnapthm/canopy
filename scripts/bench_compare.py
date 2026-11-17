@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Modified for Canopy.
 """The bench's scenarios in Ghostty alone and in Canopy 1.x inside Ghostty,
 measured the same way (macOS: instructions, energy, wakeups) for a CPU
 baseline comparison.

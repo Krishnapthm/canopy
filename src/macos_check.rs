@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! A checker uses AppKit, but must not join its caller's agent coalition.
 use std::ffi::OsString;
 use std::fs::{self, File};
