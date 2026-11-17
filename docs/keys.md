@@ -9,9 +9,9 @@ the terminal, so agents can still be interrupted. Pan with Space+drag, middle
 drag or the trackpad; zoom with pinch or Cmd+scroll. On Home, double-click a
 space card (or select it and press Enter) to go inside.
 
-Hold Option (Alt) while the canvas has the keyboard: each selected cell, or the
-one under the pointer, shows its actions with their keys, and the bottom bar
-lists every canvas key. Release Option to hide them.
+Hold Option (Alt) in canvas mode while the canvas has the keyboard to show keys
+on each selected or hovered pane's helper bar. The bottom bar still lists
+every canvas key. Release Option to hide the keys.
 
 Anywhere: Cmd+K or Cmd+P (Ctrl+Shift+K) opens Go to, a fuzzy search over
 spaces, terminal panes and open file tabs (then the old tab list). Cmd+1..9

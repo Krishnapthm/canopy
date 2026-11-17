@@ -248,7 +248,10 @@ Canopy main layout is a canvas. `canvas.zoom_in`, `canvas.zoom_out`,
 view: the selected cells (two or more) or else the current space's expanded cells
 fill the view, the selected one largest; dragging a tile ends tile view in place.
 `panel.close` closes the
-file panel. Geometry is in app-home canvas.json;
+file panel. Geometry is in app-home canvas.json version 3: `panes` holds terminal,
+sub-agent and file panes with stable ids and kind-specific `props`; versions 1 and 2 load
+automatically. Terminal ids keep core addresses, sub-agent ids are `sub:<parent>:<id>`,
+and file ids are `p<N>`, never reused;
 `canvas_color` in settings.json overrides the theme background (null resets).
 Layouts without a theme use `canopy-dark` or `canopy-light` by appearance.
 Saved `graphite`/`paper` themes alias `herdr-dark`/`herdr-light`.
@@ -337,7 +340,12 @@ Enter enters the selected cell; Esc clears the selection, then goes Home. `canva
 every selected pane (else the focused one) behind one dialog that lists them, with "Terminate and close all" and
 "Cancel". With `confirm_close_terminal: false` in settings.json (default true) and no agent among them they close
 without asking. `canvas.close {terminal}` closes one cell: running agents ask "Terminate agent?", plain terminals
-"Close this terminal?". Done sub-agent cells clear; working ones refuse with a toast.
+"Close this terminal?". Selected file panes close without a dialog; their files stay.
+Done sub-agent cells clear; working ones refuse with a toast.
+Hover or select a terminal or file pane for its helper bar above the top-left corner.
+Terminals offer Enter, Expand or Collapse, Connect and Close; files offer Open as tab
+and Close. Tooltips show names and keys; hold Option in canvas mode for keys on the
+buttons. Sub-agent cells have no bar.
 `canvas.front` and `canvas.back` raise or lower the selected panes; the order is saved.
 `canvas.sync` turns sync input on for the selected panes (typing in one reaches all) or off.
 `canvas.equalize` gives the selected panes (else the focused one) the standard `terminal_size`; `canvas.new` opens a full terminal pane, cascading from the last one.

@@ -5,6 +5,7 @@ use gpui::AnimationExt as _;
 
 mod wire_view;
 mod keyboard;
+mod helper_bar;
 
 /// What an inline name edit renames: a space (by id) or the tab of a cell (by tab id).
 #[derive(Clone, PartialEq)]
@@ -29,6 +30,7 @@ pub(super) struct State {
     pub subs: HashMap<String, Vec<crate::subs::Sub>>,
     sub_watches: HashMap<String, Task<()>>,
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
+    bar_hover: Option<String>,
     preview_drag: Option<(String, bool, Point<Pixels>)>,
     pub file: Option<String>,
     pub(super) editing: Option<String>,
@@ -98,7 +100,7 @@ pub(super) struct State {
 
 /// Tile view of the current place (leaving it calls `State::untile`): the camera from before
 /// (its top-left is where the tiles start, at zoom 1) and each member's rect and expanded size
-/// from before, by key (cell, preview path or space id).
+/// from before, by pane id or space id.
 pub(super) struct Tile {
     camera: canvas::Camera,
     before: Vec<(String, canvas::Rect, Option<canvas::Point>)>,
@@ -145,6 +147,7 @@ impl State {
             subs: HashMap::new(),
             sub_watches: HashMap::new(),
             previews: HashMap::new(),
+            bar_hover: None,
             preview_drag: None,
             file: None,
             editing: None,
@@ -209,12 +212,11 @@ impl State {
         self.motion = Motion::default();
         let back = |key: &str| tile.before.iter().find(|(k, ..)| k == key);
         let mut flipped = vec![];
-        for c in &mut self.doc.cards {
-            let Some((_, r, size)) = back(&c.key()) else { continue };
-            if c.size.is_some() == size.is_some() { c.rect = *r; c.size = *size; }
-            else { c.rect[0] = r[0]; c.rect[1] = r[1]; flipped.push(c.key()); }
+        for c in &mut self.doc.panes {
+            let Some((_, r, size)) = back(&c.id) else { continue };
+            if c.size().is_some() == size.is_some() { c.rect = *r; if let Some(to) = c.size_mut() { *to = *size; } }
+            else { c.rect[0] = r[0]; c.rect[1] = r[1]; flipped.push(c.id.clone()); }
         }
-        for p in &mut self.doc.previews { if let Some((_, r, _)) = back(&p.path) { p.rect = *r; } }
         for s in &mut self.doc.spaces { if let Some((_, r, _)) = back(&s.space) { s.rect = *r; } }
         flipped
     }
@@ -292,7 +294,7 @@ impl AppWindow {
         if !self.canvas_state.selected.iter().any(|s| s == addr) { self.canvas_state.selected = vec![addr.to_owned()]; }
         let tab = self.model.pane_of(addr).and_then(|p| self.model.tab_of(&p)).map(|t| t.id.clone());
         let target = json!({"terminal":addr,"id":tab,"popped":self.canvas_state.popped.contains_key(addr),
-            "expanded":self.canvas_state.doc.cards.iter().any(|c| c.terminal == addr && c.size.is_some()),
+            "expanded":self.canvas_state.doc.panes.iter().any(|c| c.id == addr && c.size().is_some()),
             "finished":self.canvas_state.subs.get(addr).is_some_and(|subs| subs.iter().any(|s| s.done))});
         self.open_menu("canvas-card", target, Some(at), window, cx);
     }
@@ -307,8 +309,13 @@ impl AppWindow {
     }
 
     fn canvas_members(&self) -> Vec<Option<String>> {
-        self.canvas_state.doc.cards.iter().map(|c| {
-            cell_space(&self.model,&self.live,c.parent.as_deref().unwrap_or(&c.terminal)).filter(|s|!root_space(s)).map(|s|s.id.clone())
+        self.canvas_state.doc.panes.iter().map(|c| {
+            let addr = match &c.kind {
+                canvas::Kind::File { .. } => return c.space.clone(),
+                canvas::Kind::Sub { parent, .. } => parent,
+                canvas::Kind::Terminal { .. } => &c.id,
+            };
+            cell_space(&self.model, &self.live, addr).filter(|s| !root_space(s)).map(|s| s.id.clone())
         }).collect()
     }
 
@@ -332,58 +339,38 @@ impl AppWindow {
     }
 
     fn solve_layout_now(&mut self, pin: Option<&str>, space_pin: Option<&str>, cx: &App) {
-        let mut members = self.canvas_members();
+        let members = self.canvas_members();
         let sizes: Vec<_> = self
             .canvas_state
             .doc
-            .cards
+            .panes
             .iter()
             .map(|c| self.pill_rect(c, cx))
             .collect();
         let state = &mut self.canvas_state;
-        let count = state.doc.cards.len();
-        let pinned = pin.and_then(|id| {
-            state
-                .doc
-                .cards
-                .iter()
-                .position(|c| c.key() == id)
-                .or_else(|| {
-                    state
-                        .doc
-                        .previews
-                        .iter()
-                        .position(|p| p.path == id)
-                        .map(|i| count + i)
-                })
-        });
+        let pinned = pin.and_then(|id| state.doc.panes.iter().position(|p| p.id == id));
         let current: Vec<_> = state
             .doc
-            .cards
+            .panes
             .iter()
             .map(|c| c.rect)
-            .chain(state.doc.previews.iter().map(|p| p.rect))
             .collect();
         if let Some(rest) = &state.rest {
             rest.restore(&mut state.doc);
         }
-        members.extend(state.doc.previews.iter().map(|p| p.space.clone()));
         let doc = &mut state.doc;
         let mut cells: Vec<_> = doc
-            .cards
+            .panes
             .iter()
             .zip(&sizes)
             .map(|(c, r)| [c.rect[0], c.rect[1], r[2], r[3]])
-            .chain(doc.previews.iter().map(|p| p.rect))
             .collect();
         // The pinned cell, and the rest of a dragged selection, stay where they were put.
-        let keys: Vec<String> = doc.cards.iter().map(|c| c.key()).chain(doc.previews.iter().map(|p| p.path.clone())).collect();
+        let keys: Vec<String> = doc.panes.iter().map(|c| c.id.clone()).collect();
         for i in (0..cells.len()).filter(|i| Some(*i) == pinned || state.group.contains(&keys[*i])) {
             cells[i] = current[i];
-            if i < count {
-                cells[i][2] = sizes[i][2];
-                cells[i][3] = sizes[i][3];
-            }
+            cells[i][2] = sizes[i][2];
+            cells[i][3] = sizes[i][3];
         }
         // Push off lets cells overlap; spaces and root cells on Home still separate below.
         if let (Some(i), false) = (pinned, self.person.canvas_push == settings::CanvasPush::Off) {
@@ -413,10 +400,9 @@ impl AppWindow {
             for (i,r) in roots.iter().zip(&solved[doc.spaces.len()..]) { cells[*i] = *r; }
         }
         for (r, to) in doc
-            .cards
+            .panes
             .iter_mut()
             .map(|c| &mut c.rect)
-            .chain(doc.previews.iter_mut().map(|p| &mut p.rect))
             .zip(cells)
         {
             *r = to;
@@ -455,23 +441,16 @@ impl AppWindow {
                 let mut shown = state.doc.clone();
                 canvas::Rest::capture(from).restore(&mut shown);
                 for (r, to) in shown
-                    .cards
+                    .panes
                     .iter_mut()
                     .map(|c| &mut c.rect)
-                    .zip(state.doc.cards.iter().map(|c| c.rect))
+                    .zip(state.doc.panes.iter().map(|c| c.rect))
                     .chain(
                         shown
                             .spaces
                             .iter_mut()
                             .map(|s| &mut s.rect)
                             .zip(state.doc.spaces.iter().map(|s| s.rect)),
-                    )
-                    .chain(
-                        shown
-                            .previews
-                            .iter_mut()
-                            .map(|p| &mut p.rect)
-                            .zip(state.doc.previews.iter().map(|p| p.rect)),
                     )
                 {
                     for k in 0..4 {
@@ -480,23 +459,23 @@ impl AppWindow {
                 }
                 if let Some((Some(id), _)) = &state.drag
                     && let (Some(c), Some(target)) = (
-                        shown.cards.iter_mut().find(|c| &c.key() == id),
-                        state.doc.cards.iter().find(|c| &c.key() == id),
+                        shown.panes.iter_mut().find(|c| &c.id == id),
+                        state.doc.panes.iter().find(|c| &c.id == id),
                     ) {
                     c.rect = target.rect;
                 }
                 // The corner follows the pointer; the cells it pushes ease away.
                 if let Some((id, _)) = &state.cell_resize
                     && let (Some(c), Some(target)) = (
-                        shown.cards.iter_mut().find(|c| &c.key() == id),
-                        state.doc.cards.iter().find(|c| &c.key() == id),
+                        shown.panes.iter_mut().find(|c| &c.id == id),
+                        state.doc.panes.iter().find(|c| &c.id == id),
                     ) {
                     c.rect = target.rect;
                 }
                 if let Some((id, _, _)) = &state.preview_drag
                     && let (Some(p), Some(target)) = (
-                        shown.previews.iter_mut().find(|p| &p.path == id),
-                        state.doc.previews.iter().find(|p| &p.path == id),
+                        shown.panes.iter_mut().find(|p| &p.id == id),
+                        state.doc.panes.iter().find(|p| &p.id == id),
                     ) {
                     p.rect = target.rect;
                 }
@@ -554,22 +533,18 @@ impl AppWindow {
             return;
         }
         self.end_canvas_drag(cx);
-        let mut members = self.canvas_members();
+        let members = self.canvas_members();
         let doc = &self.canvas_state.doc;
-        let count = doc.cards.len();
         let ids: Vec<_> = doc
-            .cards
+            .panes
             .iter()
-            .map(|c| c.key())
-            .chain(doc.previews.iter().map(|p| p.path.clone()))
+            .map(|c| c.id.clone())
             .collect();
         let all: Vec<_> = doc
-            .cards
+            .panes
             .iter()
             .map(|c| self.pill_rect(c, cx))
-            .chain(doc.previews.iter().map(|p| p.rect))
             .collect();
-        members.extend(doc.previews.iter().map(|p| p.space.clone()));
         // The named space, else the room being shown (None arranges Home's own cells).
         let space = args["space"].as_str().map(str::to_owned).or_else(|| doc.room.clone());
         let picked = self.canvas_state.selected.last().and_then(|id| ids.iter().position(|k| k == id));
@@ -590,8 +565,8 @@ impl AppWindow {
         let parents: Vec<_> = indices
             .iter()
             .map(|i| {
-                doc.cards.get(*i)
-                    .and_then(|c| c.parent.as_deref().or_else(|| self.live.get(&c.terminal)?["parent"].as_str()))
+                doc.panes.get(*i)
+                    .and_then(|c| match &c.kind { canvas::Kind::Sub { parent, .. } => Some(parent.as_str()), canvas::Kind::Terminal { .. } => self.live.get(&c.id)?["parent"].as_str(), canvas::Kind::File { .. } => None })
                     .and_then(|p| indices.iter().position(|j| ids[*j] == p))
             })
             .collect();
@@ -604,11 +579,7 @@ impl AppWindow {
         let before = self.canvas_state.doc.clone();
         self.canvas_state.undo = Some(canvas::Rest::capture(&before));
         for (i, r) in indices.iter().zip(arranged) {
-            if *i < count {
-                self.canvas_state.doc.cards[*i].rect = r;
-            } else {
-                self.canvas_state.doc.previews[*i - count].rect = r;
-            }
+            self.canvas_state.doc.panes[*i].rect = r;
         }
         self.solve_layout(Some(&ids[indices[0]]), None, cx);
         self.canvas_state.doc.arrange_layout = layout;
@@ -657,18 +628,16 @@ impl AppWindow {
         let area = self.canvas_state.tile.as_ref().map_or(camera, |t| t.camera);
         let area = [area.x, area.y];
         // What the place shows: expanded cells and previews tile; pills (and space cards on Home) line up.
-        let shown = |c: &canvas::Card| doc.shows(c.space.as_ref())
-            && (c.sub.is_some() || canvas::view_allows(&doc.view, self.live.get(&c.terminal).is_some_and(canvas_agent)));
-        let cards: Vec<usize> = (0..doc.cards.len()).filter(|i| shown(&doc.cards[*i])).collect();
-        let (tiled, pilled): (Vec<usize>, Vec<usize>) = cards.into_iter().partition(|i| doc.cards[*i].size.is_some());
-        let previews: Vec<usize> = (0..doc.previews.len()).filter(|i| doc.shows(doc.previews[*i].space.as_ref())).collect();
+        let shown = |c: &canvas::Pane| doc.shows(c.space.as_ref())
+            && (c.file().is_some() || matches!(c.kind, canvas::Kind::Sub { .. }) || canvas::view_allows(&doc.view, self.live.get(&c.id).is_some_and(canvas_agent)));
+        let cards: Vec<usize> = (0..doc.panes.len()).filter(|i| shown(&doc.panes[*i])).collect();
+        let (tiled, pilled): (Vec<usize>, Vec<usize>) = cards.into_iter().partition(|i| doc.panes[*i].file().is_some() || doc.panes[*i].size().is_some());
         let spaces: Vec<usize> = (0..doc.spaces.len()).filter(|i| doc.room.is_none()
             && !self.model.spaces.iter().any(|s| s.id == doc.spaces[*i].space && root_space(s))).collect();
-        let count = doc.cards.len();
-        // (key, rect, index): an index below `count` is a card, above it a preview (tiles) or space (pills).
-        let mut tiles: Vec<(String, canvas::Rect, usize)> = tiled.iter().map(|i| (doc.cards[*i].key(), doc.cards[*i].rect, *i))
-            .chain(previews.iter().map(|i| (doc.previews[*i].path.clone(), doc.previews[*i].rect, count + i))).collect();
-        let mut lined_up: Vec<(String, canvas::Rect, usize)> = pilled.iter().map(|i| (doc.cards[*i].key(), doc.cards[*i].rect, *i))
+        let count = doc.panes.len();
+        // (id, rect, index): an index below `count` is a pane, above it a space.
+        let mut tiles: Vec<(String, canvas::Rect, usize)> = tiled.iter().map(|i| (doc.panes[*i].id.clone(), doc.panes[*i].rect, *i)).collect();
+        let mut lined_up: Vec<(String, canvas::Rect, usize)> = pilled.iter().map(|i| (doc.panes[*i].id.clone(), doc.panes[*i].rect, *i))
             .chain(spaces.iter().map(|i| (doc.spaces[*i].space.clone(), doc.spaces[*i].rect, count + i))).collect();
         // Who is tiled and in what order is fixed when tile view starts (a selection of two or more,
         // else everything, in reading order); later layouts keep it, so a click or a jitter never swaps tiles.
@@ -693,7 +662,7 @@ impl AppWindow {
         lined_up.retain(|x| rank(&x.0).is_some());
         lined_up.sort_by_key(|x| rank(&x.0));
         let rects: Vec<_> = tiles.iter().map(|x| x.1).collect();
-        let pills: Vec<_> = lined_up.iter().map(|x| if x.2 < count { self.pill_rect(&doc.cards[x.2], cx) } else { x.1 }).collect();
+        let pills: Vec<_> = lined_up.iter().map(|x| if x.2 < count { self.pill_rect(&doc.panes[x.2], cx) } else { x.1 }).collect();
         // Every tile the same size unless `tile_focus_grows` lets the selected one take more.
         let active = self.person.tile_focus_grows.then(|| self.canvas_state.selected.iter().rev().find_map(|k| tiles.iter().position(|t| &t.0 == k))).flatten();
         // The canvas starts under the bar, so tiles fill its whole area.
@@ -703,25 +672,24 @@ impl AppWindow {
         if !toggle && unchanged { return; }
         if started {
             let doc = &mut state.doc;
-            let before = doc.cards.iter().map(|c| (c.key(), c.rect, c.size))
-                .chain(doc.previews.iter().map(|p| (p.path.clone(), p.rect, None)))
+            let before = doc.panes.iter().map(|c| (c.id.clone(), c.rect, c.size()))
                 .chain(doc.spaces.iter().map(|s| (s.space.clone(), s.rect, None)))
                 .filter(|(k, ..)| order.contains(k)).collect();
             // Members draw above the cells that stay put.
             if !all {
-                let top = doc.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
-                for c in &mut doc.cards { if let Some(r) = rank(&c.key()) { c.z = top + r as u64; } }
+                let top = doc.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
+                for c in &mut doc.panes { if let Some(r) = rank(&c.id) { c.z = top + r as u64; } }
             }
             state.tile = Some(Tile { camera, before, order, all });
         } else if let Some(t) = &mut state.tile { t.order = order; }
         if state.shown.is_none() { state.shown = Some(state.doc.clone()); }
         let doc = &mut state.doc;
         for ((_, _, i), r) in tiles.iter().zip(placed) {
-            if *i < count { doc.cards[*i].rect = r; doc.cards[*i].size = Some([r[2], r[3]]); }
-            else { doc.previews[*i - count].rect = r; }
+            doc.panes[*i].rect = r;
+            if let Some(size) = doc.panes[*i].size_mut() { *size = Some([r[2], r[3]]); }
         }
         for ((_, _, i), r) in lined_up.iter().zip(lined) {
-            let rect = if *i < count { &mut doc.cards[*i].rect } else { &mut doc.spaces[*i - count].rect };
+            let rect = if *i < count { &mut doc.panes[*i].rect } else { &mut doc.spaces[*i - count].rect };
             rect[0] = r[0];
             rect[1] = r[1];
         }
@@ -788,7 +756,7 @@ impl AppWindow {
     /// The panes an action applies to.
     fn targets(&self, window: &Window) -> Vec<String> {
         let doc = &self.canvas_state.doc;
-        let here = |key: &str| doc.cards.iter().any(|c| c.key() == key && doc.shows(c.space.as_ref()));
+        let here = |key: &str| doc.panes.iter().any(|c| c.file().is_none() && c.id == key && doc.shows(c.space.as_ref()));
         let selected: Vec<_> = self.canvas_state.selected.iter().filter(|k| here(k)).cloned().collect();
         if !selected.is_empty() { return selected; }
         self.terms.values().find(|t| t.focus.is_focused(window) && here(&t.address))
@@ -809,9 +777,24 @@ impl AppWindow {
             Some(key) => key.to_owned(),
             None => {
                 if !self.focus.is_focused(window) { return; }
+                let state = &mut self.canvas_state;
+                let files: Vec<_> = state.doc.panes.iter().filter(|p| state.selected.contains(&p.id) && state.doc.shows(p.space.as_ref()))
+                    .filter_map(|p| Some((p.id.clone(), p.file()?.to_owned()))).collect();
+                if !files.is_empty() {
+                    state.doc.panes.retain(|p| !files.iter().any(|(id, _)| id == &p.id));
+                    state.selected.retain(|id| !files.iter().any(|(closed, _)| closed == id));
+                    for (_, path) in files {
+                        if state.file.as_ref() != Some(&path) && !state.doc.panes.iter().any(|p| p.file() == Some(path.as_str())) {
+                            state.previews.remove(&path);
+                        }
+                    }
+                    self.canvas_changed(cx);
+                    cx.notify();
+                    if self.targets(window).is_empty() { return; }
+                }
                 // Every target pane closes behind one dialog; only spaces and sub-agents take the single path.
                 let panes: Vec<_> = self.targets(window).into_iter()
-                    .filter(|k| self.canvas_state.doc.cards.iter().any(|c| &c.key() == k && c.sub.is_none())).collect();
+                    .filter(|k| self.canvas_state.doc.panes.iter().any(|c| &c.id == k && c.terminal().is_some())).collect();
                 if !panes.is_empty() { return self.close_panes(panes, window, cx); }
                 let Some(key) = self.canvas_state.selected.last().cloned() else { return };
                 key
@@ -821,9 +804,8 @@ impl AppWindow {
         if self.canvas_state.doc.spaces.iter().any(|s| s.space == key) {
             return self.run_key("space.close", json!({"id":key}), window, cx);
         }
-        let Some(card) = self.canvas_state.doc.cards.iter().find(|c| c.key() == key) else { return };
-        let sub = card.parent.as_ref().and_then(|p| self.canvas_state.subs.get(p)).into_iter().flatten()
-            .find(|s| Some(&s.id) == card.sub.as_ref());
+        let Some(card) = self.canvas_state.doc.panes.iter().find(|c| c.id == key) else { return };
+        let sub = if let canvas::Kind::Sub { parent, sub } = &card.kind { self.canvas_state.subs.get(parent).into_iter().flatten().find(|s| &s.id == sub) } else { None };
         let agent = self.live.get(&key).is_some_and(canvas_agent);
         let choice = canvas::close_choice(sub.map(|s| s.done), agent, self.person.confirm_close_terminal);
         match choice {
@@ -831,7 +813,8 @@ impl AppWindow {
                 self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":"This sub-agent is still working. Stop it through its parent."}}), window, cx);
             }
             canvas::CloseChoice::ClearSub => {
-                let args = json!({"terminal":card.parent,"id":card.sub});
+                let canvas::Kind::Sub { parent, sub } = &card.kind else { return };
+                let args = json!({"terminal":parent,"id":sub});
                 self.clear_subs(&args, window, cx);
             }
             canvas::CloseChoice::ConfirmAgent | canvas::CloseChoice::ConfirmTerminal if a["confirmed"] != if agent { "agent" } else { "terminal" } => {
@@ -872,9 +855,9 @@ impl AppWindow {
         let size = self.default_pane_size(window);
         let targets = self.targets(window);
         let mut changed = false;
-        for card in self.canvas_state.doc.cards.iter_mut().filter(|c| c.sub.is_none() && targets.contains(&c.key())) {
-            changed |= card.size != Some(size);
-            card.size = Some(size);
+        for card in self.canvas_state.doc.panes.iter_mut().filter(|c| c.terminal().is_some() && targets.contains(&c.id)) {
+            changed |= card.size() != Some(size);
+            *card.size_mut().unwrap() = Some(size);
         }
         if self.canvas_state.tile.is_some() { return self.tile_canvas(false, window, cx); }
         if changed {
@@ -1000,47 +983,6 @@ impl AppWindow {
             self.sync(window, cx);
             cx.notify();
         }
-    }
-    /// While Option is held: under each selected cell (else the hovered one) its actions, each
-    /// with the key bound to it. A click selects that cell and runs the action.
-    fn action_strips(&self, doc: &Document, keys: &[(String, String, String)], cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let state = &self.canvas_state;
-        let targets: Vec<String> = if state.selected.is_empty() { state.wire.hover.iter().cloned().collect() } else { state.selected.clone() };
-        let key_of = |command: &str| keys.iter().filter(|(s, _, a)| (s == "canvas-mode" || s == "layout:main") && a == command)
-            .map(|(_, k, _)| k.clone()).next().unwrap_or_default();
-        let camera = doc.camera;
-        let mut out = vec![];
-        for key in targets {
-            let Some(card) = doc.cards.iter().find(|c| c.key() == key && c.sub.is_none()) else { continue };
-            let Some(r) = self.wire_cell(doc, &key) else { continue };
-            let [x, y] = camera.to_screen([r[0], r[1] + r[3]]);
-            let expanded = card.size.is_some();
-            let items = [
-                ("Enter", "canvas.enter"),
-                (if expanded { "Collapse" } else { "Expand" }, if expanded { "canvas.collapse" } else { "canvas.expand" }),
-                ("Connect", "canvas.connect"),
-                ("Close", "canvas.close"),
-            ];
-            let mut row = div().absolute().left(px(x)).top(px(y + 6.)).flex().gap(px(2.)).p(px(3.))
-                .rounded(px(ui::RADIUS)).bg(c("popover")).border_1().border_color(c("border")).shadow_md()
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-            for (label, command) in items {
-                let (target, hint) = (key.clone(), key_of(command));
-                row = row.child(
-                    div().id(SharedString::from(format!("action-{key}-{command}"))).flex().items_center().gap(px(6.))
-                        .px(px(8.)).py(px(4.)).rounded(px(ui::RADIUS_SM)).cursor_pointer().text_size(px(12.)).text_color(c("foreground"))
-                        .hover(|d| d.bg(c("hover")))
-                        .child(label)
-                        .when(!hint.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("muted-foreground")).child(hint)))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.canvas_state.selected = vec![target.clone()];
-                            this.run_key(command, json!({}), window, cx);
-                        })),
-                );
-            }
-            out.push(row.into_any_element());
-        }
-        out
     }
     /// Shows a space's room (None: Home) with the camera it had there; a first visit fits what is inside.
     pub(super) fn go_room(&mut self, room: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
@@ -1177,48 +1119,36 @@ impl AppWindow {
             return;
         };
         let path = path.to_string_lossy().into_owned();
-        if let Some(card) = self
-            .canvas_state
-            .doc
-            .previews
-            .iter_mut()
-            .find(|p| p.path == path)
-        {
-            card.rect[0] = point[0];
-            card.rect[1] = point[1];
+        let doc = &mut self.canvas_state.doc;
+        let id = if let Some(pane) = doc.panes.iter_mut().find(|p| p.file() == Some(path.as_str())) {
+            pane.rect[0] = point[0];
+            pane.rect[1] = point[1];
+            pane.id.clone()
         } else {
-            self.canvas_state.doc.previews.push(canvas::Preview {
-                path: path.clone(),
-                rect: [point[0], point[1], 560., 420.],
-                space: self.canvas_state.doc.room.clone(),
+            let id = doc.next_file_id();
+            let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
+            doc.panes.push(canvas::Pane {
+                id: id.clone(), kind: canvas::Kind::File { path },
+                rect: [point[0], point[1], 560., 420.], z, space: doc.room.clone(),
             });
-        }
+            id
+        };
         self.load_previews(cx);
-        self.solve_layout(Some(&path),None,cx);
+        self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
     }
     fn load_previews(&mut self, cx: &mut Context<Self>) {
-        let mut cards = self.canvas_state.doc.previews.clone();
+        let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
         if let Some(path) = &self.canvas_state.file {
-            if rendered(path) {
-                cards.push(canvas::Preview {
-                    path: path.clone(),
-                    rect: [0., 0., 0., 0.],
-                    space: None,
-                });
-            }
+            if rendered(path) { paths.push(path.clone()); }
         }
-        self.canvas_state
-            .previews
-            .retain(|path, _| cards.iter().any(|c| &c.path == path));
-        for card in cards {
-            if self.canvas_state.previews.contains_key(&card.path) {
-                continue;
-            }
-            let text = preview_source(&card.path);
+        self.canvas_state.previews.retain(|path, _| paths.contains(path));
+        for path in paths {
+            if self.canvas_state.previews.contains_key(&path) { continue; }
+            let text = preview_source(&path);
             let view = cx.new(|cx| gpui_base::TextViewState::markdown(&text, cx));
-            let path = card.path.clone();
+            let cache_path = path.clone();
             let folder = std::path::Path::new(&path)
                 .parent()
                 .and_then(|p| p.ancestors().find(|p| p.is_dir()))
@@ -1257,7 +1187,7 @@ impl AppWindow {
                     }
                 }
             });
-            self.canvas_state.previews.insert(card.path, (view, task));
+            self.canvas_state.previews.insert(cache_path, (view, task));
         }
     }
 
@@ -1350,8 +1280,8 @@ impl AppWindow {
     /// Grows a terminal cell into a live terminal in place (neighbours give way), or shrinks it back to a pill.
     pub(super) fn set_expanded(&mut self, addr: &str, expand: bool, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
-        let Some(i) = state.doc.cards.iter().position(|c| c.sub.is_none() && c.terminal == addr) else { return };
-        if state.doc.cards[i].size.is_some() == expand || (expand && (!self.live.contains_key(addr) || state.popped.contains_key(addr))) { return; }
+        let Some(i) = state.doc.panes.iter().position(|c| c.terminal().is_some() && c.id == addr) else { return };
+        if state.doc.panes[i].size().is_some() == expand || (expand && (!self.live.contains_key(addr) || state.popped.contains_key(addr))) { return; }
         self.end_canvas_drag(cx);
         let state = &mut self.canvas_state;
         if state.shown.is_none() { state.shown = Some(state.doc.clone()); }
@@ -1359,9 +1289,9 @@ impl AppWindow {
             let before = canvas::Rest::capture(&state.doc);
             let size = self.default_pane_size(window);
             let state = &mut self.canvas_state;
-            let z = state.doc.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
-            state.doc.cards[i].size = Some(size);
-            state.doc.cards[i].z = z;
+            let z = state.doc.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
+            *state.doc.panes[i].size_mut().unwrap() = Some(size);
+            state.doc.panes[i].z = z;
             state.selected = vec![addr.to_owned()];
             // Tile view re-tiles below; neighbours do not give way.
             if self.canvas_state.tile.is_none() {
@@ -1373,7 +1303,7 @@ impl AppWindow {
         } else {
             let tiled = state.tile.is_some();
             if let Some((base, moved)) = state.moves.remove(addr) { if !tiled { base.put_back(&moved, &mut state.doc); } }
-            state.doc.cards[i].size = None;
+            *state.doc.panes[i].size_mut().unwrap() = None;
             if !tiled { self.solve_layout(Some(addr), None, cx); }
         }
         self.animate_layout(window, cx);
@@ -1394,20 +1324,20 @@ impl AppWindow {
         let Some(addr) = a["terminal"].as_str().map(str::to_owned).or_else(|| self.canvas_state.selected.last().cloned()) else {
             return self.fail("select a terminal cell first");
         };
-        let Some(card) = self.canvas_state.doc.cards.iter().find(|c| c.sub.is_none() && c.terminal == addr) else {
+        let Some(card) = self.canvas_state.doc.panes.iter().find(|c| c.terminal().is_some() && c.id == addr) else {
             return self.fail("no such terminal cell");
         };
         if self.canvas_state.popped.contains_key(&addr) {
             return self.pop_canvas(addr, true, window, cx);
         }
-        let expand = card.size.is_none();
+        let expand = card.size().is_none();
         self.set_expanded(&addr, expand, window, cx);
     }
 
     /// The camera zoom moved by a gesture: expanded cells draw flat until it has rested for a moment.
     fn zoom_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
-        if !state.doc.cards.iter().any(|c| c.size.is_some()) { return; }
+        if !state.doc.panes.iter().any(|c| c.size().is_some()) { return; }
         state.zoomed_at = Some(std::time::Instant::now());
         state.zoom_task = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(ZOOM_REST).await;
@@ -1629,8 +1559,8 @@ impl AppWindow {
                     let cascade = args["cascade"] == true;
                     if let Err(error) = self.place_canvas_card(addr, point, !cascade, cx) {
                         self.fail(error);
-                    } else if let Some(card) = self.canvas_state.doc.cards.iter_mut().find(|c| c.key() == addr) {
-                        card.size = Some(size);
+                    } else if let Some(card) = self.canvas_state.doc.panes.iter_mut().find(|c| c.id == addr) {
+                        *card.size_mut().unwrap() = Some(size);
                         (card.rect[2], card.rect[3]) = (size[0], size[1]);
                         if !cascade { self.solve_layout(Some(addr), None, cx); }
                         self.canvas_changed(cx);
@@ -1689,16 +1619,16 @@ impl AppWindow {
         let given = self.model.pane_of(addr).and_then(|p| self.model.tab_of(&p)).map(|t| t.name.as_str());
         pill_label(given, self.live.get(addr).unwrap_or(&Value::Null))
     }
-    fn pill_rect(&self, card: &canvas::Card, cx: &App) -> canvas::Rect {
-        if card.sub.is_some() { return card.rect; }
-        if let Some(size) = card.size { return [card.rect[0], card.rect[1], size[0], size[1]]; }
-        let rec = self.live.get(&card.terminal).unwrap_or(&Value::Null);
+    fn pill_rect(&self, card: &canvas::Pane, cx: &App) -> canvas::Rect {
+        if card.terminal().is_none() { return card.rect; }
+        if let Some(size) = card.size() { return [card.rect[0], card.rect[1], size[0], size[1]]; }
+        let rec = self.live.get(&card.id).unwrap_or(&Value::Null);
         // Room taken by the trailing status and pop-out glyphs (12 px each plus the gap).
-        let trailing = 20 * (canvas_agent(rec) as u8 + self.canvas_state.popped.contains_key(&card.terminal) as u8);
-        let text = self.pill_name(&card.terminal).replace(['\n', '\r'], " ");
+        let trailing = 20 * (canvas_agent(rec) as u8 + self.canvas_state.popped.contains_key(&card.id) as u8);
+        let text = self.pill_name(&card.id).replace(['\n', '\r'], " ");
         let family = settings::get().ui_font_family.to_string();
         let mut sizes = self.canvas_state.pill_sizes.borrow_mut();
-        if let Some((label, cached_font, cached_trailing, size)) = sizes.get(&card.terminal)
+        if let Some((label, cached_font, cached_trailing, size)) = sizes.get(&card.id)
             && label == &text
             && cached_font == &family
             && *cached_trailing == trailing
@@ -1718,7 +1648,7 @@ impl AppWindow {
         // Every pill is PILL_WIDTH wide; a name that does not fit wraps to a second line.
         let room = PILL_WIDTH - 2. - 24. - 16. - 8. - trailing as f32;
         let size = [PILL_WIDTH, if width > room { 54. } else { 36. }];
-        sizes.insert(card.terminal.clone(), (text, family, trailing, size));
+        sizes.insert(card.id.clone(), (text, family, trailing, size));
         [card.rect[0], card.rect[1], size[0], size[1]]
     }
     /// Menus can place a newly created terminal without duplicating membership or geometry rules.
@@ -1733,22 +1663,20 @@ impl AppWindow {
             return Err("invalid canvas point".into());
         }
         if !self.live.contains_key(terminal) && self.model.pane_of(terminal).is_none()
-            && !self.canvas_state.doc.cards.iter().any(|c| c.sub.is_some() && c.key() == terminal)
+            && !self.canvas_state.doc.panes.iter().any(|c| matches!(c.kind, canvas::Kind::Sub { .. }) && c.id == terminal)
         {
             return Err("no running terminal".into());
         }
         let card = self
             .canvas_state
             .doc
-            .cards
+            .panes
             .iter()
-            .find(|c| c.key() == terminal)
+            .find(|c| c.id == terminal)
             .cloned()
-            .unwrap_or(canvas::Card {
-                terminal: terminal.into(),
-                sub: None, parent: None,
+            .unwrap_or(canvas::Pane { id: terminal.into(), kind: canvas::Kind::Terminal { size: None },
                 rect: [point[0], point[1], 240., 36.],
-                z: 0, size: None, space: None,
+                z: 0, space: None,
             });
         let mut r = self.pill_rect(&card, cx);
         r[0] = point[0];
@@ -1832,19 +1760,17 @@ impl AppWindow {
             .keys()
             .map(|a| {
                 let r = self.pill_rect(
-                    &canvas::Card {
-                        terminal: a.clone(),
-                        sub: None, parent: None,
+                    &canvas::Pane { id: a.clone(), kind: canvas::Kind::Terminal { size: None },
                         rect: [0., 0., 240., 36.],
-                        z: 0, size: None, space: None,
+                        z: 0, space: None,
                     },
                     cx,
                 );
                 (a.clone(), [r[2], r[3]])
             })
             .collect();
-        let effective = |c: &canvas::Card| {
-            let size = c.size.or_else(|| sizes.get(&c.terminal).copied()).unwrap_or([240., 36.]);
+        let effective = |c: &canvas::Pane| {
+            let size = c.size().or_else(|| sizes.get(&c.id).copied()).unwrap_or([240., 36.]);
             [c.rect[0], c.rect[1], size[0], size[1]]
         };
         self.canvas_state
@@ -1888,27 +1814,27 @@ impl AppWindow {
             state.doc.go(None);
             changed = true;
         }
-        let before = state.doc.cards.len();
-        state.doc.cards.retain(|c| {
-            c.sub.is_some() || self.live.contains_key(&c.terminal) || self.born.borrow().contains_key(&c.terminal)
+        let before = state.doc.panes.len();
+        state.doc.panes.retain(|c| {
+            c.terminal().is_none() || self.live.contains_key(&c.id) || self.born.borrow().contains_key(&c.id)
         });
-        changed |= before != state.doc.cards.len();
-        state.selected.retain(|id|state.doc.cards.iter().any(|c|&c.key()==id) || state.doc.previews.iter().any(|p|&p.path==id));
-        state.moves.retain(|key, _| state.doc.cards.iter().any(|c| &c.key() == key));
+        changed |= before != state.doc.panes.len();
+        state.selected.retain(|id|state.doc.panes.iter().any(|c|&c.id==id));
+        state.moves.retain(|key, _| state.doc.panes.iter().any(|c| c.file().is_none() && &c.id == key));
         let mut addresses: Vec<_> = self.live.keys().cloned().collect();
         addresses.sort_by_key(|a| (self.live[a]["created_ms"].as_u64().unwrap_or(0), a.clone()));
         // Parents are placed first even when a snapshot arrives out of order.
         for _ in 0..addresses.len().max(1) {
             let mut progress = false;
             for addr in &addresses {
-                if state.doc.cards.iter().any(|c| &c.terminal == addr) {
+                if state.doc.panes.iter().any(|c| c.terminal() == Some(addr.as_str())) {
                     continue;
                 }
                 let parent = self.live[addr]["parent"].as_str();
                 if parent.is_some_and(|p| {
                     p != addr
                         && self.live.contains_key(p)
-                        && !state.doc.cards.iter().any(|c| c.terminal == p)
+                        && !state.doc.panes.iter().any(|c| c.terminal() == Some(p))
                 }) {
                     continue;
                 }
@@ -1922,18 +1848,18 @@ impl AppWindow {
                 });
                 // Cells land in their own room (None for Home), among that room's cells only.
                 let room = space.filter(|s| !root_space(s)).map(|s| s.id.clone());
-                let occupied: Vec<_> = state.doc.cards.iter().filter(|c| c.space == room).map(effective).collect();
+                let occupied: Vec<_> = state.doc.panes.iter().filter(|c| c.file().is_none() && c.space == room).map(effective).collect();
                 let area = canvas::union(&occupied).map_or([0., 0., 960., 640.], |u| [u[0] - 24., u[1] - 24., u[2].max(912.) + 48., u[3] + 48.]);
                 let r = if let Some(p) =
-                    parent.and_then(|p| state.doc.cards.iter().find(|c| c.terminal == p))
+                    parent.and_then(|p| state.doc.panes.iter().find(|c| c.terminal() == Some(p)))
                 {
                     let siblings: Vec<_> = state
                         .doc
-                        .cards
+                        .panes
                         .iter()
                         .filter(|c| {
-                            self.live
-                                .get(&c.terminal)
+                            c.file().is_none() && self.live
+                                .get(&c.id)
                                 .and_then(|r| r["parent"].as_str())
                                 == parent
                         })
@@ -1944,7 +1870,7 @@ impl AppWindow {
                     canvas::free_spot(area, &occupied, sizes[addr])
                 };
                 state.doc.place(addr, [r[0], r[1]], [r[2], r[3]]);
-                if let Some(card) = state.doc.cards.iter_mut().find(|c| &c.terminal == addr) { card.space = room; }
+                if let Some(card) = state.doc.panes.iter_mut().find(|c| c.terminal() == Some(addr.as_str())) { card.space = room; }
                 progress = true;
                 changed = true;
             }
@@ -1953,11 +1879,16 @@ impl AppWindow {
             }
         }
         // The core says where a cell lives (None: Home); one it does not know yet keeps its last space.
-        let members: Vec<_> = self.canvas_state.doc.cards.iter().map(|c| {
-            cell_space(&self.model, &self.live, c.parent.as_deref().unwrap_or(&c.terminal)).map(|s| (!root_space(s)).then(|| s.id.clone()))
+        let members: Vec<_> = self.canvas_state.doc.panes.iter().map(|c| {
+            let addr = match &c.kind {
+                canvas::Kind::File { .. } => return None,
+                canvas::Kind::Sub { parent, .. } => parent,
+                canvas::Kind::Terminal { .. } => &c.id,
+            };
+            cell_space(&self.model, &self.live, addr).map(|s| (!root_space(s)).then(|| s.id.clone()))
         }).collect();
         let state = &mut self.canvas_state;
-        for (card, member) in state.doc.cards.iter_mut().zip(members) {
+        for (card, member) in state.doc.panes.iter_mut().zip(members) {
             if let Some(member) = member && card.space != member { card.space = member; changed = true; }
         }
         let spaces = &state.doc.spaces;
@@ -1968,8 +1899,8 @@ impl AppWindow {
             if self.canvas_state.rest.is_none() && self.canvas_state.tile.is_none() {
                 let members = self.canvas_members();
                 let mut groups = std::collections::HashSet::new();
-                let pins: Vec<_> = self.canvas_state.doc.cards.iter().zip(members)
-                    .filter(|(_,space)|groups.insert(space.clone())).map(|(c,_)|c.key()).collect();
+                let pins: Vec<_> = self.canvas_state.doc.panes.iter().zip(members)
+                    .filter(|(c,space)|c.file().is_none() && groups.insert(space.clone())).map(|(c,_)|c.id.clone()).collect();
                 for pin in pins { self.solve_layout(Some(&pin),None,cx); }
             }
             self.canvas_changed(cx);
@@ -2120,7 +2051,7 @@ impl AppWindow {
     ) {
         // An entered cell takes the zoom keys (and the View menu) for its own text.
         if matches!(name, "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset") && !self.canvas_state.mode {
-            let entered = self.canvas_state.selected.last().filter(|k| self.canvas_state.doc.cards.iter().any(|c| &c.terminal == *k && c.sub.is_none()));
+            let entered = self.canvas_state.selected.last().filter(|k| self.canvas_state.doc.panes.iter().any(|c| &c.id == *k && c.terminal().is_some()));
             if let Some(t) = entered.and_then(|k| self.terms.get(&cell_slot(k))) {
                 let factor = match name { "canvas.zoom_in" => Some(1.1), "canvas.zoom_out" => Some(1. / 1.1), _ => None };
                 t.view.update(cx, |v, cx| v.zoom_text(factor, cx));
@@ -2142,8 +2073,7 @@ impl AppWindow {
             let doc = &self.canvas_state.doc;
             let all = name == "canvas.fit_all" || self.canvas_state.selected.is_empty();
             let pick = |key: &String| all || self.canvas_state.selected.contains(key);
-            doc.cards.iter().filter(|c| doc.shows(c.space.as_ref()) && pick(&c.key())).map(|c| self.pill_rect(c, cx))
-                .chain(doc.previews.iter().filter(|p| doc.shows(p.space.as_ref()) && pick(&p.path)).map(|p| p.rect))
+            doc.panes.iter().filter(|c| doc.shows(c.space.as_ref()) && pick(&c.id)).map(|c| self.pill_rect(c, cx))
                 .chain(doc.spaces.iter().filter(|s| doc.room.is_none() && pick(&s.space)).map(|s| s.rect))
                 .collect()
         } else { vec![] };
@@ -2157,8 +2087,8 @@ impl AppWindow {
                     "view.terminals" => canvas::View::Terminals,
                     _ => canvas::View::All,
                 };
-                state.selected.retain(|key| state.doc.cards.iter().any(|card|
-                    card.key() == *key && canvas::view_allows(&state.doc.view, card.sub.is_some() || self.live.get(key).is_some_and(canvas_agent))));
+                state.selected.retain(|key| state.doc.panes.iter().any(|card|
+                    card.file().is_none() && card.id == *key && canvas::view_allows(&state.doc.view, matches!(card.kind, canvas::Kind::Sub { .. }) || self.live.get(key).is_some_and(canvas_agent))));
                 self.focus.focus(window, cx);
             }
             "panel.close" => {
@@ -2192,19 +2122,19 @@ impl AppWindow {
     }
     fn preview_card(
         &self,
-        card: &canvas::Preview,
+        card: &canvas::Pane,
+        file: &str,
         view: &Entity<gpui_base::TextViewState>,
         camera: canvas::Camera,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = camera.to_screen([card.rect[0], card.rect[1]]);
-        let path = std::path::Path::new(&card.path);
-        let drag = card.path.clone();
-        let close = drag.clone();
+        let path = std::path::Path::new(file);
+        let drag = card.id.clone();
         let resize = drag.clone();
-        let quote_path = card.path.clone();
+        let quote_path = file.to_owned();
         let quote_view = view.clone();
-        (div().id(SharedString::from(format!("preview-{}", card.path))).absolute().left(px(p[0])).top(px(p[1]))
+        (div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
                 .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).overflow_hidden()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -2217,15 +2147,7 @@ impl AppWindow {
                     }))
                     .child(svg().path("mods/files/file.svg").size(px(16.)).text_color(c("foreground")))
                     .child(div().text_ellipsis().child(path.file_name().unwrap_or_default().to_string_lossy().into_owned()))
-                    .child(div().flex_1().min_w_0().text_ellipsis().text_color(c("muted-foreground")).child(path.parent().unwrap_or(path).to_string_lossy().into_owned()))
-                    .child(panel_button("preview-close", "mods/pane/close.svg", c("muted-foreground"), c("hover"))
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.canvas_state.doc.previews.retain(|p| p.path != close);
-                            this.canvas_state.previews.remove(&close);
-                            this.canvas_state.selected.retain(|id|id!=&close);
-                            this.canvas_changed(cx); cx.notify();
-                        }))))
+                    .child(div().flex_1().min_w_0().text_ellipsis().text_color(c("muted-foreground")).child(path.parent().unwrap_or(path).to_string_lossy().into_owned())))
                 .child(div().flex_1().min_h_0().overflow_hidden().px(px(16.)).py(px(12.)).child(gpui_base::TextView::new(view).scrollable(true)
                     .image_source(|_| {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
@@ -2423,10 +2345,11 @@ impl AppWindow {
                     let z = this.canvas_state.doc.camera.zoom;
                     let d = [f32::from(e.position.x - previous.x) / z, f32::from(e.position.y - previous.y) / z];
                     let zone = this.canvas_state.resize_zone;
-                    if let Some(card) = this.canvas_state.doc.cards.iter_mut().find(|c| c.key() == key)
-                        && let Some(size) = card.size {
+                    if let Some(card) = this.canvas_state.doc.panes.iter_mut().find(|c| c.id == key)
+                        && let Some(size) = card.size() {
                         let (o, s) = canvas::resize_from([card.rect[0], card.rect[1]], size, zone, d, [canvas::PILL_WIDTH * 1.5, canvas::HEADER * 3.]);
-                        (card.rect[0], card.rect[1], card.size) = (o[0], o[1], Some(s));
+                        (card.rect[0], card.rect[1]) = (o[0], o[1]);
+                        *card.size_mut().unwrap() = Some(s);
                     }
                     this.solve_layout(Some(&key), None, cx);
                     this.animate_layout(window, cx);
@@ -2435,7 +2358,7 @@ impl AppWindow {
                     cx.notify();
                     return;
                 }
-                if let Some((path, resize, previous)) = this.canvas_state.preview_drag.clone() {
+                if let Some((id, resize, previous)) = this.canvas_state.preview_drag.clone() {
                     if e.pressed_button.is_none() {
                         this.end_canvas_drag(cx);
                         return;
@@ -2447,9 +2370,9 @@ impl AppWindow {
                     if let Some(card) = this
                         .canvas_state
                         .doc
-                        .previews
+                        .panes
                         .iter_mut()
-                        .find(|p| p.path == path)
+                        .find(|p| p.id == id)
                     {
                         if resize {
                             card.rect[2] = (card.rect[2] + d[0]).max(240.);
@@ -2459,9 +2382,9 @@ impl AppWindow {
                             card.rect[1] += d[1];
                         }
                     }
-                    this.solve_layout(Some(&path),None,cx);
+                    this.solve_layout(Some(&id),None,cx);
                     this.animate_layout(window,cx);
-                    this.canvas_state.preview_drag = Some((path, resize, e.position));
+                    this.canvas_state.preview_drag = Some((id, resize, e.position));
                     this.canvas_changed(cx);
                     cx.notify();
                     return;
@@ -2515,8 +2438,7 @@ impl AppWindow {
                     let state = &mut this.canvas_state;
                     state.group = if state.selected.contains(&id) { state.selected.clone() } else { vec![id.clone()] };
                     for key in &state.group {
-                        if let Some(r) = state.doc.cards.iter_mut().find(|c| &c.key() == key).map(|c| &mut c.rect)
-                            .or_else(|| state.doc.previews.iter_mut().find(|p| &p.path == key).map(|p| &mut p.rect)) {
+                        if let Some(r) = state.doc.panes.iter_mut().find(|c| &c.id == key).map(|c| &mut c.rect) {
                             r[0] += d[0] / zoom;
                             r[1] += d[1] / zoom;
                         }
@@ -2572,8 +2494,8 @@ impl AppWindow {
             let id = space.space.clone();
             let menu_id = id.clone();
             let label = self.model.space(&id).map(|s| self.model.space_name(s, &home())).unwrap_or_default();
-            let inside: Vec<_> = shown_doc.cards.iter().filter(|c| c.sub.is_none() && c.space.as_ref() == Some(&id))
-                .map(|c| self.live.get(&c.terminal).unwrap_or(&Value::Null)).collect();
+            let inside: Vec<_> = shown_doc.panes.iter().filter(|c| c.terminal().is_some() && c.space.as_ref() == Some(&id))
+                .map(|c| self.live.get(&c.id).unwrap_or(&Value::Null)).collect();
             let working = inside.iter().filter(|r| canvas_agent(r) && r["status"] == "working").count();
             let blocked = inside.iter().any(|r| canvas_agent(r) && r["status"] == "blocked");
             let summary = match (inside.len(), working) {
@@ -2671,34 +2593,34 @@ impl AppWindow {
                     ),
             );
         }
-        for card in shown_doc.previews.iter().filter(|p| shown_doc.shows(p.space.as_ref())) {
+        for card in shown_doc.panes.iter().filter(|p| p.file().is_some() && shown_doc.shows(p.space.as_ref())) {
             if canvas::visible(camera, card.rect, viewport) {
-                if let Some((view, _)) = state.previews.get(&card.path) {
-                    area = area.child(self.preview_card(card, view, camera, cx));
+                if let Some((view, _)) = state.previews.get(card.file().unwrap()) {
+                    area = area.child(self.preview_card(card, card.file().unwrap(), view, camera, cx));
                 }
             }
         }
         let cards: HashMap<_, _> = shown_doc
-            .cards
+            .panes
             .iter()
             .filter(|card| {
-                card.sub.is_none() && shown_doc.shows(card.space.as_ref()) && canvas::view_allows(
+                card.terminal().is_some() && shown_doc.shows(card.space.as_ref()) && canvas::view_allows(
                     &state.doc.view,
                     self.live
-                        .get(&card.terminal)
+                        .get(&card.id)
                         .is_some_and(|r| canvas_agent(r)),
                 )
             })
             .map(|card| {
                 // An expanded cell has its own size, eased by the layout motion.
-                let size = card.size.map(|_| [card.rect[2].max(PILL_WIDTH), card.rect[3].max(canvas::HEADER)]).unwrap_or_else(|| state
+                let size = card.size().map(|_| [card.rect[2].max(PILL_WIDTH), card.rect[3].max(canvas::HEADER)]).unwrap_or_else(|| state
                     .pill_sizes
                     .borrow()
-                    .get(&card.terminal)
+                    .get(&card.id)
                     .map(|v| v.3)
                     .unwrap_or([240., 36.]));
                 (
-                    card.terminal.as_str(),
+                    card.id.as_str(),
                     (card, [card.rect[0], card.rect[1], size[0], size[1]]),
                 )
             })
@@ -2714,9 +2636,9 @@ impl AppWindow {
             .collect();
         let mut sub_pills = Vec::new();
         if state.doc.view != canvas::View::Terminals {
-            for card in state.doc.cards.iter().filter(|c| c.sub.is_some() && state.doc.shows(c.space.as_ref())) {
-                let Some(parent) = card.parent.as_ref() else { continue };
-                let Some(sub) = state.subs.get(parent).into_iter().flatten().find(|s| Some(&s.id) == card.sub.as_ref()) else { continue };
+            for card in state.doc.panes.iter().filter(|c| matches!(c.kind, canvas::Kind::Sub { .. }) && state.doc.shows(c.space.as_ref())) {
+                let canvas::Kind::Sub { parent, sub: sub_id } = &card.kind else { continue };
+                let Some(sub) = state.subs.get(parent).into_iter().flatten().find(|s| &s.id == sub_id) else { continue };
                 if canvas::visible(camera, card.rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), card.clone())); }
             }
         }
@@ -2724,7 +2646,7 @@ impl AppWindow {
         let mut pills = Vec::new();
         for (parent, sub, card) in sub_pills {
             let rect = card.rect;
-            let key = card.key();
+            let key = card.id.clone();
             let [x, y] = camera.to_screen([rect[0], rect[1]]);
             let z = camera.zoom;
             let (icon, tint) = program_icon(&json!({"program":sub.program}));
@@ -2756,7 +2678,7 @@ impl AppWindow {
         let mut shown = shown;
         shown.sort_by_key(|c| c.z);
         for card in shown {
-            let addr = card.terminal.clone();
+            let addr = card.id.clone();
             let drag_addr = addr.clone();
             let rec = self.live.get(&addr).unwrap_or(&Value::Null);
             let agent = canvas_agent(rec);
@@ -2764,7 +2686,7 @@ impl AppWindow {
             let [x, y] = camera.to_screen([card.rect[0], card.rect[1]]);
             let z = camera.zoom;
             // An expanded cell is a pill (its header) over a terminal; it keeps its world size at every zoom.
-            let expanded = card.size.is_some();
+            let expanded = card.size().is_some();
             let [cw, ch] = [card.rect[2], card.rect[3]];
             let is_synced = synced.contains(&addr);
             let frame_color = c(if is_synced { "accent" } else if state.selected.contains(&addr) { "ring" } else { "border" });
@@ -2890,15 +2812,15 @@ impl AppWindow {
                 continue;
             }
             // The body: the terminal, or a flat stand-in when too far out to read. It draws live at every zoom frame; its PTY grid waits for `settled`.
-            let slot = cell_slot(&card.terminal);
+            let slot = cell_slot(&card.id);
             // The entered cell always draws live: its terminal holds the keyboard, Cmd+Esc included.
-            let entered = !state.mode && state.selected.last() == Some(&card.terminal);
+            let entered = !state.mode && state.selected.last() == Some(&card.id);
             let live = self.terms.get(&slot).filter(|_| entered || z >= canvas::EXPANDED_MIN_ZOOM);
             let body_size = size(px(card.rect[2] - 2.), px(card.rect[3] - canvas::HEADER - 2.));
             // A tile squeezed below readable size shows who it is instead, and its program keeps its grid.
             let compact = state.tile.is_some() && !entered && (cw < canvas::TILE_COMPACT[0] || ch < canvas::TILE_COMPACT[1]);
             if let Some(t) = self.terms.get(&slot) {
-                let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.terminal);
+                let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.id);
                 // The grid follows the cell only once the zoom rests, else a pinch resizes the program every frame.
                 let settled = !resizing && !compact && self.camera_rested();
                 t.view.update(cx, |v, cx| {
@@ -2907,9 +2829,9 @@ impl AppWindow {
                     v.set_scale(z, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
                 });
             }
-            let (select_addr, resize_addr, mode_addr) = (card.terminal.clone(), card.terminal.clone(), card.terminal.clone());
+            let (select_addr, resize_addr, mode_addr) = (card.id.clone(), card.id.clone(), card.id.clone());
             let body = div()
-                .id(SharedString::from(format!("canvas-body-{}", card.terminal)))
+                .id(SharedString::from(format!("canvas-body-{}", card.id)))
                 .flex_1()
                 .min_h_0()
                 .w_full()
@@ -2957,8 +2879,8 @@ impl AppWindow {
                     None => div().size_full().bg(crate::terminal::hsla(crate::vt::theme().bg)).into_any_element(),
                 });
             // Eight resize zones over the edges and corners of an expanded cell; selected cells show handles.
-            let show = state.selected.contains(&card.terminal);
-            let zones: Vec<_> = if card.size.is_none() { vec![] } else {
+            let show = state.selected.contains(&card.id);
+            let zones: Vec<_> = if card.size().is_none() { vec![] } else {
                 [(-1i8, -1i8), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].into_iter().map(|zone| {
                     let addr = resize_addr.clone();
                     let (edge, corner) = ((6. * z).max(4.), (12. * z).max(8.));
@@ -2969,7 +2891,7 @@ impl AppWindow {
                         (a, b) if a == b => CursorStyle::ResizeUpLeftDownRight,
                         _ => CursorStyle::ResizeUpRightDownLeft,
                     };
-                    let d = div().id(SharedString::from(format!("canvas-resize-{}-{}-{}", card.terminal, zone.0, zone.1)))
+                    let d = div().id(SharedString::from(format!("canvas-resize-{}-{}-{}", card.id, zone.0, zone.1)))
                         .absolute().cursor(cursor).flex().items_center().justify_center();
                     let d = match zone.0 { -1 => d.left_0().w(thick(zone.1)), 1 => d.right_0().w(thick(zone.1)), _ => d.left(px(corner)).right(px(corner)) };
                     let d = match zone.1 { -1 => d.top_0().h(thick(zone.0)), 1 => d.bottom_0().h(thick(zone.0)), _ => d.top(px(corner)).bottom(px(corner)) };
@@ -2987,7 +2909,7 @@ impl AppWindow {
                 }).collect()
             };
             pills.push((card.z, div()
-                .id(SharedString::from(format!("canvas-cell-{}", card.terminal)))
+                .id(SharedString::from(format!("canvas-cell-{}", card.id)))
                 .absolute()
                 .left(px(x))
                 .top(px(y))
@@ -3016,9 +2938,7 @@ impl AppWindow {
                 .w(px((a[0] - b[0]).abs())).h(px((a[1] - b[1]).abs()))
                 .border_1().border_color(c("ring")).bg(c("ring").opacity(0.08)));
         }
-        if let Some(keys) = &state.actions {
-            area = area.children(self.action_strips(shown_doc, keys, cx));
-        }
+        area = area.children(self.helper_bars(shown_doc, cx));
         // The bar's controls opt out of window dragging.
         let control = || div().flex().items_center().gap(px(4.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         let home_tab = div().id("canvas-home").group("canvas-home").role(gpui::Role::Tab).aria_label("Home").aria_selected(state.doc.room.is_none()).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
@@ -3761,32 +3681,32 @@ mod settings_tests {
         view.update_in(cx, |this, window, cx| {
             this.person.canvas_push = settings::CanvasPush::Drop;
             for resize in [false, true] {
-                this.canvas_state.doc.cards = serde_json::from_value(json!([
-                    {"terminal":"t1","rect":[0,0,200,100],"z":0,"size":[200,100]},
-                    {"terminal":"t2","rect":[400,0,200,100],"z":1,"size":[200,100]}
+                this.canvas_state.doc.panes = serde_json::from_value(json!([
+                    {"id":"t1","kind":"terminal","props":{"size":[200,100]},"rect":[0,0,200,100],"z":0},
+                    {"id":"t2","kind":"terminal","props":{"size":[200,100]},"rect":[400,0,200,100],"z":1}
                 ])).unwrap();
                 this.begin_layout();
                 if resize {
                     this.canvas_state.cell_resize = Some(("t1".into(), point(px(0.),px(0.))));
-                    this.canvas_state.doc.cards[0].size = Some([500.,100.]);
+                    *this.canvas_state.doc.panes[0].size_mut().unwrap() = Some([500.,100.]);
                 } else {
                     this.canvas_state.drag = Some((Some("t1".into()), point(px(0.),px(0.))));
-                    this.canvas_state.doc.cards[0].rect[0] = 400.;
+                    this.canvas_state.doc.panes[0].rect[0] = 400.;
                 }
-                let neighbour = this.canvas_state.doc.cards[1].rect;
+                let neighbour = this.canvas_state.doc.panes[1].rect;
                 this.solve_layout(Some("t1"), None, cx);
-                assert_eq!(this.canvas_state.doc.cards[1].rect, neighbour);
+                assert_eq!(this.canvas_state.doc.panes[1].rect, neighbour);
                 this.end_canvas_drag(cx);
-                assert_ne!(this.canvas_state.doc.cards[1].rect, neighbour);
+                assert_ne!(this.canvas_state.doc.panes[1].rect, neighbour);
                 assert!(this.canvas_state.pending_layout.is_none());
             }
             // A click expansion has no active drag, so release solves immediately.
-            this.canvas_state.doc.cards[0].size = None;
+            *this.canvas_state.doc.panes[0].size_mut().unwrap() = None;
             this.live.insert("t1".into(), json!({}));
             this.person.terminal_size = [140,45];
             this.set_expanded("t1", true, window, cx);
             let body = crate::terminal::size_of_grid(140,45,window);
-            assert_eq!(this.canvas_state.doc.cards[0].size, Some([f32::from(body.width)+2., f32::from(body.height)+canvas::HEADER+2.]));
+            assert_eq!(this.canvas_state.doc.panes[0].size(), Some([f32::from(body.width)+2., f32::from(body.height)+canvas::HEADER+2.]));
             assert!(this.canvas_state.pending_layout.is_none());
         });
     }
@@ -3806,58 +3726,58 @@ mod tile_tests {
         if !running_alone(TEST) { return; }
         let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
         view.update_in(cx, |this, window, cx| {
-            this.canvas_state.doc.cards = serde_json::from_value(json!([
-                {"terminal":"t1","rect":[0,0,600,400],"z":0,"size":[600,400]},
-                {"terminal":"t2","rect":[700,0,600,400],"z":1,"size":[600,400]},
-                {"terminal":"t3","rect":[0,500,600,400],"z":2,"size":[600,400]},
-                {"terminal":"t4","rect":[2000,2000,220,36],"z":3}
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"t1","kind":"terminal","props":{"size":[600,400]},"rect":[0,0,600,400],"z":0},
+                {"id":"t2","kind":"terminal","props":{"size":[600,400]},"rect":[700,0,600,400],"z":1},
+                {"id":"t3","kind":"terminal","props":{"size":[600,400]},"rect":[0,500,600,400],"z":2},
+                {"id":"t4","kind":"terminal","props":{},"rect":[2000,2000,220,36],"z":3}
             ])).unwrap();
             for t in ["t1", "t2", "t3", "t4"] { this.live.insert(t.into(), json!({})); }
-            let before: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| (c.rect, c.size)).collect();
+            let before: Vec<_> = this.canvas_state.doc.panes.iter().map(|c| (c.rect, c.size())).collect();
             this.person.tile_focus_grows = true;
             this.canvas_state.doc.camera = crate::canvas::Camera { x: 300., y: -40., zoom: 0.5 };
             this.canvas_state.selected = vec!["t2".into()];
             this.tile_canvas(true, window, cx);
             this.canvas_state.settle_for_test();
-            let cards = &this.canvas_state.doc.cards;
+            let cards = &this.canvas_state.doc.panes;
             let area = |i: usize| cards[i].rect[2] * cards[i].rect[3];
             assert!(this.canvas_state.tile.is_some());
             assert!(area(1) > area(0) && area(1) > area(2), "the selected tile is the largest: {:?}", cards.iter().map(|c| c.rect).collect::<Vec<_>>());
-            assert!(cards.iter().take(3).all(|c| c.size == Some([c.rect[2], c.rect[3]])), "tiles stay expanded at their tile size");
+            assert!(cards.iter().take(3).all(|c| c.size() == Some([c.rect[2], c.rect[3]])), "tiles stay expanded at their tile size");
             assert!(cards.iter().take(3).all(|c| c.rect[1] + c.rect[3] <= cards[3].rect[1]), "the pill lines up below the tiles");
             // Selecting another tile makes it the large one.
             this.canvas_state.selected = vec!["t1".into()];
             this.tile_canvas(false, window, cx);
             this.canvas_state.settle_for_test();
-            let cards = &this.canvas_state.doc.cards;
+            let cards = &this.canvas_state.doc.panes;
             assert!(cards[0].rect[2] * cards[0].rect[3] > cards[1].rect[2] * cards[1].rect[3]);
             assert!(cards[0].rect[0] < cards[1].rect[0] && cards[0].rect[1] < cards[2].rect[1], "the active tile grows in its own slot");
             // Jittered rects (a click that nudged tiles) do not reorder them.
-            let this_cards = &mut this.canvas_state.doc.cards;
+            let this_cards = &mut this.canvas_state.doc.panes;
             this_cards[0].rect[1] += 30.;
             this_cards[1].rect[1] -= 30.;
             this.tile_canvas(false, window, cx);
             this.canvas_state.settle_for_test();
-            let cards = &this.canvas_state.doc.cards;
+            let cards = &this.canvas_state.doc.panes;
             assert!(cards[0].rect[0] < cards[1].rect[0] && cards[0].rect[1] == cards[1].rect[1], "same slots after jitter");
             // Off: everything is back where it was.
             this.tile_canvas(true, window, cx);
             this.canvas_state.settle_for_test();
             assert!(this.canvas_state.tile.is_none());
             assert_eq!(this.canvas_state.motion_target_for_test(), crate::canvas::Camera { x: 300., y: -40., zoom: 0.5 }, "the camera goes back too");
-            let after: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| (c.rect, c.size)).collect();
+            let after: Vec<_> = this.canvas_state.doc.panes.iter().map(|c| (c.rect, c.size())).collect();
             assert_eq!(after, before);
             // Two selected cells tile alone: the others stay put, under them, and everything returns on exit.
             this.canvas_state.selected = vec!["t1".into(), "t3".into()];
             this.tile_canvas(true, window, cx);
             this.canvas_state.settle_for_test();
-            let cards = &this.canvas_state.doc.cards;
+            let cards = &this.canvas_state.doc.panes;
             assert_eq!((cards[1].rect, cards[3].rect), (before[1].0, before[3].0), "non-members keep their place");
             assert!(cards[0].rect != before[0].0 && cards[2].rect != before[2].0, "members tile");
             assert!(cards[0].z > cards[1].z && cards[2].z > cards[1].z, "members draw above the rest");
             this.tile_canvas(true, window, cx);
             this.canvas_state.settle_for_test();
-            let after: Vec<_> = this.canvas_state.doc.cards.iter().map(|c| (c.rect, c.size)).collect();
+            let after: Vec<_> = this.canvas_state.doc.panes.iter().map(|c| (c.rect, c.size())).collect();
             assert_eq!(after, before);
         });
     }
@@ -3917,11 +3837,11 @@ mod pane_action_tests {
         if !running_alone(TARGETS) { return; }
         let (view, cx) = open_window(cx, "pane-targets", "", json!({"id":"root","type":"canvas"}));
         view.update_in(cx, |this, window, _| {
-            this.canvas_state.doc.cards = serde_json::from_value(json!([
-                {"terminal":"t1","rect":[0,0,220,36],"z":0},
-                {"terminal":"t2","space":"other","rect":[0,0,220,36],"z":1}
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"t1","kind":"terminal","props":{},"rect":[0,0,220,36],"z":0},
+                {"id":"t2","kind":"terminal","props":{},"space":"other","rect":[0,0,220,36],"z":1}
             ])).unwrap();
-            this.canvas_state.selected = vec!["t1".into(), "t2".into(), "preview.md".into()];
+            this.canvas_state.selected = vec!["t1".into(), "t2".into(), "p1".into()];
             assert_eq!(this.targets(window), ["t1"]);
             this.canvas_state.doc.room = Some("other".into());
             assert_eq!(this.targets(window), ["t2"]);
@@ -3954,7 +3874,7 @@ mod pane_action_tests {
             // Deliver the core listing after the requested terminations, without a real core.
             let remaining: Vec<_> = this.live.iter().filter(|(key, _)| !this.closing_terminals.contains_key(*key)).map(|(_, rec)| rec.clone()).collect();
             this.terminals_listed(json!({"terminals":remaining}), window, cx);
-            assert!(this.canvas_state.doc.cards.is_empty(), "all three selected cards must be gone");
+            assert!(this.canvas_state.doc.panes.is_empty(), "all three selected cards must be gone");
         });
     }
 

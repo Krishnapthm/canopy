@@ -1091,7 +1091,7 @@ outside any space; double-click a card, or select it and press Enter, to go insi
 space's cells and previews are drawn and they fill the canvas, with no frame. The toolbar shows
 Home / space; `canvas.home` goes back and `canvas.space {direction: "next" | "prev" | "1".."9"}`
 goes into another space. The app reopens in the space it closed in, and each place keeps its own
-camera (`cameras`). Each card and preview records its `space`.
+camera (`cameras`). Each pane records its `space`.
 
 Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor.
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.

@@ -27,6 +27,6 @@ Start marks working, Stop marks done, and restarting the same id marks
 working again. Names prefer the transcript sidecar's description, then the
 stop payload's description, then the agent type. Names are plain text,
 limited to 256 characters. Label events and folder changes refresh them.
-`canvas.json` stores each cell's `sub`, `parent`, position and stacking
-order; existing terminal cards still load. Transcript changes use the
-existing folder watcher and text preview, with agent markup shown literally.
+`canvas.json` stores each sub-agent cell as a pane of kind `sub` with
+`props.parent` and `props.sub`, position and stacking order; existing terminal
+cards still load. Transcript changes use the existing folder watcher and text preview, with agent markup shown literally.

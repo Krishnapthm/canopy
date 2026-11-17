@@ -851,8 +851,7 @@ impl AppWindow {
             self.watched.settings = mtime(&settings::path());
             self.apply_look(window, cx);
             if old_gap != self.person.canvas_gap && self.listed_once {
-                let pins: Vec<_> = self.canvas_state.doc.cards.iter().map(|c| c.key())
-                    .chain(self.canvas_state.doc.previews.iter().map(|p| p.path.clone())).collect();
+                let pins: Vec<_> = self.canvas_state.doc.panes.iter().map(|c| c.id.clone()).collect();
                 for pin in pins { self.solve_layout(Some(&pin), None, cx); }
                 let spaces: Vec<_> = self.canvas_state.doc.spaces.iter().map(|s| s.space.clone()).collect();
                 for space in spaces { self.solve_layout(None, Some(&space), cx); }
@@ -1143,8 +1142,8 @@ impl AppWindow {
     fn visible(&self) -> (Vec<(String, String)>, Vec<(String, Instance)>) {
         let mut terms = Vec::new();
         if self.has_canvas() {
-            for card in self.canvas_state.doc.cards.iter().filter(|c| c.size.is_some() && self.live.contains_key(&c.terminal)) {
-                terms.push((canvas_view::cell_slot(&card.terminal), card.terminal.clone()));
+            for card in self.canvas_state.doc.panes.iter().filter(|c| c.size().is_some() && self.live.contains_key(&c.id)) {
+                terms.push((canvas_view::cell_slot(&card.id), card.id.clone()));
             }
         }
         let mut mods = self.panel_mods();
@@ -2019,7 +2018,7 @@ impl AppWindow {
             TerminalEvent::TitleChanged => this.publish(cx),
             TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
             // A canvas cell gets its own menu; tab layouts keep the pane menu.
-            TerminalEvent::ContextMenu(at) if this.has_canvas() && this.canvas_state.doc.cards.iter().any(|c| c.terminal == addr) => {
+            TerminalEvent::ContextMenu(at) if this.has_canvas() && this.canvas_state.doc.panes.iter().any(|c| c.id == addr) => {
                 this.open_card_menu(&addr, *at, window, cx)
             }
             TerminalEvent::ContextMenu(at) => {
@@ -5674,9 +5673,9 @@ export default class Probe extends View {
             this.model.space_mut("root").unwrap().tabs.push(crate::model::Tab::new("tab2", "", "pane2", "t2"));
             this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
             this.live.insert("t2".into(), json!({"state":"live", "pid":2}));
-            this.canvas_state.doc.cards = serde_json::from_value(json!([
-                {"terminal":"t1", "rect":[100,200,220,36], "z":0},
-                {"terminal":"t2", "rect":[500,200,220,36], "z":1}
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"t1","kind":"terminal","props":{}, "rect":[100,200,220,36], "z":0},
+                {"id":"t2","kind":"terminal","props":{}, "rect":[500,200,220,36], "z":1}
             ])).unwrap();
             this.sync(window, cx);
             cx.notify();
@@ -5687,7 +5686,7 @@ export default class Probe extends View {
         let none = Modifiers::default();
         let state = |cx: &mut gpui::VisualTestContext| view.update(cx, |this, _| (
             this.canvas_state.selected.clone(), this.canvas_state.mode,
-            this.canvas_state.doc.cards.iter().map(|c| [c.rect[0], c.rect[1]]).collect::<Vec<_>>()));
+            this.canvas_state.doc.panes.iter().map(|c| [c.rect[0], c.rect[1]]).collect::<Vec<_>>()));
 
         cx.simulate_mouse_down(at(50., 150.), MouseButton::Left, none);
         cx.simulate_mouse_move(at(800., 300.), MouseButton::Left, none);
@@ -5714,7 +5713,7 @@ export default class Probe extends View {
         let (selected, mode, _) = state(cx);
         assert_eq!(selected, ["t1"]);
         assert!(!mode, "double-click enters the cell");
-        assert!(view.update(cx, |this, _| this.canvas_state.doc.cards[0].size.is_some()), "entering expands it");
+        assert!(view.update(cx, |this, _| this.canvas_state.doc.panes[0].size().is_some()), "entering expands it");
 
         cx.simulate_click(at(60., 700.), none);
         cx.run_until_parked();
@@ -5761,9 +5760,9 @@ export default class Probe extends View {
             this.model.space_mut("root").unwrap().tabs.push(crate::model::Tab::new("tab2", "", "pane2", "t2"));
             this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
             this.live.insert("t2".into(), json!({"state":"live", "pid":2}));
-            this.canvas_state.doc.cards = serde_json::from_value(json!([
-                {"terminal":"t1", "rect":[0,0,220,36], "z":0},
-                {"terminal":"t2", "rect":[500,0,220,36], "z":1}
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"t1","kind":"terminal","props":{}, "rect":[0,0,220,36], "z":0},
+                {"id":"t2","kind":"terminal","props":{}, "rect":[500,0,220,36], "z":1}
             ])).unwrap();
             crate::keys::install(crate::keys::parse(r#"{"global":{"l":"canvas.close"},"canvas-mode":{"l":"canvas.go:right","escape":"canvas.leave"}}"#).unwrap(), cx);
             this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
@@ -5776,13 +5775,13 @@ export default class Probe extends View {
         cx.update(|window, cx| view.update(cx, |this, cx| {
             assert_eq!(this.canvas_state.selected, ["t2"]);
             assert!(!this.overlays.iter().any(|o| o.kind.modal_keys()), "global close did not take the mode key");
-            assert!(this.canvas_state.doc.cards.iter().all(|c| c.size.is_none()));
+            assert!(this.canvas_state.doc.panes.iter().all(|c| c.size().is_none()));
             this.canvas_keyboard("canvas.nudge", &json!({"direction":"right"}), window, cx);
-            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 500. + this.person.canvas_gap);
+            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 500. + this.person.canvas_gap);
             this.undo_canvas(window, cx);
-            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 500.);
+            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 500.);
             this.undo_canvas(window, cx);
-            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 500., "only one undo step");
+            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 500., "only one undo step");
             this.canvas_keyboard("canvas.connect", &json!({}), window, cx);
             this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), window, cx);
             this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
@@ -5855,16 +5854,16 @@ export default class Probe extends View {
         let (view, cx) = open_window(cx, "probe", "", json!({"id":"root", "type":"row", "children":[]}));
         view.update_in(cx, |this, window, cx| {
             this.listed_once = true;
-            this.canvas_state.doc.cards = serde_json::from_value(json!([
-                {"terminal":"t1","rect":[0,0,200,100],"z":0,"size":[200,100]},
-                {"terminal":"t2","rect":[224,0,200,100],"z":1,"size":[200,100]}
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"t1","kind":"terminal","props":{"size":[200,100]},"rect":[0,0,200,100],"z":0},
+                {"id":"t2","kind":"terminal","props":{"size":[200,100]},"rect":[224,0,200,100],"z":1}
             ])).unwrap();
             let settings = crate::settings::path();
             std::fs::write(&settings, r#"{"canvas_gap":60,"space_fill":0.08,"canvas_push":"drop","terminal_size":[140,45]}"#).unwrap();
             this.watched.settings = None;
             this.reload_config(window, cx);
             assert_eq!(this.person.canvas_gap, 60.);
-            assert_eq!(this.canvas_state.doc.cards[1].rect[0], 260.);
+            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 260.);
             assert_eq!(crate::settings::get().canvas_gap, 60.);
             assert_eq!(crate::settings::get().space_fill, 0.08);
             assert_eq!(crate::settings::get().canvas_push, crate::settings::CanvasPush::Drop);
