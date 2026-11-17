@@ -17,7 +17,9 @@ Read AGENTS.local.md too when present.
 - No push, repo creation, publishing or release without Krishna's instruction.
 - No em dashes. Commit as type(scope): description, lowercase, imperative,
   without agent attribution.
-- Never run paid agent sessions without asking. Never edit real harness config.
+- Never run paid agent sessions without asking. While developing, never edit
+  real harness config (the app's own setup, below, is tested only in an
+  isolated home).
 - Verify harness behavior against the installed CLI, not memory.
 - Use Ponytail full. Review each phase with ponytail-review, fix findings, and
   report ponytail-debt. Use ponytail-audit after phase 2.
@@ -50,6 +52,25 @@ Read AGENTS.local.md too when present.
   docs/canopy/harness-notes/.
 - Every dependency is a cost: say what it replaces, its size and its license
   (MIT, Apache-2.0, BSD, ISC or public domain) before adding it.
+
+## How agents learn Canopy
+
+What the app itself may write so any agent knows to read `canopy --skill`:
+
+- **Our skill, automatic.** Installing or updating Canopy's skill in each
+  installed harness's global skills folder happens without asking. Canopy
+  writes only its own skill folder, never other entries, and removes it on
+  uninstall. Verify each harness's skills path against the installed CLI.
+- **Project instruction files, only with explicit permission.** Canopy asks
+  before appending a short marked block (a few lines pointing to
+  `canopy --skill`) to the project's `AGENTS.md` or `CLAUDE.md`. A small
+  script picks the file: if `CLAUDE.md` imports `AGENTS.md` (an `@AGENTS.md`
+  line), append to `AGENTS.md` only; if only one exists, use it; if neither,
+  offer to create `AGENTS.md`. The block has begin and end markers so
+  updates replace it and removal is clean. Never append twice.
+- **Global instruction files, never.** Canopy does not write the person's
+  global `AGENTS.md` or `CLAUDE.md`. It offers the same block to copy and
+  paste; using it is entirely the person's choice.
 
 ## Panes and floating helpers
 

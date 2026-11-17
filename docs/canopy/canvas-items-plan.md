@@ -42,7 +42,7 @@ Scope is locked: P1 to P3, macOS only.
 ```text
 Wed AM   S1 spike gpui-pdf ─┐   S2 spike gpui-webview + react-grab ─┐   P1a pane model (core)
 Wed PM                      └──── P2 viewers ◀── P1a ──▶ P3 browser ┘   P1b commands, CLI, wire, quote
-Thu AM   P1c toolbar mod + note mod, P2 and P3 finish
+Thu AM   P1c toolbar mod + note mod, P1d teach agents, P2 and P3 finish
 Thu PM   integration on main, review, docs, demo recording dry run
 Fri      Krishna writes and posts
 ```
@@ -111,6 +111,33 @@ Spikes S1 and S2 are throwaway branches with a written result, not PRs.
   quoting a text selection lists the wired agent first and pastes without
   Enter.
 
+### P1d teach agents Canopy (core, rules in AGENTS.md "How agents learn Canopy")
+
+Today only Claude Code and Codex learn Canopy, through a launch note in
+`defaults/programs.json` (`--append-system-prompt`, `developer_instructions`)
+and Claude's `canopy hook wire`. Other installed CLIs get nothing.
+
+- Launch note and `src/SKILL.md` gain panes: list, read, new, close, quote
+  format, untrusted content. The hook reports wired panes too.
+- Skill install and update, automatic: write Canopy's skill into each
+  installed harness's global skills folder (paths verified per CLI version,
+  written to `docs/canopy/harness-notes/`). Only our own folder.
+- Project setup, with permission: a small script reads the project root.
+  If `CLAUDE.md` has an `@AGENTS.md` import line, the target is
+  `AGENTS.md`; else whichever of the two exists; else offer to create
+  `AGENTS.md`. Canopy shows the block and the target file and appends only
+  on "Yes". Marked block, idempotent, removable.
+- Global files: a "Copy instructions" button with the same block. Canopy
+  never writes the person's global `AGENTS.md` or `CLAUDE.md`.
+- Tests: target picking on fixtures (import present, only `CLAUDE.md`,
+  only `AGENTS.md`, neither, block already present), idempotent append.
+- Verify: on a fresh isolated home, the skill appears in each installed
+  harness's skills folder; opening a project shows the permission prompt
+  naming the exact file; "Yes" appends once, a second run changes nothing;
+  "No" leaves files byte-identical; the copy button puts the block on the
+  clipboard; a non-Claude agent (for example OpenCode) can find and use
+  `canopy pane read` after setup.
+
 ### P1c toolbar and note (mods)
 
 - `defaults/mods/toolbar`: floating bottom toolbar: select, hand, terminal,
@@ -159,7 +186,7 @@ Spikes S1 and S2 are throwaway branches with a written result, not PRs.
 
 ### Integration (Thu PM)
 
-- Merge order: P1a, P1b, P1c, then P2 and P3, each merged by Krishna.
+- Merge order: P1a, P1b, P1c, P1d, then P2 and P3, each merged by Krishna.
 - `ponytail-audit` after P1, `ponytail-debt` report at the end.
 - Demo dry run in the isolated dev window (`scripts/dev`), then
   `scripts/dev-stop`.
