@@ -7,17 +7,17 @@ published privately at https://claude.ai/artifact/FpJQpEjDHMAS57aBe1e4QV
 resting vs live, fig 5 architecture, fig 6 merges and phases, fig 7 the
 React question).
 
-The next session's job is web research: confirm or replace each candidate in
-section 6, answer the questions in section 10, and decide the React question
-in section 7.
+Research is done (section 6). "Tabletop" and "items" are working names; the
+product name and the user-facing word for canvas items are still open. Code
+and CLI use `item`, so a later rename touches only UI text.
 
 ## 1. Status this proposal assumes
 
 - `main` at `bcb3def` (0.1.0 released).
-- PR #9 `chore/rebrand-leftovers`: CI green, mergeable. Pending: Krishna's
-  README rewording, and the CC-BY-SA win98 font decision.
-- PR #10 `refactor/wire-lean-hc-adapter`: CI green, mergeable. Against #9 it
-  conflicts in `README.md` only (checked with `git merge-tree`).
+- PR #9 `chore/rebrand-leftovers`: merge first. The README and docs rebrand
+  waits for the next version; win98 fonts kept as a recorded exception.
+- PR #10 `refactor/wire-lean-hc-adapter`: merge second, after a rebase that
+  resolves `README.md` (its only conflict with #9).
 - Reddit post deadline: Friday 2026-11-20. What ships by then is decided
   after research (section 9).
 
@@ -56,8 +56,8 @@ browsers, PDFs, images, videos, simulators and anything a mod adds.
   ico, pnm. GPUI `surface()` draws a macOS `CVPixelBuffer` inside the scene
   (`vendor/gpui-pre/src/elements/surface.rs`), so video frames can zoom and
   clip like any element. `image` and `resvg` crates are already in
-  `Cargo.lock`. gpui-kit has no web view ("It is not an Electron or a
-  Tauri"); its `a11y.rs` only names `Video` and `WebView` as roles.
+  `Cargo.lock`. Our vendored gpui-kit 0.7.1 omits upstream's `crates/webview`
+  (see section 6).
 - **Mods.** gpui-kit JS, placed by `mod.json` `place` (`right`, `left`, `top`,
   `bottom`, `none`), floats via layouts. No canvas placement yet.
   `defaults/AGENTS.md` says mods cannot use HTML or a web view.
@@ -197,95 +197,57 @@ ask upstream for a message event first). No new protocol is needed: wire
 keys already accept any string, and agents reach items through the existing
 control socket.
 
-## 6. Candidates per kind (to verify in research)
+## 6. Stack, verified 2026-11-17
 
-Licence rule: MIT, Apache-2.0, BSD, ISC or public domain. Anything else
-needs Krishna's explicit exception. "Verify" means do not trust this table.
+Researched by nine Codex agents with web search, then the picks below were
+checked by hand against crates.io, npm, GitHub and our `vendor/`. Nothing was
+installed, built or measured. Licence rule: MIT, Apache-2.0, BSD, ISC or
+public domain.
 
-### PDF (with highlighting)
+| Kind | Pick | Licence, version | Why | Not chosen |
+|---|---|---|---|---|
+| PDF | `gpui-pdf` (built on `hayro`) | MIT, 0.7.0 (2026-10-29); hayro MIT/Apache 0.9.0 | Already a GPUI view on `gpui-pre ^0.3` (we pin 0.3.8; its lockfile used 0.3.9). Pure Rust, no native binary. Page virtualized. `markup` feature: drag-select returns `{quote, occurrence, rects}`, exactly the quote we need. `search` feature. | `pdfium-render` 0.9.5 (fallback; ships a native binary per OS), pdf.js (needs web items), PDFKit (native view, macOS only), MuPDF/Poppler (AGPL/GPL) |
+| Highlights | Sidecar in `canvas.json` item props, shaped like W3C Web Annotation `TextQuoteSelector` (`quote` + `occurrence`) | spec | Never edits the user's PDF; survives re-render | in-file annotations |
+| Image | GPUI `img()` + `image` crate crop | MIT/Apache, 0.25 | Already in the tree. HEIC only via macOS ImageIO later; AVIF needs `image`'s `avif-native` | libheif (LGPL) |
+| Browser | `gpui-webview` from gpui-kit **v0.7.1**, the same version we vendor, on `lb-wry` 0.53 (Longbridge's wry fork) | Apache-2.0 | Our `vendor/gpui-kit/Cargo.toml` already names `crates/webview` 0.7.1; the crate is one 6.6 KB `lib.rs`. Vendor it, no GPUI version change | gpui-webview 0.10 (needs gpui-pre 0.3.12 and GPUI Fast), Servo 0.8.0 (MPL-2.0, API incomplete), CEF (very large), Blitz (no JS), Ladybird (not embeddable) |
+| Component picker | `react-grab` injected as a wry initialization script, bundled (never fetched) | MIT, 0.2.0 (2026-08-16) | Ships `dist/index.global.js`; React 19 source via `_debugStack`. Runs before page scripts, so no change to the user's app (UNVERIFIED in a web view) | LocatorJS, click-to-component, code-inspector (need build plugins), bippy alone (no picker) |
+| Picker fallback | Our DOM script: selector, text, box, screenshot | ours | Works for any framework | |
+| Video (macOS) | `objc2-av-foundation` `AVPlayerItemVideoOutput` → `CVPixelBuffer` → GPUI `surface()` | Zlib/Apache/MIT, 0.3.2 | Zero-copy, zooms like any element, audio from AVPlayer | GStreamer (LGPL), FFmpeg (LGPL/GPL); no GPUI video crate exists |
+| iOS simulator | Snapshot: `xcrun simctl io screenshot`. Input and element tree: AXe if installed | AXe MIT, v2.0.4 (2026-11-12) | No private APIs in our code; AXe covers taps, typing, accessibility tree | idb (heavier install), private SimulatorKit IOSurface (breaks per Xcode). ScreenCaptureKit streaming later (needs Screen Recording permission) |
+| Android | scrcpy, later | Apache-2.0, v4.1 | Mature mirror and input | |
+| Agent reads | `canopy item read` CLI (section 4.3). Output wrapped as untrusted item content | ours | Every CLI can run a command. MCP tool later for clients that prefer it; hooks only as hints | MCP resources (uneven client support), ACP (per-agent adapters) |
 
-| Option | Licence | Notes to verify |
-|---|---|---|
-| `pdfium-render` + PDFium binary | MIT/Apache crate; PDFium BSD-3/Apache | Character boxes for highlight, search, page bitmaps. Binary size per OS, how to ship it |
-| `hayro` (pure Rust) | verify | Render quality, text extraction with positions, maturity |
-| pdf.js in a web item | Apache-2.0 | Text layer and selection for free. Depends on section 7 |
-| PDFKit (macOS) | system | Native highlight UI, but a native view and macOS only |
-| MuPDF, Poppler | AGPL, GPL | Excluded |
+### Facts that changed the plan
 
-Open: where highlights live (`canvas.json`, a sidecar, never inside the PDF?).
+- **gpui-kit has a web view.** The proposal said it did not. It was added
+  upstream; our vendored 0.7.1 subset just omits `crates/webview`. Its README:
+  experimental, renders on top of the GPUI window (covers GPUI elements under
+  it), macOS and Windows only. Section 4.6 resting/live already answers the
+  overlay problem: menus and the quote chip appear only while the card rests.
+- **gpui-pdf already does PDF selection-to-quote.** P2 PDF shrinks from
+  "pick a library and build a viewer" to "wrap `PdfView` as an item".
+- **Linux web view** needs X11 or XWayland (gpui-webview 0.10 path); 0.7.1 has
+  none. Linux browser items wait.
+- **Prior art names**: Figma objects/frames, Obsidian and Heptabase cards,
+  Kosmik items, Excalidraw elements, tldraw shapes. JSON Canvas (MIT) is a
+  possible import/export format later, not our model.
 
-### Image
+### Other modules worth shipping as mods later
 
-GPUI `img()` covers common formats. Region quote: drag a rectangle, crop
-with the `image` crate (already present). Verify HEIC and AVIF needs.
+`gpui-whiteboard` 0.5.2 (MIT crate; its source repo `packetThrower/zorite`
+is GPL-3.0, so use only the published crate and confirm with the author),
+gpui-kit `TextView` for Markdown and its table for CSV, Mermaid and
+Excalidraw (MIT, need web items).
 
-### Video
+## 7. The React question: decided
 
-| Option | Licence | Notes |
-|---|---|---|
-| AVFoundation → `CVPixelBuffer` → GPUI `surface()` (macOS) | system; `objc2-av-foundation` MIT/Apache/Zlib (verify) | Zero-copy, zoomable. Audio output, scrubbing |
-| Media Foundation (Windows), GStreamer (Linux) | system; GStreamer LGPL | LGPL is outside the list: exception or skip Linux video |
-| `<video>` in a web item | system codecs | Depends on section 7 |
-| FFmpeg, libmpv | LGPL/GPL | Excluded |
-
-### Browser
-
-| Option | Licence | Shape | Notes |
-|---|---|---|---|
-| `wry` | MIT/Apache | System web view (WKWebView, WebView2, WebKitGTK) as a native child view | Light. Needs resting/live. Linux embedding into a non-GTK window is a known pain: verify |
-| Servo | MPL-2.0 | Rust engine, embeddable | The "lightweight Rust browser" ask. Licence exception needed. Size, embedding API status, can it render to a texture |
-| CEF offscreen | BSD | Chromium renders into a buffer | Solves zoom and z-order (texture). Very large (verify size) |
-| Blitz (Dioxus) | MIT/Apache | HTML/CSS renderer, no JS | Not a browser. Maybe for static HTML items |
-| Ladybird | BSD-2 | Engine | Not embeddable yet (verify) |
-
-Privacy to verify per engine: no app-owned requests. No homepage, search
-suggestions or favicon services. Check WebView2 and WKWebView defaults
-(SmartScreen, Safe Browsing) and turn off what can be turned off.
-
-### Element and component picking
-
-An injected script reports the hovered element: selector, text, box, and for
-React the component name and source location. Candidates (verify licences
-and React 19 support): `bippy`, `react-grab`, LocatorJS,
-`click-to-component`, `code-inspector-plugin` (also Vue, Svelte), the React
-DevTools global hook. React 19 removed `_debugSource`; file:line needs
-`_debugStack` parsing or a dev bundler plugin. Research how the Codex app and
-Claude Code desktop do it.
-
-### iOS simulator (macOS)
-
-| Need | Candidates | Notes |
-|---|---|---|
-| Frames | ScreenCaptureKit on the Simulator window; idb `video-stream`; private SimulatorKit IOSurface | Screen recording permission; private APIs break between Xcode versions |
-| Input | idb (MIT), AXe (verify), private HID | User installs idb? |
-| Element info for quotes | idb `ui describe-point`, accessibility tree | |
-
-Research how Claude Code desktop's iOS simulator tool works.
-
-### Android (optional, same kind)
-
-scrcpy (Apache-2.0) mirrors and controls emulators and real devices.
-Emulator gRPC (Apache-2.0). Verify.
-
-### Other kinds worth researching (mods first)
-
-Notes and stickies (native), Markdown (existing TextView), diff (existing
-`changes` mod), CSV and tables (gpui-component table), Mermaid (MIT, web or
-native port?), Excalidraw (MIT, web), log tail, CI runs, database table.
-tldraw's licence needs a key: excluded.
-
-## 7. The React question
-
-| Option | What it means | For | Against |
-|---|---|---|---|
-| A. Native only (today) | Built-ins in Rust GPUI, mods in gpui-kit JS | Light, one look, everything zooms | Every viewer hand-built, no web ecosystem |
-| B. Hybrid web items | A `web` kind hosts any HTML/React page. Mods may ship `index.html`. A small bridge maps the item contract (`read`, `selection`, `verbs`) to `postMessage` | pdf.js, video, Excalidraw, Mermaid, shadcn UIs, any React the user knows | Native view zoom and z-order, memory per live item, bridge security, two toolkits to theme, changes the "no web view" mod rule |
-| C. Whole app in React (Tauri, Electron) | Rewrite the shell | One web stack | Contradicts the native pivot, terminals in GPUI, weight |
-| D. Defer | Ship A now; keep the contract toolkit-neutral so B slots in later | No rework either way | Some kinds wait |
-
-Current lean: D now, research B. B wins only if research shows: an
-acceptable memory cost per live web view, a snapshot API on each OS, a
-working answer for overlays above a live view, and Linux support. C is out.
+**D now, B narrowly later.** Friday ships native kinds plus one web-view kind
+(browser). Mods stay gpui-kit JS. No per-view memory numbers exist for
+WKWebView or WebView2 (only Linux WebKitGTK reports, about 56 MB per extra
+window in one app), so a general "mods ship HTML" surface waits until we
+measure our own. When B comes, follow the VS Code and Tauri pattern: CSP, a
+`postMessage` bridge exposing only the item contract, theme tokens injected
+as CSS variables.
 
 ## 8. Security, privacy, idle cost
 
@@ -303,24 +265,29 @@ working answer for overlays above a live view, and Linux support. C is out.
 
 ### Merges (now)
 
-1. Krishna finishes the README rewording on #9; decide the win98 fonts.
-2. Merge #9.
-3. Rebase #10 on main, resolve `README.md`, merge #10.
+1. Merge #9.
+2. Rebase #10 on main, resolve `README.md`, merge #10.
+3. Merge `main` into this branch.
 
 ### Phases
 
 | Phase | Scope | Size | Risk |
 |---|---|---|---|
 | P1 Foundation | Item model and migration, contract, `item.*` commands, wire keys, `canopy wire` and hook, generalized quote, toolbar mod, note as a mod kind | L | Low. Everything else waits on it |
-| P2 Viewers | Image with region quote, PDF with highlight | M | PDF library choice |
-| P3 Browser | Web item, resting/live, element and component picker | XL | Native view, Linux, privacy defaults |
-| P4 Video | macOS `surface()` path first | M | Audio, other OSes |
-| P5 Simulators | iOS (macOS), Android optional | L | Private APIs, permissions |
-| P6 Extensibility | Mod canvas kinds docs and examples; web items if B | M | Section 7 |
+| P2 Viewers | Image with region quote; PDF by wrapping `gpui-pdf` `PdfView` | S-M | gpui-pdf on `gpui-pre` 0.3.8 |
+| P3 Browser (macOS) | Vendor `gpui-webview` 0.7.1, resting/live, react-grab and DOM picker | L | Snapshot timing, privacy defaults |
+| P4 Video | macOS `surface()` path | M | Audio sync, buffer lifetime |
+| P5 Simulators | iOS snapshot via simctl, AXe input when installed; Android later | M | AXe across Xcode versions |
+| P6 Extensibility | Mod canvas kinds docs and examples | M | |
 
 P1 must land first. After it, P2 to P5 can run in parallel worktrees, each
-on its own branch, sharing one `CARGO_TARGET_DIR` (disk is tight). Friday
-scope is chosen after research, by risk: P1 plus whatever is proven.
+on its own branch, sharing one `CARGO_TARGET_DIR` (disk is tight).
+
+**Friday target (proposed):** P1, P2 and P3 on macOS. That is the post's
+story: an agent opens a PDF and a localhost page beside itself, and the
+person quotes a highlight or a React component into it. P4 and P5 ship
+after the post unless P1 to P3 land early. Day one builds gpui-pdf and
+gpui-webview against our GPUI to retire the two biggest risks first.
 
 ### Docs that travel with each phase
 
@@ -328,36 +295,19 @@ scope is chosen after research, by risk: P1 plus whatever is proven.
 `docs/security.md`, `defaults/AGENTS.md`, `src/SKILL.md`, the generated
 `.d.ts`, and harness notes for any CLI fact.
 
-## 10. Research brief for the next session
+## 10. Credits
 
-Answer each with sources, versions and licences. Write verified facts into
-this file or a sibling notes file.
-
-1. PDF: pdfium-render vs hayro vs pdf.js. Text positions, highlight, size,
-   licence, macOS/Linux/Windows.
-2. Browser engine: wry vs Servo vs CEF offscreen. Size, memory per view,
-   snapshot API per OS, rendering into a texture, Linux embedding, privacy
-   defaults, licence.
-3. Overlays over a live native view: how do Zed, Tauri apps, VS Code
-   webviews, Figma desktop and Arc handle menus above web content?
-4. Component picking: which library gives component name and file:line on
-   React 19, Next.js, Vite; framework-neutral options; how Codex and Claude
-   Code desktop do it.
-5. iOS simulator: how Claude Code desktop streams and taps; ScreenCaptureKit
-   vs idb vs private frameworks; permissions; Xcode version breakage.
-6. Video: AVFoundation into `CVPixelBuffer` with GPUI `surface()`; Linux and
-   Windows paths inside the licence list.
-7. React question: evidence for options B and D (memory, startup, theming
-   web items with Canopy theme tokens, bridge security).
-8. Other OSS canvas modules worth shipping as mods (section 6 last list),
-   with licences.
-9. Prior art for canvas-of-everything apps (tldraw computer, Muse, Heptabase,
-   Figma, Kosmik, Obsidian Canvas, Excalidraw): toolbar patterns and how
-   they embed web and media.
-10. Toolbar keys vs existing canvas-mode keys: propose a binding set.
+Ship these in THIRD-PARTY-NOTICES and the post: gpui-pdf (Will Lehnertz,
+MIT), hayro (Laurenz Stampfl, MIT/Apache-2.0), gpui-kit and gpui-webview
+(Longbridge, Apache-2.0), wry (Tauri, MIT/Apache-2.0), react-grab (Aiden Bai,
+MIT), AXe (Cameron Cooke, MIT, optional user install), objc2 (Mads
+Marquart, MIT/Apache-2.0/Zlib), image (image-rs, MIT/Apache-2.0).
 
 ## 11. Not verified
 
-No library was installed, built or measured. Licences, sizes and APIs in
-section 6 come from memory and must be checked. The mockups are
-illustrations, not final pixels.
+- No crate was built. gpui-pdf against our `gpui-pre =0.3.8` and
+  gpui-webview 0.7.1 inside our window are the first things to build.
+- react-grab as an injected script in WKWebView, before React loads.
+- Web view privacy: whether WKWebView Safe Browsing can be turned off for an
+  embedded view.
+- Memory per live web view on macOS.
