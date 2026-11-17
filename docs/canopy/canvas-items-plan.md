@@ -40,41 +40,49 @@ Scope is locked: P1 to P3, macOS only.
 ## 3. Order of work
 
 ```text
-Wed AM   S1 spike gpui-pdf ─┐   S2 spike gpui-webview + react-grab ─┐   P1a pane model (core)
-Wed PM                      └──── P2 viewers ◀── P1a ──▶ P3 browser ┘   P1b commands, CLI, wire, quote
+Wed AM   P1a pane model (core)
+Wed PM   P1b commands, CLI, wire, quote   P2 viewers ◀── P1a ──▶ P3 browser
 Thu AM   P1c toolbar mod + note mod, P1d teach agents, P2 and P3 finish
 Thu PM   integration on main, review, docs, demo recording dry run
 Fri      Krishna writes and posts
 ```
 
-Spikes run first because they are the two things that can kill the scope.
-P1a is independent of them, so it starts at the same time.
+No spikes: the research below settled the stack, and the first real build
+of P2 and P3 surfaces anything left (fail plans in section 4).
 
 ## 4. Steps
 
 Each step is one branch and one PR that Krishna reviews, tests and merges
 (section 9). "Verify" lists what the PR body must state as checkable
 behaviour. "Done" means its checks pass and the docs listed travel with it.
-Spikes S1 and S2 are throwaway branches with a written result, not PRs.
+### Research findings (2026-11-17, from source, nothing built)
 
-### S1 spike: gpui-pdf on our GPUI (2 h, throwaway branch)
-
-- Add `gpui-pdf = { version = "0.7", features = ["search", "markup"] }`,
-  open a PDF in an isolated dev window, drag-select, print the `Selection`.
-- Pass: builds against `gpui-pre =0.3.8`, renders, selection returns text.
-- Fail plan: `pdfium-render` 0.9.5 + bundled PDFium, P2 grows by a day;
-  cut PDF highlights to plain page text read.
-
-### S2 spike: browser view and picker (3 h, throwaway branch)
-
-- Vendor upstream `gpui-kit` v0.7.1 `crates/webview` into
-  `vendor/gpui-kit/crates/webview`. Load `http://localhost:<port>` of a tiny
-  React 19 + Vite app.
-- Check: placement follows the card rect; `WKWebView.takeSnapshot` gives a
-  PNG; `react-grab`'s `index.global.js` as an initialization script returns
-  component name and file:line on click.
-- Fail plans: no snapshot → resting state shows URL and title only; no
-  react-grab → DOM picker only (selector, text, box, screenshot).
+- **gpui-pdf 0.7.0** (MIT): `cargo fetch` resolves it onto our patched
+  `gpui-pre 0.3.8` (it asks `^0.3`; its own lockfile used 0.3.9, so
+  compiling is still unverified). It pulls `hayro` 0.8, not 0.9. Selection:
+  `toggle_select_mode` plus `set_on_create_highlight(page, quote,
+  occurrence, color)`; page text: `extract_page_text(doc, i).text()`;
+  highlights: `set_highlights(Vec<Highlight {id, page, quote, occurrence,
+  color}>)`. `PdfView` draws its own header (filename, page counter, zoom,
+  find) that only `PdfStyle` colours can change; P2 hides or replaces it so
+  the shared helper bar is the only bar. Fail plan: `pdfium-render` 0.9.5.
+- **gpui-kit v0.7.1 `crates/webview`** is not on crates.io (only 0.10.0 is);
+  vendor it from the upstream tag `v0.7.1`. Its package is named
+  `gpui-wry` (one `lib.rs`, Apache-2.0, `lb-wry` 0.53.3).
+- **react-grab 0.2.0** (MIT): `dist/index.global.js` is an IIFE that
+  auto-inits; it installs its own React DevTools hook, so inject it at
+  document start. Take picks without the clipboard with
+  `registerPlugin({name, hooks: {onElementSelect(el) {...; return true}}})`
+  and `__REACT_GRAB__.getSource(el)` → `{filePath, lineNumber,
+  columnNumber, componentName}`. Source comes from React 19 `_debugStack`
+  plus source maps it fetches from the dev server (the page's own origin).
+  **Privacy:** it fetches `https://www.react-grab.com/api/version` unless
+  `telemetry: false`, and its shadow-DOM CSS `@import`s Google Fonts; P3
+  must set `telemetry: false` and block or override the font import. WebKit
+  stack parsing exists but is unverified in WKWebView.
+- Unverified until P3 builds: `WKWebView.takeSnapshot` through wry's macOS
+  extension, and placement under zoom. Fail plans: no snapshot → resting
+  state shows URL and title only; no react-grab → DOM picker only.
 
 ### P1a pane model (core)
 
@@ -318,7 +326,7 @@ the user clicks:
 - Cost: one file read and a linear scan, once per click. No cache, no
   memory kept, nothing while idle; the OS page cache already makes repeat
   reads cheap. Expected well under a millisecond for normal files
-  (UNVERIFIED: S2 measures it).
+  (UNVERIFIED: P3 measures it).
 - Fallback: if the scan fails or runs past 400 lines, send `file:line`
   only. Never block the quote on resolution.
 - No new dependency: a hand scanner with fixture tests (self-closing tags,
@@ -335,17 +343,27 @@ Paste this into the implementation session once Krishna says go.
 You orchestrate the canvas panes build in /Users/krishna/projects/canopy.
 Read AGENTS.md, AGENTS.local.md, docs/canopy/herdr-map.md,
 docs/canopy/canvas-items-proposal.md and docs/canopy/canvas-items-plan.md
-first. The plan is the contract; section 2 decisions are recorded at its top.
+first. The plan is the contract. No spikes: start with P1a. Section 4's
+research findings feed P2 and P3. Before a step that needs an open section 2
+decision (core growth for P1a, new dependencies for P2 and P3), ask Krishna.
 
-Work in phases, one PR per step in plan section 4, in its order. Run S1 and
-S2 first as throwaway spikes and report their results before any PR that
-depends on them.
+Work in phases, one PR per step in plan section 4, in its order.
+
+Disk is tight (check df first; stop and ask under 20G free):
+- One shared target: CARGO_TARGET_DIR=/Users/krishna/projects/canopy/target,
+  with CARGO_INCREMENTAL=0. Never a target/ in a worktree.
+- Builders build and test only what their step touches. The full
+  cargo test --locked runs once per step, at review.
+- Prune each worktree as soon as its PR merges.
 
 For each step:
 1. Delegate the build to a fresh Codex gpt-6.1-sol medium session in its
-   own git worktree and branch (type/short-name), with the ponytail
-   SKILL.md path and the shared CARGO_TARGET_DIR. Never reuse a thread
-   after the plan changes.
+   own git worktree under .claude/worktrees/ and branch (type/short-name),
+   branched from main. Run the companion from the main checkout so Codex's
+   sandbox can write the shared target; the brief names the worktree as the
+   only place to edit. Give it the ponytail SKILL.md path. Anything it must
+   research it researches thoroughly from primary sources and marks
+   UNVERIFIED otherwise. Never reuse a thread after the plan changes.
 2. When it reports done: read the diff, run cargo test --locked (and
    just test when mods changed), run ponytail-review, fix findings, and
    check the docs listed for the step.
@@ -371,4 +389,3 @@ attribution, never touch the daily herdr app or its data, never run paid
 agent sessions without asking, every user-visible error is a toast, idle
 costs nothing. Stop and ask Krishna when a step would change the plan.
 ```
-
