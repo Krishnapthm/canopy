@@ -1,4 +1,5 @@
 #!/bin/bash
+# Modified for Canopy.
 # Timed, non-publishing experiment on the exact signed release bundle.
 set -euo pipefail
 

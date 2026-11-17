@@ -1,3 +1,4 @@
+// Modified for Canopy.
 import { test, expect } from "bun:test";
 import { readFile } from "node:fs/promises";
 

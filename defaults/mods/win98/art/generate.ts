@@ -1,3 +1,4 @@
+// Modified for Canopy.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';

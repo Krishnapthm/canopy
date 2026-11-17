@@ -63,7 +63,7 @@ commands. They're rewritten on every start to match this version.
 ## Seeing the window
 
 `canopy shot [file.png]` saves the last rendered window frame as a PNG
-and prints its absolute path (default: `herdr-shot.png` in your current
+and prints its absolute path (default: `canopy-shot.png` in your current
 folder). Use it when debugging mod UIs: inspect spacing, colors, terminal
 images, overlays, popups and floats. It captures the app, not the desktop,
 at the window’s physical pixel size, even when covered or minimized. No
@@ -440,14 +440,13 @@ the tabs also leave room for the window buttons when the sidebar is narrower.
 
 ### Layouts and mods other people made
 
-People share layouts at herdr.dev/layouts and mods at herdr.dev/mods. Each
-is a folder laid out like this home: a layout has `layouts/<name>.json` and
+People share layouts and mods on GitHub, under the repo topics
+`canopy-layout` and `canopy-mod`. Each is a folder laid out like this home: a layout has `layouts/<name>.json` and
 the `mods/<name>/` it needs; a mod is a piece for the person's own window,
 so it has only `mods/<name>/` and maybe a `keys.json` with the keys it
 expects. Both have a `RECIPE.md` (the brief to build it from scratch) and a
 `preview.png`. The files are one build of the recipe. Asked to add one
-(`herdr.dev/layouts/<owner>/<name>`, `herdr.dev/mods/<owner>/<name>`, or a
-folder on GitHub):
+(a GitHub repo or a folder in one):
 
 1. Read the recipe and every file before writing anything. Before adding,
    tell the person if a mod reaches the network, runs programs (`exec`,
@@ -468,9 +467,9 @@ folder on GitHub):
 
 To share one: put that folder in a public GitHub repo (one folder each if
 there are several), write its `RECIPE.md`, save a screenshot of it as
-`preview.png` and add the repo topic `herdr-layout` for a layout or
-`herdr-mod` for a mod. It shows up at herdr.dev/layouts or herdr.dev/mods
-within the hour.
+`preview.png` and add the repo topic `canopy-layout` for a layout or
+`canopy-mod` for a mod, so people find it at
+github.com/topics/canopy-layout or github.com/topics/canopy-mod.
 
 A `RECIPE.md` is a brief: another agent with an empty folder builds the
 layout or mod from it. Write it from the real files, in this order:

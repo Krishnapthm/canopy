@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // The frame's command palette: everything you can do, by name, with its key.
 // Places (spaces, tabs) stay in the picker. Fuzzy: your letters in
 // order, word starts and runs rank higher. Empty: recent first, then every
@@ -39,7 +40,7 @@ const NAMED = [
   ["space.next", {}, "Space", "Next space", "workspace"],
   ["space.prev", {}, "Space", "Previous space", "workspace"],
   ["layout.switch", {}, "Layout", "Next layout", "look switch"],
-  ["layout.reset", {}, "Layout", "Reset layout", "new version default restore herdr's"],
+  ["layout.reset", {}, "Layout", "Reset layout", "new version default restore"],
   ["layout.clone", {}, "Layout", "Duplicate layout", "clone copy customize"],
   ["mod.clone", {}, "Layout", "Duplicate mod", "clone copy customize"],
   ["terminal.open", {}, "Terminal", "New terminal", "shell"],

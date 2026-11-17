@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! Asynchronous text files for mods. Writes reject a stale editor snapshot.
 use gpui_shell::{HostError, HostValue};
 use std::io::{Read, Write};

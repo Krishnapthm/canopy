@@ -1,3 +1,4 @@
+# Modified for Canopy.
 # A release: push a tag `v<version>` matching Cargo.toml once ci has passed
 # on main. Each platform builds and packs the app (scripts/package; no core
 # inside, the installers fetch herdr-core's own release). Then one GitHub

@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! One framed connection to herdr-core through `hc connect`: JSON-RPC on
 //! channel 0, terminal byte streams on their own channels.
 

@@ -1,3 +1,4 @@
+// Modified for Canopy.
 //! The window's own title bar: a layout can hide the system's
 //! (`"titlebar": "none"` on its root) and draw one from mods. Nodes with
 //! `window_drag` move the window when dragged and maximize it on a

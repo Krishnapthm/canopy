@@ -1,4 +1,5 @@
 #!/bin/bash
+# Modified for Canopy.
 # Points ~/.local/bin/canopy at this checkout's release build and adds the
 # launcher entry with the Canopy icon. Re-run after moving the checkout.
 set -euo pipefail

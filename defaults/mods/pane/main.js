@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // A pane's header, for layouts that frame their panes:
 //   { "tab": "active", "pane": { "header": { "content": { "mod": "pane" } } } }
 // Shows the program's icon (the app's program table), the tab's name, else the agent's

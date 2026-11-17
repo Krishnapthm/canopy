@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // A Win98 popup menu: props { items, parents, start }. Hover opens
 // submenus to the right; a choice closes the whole chain and acts.
 // The Start menu (start: true) has big rows and the Canopy98 banner.

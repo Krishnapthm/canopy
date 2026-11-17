@@ -1,3 +1,4 @@
+# Modified for Canopy.
 # Builds and tests Canopy. PRs run Linux only, the cheapest runner; pushes to
 # main and manual runs (Actions tab > ci > Run workflow) add macOS and Windows.
 name: ci

@@ -1,3 +1,4 @@
+// Modified for Canopy.
 // Canopy 98: the whole Windows 98 layout is this one mod, in roles.
 // The layout and overlays give each copy props { role }:
 //   taskbar  the Start button, tabs as windows, the tray and clock

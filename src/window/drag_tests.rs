@@ -1,3 +1,4 @@
+// Modified for Canopy.
 #[test]
 fn dragging_squeezed_layout_blocks_never_crashes() {
     in_own_process("squeezed_layout_drag");
