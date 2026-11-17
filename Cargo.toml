@@ -40,6 +40,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 fancy-regex = "0.19"
 notify = "7"
 sha2 = "0.10"
+# PDF pane: renders, selects and searches PDFs in GPUI (MIT, pulls hayro).
+gpui-pdf = { version = "=0.7.0", features = ["search"] }
 
 [[test]]
 name = "shot_pixels"
