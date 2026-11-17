@@ -27,9 +27,15 @@ Scope is locked: P1 to P3, macOS only.
    `canvas.json`, `pane.*` commands, `canopy pane` CLI and the browser and
    PDF kinds are core. Toolbar and note stay mods.
 2. ~~User-facing word~~ Decided: **pane**, everywhere (AGENTS.md).
-3. **Toolbar keys.** Open. Canvas mode already uses `h f a n c`. Proposal:
-   no new single-letter keys for Friday; the toolbar is mouse-first and
-   `n` keeps opening the new menu, which gains the pane kinds.
+3. **Shortcut hints everywhere.** Decided by Krishna 2026-11-17 (replaces
+   "no toolbar keys"): every button on the toolbar and on every helper bar
+   has a key, and its tooltip shows name and key (`Hand  H`, `Open file  ⌘O`).
+   Holding Cmd (Ctrl on Linux and Windows) shows the keys on all of these
+   surfaces at once, after a short hold so Cmd shortcuts do not flash them.
+   The toolbar's Agent button opens its menu above the toolbar, Claude style:
+   each installed agent with a muted number on the right (1 to 9), and the
+   number starts that agent while the menu is open. Toolbar keys are listed
+   in P1c.
 4. **Two new dependencies.** Approved 2026-11-17:
    `gpui-pdf` 0.7.0 (MIT, pulls `hayro`, `kurbo`) and `lb-wry` 0.53 via a
    vendored `gpui-webview` 0.7.1 (Apache-2.0). `react-grab` 0.2.0 (MIT) is
@@ -83,6 +89,22 @@ behaviour. "Done" means its checks pass and the docs listed travel with it.
 - Unverified until P3 builds: `WKWebView.takeSnapshot` through wry's macOS
   extension, and placement under zoom. Fail plans: no snapshot → resting
   state shows URL and title only; no react-grab → DOM picker only.
+
+### Shortcut hints (every step)
+
+Decision 3 applies to every surface a step adds: each helper-bar or toolbar
+button has a key, its tooltip shows name and key, held Cmd (Ctrl elsewhere)
+shows all keys on screen, and any menu of choices numbers them 1 to 9 in
+muted text with the number as the key. The shared helper-bar component draws
+tooltips and the held-Cmd hints from each action's `shortcut`, so a pane gets
+them by declaring keys, never by drawing its own. Each step's Verify includes
+hovering every new button and holding Cmd.
+
+Follow-up, its own PR (Krishna, 2026-11-17): the black bar along the bottom
+that lists canvas keys while Option is held (`defaults/mods/canvas-keys`)
+goes. Its replacement follows the new design language: a floating,
+elevated card (shadow, rounded, theme surface colours), shown by the same
+held-Cmd hint, never a full-width plain bar.
 
 ### P1a pane model (core)
 
@@ -170,6 +192,13 @@ and Claude's `canopy hook wire`. Other installed CLIs get nothing.
 - Verify: the toolbar floats bottom centre at any zoom; its agent button
   lists only installed CLIs; each button spawns its kind at the viewport
   centre; a note can be typed in, wired and read by an agent.
+- Shortcut hints (decision 3), added 2026-11-17. Proposed keys, all free or
+  already bound to the same action in canvas mode: Select `V`, Hand
+  `Space` (hold; `H` stays `canvas.go:left`), Terminal `N`, Agent `⇧N`,
+  Open file `⌘O`, Note `T`, Connect `C`. Agent opens its menu above the
+  toolbar with muted numbers; `1` to `9` start an agent. Verify: hover each
+  toolbar and helper-bar button and see its key; hold Cmd and see every
+  key; `⇧N` then `2` starts the second installed agent.
 
 ### P2 viewers (built-in kinds)
 
@@ -183,7 +212,8 @@ and Claude's `canopy hook wire`. Other installed CLIs get nothing.
   and quote it; select a PDF line and quote it, the agent gets page and
   text; highlights survive an app restart; the PDF file is byte-identical
   afterwards; `canopy pane read` returns page text; both panes show their
-  helper bars (image: crop, quote; PDF: search, highlight, page).
+  helper bars (image: crop, quote; PDF: search, highlight, page); every
+  bar button's tooltip shows its key, and holding Cmd shows them all.
 
 ### P3 browser (built-in kind, macOS)
 
@@ -199,7 +229,8 @@ and Claude's `canopy hook wire`. Other installed CLIs get nothing.
 - Verify: open a localhost React app; pan and zoom with it resting; click
   in to go live and use the page; pick a component and quote it, the agent
   gets file and line range; a non-React page quotes selector and text; the
-  helper bar offers home, reload, screenshot, pick and open externally; no
+  helper bar offers home, reload, screenshot, pick and open externally,
+  each tooltip with its key and all keys shown while Cmd is held; no
   network request other than the page's own (check with the proxy log or
   Little Snitch).
 
