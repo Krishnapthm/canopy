@@ -167,6 +167,12 @@ the mechanism):
   `SimulatorFrameworkBridge-iOS`, is built for the iOS Simulator platform.
 - Frames are H.264/HEVC encoded with VideoToolbox, because an Electron
   renderer needs a video stream.
+- Confirmed live on macOS 27.2.1: the running helper is launched through
+  Claude's `disclaimer` wrapper under `sandbox-exec` with a Seatbelt
+  profile whose comment says it "hosts Meta's FBSimulatorControl, which
+  dlopens Apple's private CoreSimulator framework". The profile blocks file
+  reads and sockets, and the wrapper keeps it out of the app's Screen
+  Recording and Accessibility grants. Our helper should do the same.
 
 ### Can we pull Device Hub into the canvas?
 
