@@ -60,7 +60,7 @@ impl AppWindow {
     /// The drawn rect of a pane the current view shows.
     pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
         let card = doc.panes.iter().find(|c| c.id == key && doc.shows(c.space.as_ref()))?;
-        if card.file().is_some() { return Some(card.rect); }
+        if card.boxed() { return Some(card.rect); }
         let view = &self.canvas_state.doc.view;
         if matches!(card.kind, canvas::Kind::Sub { .. }) {
             return (*view != canvas::View::Terminals).then_some(card.rect);
@@ -77,7 +77,7 @@ impl AppWindow {
     /// A child's status word changed: glow its born edge to `parent` if both cells are on the canvas.
     pub(in crate::window) fn pulse_status(&mut self, child: &str, parent: &str, prev: Option<&str>, word: Option<&str>, cx: &mut Context<Self>) {
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
-        let on_canvas = [child, parent].iter().all(|k| doc.panes.iter().filter(|p| p.file().is_none()).any(|c| c.id == *k));
+        let on_canvas = [child, parent].iter().all(|k| doc.panes.iter().filter(|p| !p.boxed()).any(|c| c.id == *k));
         if status_pulses(prev, word, on_canvas) {
             // Spent glows go first, so closed children leave nothing behind.
             self.canvas_state.wire.pulses.retain(|_, t| t.elapsed() < PULSE);
@@ -116,7 +116,7 @@ impl AppWindow {
         let s = slop / camera.zoom;
         doc.panes.iter().filter(|c| {
             self.wire_cell(doc, &c.id).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
-        }).max_by_key(|c| (c.file().is_none(), c.z)).map(|c| c.id.clone())
+        }).max_by_key(|c| (!c.boxed(), c.z)).map(|c| c.id.clone())
     }
 
     fn wire_edge_at(&self, position: Point<Pixels>) -> Option<Edge> {
@@ -147,14 +147,14 @@ impl AppWindow {
         let bar_hover = if busy { None } else {
             doc.panes.iter().filter(|p| doc.shows(p.space.as_ref()) && !matches!(p.kind, canvas::Kind::Sub { .. }))
                 .filter(|p| {
-                    let rect = if p.file().is_some() { Some(p.rect) } else { self.wire_cell(doc, &p.id) };
+                    let rect = if p.boxed() { Some(p.rect) } else { self.wire_cell(doc, &p.id) };
                     rect.is_some_and(|r| {
                         let [x, y] = doc.camera.to_screen([r[0], r[1]]);
                         point[0] >= x && point[0] <= x + r[2] * doc.camera.zoom
                             && point[1] >= y - 8. - bar_height && point[1] <= y + r[3] * doc.camera.zoom
                     })
                 // Topmost as drawn: file panes paint under terminal panes, whatever their z.
-                }).max_by_key(|p| (p.file().is_none(), p.z)).map(|p| p.id.clone())
+                }).max_by_key(|p| (!p.boxed(), p.z)).map(|p| p.id.clone())
         };
         if bar_hover != self.canvas_state.bar_hover {
             self.canvas_state.bar_hover = bar_hover;
@@ -243,7 +243,7 @@ impl AppWindow {
         let doc = &mut self.canvas_state.doc;
         if a == b { return Err("A pane cannot be wired to itself".into()); }
         if ![a, b].iter().all(|k| doc.panes.iter().any(|c| c.id == *k)) { return Err("No such pane".into()); }
-        if [a, b].iter().all(|k| doc.panes.iter().any(|c| c.id == *k && c.file().is_some())) { return Err("Wire a file pane to a terminal or agent".into()); }
+        if [a, b].iter().all(|k| doc.panes.iter().any(|c| c.id == *k && c.boxed())) { return Err("Wire a pane to a terminal or agent".into()); }
         if !doc.same_space(a, b) { return Err("Same space only for now".into()); }
         if !doc.connect(a, b) { return Err("Already wired".into()); }
         self.canvas_changed(cx);

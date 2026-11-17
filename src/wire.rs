@@ -31,10 +31,10 @@ pub fn neighbors(wires: &[Wire], me: &str) -> Vec<String> {
 /// Born edges, parent to child: a sub-agent to its parent, and a cell started by `hc run`
 /// from another cell to its parent (`parent_of` is the core's record). Computed, never stored.
 pub fn born(doc: &Document, parent_of: impl Fn(&str) -> Option<String>) -> Vec<Wire> {
-    doc.panes.iter().filter(|p| p.file().is_none()).filter_map(|c| {
+    doc.panes.iter().filter(|p| !p.boxed()).filter_map(|c| {
         let key = c.id.clone();
         let parent = match &c.kind { crate::canvas::Kind::Sub { parent, .. } => Some(parent.clone()), _ => parent_of(&key) }?;
-        (parent != key && doc.panes.iter().filter(|p| p.file().is_none()).any(|p| p.id == parent)).then_some(Wire { a: parent, b: key, born: true })
+        (parent != key && doc.panes.iter().filter(|p| !p.boxed()).any(|p| p.id == parent)).then_some(Wire { a: parent, b: key, born: true })
     }).collect()
 }
 
@@ -123,7 +123,7 @@ impl Me {
         let rec = Rec::get(&addr).map_or_else(|| fail(format!("cannot read terminal {addr} from the core")), Ok)?;
         let doc = load_doc()?;
         let key = addr.clone();
-        if !doc.panes.iter().filter(|p| p.file().is_none()).any(|c| c.id == key) {
+        if !doc.panes.iter().filter(|p| !p.boxed()).any(|c| c.id == key) {
             return fail(format!("{addr} is not a cell on the canvas, so nothing is wired to it"));
         }
         let mut wires = doc.wires.clone();
@@ -133,7 +133,7 @@ impl Me {
             let list: Value = serde_json::from_str(&out).unwrap_or_default();
             for t in list.as_array().or(list["terminals"].as_array()).into_iter().flatten() {
                 if let (Some(child), Some(parent)) = (t["address"].as_str(), t["parent"].as_str()) {
-                    if parent == key && doc.panes.iter().filter(|p| p.file().is_none()).any(|c| c.id == child) {
+                    if parent == key && doc.panes.iter().filter(|p| !p.boxed()).any(|c| c.id == child) {
                         wires.push(Wire { a: key.clone(), b: child.into(), born: true });
                     }
                 }
@@ -154,7 +154,7 @@ struct Peer {
     /// The terminal to address: the cell's own, or a sub-agent cell's parent.
     rec: Option<Rec>,
     /// The kind and description of a peer without a core terminal.
-    pane: Option<(&'static str, String)>,
+    pane: Option<(String, String)>,
 }
 
 impl Peer {
@@ -162,7 +162,11 @@ impl Peer {
         if let Some(pane) = doc.panes.iter().find(|p| p.id == key && p.file().is_some()) {
             let path = pane.file().unwrap();
             let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned());
-            return Peer { key: key.into(), name, rec: None, pane: Some(("file", format!("file {path} - canopy pane {} {key}", pane.verbs().join("|")))) };
+            return Peer { key: key.into(), name, rec: None, pane: Some(("file".into(), format!("file {path} - canopy pane {} {key}", pane.verbs().join("|")))) };
+        }
+        if let Some(pane) = doc.panes.iter().find(|p| p.id == key && p.mod_name().is_some()) {
+            let kind = pane.kind_name();
+            return Peer { key: key.into(), name: kind.into(), rec: None, pane: Some((kind.into(), format!("{kind} - canopy pane {} {key}", pane.verbs().join("|")))) };
         }
         match sub_parts(key) {
             Some((parent, id)) => {
@@ -395,6 +399,16 @@ mod tests {
         assert_eq!(peer.describe(), "file /tmp/a.md - canopy pane read|shot|close p1");
     }
 
+
+    #[test]
+    fn mod_peers_describe_their_verbs() {
+        let mut d = doc(serde_json::json!({}));
+        d.panes.push(crate::canvas::Pane { id: "p2".into(), kind: crate::canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None });
+        let peer = Peer::new("p2", &d);
+        assert_eq!(peer.name, "mod:note");
+        assert!(peer.rec.is_none());
+        assert_eq!(peer.describe(), "mod:note - canopy pane read|shot|close p2");
+    }
 
     fn doc(json: Value) -> Document {
         let mut base = serde_json::json!({"version":3,"camera":{"x":0,"y":0,"zoom":1},"view":"all","spaces":[],"panel":{"width":null},

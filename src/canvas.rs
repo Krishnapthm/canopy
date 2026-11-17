@@ -671,19 +671,73 @@ pub struct Pane {
 
 /// What a pane shows, with its kind-specific fields saved under `props`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "props", rename_all = "lowercase")]
+#[serde(try_from = "RawKind", into = "RawKind")]
 pub enum Kind {
     /// A core terminal or agent. `size`: set while expanded into a live
     /// terminal, world px at zoom 1, header included.
-    Terminal { #[serde(default, skip_serializing_if = "Option::is_none")] size: Option<Point> },
+    Terminal { size: Option<Point> },
     /// A sub-agent cell under its parent terminal.
     Sub { parent: String, sub: String },
     /// A text file preview.
     File { path: String },
+    /// A pane drawn by a mod. kind: "mod:<mod name>"; props: what the mod saved with canvas.pane_set.
+    Mod { kind: String, props: serde_json::Map<String, serde_json::Value> },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", content = "props", rename_all = "lowercase")]
+enum Builtin {
+    Terminal { #[serde(default, skip_serializing_if = "Option::is_none")] size: Option<Point> },
+    Sub { parent: String, sub: String },
+    File { path: String },
+}
+
+#[derive(Serialize, Deserialize)]
+struct RawKind {
+    kind: String,
+    #[serde(default)]
+    props: serde_json::Value,
+}
+
+impl TryFrom<RawKind> for Kind {
+    type Error = String;
+    fn try_from(RawKind { kind, props }: RawKind) -> Result<Self, String> {
+        if let Some(name) = kind.strip_prefix("mod:") {
+            if !crate::mods::valid_name(name) { return Err(format!("invalid mod pane kind {kind}")); }
+            let props = match props {
+                serde_json::Value::Null => serde_json::Map::new(),
+                serde_json::Value::Object(props) => props,
+                _ => return Err("pane props must be an object".into()),
+            };
+            return Ok(Self::Mod { kind, props });
+        }
+        let builtin = serde_json::from_value::<Builtin>(serde_json::json!({"kind":kind,"props":props})).map_err(|e| e.to_string())?;
+        Ok(match builtin {
+            Builtin::Terminal { size } => Self::Terminal { size },
+            Builtin::Sub { parent, sub } => Self::Sub { parent, sub },
+            Builtin::File { path } => Self::File { path },
+        })
+    }
+}
+
+impl From<Kind> for RawKind {
+    fn from(kind: Kind) -> Self {
+        let builtin = match kind {
+            Kind::Mod { kind, props } => return Self { kind, props: serde_json::Value::Object(props) },
+            Kind::Terminal { size } => Builtin::Terminal { size },
+            Kind::Sub { parent, sub } => Builtin::Sub { parent, sub },
+            Kind::File { path } => Builtin::File { path },
+        };
+        let mut value = serde_json::to_value(builtin).unwrap();
+        Self { kind: value["kind"].as_str().unwrap().to_owned(), props: value["props"].take() }
+    }
 }
 
 /// Kinds `canvas.pane_new` creates, with the `canopy pane` verbs each answers.
 pub const PANE_KINDS: &[(&str, &[&str])] = &[("file", &["read", "shot", "close"])];
+
+/// The `canopy pane` verbs mod panes answer.
+pub const MOD_VERBS: &[&str] = &["read", "shot", "close"];
 
 /// What `canvas.pane_read` returns at most, in bytes of text.
 pub const READ_LIMIT: usize = 256 * 1024;
@@ -715,10 +769,21 @@ pub fn envelope(id: &str, kind: &str, attrs: &[(&str, &str)], text: &str) -> Str
 }
 
 impl Pane {
-    /// The kind's name as canvas.json saves it: "terminal", "sub" or "file".
-    pub fn kind_name(&self) -> &'static str { match self.kind { Kind::Terminal { .. } => "terminal", Kind::Sub { .. } => "sub", Kind::File { .. } => "file" } }
+    /// The kind's name as canvas.json saves it: terminal, sub, file or mod:<name>.
+    pub fn kind_name(&self) -> &str { match &self.kind { Kind::Terminal { .. } => "terminal", Kind::Sub { .. } => "sub", Kind::File { .. } => "file", Kind::Mod { kind, .. } => kind } }
     /// The `canopy pane` verbs this pane answers (none for terminals and sub-agent cells).
-    pub fn verbs(&self) -> &'static [&'static str] { PANE_KINDS.iter().find(|(k, _)| *k == self.kind_name()).map_or(&[], |(_, v)| v) }
+    pub fn verbs(&self) -> &'static [&'static str] { if matches!(self.kind, Kind::Mod { .. }) { return MOD_VERBS; } PANE_KINDS.iter().find(|(k, _)| *k == self.kind_name()).map_or(&[], |(_, v)| v) }
+
+    /// Drawn at its own saved rect: every kind but terminals and sub-agent cells.
+    pub fn boxed(&self) -> bool { matches!(self.kind, Kind::File { .. } | Kind::Mod { .. }) }
+    /// A mod pane's non-blank saved text (props.text): what closing it would delete.
+    pub fn text(&self) -> Option<&str> {
+        if let Kind::Mod { props, .. } = &self.kind { props.get("text")?.as_str().filter(|t| !t.trim().is_empty()) } else { None }
+    }
+    /// The mod name for a mod pane, without mod:.
+    pub fn mod_name(&self) -> Option<&str> {
+        if let Kind::Mod { kind, .. } = &self.kind { kind.strip_prefix("mod:") } else { None }
+    }
 
     /// The core address for a terminal pane.
     pub fn terminal(&self) -> Option<&str> {
@@ -883,7 +948,7 @@ impl Document {
     /// them a terminal or sub-agent cell; false when it exists or is refused.
     pub fn connect(&mut self, a: &str, b: &str) -> bool {
         if a == b || !self.same_space(a, b) || self.wires.iter().any(|w| w.joins(a, b)) { return false; }
-        if [a, b].iter().all(|k| self.panes.iter().any(|p| p.id == *k && p.file().is_some())) { return false; }
+        if [a, b].iter().all(|k| self.panes.iter().any(|p| p.id == *k && p.boxed())) { return false; }
         self.wires.push(Wire { a: a.into(), b: b.into(), born: false });
         true
     }
@@ -1021,9 +1086,9 @@ impl Document {
         self.version = 3;
     }
 
-    /// Hand out a file pane id, including ids already present in the document.
+    /// Hand out a file or mod pane id (p<N>), including ids already present in the document.
     pub fn next_file_id(&mut self) -> String {
-        let highest = self.panes.iter().filter(|p| p.file().is_some())
+        let highest = self.panes.iter().filter(|p| p.boxed())
             .filter_map(|p| p.id.strip_prefix('p')?.parse::<u64>().ok()).max().unwrap_or(0);
         let n = 1 + self.file_ids.max(highest);
         self.file_ids = n;
@@ -1067,6 +1132,25 @@ pub fn view_allows(view: &View, agent: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mod_panes_round_trip() {
+        let saved = serde_json::json!({"id":"p4","kind":"mod:note","props":{"text":"hi"},"rect":[0.,0.,320.,240.],"z":3});
+        let pane: Pane = serde_json::from_value(saved.clone()).unwrap();
+        assert!(matches!(&pane.kind, Kind::Mod { kind, props } if kind == "mod:note" && props["text"] == "hi"));
+        assert_eq!(serde_json::to_value(pane).unwrap(), saved);
+        for bad in [serde_json::json!({"kind":"mod:","props":{}}), serde_json::json!({"kind":"mod:note","props":3}), serde_json::json!({"kind":"video"})] {
+            assert!(serde_json::from_value::<Kind>(bad).is_err());
+        }
+        assert_eq!(serde_json::from_value::<Kind>(serde_json::json!({"kind":"mod:note"})).unwrap(), Kind::Mod { kind: "mod:note".into(), props: Default::default() });
+    }
+
+    #[test]
+    fn next_file_id_counts_mod_panes() {
+        let mut doc = Document::default();
+        doc.panes.push(Pane { id: "p5".into(), kind: Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None });
+        assert_eq!(doc.next_file_id(), "p6");
+    }
 
     #[test]
     fn pane_read_envelope_marks_untrusted_text() {

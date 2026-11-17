@@ -29,4 +29,21 @@ The check loads a mod and renders it once. It does not replace looking at the re
 Mods can run programs, read files and use the network. Only install code you trust.
 See [security and privacy](security.md).
 
+## Mod panes
+
+A mod declares a canvas pane kind `mod:<name>` in `mod.json`:
+
+```json
+"pane": { "label": "Note", "icon": "mods/note/sticky-note.svg", "actions": [] }
+```
+
+Open it with `canvas.pane_new {kind: "mod:<name>"}`. The app draws one copy per
+pane with `props().pane` set to its id. The copy lives only while its place is
+shown. `canvasPanes()` gives its saved props; save state with
+`run("canvas.pane_set", {pane, props})`. This shallow-merges the object; a string
+`props.text` is what `canopy pane read` returns.
+
+Actions declare `{icon, label, command, args}`. They run app commands with the
+pane selected. After them the app adds Connect and Close in the shared helper bar.
+
 [Back to Canopy](../README.md)

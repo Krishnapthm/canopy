@@ -318,12 +318,32 @@ fn write_if_changed(path: &Path, content: impl AsRef<[u8]>) -> std::io::Result<(
 #[derive(Deserialize, Default, Clone)]
 pub struct Hint {
     #[serde(default)]
+    pub pane: Option<PaneHint>,
+    #[serde(default)]
     pub place: Option<String>,
     #[serde(default)]
     pub size: Option<f32>,
     /// `pane.go` can give it the keyboard.
     #[serde(default)]
     pub focusable: bool,
+}
+
+/// mod.json "pane": the mod draws canvas panes of kind mod:<name>. docs/mods.md.
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct PaneHint {
+    pub label: String,
+    pub icon: String,
+    #[serde(default)]
+    pub actions: Vec<PaneAction>,
+}
+/// One helper bar button a mod pane declares: an app command run with the pane selected.
+#[derive(Deserialize, Clone, Debug, PartialEq)]
+pub struct PaneAction {
+    pub icon: String,
+    pub label: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Value,
 }
 
 #[derive(Clone)]
@@ -1014,7 +1034,11 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         .function("agents", reader(reads.clone(), "agents", |s| &s.agents))
         .function("panes", reader(reads.clone(), "panes", |s| &s.panes))
         .function("canvasPanes", reader(reads.clone(), "canvas_panes", |s| &s.canvas_panes))
-        .function("paneKinds", |_| Ok(to_host(&Value::Array(crate::canvas::PANE_KINDS.iter().map(|(kind, verbs)| json!({"kind": kind, "verbs": verbs})).collect()))))
+        .function("paneKinds", |_| {
+            let mut kinds: Vec<_> = crate::canvas::PANE_KINDS.iter().map(|(kind, verbs)| json!({"kind":kind,"verbs":verbs})).collect();
+            kinds.extend(scan().into_iter().filter_map(|f| f.hint.pane.map(|p| json!({"kind":format!("mod:{}", f.id),"verbs":crate::canvas::MOD_VERBS,"label":p.label,"icon":p.icon}))));
+            Ok(to_host(&Value::Array(kinds)))
+        })
         .function("setAgentOrder", |a| {
             AGENT_ORDER.with(|s| *s.borrow_mut() = strings(a.get(0)));
             Ok(HostValue::Null)

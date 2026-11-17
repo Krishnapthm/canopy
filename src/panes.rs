@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: canopy pane new file <path> [--wire] | read <pane> | shot <pane> [file.png] | open <pane> <target> | close <pane>";
+const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new mod:<name> [--wire] | read <pane> | shot <pane> [file.png] | open <pane> <target> | close <pane>";
 
 /// The app command and its arguments for `canopy pane <args>`; `caller` is
 /// `$HC_TERMINAL_ID`, which `--wire` needs.
@@ -13,6 +13,13 @@ fn request(args: &[String], caller: Option<&str>) -> Result<(&'static str, Value
     let words: Vec<_> = args.iter().map(String::as_str).collect();
     let absolute = |path| std::path::absolute(path).map(|p| p.to_string_lossy().into_owned()).map_err(|e| format!("cannot resolve path: {e}"));
     match words.as_slice() {
+        ["new", kind, rest @ ..] if kind.starts_with("mod:") && (rest.is_empty() || *rest == ["--wire"]) => {
+            let mut a = json!({"kind":kind});
+            if !rest.is_empty() {
+                a["wire"] = json!(caller.filter(|s| !s.is_empty()).ok_or("--wire works only inside a Canopy terminal ($HC_TERMINAL_ID is not set)")?);
+            }
+            Ok(("canvas.pane_new", a))
+        }
         ["new", kind, path] | ["new", kind, path, "--wire"] => {
             let mut a = json!({"kind":kind,"path":absolute(path)?});
             if words.len() == 4 {
@@ -37,7 +44,7 @@ fn answer(name: &str, args: &Value, reply: &Value) -> String {
     match name {
         "canvas.pane_new" => {
             let pane = reply["pane"].as_str().unwrap_or_default();
-            let path = reply["path"].as_str().unwrap_or_default();
+            let path = reply["path"].as_str().or(reply["kind"].as_str()).unwrap_or_default();
             let wired = if reply["wired"] == true { ", wired to you" } else { "" };
             format!("{pane}: {path}{wired}. Read it with canopy pane read {pane}")
         }
@@ -67,6 +74,9 @@ mod tests {
     #[test]
     fn pane_cli_maps_verbs_to_commands() {
         let req = |args: &[&str], caller| request(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(), caller);
+        assert_eq!(req(&["new", "mod:note"], None).unwrap(), ("canvas.pane_new", json!({"kind":"mod:note"})));
+        assert_eq!(req(&["new", "mod:note", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"mod:note","wire":"t1"})));
+        assert_eq!(answer("canvas.pane_new", &json!({}), &json!({"pane":"p2","kind":"mod:note","wired":true})), "p2: mod:note, wired to you. Read it with canopy pane read p2");
         let path = std::path::absolute("README.md").unwrap();
         assert_eq!(req(&["new", "file", "README.md"], None).unwrap(), ("canvas.pane_new", json!({"kind":"file","path":path})));
         assert_eq!(req(&["new", "file", "README.md", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"file","path":path,"wire":"t1"})));

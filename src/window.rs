@@ -2945,7 +2945,7 @@ impl AppWindow {
             "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
-            "canvas.pane_new" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
+            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
             "app.menu" => {
                 let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
                 let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
@@ -2972,6 +2972,10 @@ impl AppWindow {
             }
             "panel.editor" => self.panel_editor(a, window, cx),
             "preview.open" => self.open_preview(a.clone(), window, cx),
+            "canvas.hand" => {
+                self.canvas_state.hand = a["on"].as_bool().unwrap_or(!self.canvas_state.hand);
+                cx.notify();
+            }
             "canvas.create" => {
                 self.create_canvas(a.clone(), window, cx);
             }

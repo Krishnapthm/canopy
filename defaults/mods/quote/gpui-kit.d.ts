@@ -22425,8 +22425,8 @@ declare module "herdr" {
     /** A terminal's core address (`t3`), `sub:<parent>:<id>` for a sub-agent cell, or `p<N>`
      *  for any other pane. Wire keys use the same ids. */
     id: string;
-    kind: "terminal" | "sub" | "file";
-    /** Kind fields: terminal { size? }, sub { parent, sub }, file { path }. */
+    kind: "terminal" | "sub" | "file" | `mod:${string}`;
+    /** Kind fields: terminal { size? }, sub { parent, sub }, file { path }, mod:<name> { what the mod saved }. */
     props: any;
     /** World pixels: [x, y, width, height]. */
     rect: [number, number, number, number];
@@ -22439,8 +22439,9 @@ declare module "herdr" {
    *  the panes of tab layouts. */
   export function canvasPanes(): CanvasPane[];
 
-  /** The kinds canvas.pane_new creates, with the `canopy pane` verbs each answers. */
-  export function paneKinds(): { kind: string; verbs: string[] }[];
+  /** The kinds canvas.pane_new creates, with the `canopy pane` verbs each answers; mod kinds
+   *  carry their label and icon. */
+  export function paneKinds(): { kind: string; verbs: string[]; label?: string; icon?: string }[];
 
   /** Sets agent.next / agent.prev order to match the list a mod displays.
    *  Call when rendering the list. In memory only; missing agents are ignored, new agents

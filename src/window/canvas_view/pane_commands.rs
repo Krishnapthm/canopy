@@ -7,6 +7,7 @@ impl AppWindow {
         let r = match name {
             "canvas.pane_new" => self.pane_new(a, window, cx),
             "canvas.pane_read" => self.pane_read(a),
+            "canvas.pane_set" => self.pane_set(a, cx),
             "canvas.pane_shot" => self.pane_shot(a, window),
             _ => self.pane_open(a),
         };
@@ -14,10 +15,12 @@ impl AppWindow {
     }
 
     fn pane_new(&mut self, a: &Value, window: &Window, cx: &mut Context<Self>) -> Result<Value, String> {
-        if a["kind"] != "file" {
-            return Err(format!("canvas.pane_new: kind must be one of: {}", canvas::PANE_KINDS.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")));
+        let mut kinds = vec!["file".to_owned()];
+        kinds.extend(self.folders.iter().filter(|(_, f)| f.hint.pane.is_some()).map(|(id, _)| format!("mod:{id}")));
+        let kind = a["kind"].as_str().unwrap_or_default();
+        if !kinds.iter().any(|k| k == kind) {
+            return Err(format!("canvas.pane_new: kind must be one of: {}", kinds.join(", ")));
         }
-        let path = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()).ok_or("canvas.pane_new: path must be absolute")?;
         let doc = &self.canvas_state.doc;
         let (point, space) = if let Some(t) = a["wire"].as_str() {
             let pane = doc.panes.iter().find(|p| p.id == t && p.terminal().is_some()).ok_or_else(|| format!("{t} is not a terminal pane on the canvas"))?;
@@ -33,12 +36,35 @@ impl AppWindow {
             };
             (point, doc.room.clone())
         };
-        let (id, path) = self.add_file_pane(std::path::Path::new(path), point, space, cx)?;
+        let (id, path) = if kind == "file" {
+            let path = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()).ok_or("canvas.pane_new: path must be absolute")?;
+            let (id, path) = self.add_file_pane(std::path::Path::new(path), point, space, cx)?;
+            (id, Some(path))
+        } else {
+            (self.add_mod_pane(kind.to_owned(), point, space, cx), None)
+        };
         if let Some(t) = a["wire"].as_str() {
             self.canvas_state.doc.connect(&id, t);
             self.canvas_changed(cx);
         }
-        Ok(json!({"pane":id,"path":path,"wired":a["wire"].is_string()}))
+        let mut reply = json!({"pane":id,"kind":kind,"wired":a["wire"].is_string()});
+        if let Some(path) = path { reply["path"] = json!(path); }
+        Ok(reply)
+    }
+
+    /// Shallow-merges mod state only after validating the complete saved props.
+    fn pane_set(&mut self, a: &Value, cx: &mut Context<Self>) -> Result<Value, String> {
+        let Some(id) = a["pane"].as_str() else { return Err("canvas.pane_set needs pane".into()); };
+        let pane = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
+        let kind = pane.kind_name().to_owned();
+        let canvas::Kind::Mod { props, .. } = &mut pane.kind else { return Err(format!("pane {id} is a {kind}: only mod panes take canvas.pane_set")); };
+        let patch = a["props"].as_object().ok_or("canvas.pane_set: props must be an object")?;
+        let mut merged = props.clone();
+        merged.extend(patch.clone());
+        if serde_json::to_vec(&merged).unwrap().len() > 1024 * 1024 { return Err("canvas.pane_set: props over 1 MiB".into()); }
+        *props = merged;
+        self.canvas_changed(cx);
+        Ok(json!({}))
     }
 
     fn pane_read(&self, a: &Value) -> Result<Value, String> {
@@ -49,6 +75,7 @@ impl AppWindow {
                 let text = canvas::read_preview(std::path::Path::new(path)).map_err(|e| format!("cannot read {path}: {e}"))?;
                 Ok(json!({"text":canvas::envelope(id, "file", &[("path", path)], &text)}))
             }
+            canvas::Kind::Mod { kind, props } => Ok(json!({"text":canvas::envelope(id, kind, &[], props.get("text").and_then(Value::as_str).unwrap_or(""))})),
             canvas::Kind::Terminal { .. } => Err(format!("pane {id} is a terminal: read it with hc read {id}")),
             canvas::Kind::Sub { parent, .. } => Err(format!("pane {id} is a sub-agent cell: read its parent with hc read {parent}")),
         }
@@ -59,7 +86,7 @@ impl AppWindow {
         let doc = &self.canvas_state.doc;
         let pane = doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
         if !doc.shows(pane.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
-        let r = if pane.file().is_some() { pane.rect } else { self.wire_cell(doc, id).ok_or_else(|| format!("pane {id} is not drawn in this view"))? };
+        let r = if pane.boxed() { pane.rect } else { self.wire_cell(doc, id).ok_or_else(|| format!("pane {id} is not drawn in this view"))? };
         let bounds = self.bounds.borrow().get("canopy-canvas").copied().ok_or("the canvas is not shown")?;
         let [x, y] = doc.camera.to_screen([r[0], r[1]]);
         let (w, h) = (r[2] * doc.camera.zoom, r[3] * doc.camera.zoom);
@@ -101,6 +128,46 @@ mod tests {
     #[test]
     fn pane_commands_open_read_move_refuse_and_close() { in_own_process(TEST); }
 
+    const MOD_TEST: &str = "window::canvas_view::pane_commands::tests::mod_pane_commands_headless";
+
+    #[test]
+    fn mod_pane_commands() { in_own_process(MOD_TEST); }
+
+    #[gpui::test]
+    fn mod_pane_commands_headless(cx: &mut TestAppContext) {
+        if !running_alone(MOD_TEST) { return; }
+        let (view, cx) = open_window(cx, "mod-pane-commands", "", json!({"id":"root","type":"canvas"}));
+        view.update_in(cx, |this, window, cx| {
+            this.folders.insert("note".into(), crate::mods::Found {
+                id: "note".into(), dir: std::path::PathBuf::from("/tmp/note"),
+                hint: crate::mods::Hint { pane: Some(crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![] }), ..Default::default() },
+                stamp: std::time::UNIX_EPOCH,
+            });
+            this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
+            assert_eq!(this.pane_new(&json!({"kind":"mod:nope"}), window, cx).unwrap_err(), "canvas.pane_new: kind must be one of: file, mod:note");
+            let reply = this.pane_new(&json!({"kind":"mod:note","wire":"t1"}), window, cx).unwrap();
+            assert_eq!(reply, json!({"pane":"p1","kind":"mod:note","wired":true}));
+            assert_eq!(crate::wire::neighbors(&this.canvas_state.doc.wires, "t1"), ["p1"]);
+            assert_eq!(this.pane_read(&json!({"pane":"p1"})).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], ""));
+            assert!(this.pane_set(&json!({"pane":"p1","props":{"text":"hello"}}), cx).is_ok());
+            assert_eq!(this.pane_read(&json!({"pane":"p1"})).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], "hello"));
+            assert_eq!(this.pane_set(&json!({"pane":"p1","props":3}), cx).unwrap_err(), "canvas.pane_set: props must be an object");
+            assert_eq!(this.pane_set(&json!({"pane":"t1","props":{}}), cx).unwrap_err(), "pane t1 is a terminal: only mod panes take canvas.pane_set");
+            assert_eq!(this.pane_set(&json!({"pane":"p1","props":{"text":"x".repeat(1024 * 1024 + 1)}}), cx).unwrap_err(), "canvas.pane_set: props over 1 MiB");
+            assert_eq!(this.pane_read(&json!({"pane":"p1"})).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], "hello"));
+            assert_eq!(this.pane_set(&json!({"props":{}}), cx).unwrap_err(), "canvas.pane_set needs pane");
+            // An agent cannot delete the person's text; the confirmed dialog's list can.
+            this.close_canvas_cell(&json!({"pane":"p1"}), window, cx);
+            assert!(this.canvas_state.doc.panes.iter().any(|p| p.id == "p1"));
+            this.close_canvas_cell(&json!({"panes":["p1"]}), window, cx);
+            assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == "p1"));
+            let blank = this.pane_new(&json!({"kind":"mod:note"}), window, cx).unwrap();
+            this.close_canvas_cell(&json!({"pane":blank["pane"]}), window, cx);
+            assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == blank["pane"]), "a blank note closes without asking");
+            assert!(this.canvas_state.doc.wires.is_empty());
+        });
+    }
+
     #[gpui::test]
     fn pane_commands_headless(cx: &mut TestAppContext) {
         if !running_alone(TEST) { return; }
@@ -108,7 +175,7 @@ mod tests {
         view.update_in(cx, |this, window, cx| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
-            assert_eq!(this.pane_new(&json!({"kind":"browser","path":path}), window, cx).unwrap_err(), "canvas.pane_new: kind must be one of: file");
+            assert_eq!(this.pane_new(&json!({"kind":"browser","path":path}), window, cx).unwrap_err(), "canvas.pane_new: kind must be one of: file, mod:note");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":"README.md"}), window, cx).unwrap_err(), "canvas.pane_new: path must be absolute");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"point":null}), window, cx).unwrap_err(), "invalid canvas point");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"wire":"missing"}), window, cx).unwrap_err(), "missing is not a terminal pane on the canvas");
