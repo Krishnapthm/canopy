@@ -87,7 +87,11 @@ behaviour. "Done" means its checks pass and the docs listed travel with it.
 ### P1a pane model (core)
 
 - `src/canvas.rs`: `panes: Vec<Pane>` with `id, kind, rect, z, space, props`.
-  Old `previews` load as `kind: "file"`; still read, never written.
+  Terminals and sub-agent cells become panes too (Krishna, 2026-11-17):
+  old `cards` load as `kind: "terminal"` or `"sub"`, old `previews` as
+  `kind: "file"`; both still read, never written. Pane ids keep the old
+  card keys (`t3`, `sub:<parent>:<id>`), so saved wires stay valid; file
+  panes get `p1`, `p2`, ...
 - Undo, arrange, spaces and `canvas::solve` treat panes like previews.
 - `src/window/canvas_view.rs`: draw panes by kind; `file` reuses
   `preview_card`.
