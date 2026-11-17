@@ -53,8 +53,10 @@ P1a is independent of them, so it starts at the same time.
 
 ## 4. Steps
 
-Each step is one branch and one PR. "Done" means its checks pass and the
-docs listed travel with it.
+Each step is one branch and one PR that Krishna reviews, tests and merges
+(section 9). "Verify" lists what the PR body must state as checkable
+behaviour. "Done" means its checks pass and the docs listed travel with it.
+Spikes S1 and S2 are throwaway branches with a written result, not PRs.
 
 ### S1 spike: gpui-pdf on our GPUI (2 h, throwaway branch)
 
@@ -84,6 +86,8 @@ docs listed travel with it.
   `preview_card`.
 - Tests: migration of a 0.1.0 `canvas.json`, round-trip, undo.
 - Docs: `docs/canvas.md`.
+- Verify: an existing canvas with text previews opens unchanged; previews
+  move, resize, undo and arrange as before; `canvas.json` now has `items`.
 
 ### P1b agents and quoting (core)
 
@@ -97,6 +101,11 @@ docs listed travel with it.
 - Tests: wire key round-trip, `item read` envelope, quote text format.
 - Docs: `docs/wire.md`, new `docs/items.md`, `docs/security.md`,
   `defaults/AGENTS.md`, `src/SKILL.md`.
+- Verify: `canopy item new file ./README.md --wire` from an agent's
+  terminal puts a card beside it; `canopy wire` in that agent lists `i1`;
+  `canopy item read i1` prints the text inside the untrusted envelope;
+  quoting a text selection lists the wired agent first and pastes without
+  Enter.
 
 ### P1c toolbar and note (mods)
 
@@ -104,6 +113,9 @@ docs listed travel with it.
   agent (installed CLIs via `knownAgents()`), browser, open file, note, wire.
 - `mod.json` `"place": "canvas"`; `defaults/mods/note` as the first mod kind.
 - Docs: `docs/mods.md`.
+- Verify: the toolbar floats bottom centre at any zoom; its agent button
+  lists only installed CLIs; each button spawns its kind at the viewport
+  centre; a note can be typed in, wired and read by an agent.
 
 ### P2 viewers (built-in kinds)
 
@@ -113,6 +125,10 @@ docs listed travel with it.
   its `Selection`; highlights stored in item props as `{quote, occurrence,
   page}`, never written into the PDF.
 - Open file picks the kind by extension.
+- Verify: open a PNG and a PDF from the toolbar; drag a region on the image
+  and quote it; select a PDF line and quote it, the agent gets page and
+  text; highlights survive an app restart; the PDF file is byte-identical
+  afterwards; `canopy item read` returns page text.
 
 ### P3 browser (built-in kind, macOS)
 
@@ -120,16 +136,21 @@ docs listed travel with it.
   Live: focused and near 100% zoom; GPUI menus and the quote chip only show
   while resting.
 - `read` = URL, title, visible text; `open <url>`; `shot`.
-- Picker: react-grab when React is found, DOM picker otherwise; quote
-  `@<url> <Component> src/file.tsx:42 <selector>`.
+- Picker: react-grab when React is found, DOM picker otherwise. The quote
+  is a reference, not code (section 8):
+  `@<url> <PricingCard> src/PricingCard.tsx:42-61 "<div class=card>"`.
 - Privacy: no homepage, no app-owned requests; react-grab bundled, never
   fetched from unpkg.
+- Verify: open a localhost React app; pan and zoom with it resting; click
+  in to go live and use the page; pick a component and quote it, the agent
+  gets file and line range; a non-React page quotes selector and text; no
+  network request other than the page's own (check with the proxy log or
+  Little Snitch).
 
 ### Integration (Thu PM)
 
-- Merge order: P1a, P1b, P1c, then P2 and P3.
-- `ponytail-review` per PR, `ponytail-audit` after P1, `ponytail-debt`
-  report.
+- Merge order: P1a, P1b, P1c, then P2 and P3, each merged by Krishna.
+- `ponytail-audit` after P1, `ponytail-debt` report at the end.
 - Demo dry run in the isolated dev window (`scripts/dev`), then
   `scripts/dev-stop`.
 
@@ -212,3 +233,98 @@ Risk: private frameworks break with Xcode releases (Claude's helper already
 carries an Xcode 27 workaround). Prior art to read first: idb
 `FBSimulatorControl`, AXe, baguette (README says it links SimulatorKit),
 Radon IDE (embeds a simulator in VS Code via a `simulator-server` helper).
+
+## 8. Context engineering: what a quote sends
+
+Rule: **a quote is a pointer, not a copy.** The agent gets enough to find
+the thing and decide whether to read it, never the content itself.
+
+| Item | Sends | Never sends |
+|---|---|---|
+| Browser, React | URL, component name, `file:start-end`, the opening tag (cut at 80 chars) | component source, full `outerHTML` |
+| Browser, other | URL, CSS selector, visible text (cut at 200 chars) | page HTML |
+| PDF | file, page, selected text | page text |
+| Image | file, region, crop PNG path | pixels |
+| Any | screenshot as a file path, on request | inline image |
+
+### Why references beat inlined code
+
+- **Agents re-read anyway.** Claude Code's Edit tool refuses to edit a
+  file that was not Read in the session (observed in this harness), so
+  inlined code is a duplicate the moment the agent edits. Codex's behaviour
+  is UNVERIFIED; check against the installed CLI per AGENTS.md.
+- **Prompt caching does not save context.** Caching cuts the price and
+  latency of a repeated prefix, but every pasted copy still occupies the
+  context window and brings compaction sooner. So "it hits the cache" does
+  not make duplication free.
+- **Size.** A reference is about 30 tokens; a 40-line component is about
+  400 to 600 tokens, more with its `outerHTML`. react-grab's default copy
+  includes the element HTML, which for a container can be thousands.
+- **Freshness.** Inlined code goes stale the moment the agent edits; a
+  path and range point at the live file.
+
+### Resolving the line range
+
+react-grab gives `file:line:col` of the element (React 19 `_debugStack`
+mapped to source). Canopy turns that into `start-end` itself, in Rust, when
+the user clicks:
+
+- Read the one file (skip if over 512 KB), scan from `line:col` to the
+  matching closing tag, aware of strings, comments and `{}` expressions.
+- Cost: one file read and a linear scan, once per click. No cache, no
+  memory kept, nothing while idle; the OS page cache already makes repeat
+  reads cheap. Expected well under a millisecond for normal files
+  (UNVERIFIED: S2 measures it).
+- Fallback: if the scan fails or runs past 400 lines, send `file:line`
+  only. Never block the quote on resolution.
+- No new dependency: a hand scanner with fixture tests (self-closing tags,
+  fragments, generics like `<T,>`, `>` inside expressions). If it is wrong
+  too often, switch to `oxc_parser` (MIT); that is a later decision.
+- The opening-tag anchor lets the agent re-find the element if lines
+  shifted since the page last reloaded.
+
+## 9. Orchestrator prompt
+
+Paste this into the implementation session once Krishna says go.
+
+```text
+You orchestrate the canvas items build in /Users/krishna/projects/canopy.
+Read AGENTS.md, AGENTS.local.md, docs/canopy/herdr-map.md,
+docs/canopy/canvas-items-proposal.md and docs/canopy/canvas-items-plan.md
+first. The plan is the contract; section 2 decisions are recorded at its top.
+
+Work in phases, one PR per step in plan section 4, in its order. Run S1 and
+S2 first as throwaway spikes and report their results before any PR that
+depends on them.
+
+For each step:
+1. Delegate the build to a fresh Codex gpt-6.1-sol medium session in its
+   own git worktree and branch (type/short-name), with the ponytail
+   SKILL.md path and the shared CARGO_TARGET_DIR. Never reuse a thread
+   after the plan changes.
+2. When it reports done: read the diff, run cargo test --locked (and
+   just test when mods changed), run ponytail-review, fix findings, and
+   check the docs listed for the step.
+3. Push the branch and open the PR. The PR body must contain:
+   - What changed, in plain words, and why.
+   - A feature checklist: each feature, its expected behaviour, and the
+     exact steps to see it (commands, clicks), copied from the step's
+     "Verify" list and extended with anything new.
+   - What was not verified, and ponytail-debt for the step.
+   - Isolated launch commands for the app (scripts/dev, scripts/dev-stop).
+4. Check the PR branch out locally for Krishna so it is ready to run: a
+   review worktree (or a git switch in the main checkout when it is
+   clean), built with the shared CARGO_TARGET_DIR. Do not launch the app
+   and leave it running; give Krishna the commands.
+5. Tell Krishna: PR link, the checklist, and that it waits for him to test,
+   run a code review and merge. Do not merge PRs yourself. Do not start a
+   step that depends on an unmerged PR; independent steps may proceed in
+   parallel worktrees.
+6. After Krishna merges: pull main, prune the merged worktree, continue.
+
+Rules: no em dashes, commits as type(scope): description with no agent
+attribution, never touch the daily herdr app or its data, never run paid
+agent sessions without asking, every user-visible error is a toast, idle
+costs nothing. Stop and ask Krishna when a step would change the plan.
+```
+
