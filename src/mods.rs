@@ -800,7 +800,7 @@ fn run_remote_with_limit(machine: &str, command: &str, args: &[String], cwd: Opt
     hc_args.push(command.into());
     hc_args.extend(args.iter().cloned());
     // Let the remote timeout end the program and deliver its result before the wrapper expires.
-    let (_, out, err) = run_blocking("hc", &hc_args, None, limit + Duration::from_secs(5))?;
+    let (_, out, err) = run_blocking(&crate::core_bin::path().to_string_lossy(), &hc_args, None, limit + Duration::from_secs(5))?;
     let v: Value = serde_json::from_str(out.trim()).or_else(|_| serde_json::from_str(err.trim())).map_err(|_| format!("hc exec: {}", err.trim()))?;
     if let Some(e) = v.get("error") {
         return Err(e.get("message").and_then(Value::as_str).unwrap_or("hc exec failed").to_owned());
@@ -953,7 +953,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
             let expected = a.get(2).and_then(|v| match v { HostValue::Str(s) => Some(s.clone()), _ => None });
             Ok(crate::mod_files::write_text(a.string(0)?.to_owned(), a.string(1)?.to_owned(), expected))
         })
-        .async_function("hc", |a| Ok(exec_future("hc".into(), strings(a.get(0)), None, None, EXEC_LIMIT)))
+        .async_function("hc", |a| Ok(exec_future(crate::core_bin::path().to_string_lossy().into_owned(), strings(a.get(0)), None, None, EXEC_LIMIT)))
         .function("home", |_| Ok(home().to_string_lossy().into_owned().into()))
         .function("appHome", |_| Ok(app_dir().to_string_lossy().into_owned().into()))
         .function("fonts", |_| Ok(to_host(&json!(*FONTS.lock().unwrap()))))

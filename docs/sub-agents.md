@@ -3,9 +3,12 @@
 There are two kinds. Real helpers are agents another agent started with
 `canopy spawn <program> --name <n> [--model <m>] [-- <task>]` when you asked it
 for sub-agents, helpers or peers: each is a full terminal in its parent's folder
-and space, wired to the parent, that you can open and type into. The parent talks
-to it with `canopy wire`, and gets `"<name>" is idle: <last answer>` when the
-child's turn ends (see wire.md). The rest of this page is about the other kind.
+and space, wired to the parent, that you can open and type into. `canopy wire`
+lists their addresses; the parent messages them with `hc send`, reads their
+screens with `hc read` and waits with `hc wait --children any`. When a task is
+given, Canopy appends a request to report back with `hc send <parent> "..."`
+when done or stuck (see [Wire](wire.md)). The rest of this page is about the
+other kind.
 
 In-process helpers appear as named cells beside their parent, joined by an
 edge. They show working, then done; done cells dim. They are observations,
@@ -13,9 +16,9 @@ not independent terminals.
 
 Drag a cell to keep it somewhere else. Click to follow its read-only
 transcript in the side panel, including when the file appears later.
-"Message through parent" opens the Wire thread: what you type there reaches the
-sub-agent through its parent, addressed to it (see wire.md). Pick "Clear finished" on the parent to remove its
-done cells, or select a done cell and press Backspace or Delete. Working
+Talk to a sub-agent through its parent's terminal. Pick "Clear finished" on
+the parent to remove its done cells, or select a done cell and press Backspace
+or Delete. Working
 cells refuse deletion with a toast. Ending the parent session clears all
 its sub-agent cells.
 

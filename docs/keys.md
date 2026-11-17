@@ -29,7 +29,6 @@ were in last (again toggles; Ctrl+Shift+Tab walks further back).
 | h j k l, Tab / Shift+Tab | Select the nearest cell in that direction |
 | x | Collapse the selected terminal |
 | c | Start a wire; select its other cell, Enter connects, Esc cancels |
-| t | Open the selected wire's thread, or the selected cell's first wire |
 | Shift+A / a | Arrange (repeat the last layout) / choose a layout |
 | n / Shift+N | New terminal here / installed agent list |
 | Backspace / Delete | Close, using the usual agent and terminal confirmations |

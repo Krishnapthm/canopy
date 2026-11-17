@@ -392,10 +392,6 @@ person_settings! {
     canvas_resize_terminals: bool = true => "Refit a canvas terminal's grid to its cell as the cell resizes (no longer in Settings; false keeps the grid and scales it).";
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
-    #[serde(skip_serializing_if = "is_default_wire_limit")]
-    wire_limit: usize = crate::wire::DEFAULT_LIMIT => "Maximum Wire postcard length in characters.";
-    #[serde(skip_serializing_if = "is_default_wire_budget")]
-    wire_budget: u32 = crate::wire::DEFAULT_BUDGET => "Agent postcards before a wire trips; 0 disables the breaker.";
     zoom: f32 = 1.0 => "Whole app scale (0.5..3).";
     sounds: Sounds = Sounds::default() => "Attention sounds: enabled, done and blocked file overrides.";
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -468,14 +464,6 @@ impl OptionAsAlt {
 
 fn is_true(b: &bool) -> bool {
     *b
-}
-
-fn is_default_wire_limit(n: &usize) -> bool {
-    *n == crate::wire::DEFAULT_LIMIT
-}
-
-fn is_default_wire_budget(n: &u32) -> bool {
-    *n == crate::wire::DEFAULT_BUDGET
 }
 
 /// What the app runs with: the shown layout's look over the defaults, at
@@ -735,11 +723,14 @@ fn parse_person(text: &str) -> Result<Person, String> {
     Ok(person)
 }
 
+/// Settings removed from the app, still allowed in old files without a warning.
+const RETIRED_KEYS: &[&str] = &["wire_limit", "wire_budget"];
+
 /// The keys of settings.json that no setting reads, each with a close spelling when there is
 /// exactly one. A warning only: the rest of the file still applies.
 pub fn unknown_keys(text: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(text).ok()?;
-    let found: Vec<String> = value.as_object()?.keys().filter(|key| !SETTING_KEYS.contains(&key.as_str())).map(|key| {
+    let found: Vec<String> = value.as_object()?.keys().filter(|key| !SETTING_KEYS.contains(&key.as_str()) && !RETIRED_KEYS.contains(&key.as_str())).map(|key| {
         let mut close: Vec<_> = SETTING_KEYS.iter().map(|known| (distance(key, known), known)).filter(|(d, _)| *d <= 2).collect();
         close.sort();
         match close.as_slice() {
@@ -1115,6 +1106,9 @@ mod tests {
         assert_eq!(unknown_keys(r#"{"unrelated":24}"#).unwrap(), "settings.json: unknown key `unrelated`");
         assert_eq!(unknown_keys(r#"{"fome":24}"#).unwrap(), "settings.json: unknown key `fome`");
         assert_eq!(unknown_keys(r#"{"zoom":1}"#), None);
+        // Removed settings in an old file neither warn nor drop the rest.
+        assert_eq!(unknown_keys(r#"{"wire_limit":500,"wire_budget":0}"#), None);
+        assert_eq!(parse_person(r#"{"wire_limit":500,"wire_budget":0,"zoom":2}"#).unwrap().zoom, 2.);
         assert_eq!(distance("", "font"), 4);
         assert_eq!(distance("fönt", "font"), 1);
         let reference = config();

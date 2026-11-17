@@ -69,5 +69,17 @@ Not checked: the live pill repro in the app (folded into the phase 1 hand check)
   inside a Claude Code session passes `CLAUDE_CODE_*` (including
   `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`) to agents: hc then reports no status (`null`) for
   them, even mid-turn. Start dev cores with `env -i HOME USER SHELL LANG TERM PATH`.
+- **The inherited environment includes the parent session's secrets - verified
+  2026-11-16 (2.1.322, dev app, hc 0.1.20).** A dev window launched from a Claude Code
+  desktop session gave its agents `CLAUDE_CODE_CHILD_SESSION=1` (Claude then shows
+  "Transcript saving is off - inherited CLAUDE_CODE_CHILD_SESSION marker"),
+  `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`, the parent's `CLAUDE_CODE_SESSION_ID` and
+  `CLAUDE_CODE_MESSAGING_TOKEN`. `hc get` showed `status: null` for both live agents.
+  `scripts/dev` now starts from `env -i` with a short allowlist.
+- **A login shell's profile decides which `canopy` an agent runs - verified 2026-11-16
+  (2.1.322).** macOS agent cells start under `zsh -lic`; a `~/.zshrc` that prepends
+  `~/.local/bin` put the installed 0.1.0 CLI ahead of `<app home>/bin` in the agent's
+  PATH, and the agent ran its retired `canopy wire tell`. A `canopy` run by name in a
+  terminal now hands off to `<app home>/bin/canopy`.
 - A spawned Claude in an untrusted folder stops at the folder trust dialog; `canopy spawn`
   passes the caller's folder (`--cwd`) so the child starts where its parent works.

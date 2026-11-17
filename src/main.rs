@@ -82,6 +82,8 @@ fn attach_console() {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(unix)]
+    core_bin::hand_off_to_owner(&args);
     if args.get(1).is_some_and(|s| s == "hook") {
         match args.get(2).map(String::as_str) {
             Some("wire") => wire::hook(),

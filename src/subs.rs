@@ -58,11 +58,11 @@ pub fn hook(action: Option<&str>) {
     if terminal.is_empty() || std::env::var_os("HC_SOCKET").is_none_or(|s| s.is_empty() || !std::path::Path::new(&s).exists()) { return; }
     if action == Some("session-end") {
         let args = vec!["get".into(), terminal.clone(), "--json".into()];
-        let Ok((0, output, _)) = crate::mods::run_blocking("hc", &args, None, Duration::from_millis(800)) else { return };
+        let Ok((0, output, _)) = crate::wire::hc(&args, Duration::from_millis(800)) else { return };
         let Ok(record) = serde_json::from_str::<Value>(&output) else { return };
         let mut args = vec!["label".into(), terminal];
         args.extend(sub_labels(&record).map(|key| format!("{key}=")));
-        if args.len() > 2 { let _ = crate::mods::run_blocking("hc", &args, None, Duration::from_millis(800)); }
+        if args.len() > 2 { let _ = crate::wire::hc(&args, Duration::from_millis(800)); }
         return;
     }
     let (tx, rx) = std::sync::mpsc::channel();
@@ -76,7 +76,7 @@ pub fn hook(action: Option<&str>) {
     let Some((id, data)) = payload(&bytes, stop) else { return };
     let Ok(value) = serde_json::to_string(&data) else { return };
     let args = vec!["label".into(), terminal, format!("canopy.sub.{id}={value}")];
-    let _ = crate::mods::run_blocking("hc", &args, None, Duration::from_millis(800));
+    let _ = crate::wire::hc(&args, Duration::from_millis(800));
 }
 
 /// The sub-agent label keys on a terminal, including malformed old values.

@@ -594,20 +594,6 @@ pub fn smooth(path: &[Point]) -> Vec<Point> {
     out
 }
 
-/// The point `t` (0 to 1) of the way along a path, by length.
-pub fn along(path: &[Point], t: f32) -> Point {
-    let lens: Vec<f32> = path.windows(2).map(|w| ((w[1][0] - w[0][0]).powi(2) + (w[1][1] - w[0][1]).powi(2)).sqrt()).collect();
-    let mut left = lens.iter().sum::<f32>() * t.clamp(0., 1.);
-    for (w, len) in path.windows(2).zip(&lens) {
-        if left <= *len && *len > 0. {
-            let k = left / len;
-            return [w[0][0] + (w[1][0] - w[0][0]) * k, w[0][1] + (w[1][1] - w[0][1]) * k];
-        }
-        left -= len;
-    }
-    path.last().copied().unwrap_or_default()
-}
-
 /// How far a point is from a path.
 pub fn path_distance(path: &[Point], p: Point) -> f32 {
     path.windows(2).map(|w| {
@@ -1328,7 +1314,6 @@ mod tests {
     #[test]
     fn path_measures() {
         let path = [[0., 0.], [10., 0.], [10., 10.]];
-        assert_eq!(along(&path, 0.5), [10., 0.]);
         assert_eq!(path_distance(&path, [5., 3.]), 3.);
     }
     #[test]

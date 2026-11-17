@@ -178,14 +178,6 @@ impl AppWindow {
                 self.canvas_state.mode = true;
                 self.canvas_state.connecting = Some(key);
             }
-            "canvas.thread" => {
-                let edge = self.canvas_state.wire.selected.clone().or_else(|| {
-                    crate::wire::all(&self.canvas_state.doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned))
-                        .into_iter().find(|w| selected.as_ref().is_some_and(|k| w.a == *k || w.b == *k)).map(|w| (w.a, w.b))
-                });
-                let Some((a,b)) = edge else { return self.fail("select a wired cell or wire first"); };
-                self.run("wire.open", json!({"a":a,"b":b}), window, cx);
-            }
             "canvas.nudge" => {
                 let Some(d) = args["direction"].as_str().and_then(direction) else { return self.fail("use left, right, up or down"); };
                 let Some(key) = selected else { return self.fail("select a cell first"); };
