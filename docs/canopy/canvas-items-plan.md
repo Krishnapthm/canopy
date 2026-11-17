@@ -17,7 +17,7 @@ Scope is locked: P1 to P3, macOS only.
 | In for Friday | After the post |
 |---|---|
 | P1 item model, wiring, quoting, toolbar, note | P4 video |
-| P2 image and PDF items | P5 iOS simulator (section 7) |
+| P2 image and PDF items | P5 iOS simulator (section 7), then Android (adb, scrcpy) |
 | P3 browser item with React picker | Linux and Windows for browser and PDF polish |
 | | P6 mod canvas kinds docs, web-view mods |
 
@@ -203,7 +203,10 @@ give Canopy a view.
    Input: Indigo HID through the same helper, or AXe (MIT, bundles idb).
 3. **Agents:** document Xcode MCP in `defaults/AGENTS.md` for agents that
    want to drive the simulator themselves; Canopy shows the result.
-4. Real devices: no public path. Out of scope.
+4. Real iOS devices: no public path. Out of scope.
+5. Android follows iOS: `adb` for screenshots and input, scrcpy
+   (Apache-2.0) for a live stream, emulators and devices alike. Not
+   researched in depth yet.
 
 Risk: private frameworks break with Xcode releases (Claude's helper already
 carries an Xcode 27 workaround). Prior art to read first: idb
