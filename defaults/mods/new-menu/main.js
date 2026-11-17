@@ -1,26 +1,13 @@
 // Modified for Canopy.
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { theme, spaces, panes, knownAgents, run, openOverlay, closeOverlay, props, window, keys, shared, setShared, ui } from "herdr";
+import { theme, spaces, panes, knownAgents, run, openOverlay, closeOverlay, props, keys, shared, setShared, ui } from "herdr";
 
 // The last agents each machine reported, shown at once while knownAgents() checks again.
 const KNOWN = "new-menu.agents";
 
 function shortcut(name) {
-  const k = keys().find(b => b.section === "global" && b.action === name);
-  if (!k?.keys.trim()) return "";
-  const mac = window()?.platform === "macos";
-  const names = mac ? { ctrl: "⌃", alt: "⌥", shift: "⇧", cmd: "⌘", fn: "fn" } : { ctrl: "Ctrl", alt: "Alt", shift: "Shift", cmd: "Super", fn: "Fn" };
-  const alias = { secondary: mac ? "cmd" : "ctrl", super: "cmd", win: "cmd" };
-  return k.keys.trim().split(/\s+/).map(stroke => {
-    const parts = stroke.split("-");
-    let key = parts.pop();
-    if (key === "") { key = "-"; parts.pop(); }
-    const held = new Set(parts.map(m => alias[m.toLowerCase()] ?? m.toLowerCase()));
-    if (/^[A-Z]$/.test(key)) held.add("shift");
-    const label = key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1).toLowerCase();
-    return [...Object.keys(names).filter(m => held.has(m)).map(m => names[m]), label].join(mac ? "" : "+");
-  }).join(" ");
+  return keys().find(b => b.section === "global" && b.action === name)?.label ?? "";
 }
 
 export default class NewMenu extends View {

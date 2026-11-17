@@ -30,8 +30,9 @@ Hover or select a pane to see its helper bar above the top-left corner.
 - Mod panes: declared actions, then Connect and Close.
 - Sub-agent cells have no bar.
 
-Tooltips give the button's name and key. Hold Option in canvas mode to see
-keys on the buttons. Bars hide during a drag, resize, marquee or pending layout.
+Tooltips show the button's name and key. Hold Cmd (Ctrl elsewhere) alone for
+0.4 s to see keys on the buttons, even while a terminal has focus. Bars hide
+during a drag, resize, marquee or pending layout.
 
 The shared helper bar draws the actions for each pane kind, scaled with zoom
 between 75% and 100%. It sits 8 px above the pane, clear of the wire handle.

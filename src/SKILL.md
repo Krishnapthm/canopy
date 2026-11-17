@@ -304,8 +304,8 @@ apply to the `main` layout; other layouts retain app zoom.
 Canvas mouse (Figma style): click selects, drag moves the selection, a drag on empty canvas draws a
 selection box (Shift adds), double-click enters a cell (expands it, focuses its terminal; on an
 expanded cell's header name it renames the tab in place instead). Clicking
-empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. Holding Option/Alt on
-the canvas shows each selected or hovered cell's actions with their keys. Expanded cells are
+empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. Holding Cmd (Ctrl elsewhere) alone for 0.4 s
+shows keys on the toolbar and helper bars, even while a terminal has focus. Expanded cells are
 100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
 neighbours back. Drag the bottom-right corner to resize; the terminal is resized on release. Several
 can be open. The wheel scrolls a focused expanded terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
@@ -378,8 +378,8 @@ without asking. `canvas.close {terminal}` closes one cell: running agents ask "T
 Done sub-agent cells clear; working ones refuse with a toast.
 Hover or select a terminal or file pane for its helper bar above the top-left corner.
 Terminals offer Enter, Expand or Collapse, Connect and Close; files offer Open as tab
-and Close. Tooltips show names and keys; hold Option in canvas mode for keys on the
-buttons. Sub-agent cells have no bar.
+and Close. Tooltips show names and keys; hold Cmd (Ctrl elsewhere) alone for 0.4 s for keys on the
+buttons, even while a terminal has focus. Sub-agent cells have no bar.
 `canvas.front` and `canvas.back` raise or lower the selected panes; the order is saved.
 `canvas.sync` turns sync input on for the selected panes (typing in one reaches all) or off.
 `canvas.equalize` gives the selected panes (else the focused one) the standard `terminal_size`; `canvas.new` opens a full terminal pane, cascading from the last one.
@@ -391,7 +391,8 @@ their keys still work. The canvas bar (top of the window) has file, focus-fit an
 
 Canvas keyboard: the canvas has the keyboard unless a cell is entered; then the `canvas-mode`
 key section gets first refusal and unbound keys without Ctrl, Alt or Cmd are swallowed. No idle
-timer. The hint mod reads the bindings with `keys()` and shows while Option is held. Dialogs, menus
+timer. Holding Cmd (Ctrl elsewhere) alone for 0.4 s shows surface keys; releasing it or
+pressing any key hides them. In the agent menu, 1-9 start the agent with that number. Dialogs, menus
 and inputs keep their own keys. `canvas.mode` (Cmd+Esc, Cmd+J) leaves the entered cell.
 `canvas.leave` (Esc) cancels a pending connection, else clears the selection, else goes Home;
 `canvas.enter` connects, enters the selected cell or goes into the selected space.

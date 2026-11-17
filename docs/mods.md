@@ -46,4 +46,18 @@ shown. `canvasPanes()` gives its saved props; save state with
 Actions declare `{icon, label, command, args}`. They run app commands with the
 pane selected. After them the app adds Connect and Close in the shared helper bar.
 
+## Toolbar state and shortcut hints
+
+`window().hand` is true while the canvas hand tool is on (`canvas.hand`).
+Use it to highlight Hand or Select. `window().keys` becomes true after the
+person holds Cmd (Ctrl elsewhere) alone for 0.4 s; show each button's key
+beside its icon while true. Release or any key press hides the hints.
+`keys()` rows include `label`, the platform-formatted binding, such as `⇧⌘N`
+on macOS or `Ctrl+Shift+N` elsewhere. Use it in tooltips and inline hints.
+
+Open a popup with `openOverlay({mod, kind: "popup", at: "above"})` to place
+its bottom 8 px above the floating block under the pointer, with its left
+edge 16 px left of the pointer. The popup snaps inside the window with an
+8 px margin. Without a floating block under the pointer it opens at the pointer.
+
 [Back to Canopy](../README.md)
