@@ -283,7 +283,7 @@ as CSS variables.
 P1 must land first. After it, P2 to P5 can run in parallel worktrees, each
 on its own branch, sharing one `CARGO_TARGET_DIR` (disk is tight).
 
-**Friday target (proposed):** P1, P2 and P3 on macOS. That is the post's
+**Friday target (locked 2026-11-17):** P1, P2 and P3 on macOS. That is the post's
 story: an agent opens a PDF and a localhost page beside itself, and the
 person quotes a highlight or a React component into it. P4 and P5 ship
 after the post unless P1 to P3 land early. Day one builds gpui-pdf and
