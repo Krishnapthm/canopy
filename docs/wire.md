@@ -8,9 +8,10 @@ and `hc read` directly.
 ## How to use it
 
 Hover a cell and drag from a side "+" to another cell in the same space,
-or click the "+" and then the other cell. Esc or a click on empty canvas
-cancels. In canvas mode, `c` starts a connection; select the other cell and
-press Enter. Connecting types nothing into either terminal.
+or click the "+" (or the pane's helper bar Connect) and then the other cell.
+Esc or a click on empty canvas cancels. In canvas mode, `c` starts a
+connection; arrows select the other cell and Enter connects. Either way a
+one-line hint shows at the bottom of the canvas. Connecting types nothing into either terminal.
 
 File panes can be wired to terminals and agents, but not to each other.
 `canopy wire` lists a wired file pane with its path and verbs, for example

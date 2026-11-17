@@ -30,8 +30,15 @@ Hover or select a pane to see its helper bar above the top-left corner.
 - Mod panes: declared actions, then Connect and Close.
 - Sub-agent cells have no bar.
 
+Connect works like clicking a wire "+" handle: a wire leaves the pane and
+follows the pointer; click another pane to connect, or Esc or empty canvas to
+cancel. The strip at the bottom says "Click a pane to connect · Esc cancels".
+Connect stays highlighted while its wire is drawn and while the pane has any
+edge, drawn or born (a sub-agent or `hc run` child).
+
 Tooltips give the button's name and key. Hold Option in canvas mode to see
-keys on the buttons. Bars hide during a drag, resize, marquee or pending layout.
+keys on the buttons. Bars hide during a drag, resize, marquee or pending layout, but stay up while a
+clicked wire follows the pointer.
 
 The shared helper bar draws the actions for each pane kind, scaled with zoom
 between 75% and 100%. It sits 8 px above the pane, clear of the wire handle.
