@@ -41,6 +41,14 @@ cargo build --locked
 cargo test --locked
 ```
 
+The app embeds text files byte for byte, so `.gitattributes` checks them out
+with LF line endings on every OS. A Windows clone made before that file existed
+still has CRLF copies; refresh them once from a clean tree:
+
+```sh
+git rm -r --cached -q . && git reset --hard
+```
+
 A source build needs herdr-core too; the installer above sets it up, or run its
 own installer:
 
