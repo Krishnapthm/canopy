@@ -5194,8 +5194,7 @@ mod tests {
     #[gpui::test]
     fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
         use gpui::{ImgResourceLoader, Resource};
-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
+        let home = test_home("image-atlas-test");
         std::fs::create_dir_all(&home).unwrap();
         let file = home.join("image.gif");
         let mut encoder = image::codecs::gif::GifEncoder::new(std::fs::File::create(&file).unwrap());
@@ -5282,8 +5281,7 @@ mod tests {
                 encoder.encode_frame(image::Frame::new(image::RgbaImage::from_pixel(2, 2, image::Rgba(color)))).unwrap();
             }
         }
-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let dir = temp.join(format!("herdr-many-images-{}", std::process::id()));
+        let dir = test_home("many-images");
         std::fs::create_dir_all(&dir).unwrap();
         let sources: Vec<_> = (0..24).map(|id| {
             let path = dir.join(format!("{id}.gif"));
@@ -5375,8 +5373,7 @@ mod tests {
                 element
             }
         }
-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let home = temp.join(format!("herdr-image-release-test-{}", std::process::id()));
+        let home = test_home("image-release-test");
         std::fs::create_dir_all(&home).unwrap();
         let gif = home.join("animated.gif");
         let png = home.join("still.png");
@@ -5442,8 +5439,7 @@ mod tests {
 
     #[test]
     fn directory_changes_include_nested_assets() {
-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let home = temp.join(format!("herdr-image-directory-test-{}", std::process::id()));
+        let home = test_home("image-directory-test");
         std::fs::create_dir_all(home.join("mods/probe/nested")).unwrap();
         std::fs::write(home.join("mods/probe/nested/icon.svg"), "svg").unwrap();
         for ignored in ["node_modules/pkg", ".git"] {
@@ -5628,12 +5624,22 @@ mod tests {
         assert_eq!(restored.terminal_menu.as_deref(), Some("personal-menu"));
     }
 
+    /// A scratch path `herdr-<label>-<pid>` for one test, under /var/tmp on
+    /// Linux and the OS temp dir elsewhere (a "/tmp" literal is not absolute on
+    /// Windows). The caller creates and removes it.
+    fn test_home(label: &str) -> std::path::PathBuf {
+        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+        temp.join(format!("herdr-{label}-{}", std::process::id()))
+    }
+
     /// Runs `window::tests::<name>` alone in a test process of its own, on a
     /// fresh app home: a window takes process-wide things (the app home, the
     /// mods' request channel) that tests beside it would otherwise share.
     pub(super) fn in_own_process(name: &str) {
-        // temp_dir, not "/tmp": on Windows "/tmp/x" has no drive, so it is not absolute.
-        let home = std::env::temp_dir().join(format!("herdr-window-test-{}-{}", name.replace("::", "-"), std::process::id()));
+        // A counter, not the test name: macOS caps socket paths at 104 bytes and
+        // the home holds herdr-app.sock under an already long temp dir.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let home = test_home(&format!("w{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&home);
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", &if name.contains("::") { name.to_owned() } else { format!("window::tests::{name}") }, "--nocapture", "--test-threads=1"])
