@@ -14,7 +14,7 @@ impl AppWindow {
         self.answer(r);
     }
 
-    fn pane_new(&mut self, a: &Value, window: &Window, cx: &mut Context<Self>) -> Result<Value, String> {
+    fn pane_new(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
         let mut kinds = vec!["file".to_owned()];
         kinds.extend(self.folders.iter().filter(|(_, f)| f.hint.pane.is_some()).map(|(id, _)| format!("mod:{id}")));
         let kind = a["kind"].as_str().unwrap_or_default();
@@ -36,12 +36,12 @@ impl AppWindow {
             };
             (point, doc.room.clone())
         };
-        let (id, path) = if kind == "file" {
+        let (id, path, kind) = if kind == "file" {
             let path = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()).ok_or("canvas.pane_new: path must be absolute")?;
-            let (id, path) = self.add_file_pane(std::path::Path::new(path), point, space, cx)?;
-            (id, Some(path))
+            let (id, path, kind) = self.add_file_pane(std::path::Path::new(path), point, space, window, cx)?;
+            (id, Some(path), kind)
         } else {
-            (self.add_mod_pane(kind.to_owned(), point, space, cx), None)
+            (self.add_mod_pane(kind.to_owned(), point, space, cx), None, kind.to_owned())
         };
         if let Some(t) = a["wire"].as_str() {
             self.canvas_state.doc.connect(&id, t);
@@ -75,6 +75,11 @@ impl AppWindow {
                 let text = canvas::read_preview(std::path::Path::new(path)).map_err(|e| format!("cannot read {path}: {e}"))?;
                 Ok(json!({"text":canvas::envelope(id, "file", &[("path", path)], &text)}))
             }
+            canvas::Kind::Image { path } => {
+                let &(w, h) = self.canvas_state.image_sizes.get(path).ok_or_else(|| format!("cannot read {path}: not a readable image"))?;
+                Ok(json!({"text":canvas::envelope(id, "image", &[("path", path), ("size", &format!("{w}x{h}"))], "")}))
+            }
+            canvas::Kind::Pdf { path, .. } => Ok(json!({"text":pdf::read_pdf(id, path)?})),
             canvas::Kind::Mod { kind, props } => Ok(json!({"text":canvas::envelope(id, kind, &[], props.get("text").and_then(Value::as_str).unwrap_or(""))})),
             canvas::Kind::Terminal { .. } => Err(format!("pane {id} is a terminal: read it with hc read {id}")),
             canvas::Kind::Sub { parent, .. } => Err(format!("pane {id} is a sub-agent cell: read its parent with hc read {parent}")),
@@ -201,4 +206,87 @@ mod tests {
             assert!(this.canvas_state.doc.wires.is_empty());
         });
     }
+    const VIEWERS_TEST: &str = "window::canvas_view::pane_commands::tests::viewer_pane_commands_headless";
+
+    #[test]
+    fn viewer_pane_commands() { in_own_process(VIEWERS_TEST); }
+
+    #[gpui::test]
+    fn viewer_pane_commands_headless(cx: &mut TestAppContext) {
+        if !running_alone(VIEWERS_TEST) { return; }
+        let (view, cx) = open_window(cx, "viewer-panes", "", json!({"id":"root","type":"canvas"}));
+        let dir = crate::mods::app_dir();
+        let image = dir.join("viewer.PNG");
+        let pdf = dir.join("viewer.pdf");
+        let bytes = sample_pdf();
+        image::RgbaImage::new(10, 6).save(&image).unwrap();
+        std::fs::write(&pdf, &bytes).unwrap();
+        view.update_in(cx, |this, window, cx| {
+            let png = this.run_as("canvas.pane_new", json!({"kind":"file","path":image}), false, window, cx);
+            assert_eq!(png["kind"], "image", "{png}");
+            let read = this.pane_read(&json!({"pane":png["pane"]})).unwrap();
+            assert!(read["text"].as_str().unwrap().contains("kind=\"image\""));
+            assert!(read["text"].as_str().unwrap().contains("size=\"10x6\""));
+            // A PNG saved as .jpg still opens: the size is read from the bytes.
+            let lie = dir.join("lie.jpg");
+            image::RgbaImage::new(3, 2).save_with_format(&lie, image::ImageFormat::Png).unwrap();
+            assert_eq!(this.run_as("canvas.pane_new", json!({"kind":"file","path":lie}), false, window, cx)["kind"], "image");
+
+            let reply = this.run_as("canvas.pane_new", json!({"kind":"file","path":pdf}), false, window, cx);
+            assert_eq!(reply["kind"], "pdf", "{reply}");
+            assert_eq!(std::fs::read(&pdf).unwrap(), bytes);
+            let id = reply["pane"].as_str().unwrap();
+            let read = this.pane_read(&json!({"pane":id})).unwrap();
+            let text = read["text"].as_str().unwrap();
+            assert!(text.contains("pages=\"1\""), "{text}");
+            assert!(text.contains("[page 1]\nHello canvas"), "{text}");
+            assert_eq!(std::fs::read(&pdf).unwrap(), bytes);
+            let mark = canvas::PdfMark { page: 1, quote: "Hello canvas".into(), occurrence: 0 };
+            this.add_pdf_mark(id, mark.clone(), point(px(10.), px(10.)), cx);
+            let pane = this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap();
+            assert!(matches!(&pane.kind, canvas::Kind::Pdf { highlights, .. } if highlights == &[mark]));
+            assert_eq!(std::fs::read(&pdf).unwrap(), bytes);
+            let quote = &this.canvas_state.quote_chip.as_ref().unwrap().0;
+            assert_eq!(quote["page"], 1);
+            assert_eq!(quote["text"], "Hello canvas");
+            let mut send = quote.clone();
+            send.as_object_mut().unwrap().remove("point");
+            crate::commands::validate_args(crate::commands::find("quote.send").unwrap(), &send).unwrap();
+            // Clear removes the saved marks of the selected pane and never touches the file.
+            this.canvas_state.selected = vec![id.to_owned()];
+            this.pdf_command("canvas.pdf_clear", window, cx);
+            assert!(this.canvas_state.doc.panes.iter().any(|p| p.id == id && matches!(&p.kind, canvas::Kind::Pdf { highlights, .. } if highlights.is_empty())));
+            assert_eq!(std::fs::read(&pdf).unwrap(), bytes);
+            this.close_canvas_cell(&json!({"pane":id}), window, cx);
+            assert!(this.canvas_state.pdfs.is_empty());
+            assert_eq!(this.canvas_state.pdf_drops.len(), 1);
+            this.release_pdf_drops(window, cx);
+        });
+    }
+
+    fn sample_pdf() -> Vec<u8> {
+        use std::fmt::Write;
+        let text = "BT /F1 12 Tf 10 40 Td (Hello canvas) Tj ET\n";
+        let mut pdf = "%PDF-1.4\n".to_owned();
+        let mut offsets = Vec::new();
+        for (i, object) in [
+            "<< /Type /Catalog /Pages 2 0 R >>".into(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".into(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>".into(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+            format!("<< /Length {} >>\nstream\n{text}endstream", text.len()),
+        ].iter().enumerate() {
+            offsets.push(pdf.len());
+            writeln!(pdf, "{} 0 obj\n{object}\nendobj", i + 1).unwrap();
+        }
+        let xref = pdf.len();
+        let size = offsets.len() + 1;
+        writeln!(pdf, "xref\n0 {size}\n0000000000 65535 f ").unwrap();
+        for offset in offsets {
+            writeln!(pdf, "{offset:010} 00000 n ").unwrap();
+        }
+        writeln!(pdf, "trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF").unwrap();
+        pdf.into_bytes()
+    }
+
 }
