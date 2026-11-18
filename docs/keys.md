@@ -28,7 +28,7 @@ were in last (again toggles; Ctrl+Shift+Tab walks further back).
 | Arrows | Move the selection by one gap, with one undo step |
 | h j k l, Tab / Shift+Tab | Select the nearest cell in that direction |
 | x | Collapse the selected terminal |
-| c | Start a wire; select its other cell, Enter connects, Esc cancels |
+| c | Start a wire; arrows pick its other pane, Enter connects, Esc cancels |
 | Shift+A / a | Arrange (repeat the last layout) / choose a layout |
 | n / Shift+N | New terminal here / installed agent list |
 | V | Select tool |

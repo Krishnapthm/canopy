@@ -1054,6 +1054,7 @@ impl AppWindow {
         self.canvas_state.doc.go(room.clone());
         self.canvas_state.selected.clear();
         self.canvas_state.wire.selected = None;
+        (self.canvas_state.wire.drag, self.canvas_state.wire.sticky) = (None, false);
         self.canvas_state.connecting = None;
         self.canvas_state.previous_camera = None;
         if let Some(id) = &room {
@@ -1077,11 +1078,22 @@ impl AppWindow {
             cx.notify();
         }
     }
+    /// Whether the canvas-keys strip shows one connect line instead of its key list: a wire
+    /// follows the pointer, or a keyboard connection is pending.
+    fn connect_hint(&self) -> bool {
+        self.canvas_state.wire.sticky || self.canvas_state.connecting.is_some()
+    }
     pub(super) fn panel_mods(&self) -> Vec<(String, Instance)> {
         if !self.has_canvas() { return vec![]; }
         let mut slots = vec![];
         if self.canvas_state.connecting.is_some() {
             slots.push(("canvas-keys".into(), Instance { name: "canvas-keys".into(), props: json!({"connecting":self.canvas_state.connecting.is_some()}) }));
+        }
+        // A wire following the pointer (helper bar Connect, a clicked "+") shows only its one-line
+        // hint, never the key list.
+        if self.canvas_state.wire.sticky {
+            slots.retain(|(slot, _)| slot != "canvas-keys");
+            slots.push(("canvas-keys".into(), Instance { name: "canvas-keys".into(), props: json!({"pointer":true}) }));
         }
         for pane in &self.canvas_state.doc.panes {
             if !self.canvas_state.doc.shows(pane.space.as_ref()) { continue; }
@@ -3118,8 +3130,8 @@ impl AppWindow {
             // Like Claude's header, the canvas controls sit at the right end, beside the panel.
             bar = bar.child(crumbs.child(div().flex_1().h_full())).child(tabs.flex_none().px(px(8.)));
         }
-        if state.connecting.is_some() {
-            area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(72.))
+        if self.connect_hint() {
+            area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(32.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_slot("canvas-keys", cx)));
         }

@@ -19,8 +19,9 @@ pub(in crate::window) struct WireUi {
     pub(super) drag: Option<(String, canvas::Point, Point<Pixels>)>,
     /// Where the button went down on the "+" handle, to tell a click from a drag.
     down: Point<Pixels>,
-    /// The handle was clicked, not dragged: the wire follows the pointer until a click picks a cell.
-    sticky: bool,
+    /// The handle (or the helper bar's Connect) was clicked, not dragged: the wire follows the
+    /// pointer until a click picks a pane.
+    pub(super) sticky: bool,
     pub(super) selected: Option<(String, String)>,
     /// When an edge was last pulsed, for its glow.
     pulses: HashMap<(String, String), Instant>,
@@ -196,6 +197,7 @@ impl AppWindow {
         if wire.drag.is_none() || wire.sticky { return false; }
         if is_click(wire.down, position) {
             wire.sticky = true;
+            self.sync(window, cx);
             cx.notify();
             return true;
         }
@@ -216,17 +218,34 @@ impl AppWindow {
         if let Some(to) = drag.and_then(|(from, ..)| self.wire_cell_at(position, 0.).filter(|to| *to != from).map(|to| (from, to))) {
             if let Err(why) = self.wire_connect(&to.0, &to.1, cx) { self.wire_toast(why, window, cx); }
         }
+        self.sync(window, cx);
         cx.notify();
         true
     }
 
     /// Escape drops a wire that follows the pointer. True when there was one.
-    pub(in crate::window) fn wire_cancel(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::window) fn wire_cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let wire = &mut self.canvas_state.wire;
         if !wire.sticky { return false; }
         (wire.drag, wire.sticky) = (None, false);
+        self.sync(window, cx);
         cx.notify();
         true
+    }
+
+    /// The helper bar's Connect: like a clicked "+" handle, a wire leaves the pane's right side
+    /// and follows the pointer until a click picks a pane (`wire_pick`) or Escape drops it.
+    pub(super) fn wire_start(&mut self, key: &str, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
+        let Some(r) = self.wire_cell(doc, key) else { return };
+        self.canvas_state.selected.clear();
+        // The canvas takes the keyboard so Escape can cancel.
+        self.canvas_state.mode = true;
+        self.focus.focus(window, cx);
+        self.canvas_state.wire.drag = Some((key.to_owned(), [r[0] + r[2], r[1] + r[3] / 2.], position));
+        self.canvas_state.wire.sticky = true;
+        self.sync(window, cx);
+        cx.notify();
     }
 
     /// Delete on a selected edge removes it (a selected cell takes the key first).
@@ -381,7 +400,7 @@ mod sticky_tests {
             assert!(this.wire_pointer(&moved, cx));
             assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| d.2), Some(over_t2));
             // Escape drops it.
-            assert!(this.wire_cancel(cx));
+            assert!(this.wire_cancel(window, cx));
             assert!(this.canvas_state.wire.drag.is_none() && this.canvas_state.doc.wires.is_empty());
             // The next click on a cell connects.
             start(this);
@@ -393,6 +412,12 @@ mod sticky_tests {
             start(this);
             assert!(this.wire_release(point(px(900.), px(900.)), window, cx));
             assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
+            // The helper bar's Connect starts the same pointer wire, from the pane's right side.
+            this.wire_start("t2", over_t2, window, cx);
+            assert!(this.canvas_state.wire.sticky);
+            let r = this.wire_cell(&this.canvas_state.doc, "t2").unwrap();
+            assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| (d.0.as_str(), d.1)), Some(("t2", [r[0] + r[2], r[1] + r[3] / 2.])));
+            assert!(this.connect_hint());
         });
     }
 }
