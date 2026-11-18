@@ -105,6 +105,9 @@
     "ctrl-shift-h": "canvas.home"
   },
   "canvas-mode": {
+    "v": {"command": "canvas.hand", "args": {"on": false}},
+    "t": {"command": "canvas.pane_new", "args": {"kind": "mod:note"}},
+    "ctrl-o": {"command": "preview.open", "args": {"place": "canvas"}},
     "left": "canvas.nudge:left",
     "right": "canvas.nudge:right",
     "up": "canvas.nudge:up",

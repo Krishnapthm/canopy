@@ -1,6 +1,7 @@
 {
   "id": "root",
   "type": "canvas",
+  "floating": [ { "id": "toolbar", "content": { "mod": "toolbar" }, "edge": "bottom", "align": "center" } ],
   "titlebar": "none",
   "traffic_lights": [
     12,

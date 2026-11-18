@@ -164,7 +164,7 @@ Open the quote popover at point or the pointer: agents wired to the quoted pane 
 
 ## `canvas.close`
 
-Close every selected pane (else the focused one) behind one dialog listing them, the named terminal, or one file pane by id (pane); terminals is the confirmed list, ending them all without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
+Close every selected pane (else the focused one) behind one dialog listing them, the named terminal, or one file or mod pane by id (pane; a mod pane holding text refuses); terminals and panes are the confirmed lists, closed without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
 
 | Argument | Required |
 |---|---|
@@ -173,17 +173,35 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 | `confirmed` | no |
 | `dont_ask` | no |
 | `pane` | no |
+| `panes` | no |
 
 ## `canvas.pane_new`
 
-Open a pane of a kind ("file") at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A path already open moves its pane. Replies with pane, path and wired.
+Open a pane of a kind ("file" or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. Replies with pane, kind, path (files) and wired.
 
 | Argument | Required |
 |---|---|
 | `kind` | yes |
-| `path` | yes |
+| `path` | no |
 | `wire` | no |
 | `point` | no |
+
+## `canvas.pane_set`
+
+Merge props (an object) into a mod pane's saved props; mods save their state with it, and a string props.text is what canopy pane read returns. Replies with nothing.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+| `props` | yes |
+
+## `canvas.hand`
+
+Hand tool: while on, a left drag anywhere on the canvas pans, as with Space held. Without on it toggles.
+
+| Argument | Required |
+|---|---|
+| `on` | no |
 
 ## `canvas.pane_read`
 

@@ -217,6 +217,8 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
                 "readTextFile" if first == "/fixture/app/frame/settings/keys.macos.json" => Some(json!(include_str!("../../defaults/keys.macos.json"))),
                 "readTextFile" if first == "/fixture/hello.rs" => Some(json!("fn main() {}")),
                 "readTextFile" if first == "/fixture/app/settings.json" || first == "/fixture/.ssh/config" => Some(Value::Null),
+                // project-setup reads the fixture space's instruction files: both missing.
+                "readTextFile" if first == "/fixture/project/AGENTS.md" || first == "/fixture/project/CLAUDE.md" => Some(Value::Null),
                 "readTextFile" => first
                     .as_str()
                     .and_then(|p| p.strip_prefix("/fixture/app/layouts/"))

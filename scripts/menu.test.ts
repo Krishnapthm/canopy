@@ -100,10 +100,10 @@ test("canvas hint bar reads rebound mode keys and distinguishes the layout picke
     return element;
   } });
   const Hint = new Function("View", "div", "v_flex", "keys", "props", "theme", `${source}; return CanvasKeys;`)(class {}, () => element, () => element, () => [
-    {section:"global", keys:"q", action:"app.quit"},
-    {section:"canvas-mode", keys:"z", action:"canvas.new"},
-    {section:"canvas-mode", keys:"b", action:"{}"},
-    {section:"canvas-mode", keys:"shift-z", action:JSON.stringify({command:"canvas.arrange",args:{picker:true}})},
+    {section:"global", keys:"q", label:"Q", action:"app.quit"},
+    {section:"canvas-mode", keys:"z", label:"Z", action:"canvas.new"},
+    {section:"canvas-mode", keys:"b", label:"B", action:"{}"},
+    {section:"canvas-mode", keys:"shift-z", label:"⇧Z", action:JSON.stringify({command:"canvas.arrange",args:{picker:true}})},
   ], () => ({connecting:true}), () => ({}));
   new Hint().render();
   expect(shown).toContain("z new terminal");
@@ -155,4 +155,37 @@ test("pane confirmation lists each pane and cancels without running its captured
   expect(sent).toEqual([]);
   confirm.yes();
   expect(sent).toEqual([["canvas.close", current.command.args]]);
+});
+
+
+test("canvas-agents numbers installed rows and starts the numbered agent", () => {
+  const shown: string[] = [], sent: unknown[] = [];
+  let keydown: (e: unknown, cx: unknown) => void;
+  const element: any = new Proxy({}, { get: (_, name) => (...args: any[]) => {
+    if (name === "when" && args[0]) args[1](element);
+    if (name === "child" && typeof args[0] === "string") shown.push(args[0]);
+    if (name === "on_key_down") keydown = args[0];
+    return element;
+  } });
+  const current = { tab: "canvas-agents", target: { space: "s1", machine: "m1" } };
+  const Menu = new Function("View", "div", "svg", "image", "h_flex", "v_flex", "props", "theme", "ui", "keys", "closeOverlay", "run", `${source}; return Menu;`)(
+    class {}, () => element, () => element, () => element, () => element, () => element,
+    () => current, () => ({}), { size: {} }, () => [], () => {}, (...args: unknown[]) => sent.push(args));
+  const menu = new Menu();
+  menu.agents = [
+    { name: "First", installed: true, run: ["first"] },
+    { name: "Missing", installed: false, run: ["missing"] },
+    { name: "Second", installed: true, run: ["second", "--flag"] },
+    { name: "Third", installed: true, run: ["third"] },
+  ];
+  menu.render();
+  expect(shown.filter(text => /^[1-9]$/.test(text))).toEqual(["1", "2", "3"]);
+  let stopped = 0;
+  const cx = { stop_propagation() { stopped++; } };
+  keydown!({ key: "2", modifiers: {} }, cx);
+  expect(sent).toEqual([["canvas.create", { space: "s1", argv: ["second", "--flag"] }]]);
+  keydown!({ key: "7", modifiers: {} }, cx);
+  keydown!({ key: "1", modifiers: { shift: true } }, cx);
+  expect(sent).toHaveLength(1);
+  expect(stopped).toBe(2);
 });

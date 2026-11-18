@@ -83,3 +83,12 @@ Not checked: the live pill repro in the app (folded into the phase 1 hand check)
   terminal now hands off to `<app home>/bin/canopy`.
 - A spawned Claude in an untrusted folder stops at the folder trust dialog; `canopy spawn`
   passes the caller's folder (`--cwd`) so the child starts where its parent works.
+
+## Global skills, 2026-11-17 (2.1.322)
+
+- **Personal skills live in `<config dir>/skills/<name>/SKILL.md` - binary strings only,
+  not run.** The bundled JS joins the config directory (`$CLAUDE_CONFIG_DIR`, else
+  `~/.claude`) with `skills`, and lists `~/.claude/skills/` beside the project's
+  `.claude/skills/`. Canopy writes `~/.claude/skills/canopy/SKILL.md` (programs.json
+  `skills`); a person who sets `CLAUDE_CONFIG_DIR` gets no skill from Canopy yet.
+- Listing and loading it in a live session is not checked here (that needs a paid session).

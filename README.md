@@ -19,7 +19,9 @@ curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/instal
 This installs Canopy and, if you don't have it yet, herdr-core, the terminal engine it runs on.
 Then open Canopy from your apps or run `canopy`. Run the installer again to update.
 
-To uninstall, delete the app and its config in `~/.config/canopy`:
+To uninstall, first run `canopy skill remove` to delete the skill Canopy
+installed for your agents. Then delete the app and its config in
+`~/.config/canopy`:
 
 - macOS: `~/Applications/Canopy.app` and the `~/.local/bin/canopy` link.
 - Linux: `~/.local/share/canopy`, `~/.local/bin/canopy`,

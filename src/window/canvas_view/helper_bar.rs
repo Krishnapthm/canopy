@@ -3,30 +3,36 @@ use super::*;
 
 /// One button of a pane's helper bar: an icon running an app command.
 pub(super) struct BarAction {
-    pub icon: &'static str,
-    pub label: &'static str,
-    pub command: &'static str,
+    pub icon: SharedString,
+    pub label: SharedString,
+    pub command: String,
     pub args: Value,
 }
 
 /// The helper bar buttons for a pane, left to right. Sub-agent cells have none.
-pub(super) fn pane_actions(pane: &canvas::Pane) -> Vec<BarAction> {
+pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAction> {
     match &pane.kind {
         canvas::Kind::Terminal { size } => vec![
-            BarAction { icon: "icons/square-terminal.svg", label: "Enter", command: "canvas.enter", args: json!({}) },
+            BarAction { icon: "icons/square-terminal.svg".into(), label: "Enter".into(), command: "canvas.enter".into(), args: json!({}) },
             if size.is_some() {
-                BarAction { icon: "icons/minimize-2.svg", label: "Collapse", command: "canvas.collapse", args: json!({}) }
+                BarAction { icon: "icons/minimize-2.svg".into(), label: "Collapse".into(), command: "canvas.collapse".into(), args: json!({}) }
             } else {
-                BarAction { icon: "icons/maximize-2.svg", label: "Expand", command: "canvas.expand", args: json!({}) }
+                BarAction { icon: "icons/maximize-2.svg".into(), label: "Expand".into(), command: "canvas.expand".into(), args: json!({}) }
             },
-            BarAction { icon: "icons/link.svg", label: "Connect", command: "canvas.connect", args: json!({}) },
-            BarAction { icon: "icons/x.svg", label: "Close", command: "canvas.close", args: json!({}) },
+            BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
+            BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ],
         canvas::Kind::File { path } => vec![
-            BarAction { icon: "icons/panel-right.svg", label: "Open as tab", command: "preview.open", args: json!({"path":path}) },
-            BarAction { icon: "icons/link.svg", label: "Connect", command: "canvas.connect", args: json!({}) },
-            BarAction { icon: "icons/x.svg", label: "Close", command: "canvas.close", args: json!({}) },
+            BarAction { icon: "icons/panel-right.svg".into(), label: "Open as tab".into(), command: "preview.open".into(), args: json!({"path":path}) },
+            BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
+            BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ],
+        canvas::Kind::Mod { .. } => hint.into_iter().flat_map(|h| &h.actions).map(|a| BarAction {
+            icon: a.icon.clone().into(), label: a.label.clone().into(), command: a.command.clone(), args: a.args.clone(),
+        }).chain([
+            BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
+            BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
+        ]).collect(),
         canvas::Kind::Sub { .. } => vec![],
     }
 }
@@ -53,9 +59,10 @@ impl AppWindow {
         let mut out = vec![];
         for id in targets {
             let Some(pane) = doc.panes.iter().find(|p| p.id == id && doc.shows(p.space.as_ref())) else { continue };
-            let actions = pane_actions(pane);
+            let hint = pane.mod_name().and_then(|name| self.folders.get(name)).and_then(|f| f.hint.pane.as_ref());
+            let actions = pane_actions(pane, hint);
             if actions.is_empty() { continue; }
-            let rect = if pane.file().is_some() { pane.rect } else {
+            let rect = if pane.boxed() { pane.rect } else {
                 let Some(rect) = self.wire_cell(doc, &id) else { continue };
                 rect
             };
@@ -67,21 +74,21 @@ impl AppWindow {
                 let target = id.clone();
                 let group = SharedString::from(format!("bar-{id}-{command}"));
                 let hint = state.actions.as_ref().and_then(|keys| keys.iter()
-                    .find(|(section, _, action)| (section == "canvas-mode" || section == "layout:main") && action == command)
+                    .find(|(section, _, action)| (section == "canvas-mode" || section == "layout:main") && action == &command)
                     .map(|(_, key, _)| key.clone())).unwrap_or_default();
-                bar = bar.child(div().id(group.clone()).group(group.clone()).role(gpui::Role::Button).aria_label(label)
+                bar = bar.child(div().id(group.clone()).group(group.clone()).role(gpui::Role::Button).aria_label(label.clone())
                     .h(px(24. * s)).min_w(px(24. * s)).when(hint.is_empty(), |d| d.w(px(24. * s)))
                     .flex().items_center().justify_center().gap(px(2. * s)).rounded(px(ui::RADIUS_SM)).cursor_pointer()
                     .hover(|d| d.bg(c("hover")))
                     .child(svg().path(icon).size(px(14. * s)).text_color(c("muted-foreground"))
                         .group_hover(group, |d| d.text_color(c("foreground"))))
                     .when(!hint.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("muted-foreground")).child(hint)))
-                    .tooltip(strip_tooltip(label.to_string(), Some(command)))
+                    .tooltip(strip_tooltip(label.to_string(), Some(&command)))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.focus.focus(window, cx);
                         this.canvas_state.selected = vec![target.clone()];
-                        this.run_key(command, args.clone(), window, cx);
+                        this.run_key(&command, args.clone(), window, cx);
                     })));
             }
             out.push(bar.into_any_element());
@@ -99,14 +106,18 @@ mod helper_bar_tests {
     #[test]
     fn actions_follow_the_pane_kind() {
         let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.], z: 1, space: None };
-        let commands = |pane: &canvas::Pane| pane_actions(pane).iter().map(|a| a.command).collect::<Vec<_>>();
+        let commands = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.enter", "canvas.expand", "canvas.connect", "canvas.close"]);
         *pane.size_mut().unwrap() = Some([800., 500.]);
         assert_eq!(commands(&pane)[1], "canvas.collapse");
         pane.kind = canvas::Kind::File { path: "/tmp/a.md".into() };
         assert_eq!(commands(&pane), ["preview.open", "canvas.connect", "canvas.close"]);
-        assert_eq!(pane_actions(&pane)[0].args, json!({"path":"/tmp/a.md"}));
+        assert_eq!(pane_actions(&pane, None)[0].args, json!({"path":"/tmp/a.md"}));
+        pane.kind = canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() };
+        let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }] };
+        assert_eq!(pane_actions(&pane, Some(&hint)).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
+        assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
-        assert!(pane_actions(&pane).is_empty());
+        assert!(pane_actions(&pane, None).is_empty());
     }
 }

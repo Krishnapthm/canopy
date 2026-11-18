@@ -214,8 +214,8 @@ export interface CanvasPane {
   /** A terminal's core address (`t3`), `sub:<parent>:<id>` for a sub-agent cell, or `p<N>`
    *  for any other pane. Wire keys use the same ids. */
   id: string;
-  kind: "terminal" | "sub" | "file";
-  /** Kind fields: terminal { size? }, sub { parent, sub }, file { path }. */
+  kind: "terminal" | "sub" | "file" | `mod:${string}`;
+  /** Kind fields: terminal { size? }, sub { parent, sub }, file { path }, mod:<name> { what the mod saved }. */
   props: any;
   /** World pixels: [x, y, width, height]. */
   rect: [number, number, number, number];
@@ -228,8 +228,9 @@ export interface CanvasPane {
  *  the panes of tab layouts. */
 export function canvasPanes(): CanvasPane[];
 
-/** The kinds canvas.pane_new creates, with the `canopy pane` verbs each answers. */
-export function paneKinds(): { kind: string; verbs: string[] }[];
+/** The kinds canvas.pane_new creates, with the `canopy pane` verbs each answers; mod kinds
+ *  carry their label and icon. */
+export function paneKinds(): { kind: string; verbs: string[]; label?: string; icon?: string }[];
 
 /** Sets agent.next / agent.prev order to match the list a mod displays.
  *  Call when rendering the list. In memory only; missing agents are ignored, new agents
@@ -279,6 +280,10 @@ export function window(): {
   maximized: boolean;
   fullscreen: boolean;
   active: boolean;
+  /** The canvas hand tool is on (canvas.hand). */
+  hand: boolean;
+  /** The person holds Cmd (Ctrl off macOS): surfaces show their keys. */
+  keys: boolean;
 };
 
 /** For a floating mod: where it sits now. `vertical` on the left/right edges, horizontal on
@@ -312,8 +317,11 @@ export function fonts(): string[];
  *  number, default 1, clamped to 0.1..5. Layout values override settings.json. */
 export function settings(): Record<string, unknown>;
 
-/** Every key binding: { section, keys, action }. */
-export function keys(): { section: string; keys: string; action: string }[];
+/** Every key binding, with its readable label. */
+export function keys(): { section: string; keys: string; action: string;
+  /** The binding as people read it, e.g. "⇧⌘N" (macOS) or "Ctrl+Shift+N". */
+  label: string;
+}[];
 
 export interface OverlaySpec {
   /** One mod, or `layout`. */
@@ -343,7 +351,8 @@ export interface OverlaySpec {
   /** px, or up to 1: a share of the window. */
   width?: number;
   height?: number;
-  at?: "pointer" | { x: number; y: number };
+  /** "above": over the floating block under the pointer (the toolbar), its bottom 8 px above the block's top, left edge at the pointer minus 16 px. Pointer otherwise. */
+  at?: "pointer" | "above" | { x: number; y: number };
 }
 
 /** Shows a mod (or a layout) above everything. Returns its id. The mod gets `props().overlay` = that id. */

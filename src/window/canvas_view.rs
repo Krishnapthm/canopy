@@ -48,6 +48,7 @@ pub(super) struct State {
     pub popped: HashMap<String, WindowHandle<PopOut>>,
     save: canvas::SaveSchedule,
     pub space_down: bool,
+    pub hand: bool,
     resizing: bool,
     writable: bool,
     save_task: Option<Task<()>>,
@@ -91,8 +92,10 @@ pub(super) struct State {
     marquee: Option<(Point<Pixels>, Point<Pixels>, Vec<String>)>,
     /// The selection a cell drag carries along: the solver keeps them where the drag put them.
     group: Vec<String>,
-    /// Option (Alt) held on the canvas: each target cell shows its actions, with keys from keys.json.
+    /// Held Cmd (Ctrl elsewhere): surface hints use the current bindings.
     pub(super) actions: Option<Vec<(String, String, String)>>,
+    /// Pending hold delay, cancelled on release or any key down.
+    pub(super) hint_timer: Option<Task<anyhow::Result<()>>>,
     /// Tile view is on (`canvas.tile`): what it fills, and the geometry to put back.
     pub(super) tile: Option<Tile>,
     /// The pressed cell has moved `canvas::DRAG_THRESHOLD` px, so the press is a drag (see `drag_live`).
@@ -161,6 +164,7 @@ impl State {
             popped: HashMap::new(),
             save: canvas::SaveSchedule::default(),
             space_down: false,
+            hand: false,
             resizing: false,
             writable,
             save_task: None,
@@ -188,6 +192,7 @@ impl State {
             marquee: None,
             group: vec![],
             actions: None,
+            hint_timer: None,
             tile: None,
             drag_live: false,
         }
@@ -312,7 +317,7 @@ impl AppWindow {
     fn canvas_members(&self) -> Vec<Option<String>> {
         self.canvas_state.doc.panes.iter().map(|c| {
             let addr = match &c.kind {
-                canvas::Kind::File { .. } => return c.space.clone(),
+                canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => return c.space.clone(),
                 canvas::Kind::Sub { parent, .. } => parent,
                 canvas::Kind::Terminal { .. } => &c.id,
             };
@@ -567,7 +572,7 @@ impl AppWindow {
             .iter()
             .map(|i| {
                 doc.panes.get(*i)
-                    .and_then(|c| match &c.kind { canvas::Kind::Sub { parent, .. } => Some(parent.as_str()), canvas::Kind::Terminal { .. } => self.live.get(&c.id)?["parent"].as_str(), canvas::Kind::File { .. } => None })
+                    .and_then(|c| match &c.kind { canvas::Kind::Sub { parent, .. } => Some(parent.as_str()), canvas::Kind::Terminal { .. } => self.live.get(&c.id)?["parent"].as_str(), canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => None })
                     .and_then(|p| indices.iter().position(|j| ids[*j] == p))
             })
             .collect();
@@ -630,9 +635,9 @@ impl AppWindow {
         let area = [area.x, area.y];
         // What the place shows: expanded cells and previews tile; pills (and space cards on Home) line up.
         let shown = |c: &canvas::Pane| doc.shows(c.space.as_ref())
-            && (c.file().is_some() || matches!(c.kind, canvas::Kind::Sub { .. }) || canvas::view_allows(&doc.view, self.live.get(&c.id).is_some_and(canvas_agent)));
+            && (c.boxed() || matches!(c.kind, canvas::Kind::Sub { .. }) || canvas::view_allows(&doc.view, self.live.get(&c.id).is_some_and(canvas_agent)));
         let cards: Vec<usize> = (0..doc.panes.len()).filter(|i| shown(&doc.panes[*i])).collect();
-        let (tiled, pilled): (Vec<usize>, Vec<usize>) = cards.into_iter().partition(|i| doc.panes[*i].file().is_some() || doc.panes[*i].size().is_some());
+        let (tiled, pilled): (Vec<usize>, Vec<usize>) = cards.into_iter().partition(|i| doc.panes[*i].boxed() || doc.panes[*i].size().is_some());
         let spaces: Vec<usize> = (0..doc.spaces.len()).filter(|i| doc.room.is_none()
             && !self.model.spaces.iter().any(|s| s.id == doc.spaces[*i].space && root_space(s))).collect();
         let count = doc.panes.len();
@@ -757,7 +762,7 @@ impl AppWindow {
     /// The panes an action applies to.
     fn targets(&self, window: &Window) -> Vec<String> {
         let doc = &self.canvas_state.doc;
-        let here = |key: &str| doc.panes.iter().any(|c| c.file().is_none() && c.id == key && doc.shows(c.space.as_ref()));
+        let here = |key: &str| doc.panes.iter().any(|c| !c.boxed() && c.id == key && doc.shows(c.space.as_ref()));
         let selected: Vec<_> = self.canvas_state.selected.iter().filter(|k| here(k)).cloned().collect();
         if !selected.is_empty() { return selected; }
         self.terms.values().find(|t| t.focus.is_focused(window) && here(&t.address))
@@ -766,8 +771,8 @@ impl AppWindow {
             .into_iter().collect()
     }
 
-    /// Removes file panes, their selection and previews no longer in use.
-    fn close_file_panes(&mut self, ids: &[String], cx: &mut Context<Self>) {
+    /// Removes file and mod panes, their selection and previews no longer in use.
+    fn close_boxed_panes(&mut self, ids: &[String], cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
         let paths: Vec<_> = state.doc.panes.iter().filter(|p| ids.contains(&p.id)).filter_map(|p| p.file().map(str::to_owned)).collect();
         state.doc.panes.retain(|p| !ids.contains(&p.id));
@@ -785,8 +790,15 @@ impl AppWindow {
     pub(super) fn close_canvas_cell(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(id) = a["pane"].as_str() {
             let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return self.fail(format!("no pane {id}")) };
-            if pane.file().is_none() { return self.fail(format!("pane {id} is a {}: close it with canvas.close {{terminal}}", pane.kind_name())); }
-            return self.close_file_panes(&[id.to_owned()], cx);
+            if !pane.boxed() { return self.fail(format!("pane {id} is a {}: close it with canvas.close {{terminal}}", pane.kind_name())); }
+            // Its text lives only in canvas.json: an agent must not delete what the person wrote.
+            if pane.text().is_some() { return self.fail(format!("pane {id} holds text the person wrote: only they can close it")); }
+            return self.close_boxed_panes(&[id.to_owned()], cx);
+        }
+        // The confirmed dialog hands back the panes whose text closing deletes.
+        if let Some(list) = a["panes"].as_array() {
+            let ids: Vec<String> = list.iter().filter_map(Value::as_str).map(str::to_owned).collect();
+            return self.close_boxed_panes(&ids, cx);
         }
         if a["terminal"].is_null() && self.wire_delete_selected(window, cx) { return; }
         // The confirmed dialog hands back the whole list; terminate it as is.
@@ -799,11 +811,14 @@ impl AppWindow {
             None => {
                 if !self.focus.is_focused(window) { return; }
                 let state = &self.canvas_state;
-                let files: Vec<_> = state.doc.panes.iter().filter(|p| state.selected.contains(&p.id) && state.doc.shows(p.space.as_ref()) && p.file().is_some()).map(|p| p.id.clone()).collect();
+                let (written, files): (Vec<_>, Vec<_>) = state.doc.panes.iter().filter(|p| state.selected.contains(&p.id) && state.doc.shows(p.space.as_ref()) && p.boxed()).partition(|p| p.text().is_some());
+                let written: Vec<_> = written.into_iter().map(|p| p.id.clone()).collect();
+                let files: Vec<_> = files.into_iter().map(|p| p.id.clone()).collect();
                 if !files.is_empty() {
-                    self.close_file_panes(&files, cx);
-                    if self.targets(window).is_empty() { return; }
+                    self.close_boxed_panes(&files, cx);
                 }
+                if !written.is_empty() { return self.confirm_close_written(written, window, cx); }
+                if !files.is_empty() && self.targets(window).is_empty() { return; }
                 // Every target pane closes behind one dialog; only spaces and sub-agents take the single path.
                 let panes: Vec<_> = self.targets(window).into_iter()
                     .filter(|k| self.canvas_state.doc.panes.iter().any(|c| &c.id == k && c.terminal().is_some())).collect();
@@ -896,6 +911,19 @@ impl AppWindow {
 
     /// Terminates every pane behind one dialog listing them; without agents and with the
     /// terminal prompt switched off it just closes them.
+    /// Asks before closing mod panes whose text exists only in canvas.json (notes).
+    fn confirm_close_written(&mut self, panes: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let rows: Vec<_> = panes.iter().filter_map(|id| self.canvas_state.doc.panes.iter().find(|p| &p.id == id)).map(|p| {
+            let hint = p.mod_name().and_then(|n| self.folders.get(n)).and_then(|f| f.hint.pane.as_ref());
+            json!({"name":hint.map_or(p.kind_name(), |h| h.label.as_str()),"icon":hint.map_or("icons/x.svg", |h| h.icon.as_str()),"tint":true})
+        }).collect();
+        let title = if panes.len() == 1 { "Close this pane?".to_owned() } else { format!("Close {} panes?", panes.len()) };
+        self.open_overlay(mods::new_overlay_id(), json!({"mod":"confirm","kind":"dialog","width":400,
+            "props":{"title":title,"detail":"Their text is deleted. This cannot be undone.","panes":rows,"destructive":true,
+            "accept":"Close and delete text",
+            "command":{"name":"canvas.close","args":{"panes":panes}}}}), window, cx);
+    }
+
     fn close_panes(&mut self, panes: Vec<String>, window: &mut Window, cx: &mut Context<Self>) {
         let agents = panes.iter().any(|k| self.live.get(k).is_some_and(canvas_agent));
         if !agents && !self.person.confirm_close_terminal {
@@ -986,15 +1014,34 @@ impl AppWindow {
         ]);
         canvas::space_at(&self.canvas_state.doc.spaces, p).map(|s| s.space.clone())
     }
-    /// Option alone, while the canvas has the keyboard, shows each cell's actions (the window
-    /// root forwards modifier changes: they only reach the focused element's ancestors).
+    /// The window root forwards modifier changes, including while a terminal has focus.
     pub(in crate::window) fn canvas_modifiers(&mut self, m: gpui::Modifiers, window: &mut Window, cx: &mut Context<Self>) {
-        let held = self.has_canvas() && m.alt && !m.platform && !m.control && self.canvas_state.mode && self.focus.is_focused(window);
-        if held != self.canvas_state.actions.is_some() {
-            self.canvas_state.actions = held.then(crate::keys::listing);
-            self.sync(window, cx);
-            cx.notify();
+        let held = self.has_canvas() && window.is_window_active() && !m.alt && !m.shift && !m.function
+            && if cfg!(target_os = "macos") { m.platform && !m.control } else { m.control && !m.platform };
+        if !held {
+            self.hide_key_hints(window, cx);
+        } else if self.canvas_state.hint_timer.is_none() && self.canvas_state.actions.is_none() {
+            self.canvas_state.hint_timer = Some(cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor().timer(Duration::from_millis(400)).await;
+                this.update_in(cx, |this, window, cx| this.show_key_hints(window, cx))
+            }));
         }
+    }
+
+    fn show_key_hints(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.canvas_state.actions = Some(crate::keys::listing());
+        if mods::publish_window(self.window_json(window)) { self.refresh_snapshot_mods(cx); }
+        self.sync(window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn hide_key_hints(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.canvas_state.hint_timer.is_none() && self.canvas_state.actions.is_none() { return; }
+        self.canvas_state.hint_timer = None;
+        self.canvas_state.actions = None;
+        if mods::publish_window(self.window_json(window)) { self.refresh_snapshot_mods(cx); }
+        self.sync(window, cx);
+        cx.notify();
     }
     /// Shows a space's room (None: Home) with the camera it had there; a first visit fits what is inside.
     pub(super) fn go_room(&mut self, room: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
@@ -1033,8 +1080,14 @@ impl AppWindow {
     pub(super) fn panel_mods(&self) -> Vec<(String, Instance)> {
         if !self.has_canvas() { return vec![]; }
         let mut slots = vec![];
-        if self.canvas_state.actions.is_some() || self.canvas_state.connecting.is_some() {
+        if self.canvas_state.connecting.is_some() {
             slots.push(("canvas-keys".into(), Instance { name: "canvas-keys".into(), props: json!({"connecting":self.canvas_state.connecting.is_some()}) }));
+        }
+        for pane in &self.canvas_state.doc.panes {
+            if !self.canvas_state.doc.shows(pane.space.as_ref()) { continue; }
+            if let Some(name) = pane.mod_name().filter(|name| self.folders.get(*name).is_some_and(|f| f.hint.pane.is_some())) {
+                slots.push((format!("pane:{}", pane.id), Instance { name: name.into(), props: json!({"pane":pane.id}) }));
+            }
         }
         if self.canvas_state.file.is_none() && !self.canvas_state.files { return slots; }
         let root = self.panel_root();
@@ -1152,6 +1205,18 @@ impl AppWindow {
         cx.notify();
         Ok((id, path))
     }
+    /// Opens a mod pane at its own saved rect; its mod copy receives the pane id.
+    fn add_mod_pane(&mut self, kind: String, point: canvas::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
+        let doc = &mut self.canvas_state.doc;
+        let id = doc.next_file_id();
+        let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Mod { kind, props: serde_json::Map::new() }, rect: [point[0], point[1], 320., 240.], z, space });
+        self.solve_layout(Some(&id), None, cx);
+        self.canvas_changed(cx);
+        cx.notify();
+        id
+    }
+
     fn load_previews(&mut self, cx: &mut Context<Self>) {
         let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
         if let Some(path) = &self.canvas_state.file {
@@ -1836,7 +1901,7 @@ impl AppWindow {
         });
         changed |= before != state.doc.panes.len();
         state.selected.retain(|id|state.doc.panes.iter().any(|c|&c.id==id));
-        state.moves.retain(|key, _| state.doc.panes.iter().any(|c| c.file().is_none() && &c.id == key));
+        state.moves.retain(|key, _| state.doc.panes.iter().any(|c| !c.boxed() && &c.id == key));
         let mut addresses: Vec<_> = self.live.keys().cloned().collect();
         addresses.sort_by_key(|a| (self.live[a]["created_ms"].as_u64().unwrap_or(0), a.clone()));
         // Parents are placed first even when a snapshot arrives out of order.
@@ -1864,7 +1929,7 @@ impl AppWindow {
                 });
                 // Cells land in their own room (None for Home), among that room's cells only.
                 let room = space.filter(|s| !root_space(s)).map(|s| s.id.clone());
-                let occupied: Vec<_> = state.doc.panes.iter().filter(|c| c.file().is_none() && c.space == room).map(effective).collect();
+                let occupied: Vec<_> = state.doc.panes.iter().filter(|c| !c.boxed() && c.space == room).map(effective).collect();
                 let area = canvas::union(&occupied).map_or([0., 0., 960., 640.], |u| [u[0] - 24., u[1] - 24., u[2].max(912.) + 48., u[3] + 48.]);
                 let r = if let Some(p) =
                     parent.and_then(|p| state.doc.panes.iter().find(|c| c.terminal() == Some(p)))
@@ -1874,7 +1939,7 @@ impl AppWindow {
                         .panes
                         .iter()
                         .filter(|c| {
-                            c.file().is_none() && self.live
+                            !c.boxed() && self.live
                                 .get(&c.id)
                                 .and_then(|r| r["parent"].as_str())
                                 == parent
@@ -1897,7 +1962,7 @@ impl AppWindow {
         // The core says where a cell lives (None: Home); one it does not know yet keeps its last space.
         let members: Vec<_> = self.canvas_state.doc.panes.iter().map(|c| {
             let addr = match &c.kind {
-                canvas::Kind::File { .. } => return None,
+                canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => return None,
                 canvas::Kind::Sub { parent, .. } => parent,
                 canvas::Kind::Terminal { .. } => &c.id,
             };
@@ -1916,7 +1981,7 @@ impl AppWindow {
                 let members = self.canvas_members();
                 let mut groups = std::collections::HashSet::new();
                 let pins: Vec<_> = self.canvas_state.doc.panes.iter().zip(members)
-                    .filter(|(c,space)|c.file().is_none() && groups.insert(space.clone())).map(|(c,_)|c.id.clone()).collect();
+                    .filter(|(c,space)|!c.boxed() && groups.insert(space.clone())).map(|(c,_)|c.id.clone()).collect();
                 for pin in pins { self.solve_layout(Some(&pin),None,cx); }
             }
             self.canvas_changed(cx);
@@ -2109,7 +2174,7 @@ impl AppWindow {
                     _ => canvas::View::All,
                 };
                 state.selected.retain(|key| state.doc.panes.iter().any(|card|
-                    card.file().is_none() && card.id == *key && canvas::view_allows(&state.doc.view, matches!(card.kind, canvas::Kind::Sub { .. }) || self.live.get(key).is_some_and(canvas_agent))));
+                    !card.boxed() && card.id == *key && canvas::view_allows(&state.doc.view, matches!(card.kind, canvas::Kind::Sub { .. }) || self.live.get(key).is_some_and(canvas_agent))));
                 self.focus.focus(window, cx);
             }
             "panel.close" => {
@@ -2149,13 +2214,25 @@ impl AppWindow {
         camera: canvas::Camera,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let p = camera.to_screen([card.rect[0], card.rect[1]]);
         let path = std::path::Path::new(file);
-        let drag = card.id.clone();
-        let resize = drag.clone();
         let quote_pane = card.id.clone();
         let quote_path = file.to_owned();
         let quote_view = view.clone();
+        let body = div().flex_1().min_h_0().overflow_hidden().px(px(16.)).py(px(12.)).child(gpui_base::TextView::new(view).scrollable(true)
+                    .image_source(|_| {
+                        static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
+                        gpui::ImageSource::Image(BLANK.clone())
+                    })
+                    .on_link_click(|_, _, _, _| {}))
+                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, Some(&quote_pane), &quote_view, e.position, window, cx))).into_any_element();
+        self.pane_card(card, "mods/files/file.svg".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned(), path.parent().unwrap_or(path).to_string_lossy().into_owned(), body, camera, cx)
+    }
+
+    /// The shared saved-rect frame, header drag and resize corner for boxed panes.
+    fn pane_card(&self, card: &canvas::Pane, icon: SharedString, title: String, detail: String, body: AnyElement, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
+        let p = camera.to_screen([card.rect[0], card.rect[1]]);
+        let drag = card.id.clone();
+        let resize = drag.clone();
         (div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
                 .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).overflow_hidden()
@@ -2167,16 +2244,10 @@ impl AppWindow {
                         this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                         this.canvas_state.preview_drag = Some((drag.clone(), false, e.position)); cx.stop_propagation();
                     }))
-                    .child(svg().path("mods/files/file.svg").size(px(16.)).text_color(c("foreground")))
-                    .child(div().text_ellipsis().child(path.file_name().unwrap_or_default().to_string_lossy().into_owned()))
-                    .child(div().flex_1().min_w_0().text_ellipsis().text_color(c("muted-foreground")).child(path.parent().unwrap_or(path).to_string_lossy().into_owned())))
-                .child(div().flex_1().min_h_0().overflow_hidden().px(px(16.)).py(px(12.)).child(gpui_base::TextView::new(view).scrollable(true)
-                    .image_source(|_| {
-                        static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
-                        gpui::ImageSource::Image(BLANK.clone())
-                    })
-                    .on_link_click(|_, _, _, _| {}))
-                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, Some(&quote_pane), &quote_view, e.position, window, cx))))
+                    .child(svg().path(icon).size(px(16.)).text_color(c("foreground")))
+                    .child(div().text_ellipsis().child(title))
+                    .child(div().flex_1().min_w_0().text_ellipsis().text_color(c("muted-foreground")).child(detail)))
+                .child(div().flex_1().min_h_0().overflow_hidden().child(body))
                 .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(ui::RADIUS))
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
                     .hover(|d| d.border_color(c("foreground")))
@@ -2214,7 +2285,7 @@ impl AppWindow {
             .h_full()
             .overflow_hidden()
             .bg(c(bg))
-            .map(|d| match (&state.drag, state.space_down) {
+            .map(|d| match (&state.drag, state.space_down || state.hand) {
                 (None | Some((Some(_), _)), true) => d.cursor(CursorStyle::OpenHand),
                 _ => d,
             })
@@ -2229,7 +2300,7 @@ impl AppWindow {
                 this.canvas_state.motion.velocity = [0.; 2];
                 this.canvas_state.motion.sample = Some(std::time::Instant::now());
                 if matches!(e.button, MouseButton::Middle | MouseButton::Navigate(_))
-                    || (e.button == MouseButton::Left && this.canvas_state.space_down)
+                    || (e.button == MouseButton::Left && (this.canvas_state.space_down || this.canvas_state.hand))
                 {
                     this.canvas_state.selected.clear();
                     this.canvas_state.drag = Some((None, e.position));
@@ -2621,6 +2692,16 @@ impl AppWindow {
                     area = area.child(self.preview_card(card, card.file().unwrap(), view, camera, cx));
                 }
             }
+        }
+        for card in shown_doc.panes.iter().filter(|p| p.mod_name().is_some() && shown_doc.shows(p.space.as_ref())) {
+            if !canvas::visible(camera, card.rect, viewport) { continue; }
+            let name = card.mod_name().unwrap();
+            let (icon, title, body) = if let Some(hint) = self.folders.get(name).and_then(|f| f.hint.pane.as_ref()) {
+                (SharedString::from(hint.icon.clone()), hint.label.clone(), self.render_slot(&format!("pane:{}", card.id), cx))
+            } else {
+                ("icons/x.svg".into(), card.kind_name().to_owned(), div().p(px(12.)).text_color(c("muted-foreground")).child(format!("Mod {name} is not installed")).into_any_element())
+            };
+            area = area.child(self.pane_card(card, icon, title, String::new(), body, camera, cx));
         }
         let cards: HashMap<_, _> = shown_doc
             .panes
@@ -3037,7 +3118,7 @@ impl AppWindow {
             // Like Claude's header, the canvas controls sit at the right end, beside the panel.
             bar = bar.child(crumbs.child(div().flex_1().h_full())).child(tabs.flex_none().px(px(8.)));
         }
-        if state.actions.is_some() || state.connecting.is_some() {
+        if state.connecting.is_some() {
             area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(72.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_slot("canvas-keys", cx)));
@@ -3357,19 +3438,28 @@ pub(super) fn cell_slot(addr: &str) -> String {
 }
 
 /// Hover labels use the window-owned tooltip, including the current key binding when present.
-struct StripTooltip(SharedString);
+struct StripTooltip(SharedString, Option<SharedString>);
 impl Render for StripTooltip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         gpui_base::Tooltip::new("strip-tooltip").m(px(4.)).px(px(8.)).py(px(4.))
-            .rounded(px(6.)).bg(c("popover")).text_color(c("foreground")).text_size(px(12.)).child(self.0.clone())
+            .rounded(px(6.)).bg(c("popover")).text_color(c("foreground")).text_size(px(12.))
+            .child(gpui_base::h_flex().gap(px(8.)).child(self.0.clone())
+                .when_some(self.1.clone(), |d, key| d.child(div().text_color(c("muted-foreground")).child(key))))
     }
 }
-fn strip_tooltip(label: String, command: Option<&'static str>) -> impl Fn(&mut Window, &mut App) -> AnyView {
+fn strip_tooltip(label: String, command: Option<&str>) -> impl Fn(&mut Window, &mut App) -> AnyView + use<> {
+    let command = command.map(str::to_owned);
     move |_, cx| {
-        let key = command.and_then(|command| crate::keys::listing().into_iter().find(|(_, _, a)| a == command).map(|(_, k, _)| k));
-        let text = key.map_or_else(|| label.clone(), |k| format!("{label} ({k})"));
-        cx.new(|_| StripTooltip(text.into())).into()
+        let key = command.as_deref().and_then(|command| action_key(&crate::keys::listing(), command));
+        cx.new(|_| StripTooltip(label.clone().into(), key.map(Into::into))).into()
     }
+}
+
+/// Prefer the binding used while navigating the canvas.
+fn action_key(keys: &[(String, String, String)], command: &str) -> Option<String> {
+    keys.iter().filter(|(_, _, action)| action == command)
+        .min_by_key(|(section, _, _)| match section.as_str() { "canvas-mode" => 0, "layout:main" => 1, "global" => 2, _ => 3 })
+        .map(|(_, key, _)| crate::keys::pretty(key))
 }
 
 /// A 24 px plain icon button for canvas and panel controls.
@@ -3901,4 +3991,19 @@ mod pane_action_tests {
         });
     }
 
+}
+
+
+#[cfg(test)]
+mod hint_tests {
+    #[test]
+    fn tooltip_keys_prefer_canvas_then_layout_then_global() {
+        let mut rows: Vec<_> = [("mod:test", "q"), ("global", "cmd-x"), ("layout:main", "cmd-w"), ("canvas-mode", "x")]
+            .into_iter().map(|(section, key)| (section.into(), key.into(), "canvas.close".into())).collect();
+        for expected in ["x", "cmd-w", "cmd-x", "q"] {
+            assert_eq!(super::action_key(&rows, "canvas.close"), Some(crate::keys::pretty(expected)));
+            rows.pop();
+        }
+        assert_eq!(super::action_key(&rows, "canvas.close"), None);
+    }
 }

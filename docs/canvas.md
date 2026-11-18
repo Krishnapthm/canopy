@@ -83,10 +83,9 @@ whose frame held it, and the frame becomes that space's card.
   (submenus open on hover; → and ← work too). **Tidy** is a grid in reading order with wired cells kept next to each other, **Row**
   and **Column** line cells up, **By wires** puts parents left of their
   children and sub-agents. The choice is saved in `canvas.json`.
-- Edges are soft curves: they leave and enter at whichever sides give the
-  shortest path, go around other cells, and every bend is rounded as far as its
-  runs allow (`canvas::smooth`), so a plain hop reads as an S-curve. They draw above cells, so
-  an edge stays visible even when no clear path exists.
+- Edges are S-curves (`canvas::curve`): each leaves the side of one pane facing
+  the other, sideways when they sit side by side, up or down when stacked, and
+  bends smoothly into the facing side. An edge crosses whatever lies between.
 - Arrange works on the selected cells of one space (the space of the cell you
   selected last), otherwise on the current space. A space menu always arranges
   that space.
