@@ -63,7 +63,8 @@ jobs:
         run: echo "LIBCLANG_PATH=C:/Program Files/LLVM/bin" >> "$GITHUB_ENV"
 
       # The whole target/, so vendored crates (gpui, ghostty) are cached too.
-      # The key changes only with dependencies, so a source-only push restores
+      # The key changes only with dependencies (and .gitattributes, which
+      # ci-sources answers with a full build), so a source-only push restores
       # an exact hit and saves nothing. Any run may save on a miss: a PR then
       # reuses its own cache, as GitHub scopes PR caches to that PR.
       - name: Restore build cache
@@ -75,7 +76,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: build-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**', 'crates/**') }}
+          key: build-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'vendor/**', 'crates/**', '.gitattributes') }}
           restore-keys: build-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-zig${{ env.ZIG_VERSION }}-
       # Checkout makes every file new; this marks unchanged ones old so Cargo
       # keeps their cached build.
