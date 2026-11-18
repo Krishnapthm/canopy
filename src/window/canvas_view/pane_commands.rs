@@ -240,7 +240,7 @@ mod tests {
         view.update_in(cx, |this, window, cx| {
             let png = this.run_as("canvas.pane_new", json!({"kind":"file","path":image}), false, window, cx);
             assert_eq!(png["kind"], "image", "{png}");
-            let read = this.pane_read(&json!({"pane":png["pane"]})).unwrap();
+            let read = this.pane_read(&json!({"pane":png["pane"]}), cx).unwrap();
             assert!(read["text"].as_str().unwrap().contains("kind=\"image\""));
             assert!(read["text"].as_str().unwrap().contains("size=\"10x6\""));
             // A PNG saved as .jpg still opens: the size is read from the bytes.
@@ -252,7 +252,7 @@ mod tests {
             assert_eq!(reply["kind"], "pdf", "{reply}");
             assert_eq!(std::fs::read(&pdf).unwrap(), bytes);
             let id = reply["pane"].as_str().unwrap();
-            let read = this.pane_read(&json!({"pane":id})).unwrap();
+            let read = this.pane_read(&json!({"pane":id}), cx).unwrap();
             let text = read["text"].as_str().unwrap();
             assert!(text.contains("pages=\"1\""), "{text}");
             assert!(text.contains("[page 1]\nHello canvas"), "{text}");
