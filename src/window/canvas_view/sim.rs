@@ -416,7 +416,7 @@ impl AppWindow {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
         let actions = super::helper_bar::pane_actions(pane, None).into_iter().filter(|a| KEEP.contains(&a.command.as_str())).collect();
         let actions = self.sim_relabel(id, actions, cx);
-        Some(self.bar(id, actions, 1., cx).into_any_element())
+        Some(self.bar(id, actions, 1., false, cx).into_any_element())
     }
 
     /// `canopy pane tap|swipe|type|press`: an agent's input for a sim pane, in device points.

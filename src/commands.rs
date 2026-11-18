@@ -75,7 +75,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.clear_finished", &[req("terminal"), opt("id")], "Clear finished sub-agent cells and their labels, optionally one id."),
     cmd("wire.connect", &[req("a"), req("b")], "Draw a Wire edge between two panes of one space (pane ids: a terminal address, sub:<parent>:<id>, or p<N> for a file pane). Panes in different spaces, and two file panes, are refused."),
     cmd("wire.remove", &[req("a"), req("b")], "Remove a drawn Wire edge between two cells."),
-    cmd("quote.send", &[req("path"), opt("start"), opt("end"), req("text"), opt("message"), opt("terminal"), opt("argv"), opt("pane")], "Expand an agent's cell and paste a quote and optional message without Enter, waiting up to 30 seconds for bracketed paste."),
+    cmd("quote.send", &[req("path"), opt("start"), opt("end"), req("text"), opt("message"), opt("terminal"), opt("argv"), opt("pane"), opt("kind"), opt("page"), opt("region"), opt("crop")], "Expand an agent's cell and paste a quote and optional message without Enter, waiting up to 30 seconds for bracketed paste."),
     cmd("canvas.expand", &[opt("terminal")], "Expand the named or last selected terminal cell into a live terminal in place, or collapse it."),
     cmd("panel.open", &[req("terminal")], "Expand a terminal's cell in the canvas, as canvas.expand does (it no longer opens the side panel)."),
     cmd("panel.close", &[], "Close the canvas file panel."),
@@ -160,6 +160,12 @@ pub const COMMANDS: &[Command] = &[
     cmd("window.close", &[], "Close the window (on Linux, quits)."),
     cmd("window.minimize", &[], "Minimize the window."),
     cmd("window.maximize", &[], "Maximize the window, or back."),
+    cmd("canvas.pane_quote", &[], "Open the quote menu for the last selected image pane."),
+    cmd("canvas.pdf_find", &[], "Toggle text search in the last selected PDF pane."),
+    cmd("canvas.pdf_highlight", &[], "Toggle text highlight mode in the last selected PDF pane."),
+    cmd("canvas.pdf_prev", &[], "Go to the previous page in the last selected PDF pane."),
+    cmd("canvas.pdf_next", &[], "Go to the next page in the last selected PDF pane."),
+    cmd("canvas.pdf_clear", &[], "Clear all highlights in the last selected PDF pane."),
 ];
 
 pub fn find(name: &str) -> Option<&'static Command> {

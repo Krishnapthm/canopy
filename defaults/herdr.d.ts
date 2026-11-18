@@ -214,8 +214,8 @@ export interface CanvasPane {
   /** A terminal's core address (`t3`), `sub:<parent>:<id>` for a sub-agent cell, or `p<N>`
    *  for any other pane. Wire keys use the same ids. */
   id: string;
-  kind: "terminal" | "sub" | "file" | `mod:${string}`;
-  /** Kind fields: terminal { size? }, sub { parent, sub }, file { path }, mod:<name> { what the mod saved }. */
+  kind: "terminal" | "sub" | "file" | "image" | "pdf" | `mod:${string}`;
+  /** Kind fields: terminal { size? }, sub { parent, sub }, file/image { path }, pdf { path, highlights? }, mod:<name> { what the mod saved }. */
   props: any;
   /** World pixels: [x, y, width, height]. */
   rect: [number, number, number, number];
@@ -228,8 +228,8 @@ export interface CanvasPane {
  *  the panes of tab layouts. */
 export function canvasPanes(): CanvasPane[];
 
-/** The kinds canvas.pane_new creates, with the `canopy pane` verbs each answers; mod kinds
- *  carry their label and icon. */
+/** Pane kinds and the `canopy pane` verbs they answer. Open image and pdf through kind file.
+ *  Mod kinds carry their label and icon. */
 export function paneKinds(): { kind: string; verbs: string[]; label?: string; icon?: string }[];
 
 /** Sets agent.next / agent.prev order to match the list a mod displays.
