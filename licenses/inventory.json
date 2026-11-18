@@ -198,6 +198,13 @@
       "files": [
         "LICENSE"
       ]
+    },
+    {
+      "name": "facebook/idb (src/sim_live.m follows its CoreSimulator, DTUHID and XPC code)",
+      "source": "https://github.com/facebook/idb/tree/5f5a5fb35b78d58ea5d39f826b4198df78483fa6",
+      "files": [
+        "licenses/idb.txt"
+      ]
     }
   ]
 }

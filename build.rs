@@ -48,6 +48,16 @@ fn main() {
     embed(&base, "defaults/icons", "DEFAULT_ICONS", "default_icons.rs");
     embed(&base, "defaults/frame", "FRAME_MODS", "frame_mods.rs");
 
+    // Live simulator panes: the helper and host glue in Objective-C (src/sim_live.m).
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        println!("cargo:rerun-if-changed=src/sim_live.m");
+        #[cfg(target_os = "macos")]
+        cc::Build::new().file("src/sim_live.m").flag("-fobjc-arc").flag("-fmodules").warnings(true).compile("canopy_sim_live");
+        for framework in ["Foundation", "IOSurface", "IOKit", "CoreVideo", "CoreGraphics", "ImageIO"] {
+            println!("cargo:rustc-link-lib=framework={framework}");
+        }
+    }
+
     // Windows takes the window, taskbar and Start menu icon from the program file.
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {

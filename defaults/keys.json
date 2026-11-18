@@ -140,6 +140,12 @@
     "shift-n": "canvas.agents",
     "backspace": "canvas.close",
     "delete": "canvas.close",
-    "?": "app.help"
+    "?": "app.help",
+    "q": "canvas.pane_quote",
+    "/": "canvas.pdf_find",
+    "m": "canvas.pdf_highlight",
+    "[": "canvas.pdf_prev",
+    "]": "canvas.pdf_next",
+    "shift-m": "canvas.pdf_clear"
   }
 }

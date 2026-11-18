@@ -15,7 +15,10 @@ function key(action, args) {
 export default class Toolbar extends View {
   init() {
     // paneKinds() scans the mods folder: read it once, not every render.
-    this.kinds = paneKinds().filter(p => p.kind.startsWith("mod:"));
+    const kinds = paneKinds();
+    this.kinds = kinds.filter(p => p.kind.startsWith("mod:"));
+    // Listed only on a Mac with Xcode.
+    this.sim = kinds.some(p => p.kind === "sim");
   }
   // Offers project setup once per local folder: the dialog appears when neither AGENTS.md nor
   // CLAUDE.md holds Canopy's block, and any answer (Esc included) counts. docs/agent-setup.md.
@@ -57,6 +60,7 @@ export default class Toolbar extends View {
       .child(button("file", "mods/toolbar/file-plus.svg", "Open file", () => run("preview.open", { place: "canvas" }), key("preview.open", { place: "canvas" })))
       // Browser panes need the macOS web view; the click asks for the address.
       .when(win.platform === "macos", el => el.child(button("browser", "icons/globe.svg", "Browser", () => run("canvas.pane_new", { kind: "browser" }), key("canvas.pane_new", { kind: "browser" }))))
+      .when(this.sim, el => el.child(button("sim", "icons/smartphone.svg", "Simulator", () => run("canvas.pane_new", { kind: "sim" }), key("canvas.pane_new", { kind: "sim" }))))
       .children(this.kinds.map(p => button(p.kind, p.icon, p.label, () => run("canvas.pane_new", { kind: p.kind }), key("canvas.pane_new", { kind: p.kind }))))
       .child(divider())
       .child(button("wire", "icons/link.svg", "Connect (select a pane first)", () => run("canvas.connect", {}), key("canvas.connect")));

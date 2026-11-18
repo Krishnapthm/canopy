@@ -179,13 +179,14 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 
 ## `canvas.pane_new`
 
-Open a pane of a kind ("file" with path, "browser" with url, or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. A click without url asks for it. Replies with pane, kind, path (files), url (browsers) and wired.
+Open a pane of a kind ("file" with path, "browser" with url, "sim" on a Mac with Xcode, or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. A browser click without url asks for it. A sim pane shows udid (a simulator, or "booted"), else lists simulators to pick. Replies with pane, kind, path (files), url (browsers), udid (sim) and wired.
 
 | Argument | Required |
 |---|---|
 | `kind` | yes |
 | `path` | no |
 | `url` | no |
+| `udid` | no |
 | `wire` | no |
 | `point` | no |
 
@@ -225,7 +226,7 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a pane at a target: a browser pane loads the URL (http or https; a bare localhost:3000 gets http://) and makes it its Home. A click without target asks for it. Kinds without open refuse.
+Point a pane at a target: a browser pane loads the URL (http or https; a bare localhost:3000 gets http://) and makes it its Home, and a click without target asks for it; a sim pane takes a udid or "booted" (it boots, and its current udid refreshes the screenshot). Kinds without open refuse.
 
 | Argument | Required |
 |---|---|
@@ -279,6 +280,103 @@ Open a browser pane's page in the system browser (pane, else the selected pane).
 | Argument | Required |
 |---|---|
 | `pane` | no |
+
+## `canvas.sim_refresh`
+
+Take a new screenshot for the simulator pane and try live again after a failure. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_device`
+
+Pick another simulator for a simulator pane from a menu (Xcode's version on top); picking boots it. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_hub`
+
+Open Xcode's Device Hub to use a simulator.
+
+No arguments.
+
+## `canvas.sim_home`
+
+Press Home on a simulator pane's live device. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_screenshot`
+
+Save a simulator pane's live screen to the Desktop as a PNG. Replies with path. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_record`
+
+Start recording a simulator pane's screen to a movie on the Desktop, or stop and save it. Replies with the path when it starts. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_annotate`
+
+Draw on a still of a simulator pane's screen, then send it to an agent as a quote; again cancels. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_zoom`
+
+Resize a simulator pane: step actual (1 point per pixel, the default), in or out. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `step` | no |
+| `pane` | no |
+
+## `canvas.sim_pop`
+
+Pop a simulator pane's device out into its own window, or bring it back. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_reveal`
+
+Show a saved screenshot or recording in Finder.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `canvas.sim_input`
+
+An agent's input for a live simulator pane, in device points from the top left: action tap (x, y), swipe (x1, y1, x2, y2, ms, default 300), type (text, US keyboard) or press (button: home, lock, power, siri, volume-up, volume-down, action). Starts the device if the pane is off screen.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+| `action` | yes |
+| `x` | no |
+| `y` | no |
+| `x1` | no |
+| `y1` | no |
+| `x2` | no |
+| `y2` | no |
+| `ms` | no |
+| `text` | no |
+| `button` | no |
 
 ## `canvas.sync`
 
@@ -350,6 +448,9 @@ Expand an agent's cell and paste a quote and optional message without Enter, wai
 | `argv` | no |
 | `pane` | no |
 | `kind` | no |
+| `page` | no |
+| `region` | no |
+| `crop` | no |
 | `source` | no |
 
 ## `canvas.expand`
@@ -976,6 +1077,42 @@ No arguments.
 ## `window.maximize`
 
 Maximize the window, or back.
+
+No arguments.
+
+## `canvas.pane_quote`
+
+Open the quote menu for the last selected image pane.
+
+No arguments.
+
+## `canvas.pdf_find`
+
+Toggle text search in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_highlight`
+
+Toggle text highlight mode in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_prev`
+
+Go to the previous page in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_next`
+
+Go to the next page in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_clear`
+
+Clear all highlights in the last selected PDF pane.
 
 No arguments.
 

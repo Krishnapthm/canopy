@@ -1916,6 +1916,7 @@ impl AppWindow {
             self.documents_updated(None, vec![result], window, cx);
         }
         self.save_view();
+        self.release_pdfs(window, cx);
     }
 
     fn documents_updated(&mut self, machines: Option<Value>, results: Vec<(String, crate::mirror_sync::Outcome)>, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -2974,6 +2975,9 @@ impl AppWindow {
             "canvas.close" => self.close_canvas_cell(a, window, cx),
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external" => self.browser_command(name, a, window, cx),
+            name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
+            "canvas.pane_quote" => self.quote_image(window, cx),
+            "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
             "app.menu" => {
                 let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
                 let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
@@ -4892,6 +4896,7 @@ fn shadow(el: Div, s: Option<&str>) -> Div {
 
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.release_pdf_drops(window, cx);
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
         crate::bench::frame_start();
@@ -5044,6 +5049,7 @@ impl Render for AppWindow {
             .children(self.quote_chip_element())
             .children(tracker)
             .children(win_tracker)
+            .children(self.image_region_tracker(cx))
             .child(pane_drag)
             .child(crate::bench::frame_end())
     }

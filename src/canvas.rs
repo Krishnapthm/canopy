@@ -598,11 +598,27 @@ pub enum Kind {
     Sub { parent: String, sub: String },
     /// A text file preview.
     File { path: String },
+    /// An image file, drawn whole; a dragged region can be quoted.
+    Image { path: String },
+    /// A PDF; highlights live here, never in the file.
+    Pdf { path: String, highlights: Vec<PdfMark> },
     /// A pane drawn by a mod. kind: "mod:<mod name>"; props: what the mod saved with canvas.pane_set.
     Mod { kind: String, props: serde_json::Map<String, serde_json::Value> },
     /// A web page. url: the page shown, kept as the person navigates; home: the URL it
     /// was last opened with (`canvas.pane_new`, `canvas.pane_open`), where Home returns.
     Browser { url: String, home: String },
+    /// An iOS Simulator's screen. udid: the simulator; empty until the person picks one.
+    Sim { udid: String },
+}
+
+/// A highlight kept in canvas.json, never written into the PDF.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PdfMark {
+    /// The 1-based page.
+    pub page: usize,
+    pub quote: String,
+    /// gpui-pdf's 0-based index of the quote on this page.
+    pub occurrence: usize,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -612,6 +628,13 @@ enum Builtin {
     Sub { parent: String, sub: String },
     File { path: String },
     Browser { url: String, home: String },
+    Image { path: String },
+    Pdf {
+        path: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        highlights: Vec<PdfMark>,
+    },
+    Sim { #[serde(default)] udid: String },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -639,6 +662,9 @@ impl TryFrom<RawKind> for Kind {
             Builtin::Sub { parent, sub } => Self::Sub { parent, sub },
             Builtin::File { path } => Self::File { path },
             Builtin::Browser { url, home } => Self::Browser { url, home },
+            Builtin::Image { path } => Self::Image { path },
+            Builtin::Pdf { path, highlights } => Self::Pdf { path, highlights },
+            Builtin::Sim { udid } => Self::Sim { udid },
         })
     }
 }
@@ -651,14 +677,36 @@ impl From<Kind> for RawKind {
             Kind::Sub { parent, sub } => Builtin::Sub { parent, sub },
             Kind::File { path } => Builtin::File { path },
             Kind::Browser { url, home } => Builtin::Browser { url, home },
+            Kind::Image { path } => Builtin::Image { path },
+            Kind::Pdf { path, highlights } => Builtin::Pdf { path, highlights },
+            Kind::Sim { udid } => Builtin::Sim { udid },
         };
         let mut value = serde_json::to_value(builtin).unwrap();
         Self { kind: value["kind"].as_str().unwrap().to_owned(), props: value["props"].take() }
     }
 }
 
-/// Kinds `canvas.pane_new` creates, with the `canopy pane` verbs each answers.
-pub const PANE_KINDS: &[(&str, &[&str])] = &[("file", &["read", "shot", "close"]), ("browser", &["read", "shot", "open", "close"])];
+/// Built-in kinds agents can open, with the `canopy pane` verbs each answers.
+/// `canvas.pane_new` creates image and pdf panes through kind `file`, by extension.
+pub const PANE_KINDS: &[(&str, &[&str])] = &[
+    ("file", &["read", "shot", "close"]),
+    ("browser", &["read", "shot", "open", "close"]),
+    ("image", &["read", "shot", "close"]),
+    ("pdf", &["read", "shot", "close"]),
+    ("sim", &["read", "shot", "open", "tap", "swipe", "type", "press", "close"]),
+];
+
+/// The pane kind for a local file, picked by extension.
+pub fn file_kind(path: &Path) -> &'static str {
+    let ext = path.extension().unwrap_or_default();
+    if ext.eq_ignore_ascii_case("pdf") {
+        "pdf"
+    } else if ["png", "jpg", "jpeg", "gif", "webp"].iter().any(|kind| ext.eq_ignore_ascii_case(kind)) {
+        "image"
+    } else {
+        "file"
+    }
+}
 
 /// The `canopy pane` verbs mod panes answer.
 pub const MOD_VERBS: &[&str] = &["read", "shot", "close"];
@@ -693,13 +741,13 @@ pub fn envelope(id: &str, kind: &str, attrs: &[(&str, &str)], text: &str) -> Str
 }
 
 impl Pane {
-    /// The kind's name as canvas.json saves it: terminal, sub, file or mod:<name>.
-    pub fn kind_name(&self) -> &str { match &self.kind { Kind::Terminal { .. } => "terminal", Kind::Sub { .. } => "sub", Kind::File { .. } => "file", Kind::Mod { kind, .. } => kind, Kind::Browser { .. } => "browser" } }
+    /// The kind's name as canvas.json saves it.
+    pub fn kind_name(&self) -> &str { match &self.kind { Kind::Terminal { .. } => "terminal", Kind::Sub { .. } => "sub", Kind::File { .. } => "file", Kind::Mod { kind, .. } => kind, Kind::Image { .. } => "image", Kind::Pdf { .. } => "pdf", Kind::Sim { .. } => "sim", Kind::Browser { .. } => "browser" } }
     /// The `canopy pane` verbs this pane answers (none for terminals and sub-agent cells).
     pub fn verbs(&self) -> &'static [&'static str] { if matches!(self.kind, Kind::Mod { .. }) { return MOD_VERBS; } PANE_KINDS.iter().find(|(k, _)| *k == self.kind_name()).map_or(&[], |(_, v)| v) }
 
     /// Drawn at its own saved rect: every kind but terminals and sub-agent cells.
-    pub fn boxed(&self) -> bool { matches!(self.kind, Kind::File { .. } | Kind::Mod { .. } | Kind::Browser { .. }) }
+    pub fn boxed(&self) -> bool { matches!(self.kind, Kind::File { .. } | Kind::Mod { .. } | Kind::Image { .. } | Kind::Pdf { .. } | Kind::Sim { .. } | Kind::Browser { .. }) }
     /// A mod pane's non-blank saved text (props.text): what closing it would delete.
     pub fn text(&self) -> Option<&str> {
         if let Kind::Mod { props, .. } = &self.kind { props.get("text")?.as_str().filter(|t| !t.trim().is_empty()) } else { None }
@@ -713,6 +761,14 @@ impl Pane {
     pub fn terminal(&self) -> Option<&str> {
         matches!(self.kind, Kind::Terminal { .. }).then_some(self.id.as_str())
     }
+    /// The source path for a text, image or PDF pane.
+    pub fn path(&self) -> Option<&str> {
+        match &self.kind {
+            Kind::File { path } | Kind::Image { path } | Kind::Pdf { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+
     /// The path for a file pane.
     pub fn file(&self) -> Option<&str> {
         if let Kind::File { path } = &self.kind { Some(path) } else { None }
@@ -720,6 +776,10 @@ impl Pane {
     /// The page a browser pane shows.
     pub fn url(&self) -> Option<&str> {
         if let Kind::Browser { url, .. } = &self.kind { Some(url) } else { None }
+    }
+    /// The simulator udid for a sim pane (empty: none picked yet).
+    pub fn sim(&self) -> Option<&str> {
+        if let Kind::Sim { udid } = &self.kind { Some(udid) } else { None }
     }
     /// The expanded terminal size, if any.
     pub fn size(&self) -> Option<Point> {
@@ -1109,6 +1169,11 @@ mod tests {
         pane.kind = Kind::Sub { parent: "t1".into(), sub: "a".into() };
         assert_eq!(pane.kind_name(), "sub");
         assert!(pane.verbs().is_empty());
+        pane.kind = Kind::Sim { udid: "U1".into() };
+        assert_eq!((pane.kind_name(), pane.verbs(), pane.sim(), pane.boxed()), ("sim", &["read", "shot", "open", "tap", "swipe", "type", "press", "close"][..], Some("U1"), true));
+        let saved = serde_json::to_value(RawKind::from(pane.kind.clone())).unwrap();
+        assert_eq!(saved, serde_json::json!({"kind":"sim","props":{"udid":"U1"}}));
+        assert_eq!(Kind::try_from(serde_json::from_value::<RawKind>(saved).unwrap()).unwrap(), pane.kind);
     }
 
     fn version_2_fixture(name: &str) -> Document {
@@ -1910,5 +1975,36 @@ mod stacking_tests {
         assert_eq!(order(&restored), order(&doc));
         assert!(restored.panes.iter().all(|c| c.rect == geometry[&c.id]));
         assert!(!doc.stack(&["missing".into()], true));
+    }
+}
+
+#[cfg(test)]
+mod viewer_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn viewer_kinds_round_trip() {
+        for saved in [
+            json!({"kind":"image","props":{"path":"/a.png"}}),
+            json!({"kind":"pdf","props":{"path":"/a.pdf"}}),
+            json!({"kind":"pdf","props":{"path":"/a.pdf","highlights":[{"page":1,"quote":"Hello","occurrence":0}]}}),
+        ] {
+            let kind: Kind = serde_json::from_value(saved.clone()).unwrap();
+            if saved["kind"] == "pdf" && saved["props"]["highlights"].is_null() {
+                assert!(matches!(&kind, Kind::Pdf { highlights, .. } if highlights.is_empty()));
+            }
+            assert_eq!(serde_json::to_value(kind).unwrap(), saved);
+        }
+    }
+
+    #[test]
+    fn file_kind_uses_case_insensitive_extensions() {
+        for name in ["a.png", "a.JPG", "a.jpeg", "a.gif", "a.webp"] {
+            assert_eq!(file_kind(Path::new(name)), "image");
+        }
+        assert_eq!(file_kind(Path::new("a.PDF")), "pdf");
+        assert_eq!(file_kind(Path::new("a.txt")), "file");
+        assert_eq!(file_kind(Path::new("README")), "file");
     }
 }

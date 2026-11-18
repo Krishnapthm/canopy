@@ -28,7 +28,7 @@ were in last (again toggles; Ctrl+Shift+Tab walks further back).
 | Arrows | Move the selection by one gap, with one undo step |
 | h j k l, Tab / Shift+Tab | Select the nearest cell in that direction |
 | x | Collapse the selected terminal |
-| c | Start a wire; select its other cell, Enter connects, Esc cancels |
+| c | Start a wire; arrows pick its other pane, Enter connects, Esc cancels |
 | Shift+A / a | Arrange (repeat the last layout) / choose a layout |
 | n / Shift+N | New terminal here / installed agent list |
 | V | Select tool |
@@ -36,6 +36,12 @@ were in last (again toggles; Ctrl+Shift+Tab walks further back).
 | ⌘O (Ctrl+O elsewhere) | Open file on the canvas |
 | Backspace / Delete | Close, using the usual agent and terminal confirmations |
 | ? | Full key list |
+| q | Quote the selected image |
+| / | Find text in the selected PDF |
+| m | Toggle highlighting in the selected PDF |
+| [ | Previous page in the selected PDF |
+| ] | Next page in the selected PDF |
+| Shift+M | Clear highlights in the selected PDF |
 
 Enter on a sub-agent opens its transcript; on a file card it opens the file.
 In the agent menu, 1-9 start the agent with that number.

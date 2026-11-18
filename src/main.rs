@@ -18,6 +18,9 @@ mod model;
 mod mirror;
 mod mirror_sync;
 mod panes;
+mod sim;
+#[cfg(target_os = "macos")]
+mod sim_live;
 mod skill;
 mod place;
 mod persist;
@@ -86,6 +89,11 @@ fn attach_console() {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // A live sim pane's helper, started by Canopy itself under sandbox-exec: nothing else runs.
+    #[cfg(target_os = "macos")]
+    if args.get(1).is_some_and(|s| s == "--sim-helper") {
+        sim_live::helper_main(&args[2..]);
+    }
     #[cfg(unix)]
     core_bin::hand_off_to_owner(&args);
     if args.get(1).is_some_and(|s| s == "hook") {
