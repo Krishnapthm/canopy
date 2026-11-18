@@ -604,6 +604,9 @@ pub enum Kind {
     Pdf { path: String, highlights: Vec<PdfMark> },
     /// A pane drawn by a mod. kind: "mod:<mod name>"; props: what the mod saved with canvas.pane_set.
     Mod { kind: String, props: serde_json::Map<String, serde_json::Value> },
+    /// A web page. url: the page shown, kept as the person navigates; home: the URL it
+    /// was last opened with (`canvas.pane_new`, `canvas.pane_open`), where Home returns.
+    Browser { url: String, home: String },
     /// An iOS Simulator's screen. udid: the simulator; empty until the person picks one.
     Sim { udid: String },
 }
@@ -624,6 +627,7 @@ enum Builtin {
     Terminal { #[serde(default, skip_serializing_if = "Option::is_none")] size: Option<Point> },
     Sub { parent: String, sub: String },
     File { path: String },
+    Browser { url: String, home: String },
     Image { path: String },
     Pdf {
         path: String,
@@ -657,6 +661,7 @@ impl TryFrom<RawKind> for Kind {
             Builtin::Terminal { size } => Self::Terminal { size },
             Builtin::Sub { parent, sub } => Self::Sub { parent, sub },
             Builtin::File { path } => Self::File { path },
+            Builtin::Browser { url, home } => Self::Browser { url, home },
             Builtin::Image { path } => Self::Image { path },
             Builtin::Pdf { path, highlights } => Self::Pdf { path, highlights },
             Builtin::Sim { udid } => Self::Sim { udid },
@@ -671,6 +676,7 @@ impl From<Kind> for RawKind {
             Kind::Terminal { size } => Builtin::Terminal { size },
             Kind::Sub { parent, sub } => Builtin::Sub { parent, sub },
             Kind::File { path } => Builtin::File { path },
+            Kind::Browser { url, home } => Builtin::Browser { url, home },
             Kind::Image { path } => Builtin::Image { path },
             Kind::Pdf { path, highlights } => Builtin::Pdf { path, highlights },
             Kind::Sim { udid } => Builtin::Sim { udid },
@@ -684,6 +690,7 @@ impl From<Kind> for RawKind {
 /// `canvas.pane_new` creates image and pdf panes through kind `file`, by extension.
 pub const PANE_KINDS: &[(&str, &[&str])] = &[
     ("file", &["read", "shot", "close"]),
+    ("browser", &["read", "shot", "open", "close"]),
     ("image", &["read", "shot", "close"]),
     ("pdf", &["read", "shot", "close"]),
     ("sim", &["read", "shot", "open", "tap", "swipe", "type", "press", "close"]),
@@ -735,12 +742,12 @@ pub fn envelope(id: &str, kind: &str, attrs: &[(&str, &str)], text: &str) -> Str
 
 impl Pane {
     /// The kind's name as canvas.json saves it.
-    pub fn kind_name(&self) -> &str { match &self.kind { Kind::Terminal { .. } => "terminal", Kind::Sub { .. } => "sub", Kind::File { .. } => "file", Kind::Mod { kind, .. } => kind, Kind::Image { .. } => "image", Kind::Pdf { .. } => "pdf", Kind::Sim { .. } => "sim" } }
+    pub fn kind_name(&self) -> &str { match &self.kind { Kind::Terminal { .. } => "terminal", Kind::Sub { .. } => "sub", Kind::File { .. } => "file", Kind::Mod { kind, .. } => kind, Kind::Image { .. } => "image", Kind::Pdf { .. } => "pdf", Kind::Sim { .. } => "sim", Kind::Browser { .. } => "browser" } }
     /// The `canopy pane` verbs this pane answers (none for terminals and sub-agent cells).
     pub fn verbs(&self) -> &'static [&'static str] { if matches!(self.kind, Kind::Mod { .. }) { return MOD_VERBS; } PANE_KINDS.iter().find(|(k, _)| *k == self.kind_name()).map_or(&[], |(_, v)| v) }
 
     /// Drawn at its own saved rect: every kind but terminals and sub-agent cells.
-    pub fn boxed(&self) -> bool { matches!(self.kind, Kind::File { .. } | Kind::Mod { .. } | Kind::Image { .. } | Kind::Pdf { .. } | Kind::Sim { .. }) }
+    pub fn boxed(&self) -> bool { matches!(self.kind, Kind::File { .. } | Kind::Mod { .. } | Kind::Image { .. } | Kind::Pdf { .. } | Kind::Sim { .. } | Kind::Browser { .. }) }
     /// A mod pane's non-blank saved text (props.text): what closing it would delete.
     pub fn text(&self) -> Option<&str> {
         if let Kind::Mod { props, .. } = &self.kind { props.get("text")?.as_str().filter(|t| !t.trim().is_empty()) } else { None }
@@ -765,6 +772,10 @@ impl Pane {
     /// The path for a file pane.
     pub fn file(&self) -> Option<&str> {
         if let Kind::File { path } = &self.kind { Some(path) } else { None }
+    }
+    /// The page a browser pane shows.
+    pub fn url(&self) -> Option<&str> {
+        if let Kind::Browser { url, .. } = &self.kind { Some(url) } else { None }
     }
     /// The simulator udid for a sim pane (empty: none picked yet).
     pub fn sim(&self) -> Option<&str> {
@@ -1109,6 +1120,14 @@ pub fn view_allows(view: &View, agent: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_panes_round_trip() {
+        let saved = serde_json::json!({"id":"p2","kind":"browser","props":{"url":"http://localhost:3000/a","home":"http://localhost:3000/"},"rect":[0.,0.,960.,640.],"z":1});
+        let pane: Pane = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!((pane.url(), pane.kind_name(), pane.boxed(), pane.verbs()), (Some("http://localhost:3000/a"), "browser", true, &["read", "shot", "open", "close"][..]));
+        assert_eq!(serde_json::to_value(pane).unwrap(), saved);
+    }
 
     #[test]
     fn mod_panes_round_trip() {

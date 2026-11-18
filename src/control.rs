@@ -44,7 +44,9 @@ fn serve(stream: UnixStream, tx: async_channel::Sender<Request>) {
     }
     let reply = match serde_json::from_str::<Value>(&line) {
         Ok(cmd) => {
-            let timeout = Duration::from_secs(if cmd.get("shot").is_some() { 30 } else { 5 });
+            // A shot, or a browser pane read or shot waiting for its page, can take a while.
+            let slow = cmd.get("shot").is_some() || matches!(cmd["do"].as_str(), Some("canvas.pane_read" | "canvas.pane_shot"));
+            let timeout = Duration::from_secs(if slow { 30 } else { 5 });
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             let _ = tx.send_blocking(Request::Control { cmd, reply: reply_tx });
             reply_rx.recv_timeout(timeout).unwrap_or_else(|_| json!({ "error": "the window did not answer" }))

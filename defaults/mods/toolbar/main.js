@@ -58,6 +58,8 @@ export default class Toolbar extends View {
       .child(button("terminal", "icons/square-terminal.svg", "Terminal", () => run("canvas.new"), key("canvas.new")))
       .child(button("agent", "icons/bot.svg", "Agent", () => openOverlay({ mod: "menu", kind: "popup", at: "above", width: 220, props: { tab: "canvas-agents", target: { ...(space ? { space: space.id } : {}), ...(space?.machine ? { machine: space.machine } : {}) } } }), key("canvas.agents")))
       .child(button("file", "mods/toolbar/file-plus.svg", "Open file", () => run("preview.open", { place: "canvas" }), key("preview.open", { place: "canvas" })))
+      // Browser panes need the macOS web view; the click asks for the address.
+      .when(win.platform === "macos", el => el.child(button("browser", "icons/globe.svg", "Browser", () => run("canvas.pane_new", { kind: "browser" }), key("canvas.pane_new", { kind: "browser" }))))
       .when(this.sim, el => el.child(button("sim", "icons/smartphone.svg", "Simulator", () => run("canvas.pane_new", { kind: "sim" }), key("canvas.pane_new", { kind: "sim" }))))
       .children(this.kinds.map(p => button(p.kind, p.icon, p.label, () => run("canvas.pane_new", { kind: p.kind }), key("canvas.pane_new", { kind: p.kind }))))
       .child(divider())

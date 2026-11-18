@@ -50,6 +50,7 @@ early. Quotes are pasted as text without Enter and never run.
 
 Canopy sends no telemetry, checks for no updates and uploads no feedback. The app makes no
 network requests of its own; herdr-core's SSH connections, the programs you run and mods you
-install can.
+install can. A browser pane requests only the pages you or an agent open in it, and what
+those pages load; see [Browser](panes.md#browser).
 
 [Back to Canopy](../README.md)

@@ -6,16 +6,30 @@ impl AppWindow {
     pub(in crate::window) fn pane_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
         let r = match name {
             "canvas.pane_new" => self.pane_new(a, window, cx),
+            "canvas.pane_read" | "canvas.pane_shot" if self.is_browser(a) => {
+                let shot = (name == "canvas.pane_shot").then(|| self.shot_path(a));
+                match shot.transpose().and_then(|shot| self.browser_reply(a["pane"].as_str().unwrap(), shot, window, cx)) {
+                    // The page answers the held reply once it has loaded.
+                    Ok(()) => return,
+                    Err(e) => Err(e),
+                }
+            }
             "canvas.pane_read" => self.pane_read(a, cx),
             "canvas.pane_set" => self.pane_set(a, cx),
             "canvas.pane_shot" => self.pane_shot(a, window),
+            _ if self.is_browser(a) => self.browser_open(a["pane"].as_str().unwrap(), a["target"].as_str().unwrap_or_default(), window, cx),
             _ => self.pane_open(a, window, cx),
         };
         self.answer(r);
     }
 
+    /// Whether `a["pane"]` names a browser pane.
+    fn is_browser(&self, a: &Value) -> bool {
+        a["pane"].as_str().is_some_and(|id| self.canvas_state.doc.panes.iter().any(|p| p.id == id && p.url().is_some()))
+    }
+
     fn pane_new(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
-        let mut kinds = vec!["file".to_owned()];
+        let mut kinds = vec!["file".to_owned(), "browser".to_owned()];
         if crate::sim::available() { kinds.push("sim".to_owned()); }
         kinds.extend(self.folders.iter().filter(|(_, f)| f.hint.pane.is_some()).map(|(id, _)| format!("mod:{id}")));
         let kind = a["kind"].as_str().unwrap_or_default();
@@ -33,13 +47,18 @@ impl AppWindow {
                     Ok(p) if p.iter().all(|v| v.is_finite()) => p,
                     _ => return Err("invalid canvas point".into()),
                 },
+                // A browser pane is large: centre it in the view rather than hang it from the middle.
+                None if kind == "browser" => { let [x, y] = self.view_center(window); [x - super::browser::SIZE[0] / 2., y - super::browser::SIZE[1] / 2.] }
                 None => self.view_center(window),
             };
             (point, doc.room.clone())
         };
+        let url = if kind == "browser" { Some(super::browser::web_url(a["url"].as_str().ok_or("canvas.pane_new: a browser pane needs url")?)?) } else { None };
         // A named simulator must exist before a pane points at it.
         let udid = match a["udid"].as_str() { Some(target) if kind == "sim" => super::sim::resolve(target)?, _ => String::new() };
-        let (id, path, kind) = if kind == "file" {
+        let (id, path, kind) = if let Some(url) = url.clone() {
+            (self.add_browser_pane(url, point, space, cx), None, kind.to_owned())
+        } else if kind == "file" {
             let path = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()).ok_or("canvas.pane_new: path must be absolute")?;
             let (id, path, kind) = self.add_file_pane(std::path::Path::new(path), point, space, window, cx)?;
             (id, Some(path), kind)
@@ -54,6 +73,7 @@ impl AppWindow {
         }
         let mut reply = json!({"pane":id,"kind":kind,"wired":a["wire"].is_string()});
         if let Some(path) = path { reply["path"] = json!(path); }
+        if let Some(url) = url { reply["url"] = json!(url); }
         if kind == "sim" { reply["udid"] = json!(udid); }
         Ok(reply)
     }
@@ -90,6 +110,7 @@ impl AppWindow {
             canvas::Kind::Sim { udid } => Ok(json!({"text":self.sim_read(id, udid, cx)})),
             canvas::Kind::Terminal { .. } => Err(format!("pane {id} is a terminal: read it with hc read {id}")),
             canvas::Kind::Sub { parent, .. } => Err(format!("pane {id} is a sub-agent cell: read its parent with hc read {parent}")),
+            canvas::Kind::Browser { .. } => Err(format!("pane {id} is a browser pane: its page answers only `canopy pane read`")),
         }
     }
 
@@ -105,15 +126,7 @@ impl AppWindow {
         let (x0, y0) = (x.max(0.), y.max(0.));
         let (x1, y1) = ((x + w).min(f32::from(bounds.size.width)), (y + h).min(f32::from(bounds.size.height)));
         if x1 <= x0 || y1 <= y0 { return Err(format!("pane {id} is off screen: bring it into view first")); }
-        let path = if let Some(value) = a.get("path") {
-            let path = value.as_str().map(std::path::PathBuf::from).filter(|p| p.is_absolute() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")))
-                .ok_or("canvas.pane_shot: path must be an absolute .png path")?;
-            path
-        } else {
-            let path = std::env::temp_dir().join("canopy").join(format!("{}.png", id.replace(':', "-")));
-            std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| format!("cannot create the shot directory: {e}"))?;
-            path
-        };
+        let path = self.shot_path(a)?;
         let image = window.render_to_image().map_err(|e| format!("cannot take the shot: {e:#}"))?;
         let s = window.scale_factor();
         let physical = |origin: Pixels, local: f32, limit: u32| ((f32::from(origin) + local) * s).round().clamp(0., limit as f32) as u32;
@@ -122,6 +135,17 @@ impl AppWindow {
         let crop = image::imageops::crop_imm(&image, x0, y0, x1 - x0, y1 - y0).to_image();
         crate::control::save_png(&crop, &path).map_err(|e| format!("cannot save the shot: {e:#}"))?;
         Ok(json!({"path":path}))
+    }
+
+    /// Where canvas.pane_shot saves: `path` (absolute, .png), else <temp>/canopy/<pane>.png.
+    fn shot_path(&self, a: &Value) -> Result<std::path::PathBuf, String> {
+        if let Some(value) = a.get("path") {
+            return value.as_str().map(std::path::PathBuf::from).filter(|p| p.is_absolute() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")))
+                .ok_or_else(|| "canvas.pane_shot: path must be an absolute .png path".into());
+        }
+        let path = std::env::temp_dir().join("canopy").join(format!("{}.png", a["pane"].as_str().unwrap_or_default().replace(':', "-")));
+        std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| format!("cannot create the shot directory: {e}"))?;
+        Ok(path)
     }
 
     fn pane_open(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
@@ -161,7 +185,7 @@ mod tests {
                 stamp: std::time::UNIX_EPOCH,
             });
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
-            assert_eq!(this.pane_new(&json!({"kind":"mod:nope"}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
+            assert_eq!(this.pane_new(&json!({"kind":"mod:nope"}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, browser, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
             let reply = this.pane_new(&json!({"kind":"mod:note","wire":"t1"}), window, cx).unwrap();
             assert_eq!(reply, json!({"pane":"p1","kind":"mod:note","wired":true}));
             assert_eq!(crate::wire::neighbors(&this.canvas_state.doc.wires, "t1"), ["p1"]);
@@ -196,7 +220,14 @@ mod tests {
         view.update_in(cx, |this, window, cx| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
-            assert_eq!(this.pane_new(&json!({"kind":"browser","path":path}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
+            assert_eq!(this.pane_new(&json!({"kind":"video","path":path}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, browser, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
+            assert_eq!(this.pane_new(&json!({"kind":"browser"}), window, cx).unwrap_err(), "canvas.pane_new: a browser pane needs url");
+            assert_eq!(this.pane_new(&json!({"kind":"browser","url":"file:///etc/passwd"}), window, cx).unwrap_err(), "only http and https pages open in a browser pane, not file:");
+            let web = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","wire":"t1"}), window, cx).unwrap();
+            assert_eq!(web, json!({"pane":"p1","kind":"browser","wired":true,"url":"http://localhost:3000"}));
+            assert_eq!(this.canvas_state.doc.panes.iter().find(|p| p.id == "p1").unwrap().kind, canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into() });
+            assert!(this.browser_reply("p1", None, window, cx).unwrap_err().contains("canopy pane"), "a read with no caller to answer refuses");
+            this.close_canvas_cell(&json!({"pane":"p1"}), window, cx);
             assert_eq!(this.pane_new(&json!({"kind":"file","path":"README.md"}), window, cx).unwrap_err(), "canvas.pane_new: path must be absolute");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"point":null}), window, cx).unwrap_err(), "invalid canvas point");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"wire":"missing"}), window, cx).unwrap_err(), "missing is not a terminal pane on the canvas");

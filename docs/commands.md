@@ -161,6 +161,8 @@ Open the quote popover at point or the pointer: agents wired to the quoted pane 
 | `text` | yes |
 | `point` | no |
 | `pane` | no |
+| `kind` | no |
+| `source` | no |
 
 ## `canvas.close`
 
@@ -177,12 +179,13 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 
 ## `canvas.pane_new`
 
-Open a pane of a kind ("file", "sim" on a Mac with Xcode, or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. A sim pane shows udid (a simulator, or "booted"), else lists simulators to pick. Replies with pane, kind, path (files), udid (sim) and wired.
+Open a pane of a kind ("file" with path, "browser" with url, "sim" on a Mac with Xcode, or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. A browser click without url asks for it. A sim pane shows udid (a simulator, or "booted"), else lists simulators to pick. Replies with pane, kind, path (files), url (browsers), udid (sim) and wired.
 
 | Argument | Required |
 |---|---|
 | `kind` | yes |
 | `path` | no |
+| `url` | no |
 | `udid` | no |
 | `wire` | no |
 | `point` | no |
@@ -223,12 +226,60 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a pane at a target, such as a browser pane's URL or a sim pane's simulator (a udid or "booted"; it boots, and its current udid refreshes the screenshot); kinds without open refuse.
+Point a pane at a target: a browser pane loads the URL (http or https; a bare localhost:3000 gets http://) and makes it its Home, and a click without target asks for it; a sim pane takes a udid or "booted" (it boots, and its current udid refreshes the screenshot). Kinds without open refuse.
 
 | Argument | Required |
 |---|---|
 | `pane` | yes |
 | `target` | yes |
+
+## `canvas.browser_back`
+
+Go back in a browser pane's history (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_reload`
+
+Reload a browser pane's page (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_home`
+
+Load the URL a browser pane was last opened with (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_pick`
+
+Make a browser pane live and pick an element on its page; the pick opens the quote popover (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_shot`
+
+Save a browser pane's page to <temp>/canopy/<pane>.png and toast the path (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_external`
+
+Open a browser pane's page in the system browser (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
 
 ## `canvas.sim_refresh`
 
@@ -400,6 +451,7 @@ Expand an agent's cell and paste a quote and optional message without Enter, wai
 | `page` | no |
 | `region` | no |
 | `crop` | no |
+| `source` | no |
 
 ## `canvas.expand`
 
