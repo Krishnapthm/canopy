@@ -58,17 +58,26 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -
     }
 }
 
+/// Whether a pane's Connect button shows as active: its wire follows the pointer, or any edge
+/// (drawn or born) touches it.
+fn connect_active(id: &str, wiring: Option<&str>, edges: &[canvas::Wire]) -> bool {
+    wiring == Some(id) || edges.iter().any(|w| w.a == id || w.b == id)
+}
+
 impl AppWindow {
     /// Helper bars for the hovered pane and every selected pane of the shown
     /// place: a pill of icon buttons above each pane's top-left corner.
     pub(super) fn helper_bars(&self, doc: &Document, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let state = &self.canvas_state;
         if state.drag.is_some() || state.cell_resize.is_some() || state.preview_drag.is_some()
-            || state.space_drag.is_some() || state.marquee.is_some() || state.rest.is_some() || state.wire.drag.is_some()
+            || state.space_drag.is_some() || state.marquee.is_some() || state.rest.is_some() || (state.wire.drag.is_some() && !state.wire.sticky)
             || state.region.is_some() {
             return vec![];
         }
-        let mut targets = vec![];
+        // A wire following the pointer keeps its pane's bar up, to show Connect as active.
+        let wiring = state.wire.drag.as_ref().filter(|_| state.wire.sticky).map(|d| d.0.as_str());
+        let edges = crate::wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
+        let mut targets: Vec<String> = wiring.map(str::to_owned).into_iter().collect();
         for id in &state.selected {
             if !targets.contains(id) { targets.push(id.clone()); }
         }
@@ -93,6 +102,7 @@ impl AppWindow {
                 .flex().p(px(2. * s)).gap(px(2. * s)).rounded(px(ui::RADIUS))
                 .bg(c("popover")).border_1().border_color(c("border")).shadow_md();
             for BarAction { icon, label, command, args } in actions {
+                let active = command == "canvas.connect" && connect_active(&id, wiring, &edges);
                 let target = id.clone();
                 let group = SharedString::from(format!("bar-{id}-{command}"));
                 let hint = state.actions.as_ref().and_then(|keys| keys.iter()
@@ -101,13 +111,15 @@ impl AppWindow {
                 bar = bar.child(div().id(group.clone()).group(group.clone()).role(gpui::Role::Button).aria_label(label.clone())
                     .h(px(24. * s)).min_w(px(24. * s)).when(hint.is_empty(), |d| d.w(px(24. * s)))
                     .flex().items_center().justify_center().gap(px(2. * s)).rounded(px(ui::RADIUS_SM)).cursor_pointer()
-                    .hover(|d| d.bg(c("hover")))
-                    .child(svg().path(icon).size(px(14. * s)).text_color(c("muted-foreground"))
+                    .hover(|d| d.bg(c("hover"))).when(active, |d| d.bg(c("hover")))
+                    .child(svg().path(icon).size(px(14. * s)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
                         .group_hover(group, |d| d.text_color(c("foreground"))))
                     .when(!hint.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("muted-foreground")).child(hint)))
                     .tooltip(strip_tooltip(label.to_string(), Some(&command)))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(move |this, _, window, cx| {
+                    .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
+                        // Connect draws a wire with the pointer; the keyboard's `c` runs canvas.connect.
+                        if command == "canvas.connect" { return this.wire_start(&target, e.position(), window, cx); }
                         this.focus.focus(window, cx);
                         this.canvas_state.selected = vec![target.clone()];
                         this.run_key(&command, args.clone(), window, cx);
@@ -121,8 +133,8 @@ impl AppWindow {
 
 #[cfg(test)]
 mod helper_bar_tests {
-    use super::pane_actions;
-    use crate::canvas;
+    use super::{connect_active, pane_actions};
+    use crate::canvas::{self, Wire};
     use serde_json::json;
 
     #[test]
@@ -155,4 +167,11 @@ mod helper_bar_tests {
         assert_eq!(commands(&pane), ["canvas.pdf_find", "canvas.pdf_highlight", "canvas.pdf_prev", "canvas.pdf_next", "canvas.pdf_clear", "canvas.connect", "canvas.close"]);
     }
 
+    #[test]
+    fn connect_is_active_while_wiring_or_wired() {
+        let edges = [Wire { a: "t1".into(), b: "t2".into(), born: true }];
+        assert!(connect_active("t2", None, &edges), "a born edge counts");
+        assert!(connect_active("t3", Some("t3"), &edges), "its wire follows the pointer");
+        assert!(!connect_active("t3", Some("t1"), &edges));
+    }
 }
