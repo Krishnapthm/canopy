@@ -321,6 +321,51 @@ carries an Xcode 27 workaround). Prior art to read first: idb
 `FBSimulatorControl`, AXe, baguette (README says it links SimulatorKit),
 Radon IDE (embeds a simulator in VS Code via a `simulator-server` helper).
 
+### P5a status (2026-11-18)
+
+Built on `feat/pane-ios-sim`: the core `sim` kind, screenshots through public
+`simctl` (docs/panes.md "Simulator"). Krishna chose a core kind over a mod. The
+pane takes no input; Device Hub is one click away.
+
+### P5b research (2026-11-18, from source, nothing built)
+
+On this Mac: Xcode 27.2, CoreSimulator 1174.21, SimulatorKit 1005.14. idb read
+at commit `5f5a5fb`.
+
+- **Frames:** idb's `FramebufferSurface.swift` walks `device.io.ioPorts()` for
+  a `SimDisplayIOSurfaceRenderable` with `displayClass == 0`. It tries
+  `SimScreen registerScreenCallbacksWithUUID:...` first (a callback per frame),
+  then the older `registerCallbackWithUUID:ioSurfacesChangeCallback:`.
+  Device Hub can add a second, 7680x4320 surface: ignore it.
+- **Input changed in Xcode 27** (CoreSimulator 1155.4): the guest drops legacy
+  Indigo HID for keys and buttons, and touch is unreliable. idb and Claude's
+  helper switch to DTUHID: the `com.apple.coredevice.feature.remote.hid.digitizer`
+  service over XPC, through the private `xpc_endpoint_create_mach_port_4sim` and
+  `xpc_connection_enable_sim2host_4sim` (both resolve here). serve-sim reports
+  legacy taps still landing on 27.2; baguette needs a "heal". Test DTUHID first.
+- **Licenses:** idb MIT, actively maintained. AXe MIT (vendors an idb fork).
+  baguette and serve-sim Apache-2.0. Radon IDE's simulator-server is not open.
+- **Handoff:** `IOSurfaceCreateMachPort` / `IOSurfaceLookupFromMachPort`,
+  bindings in `objc2-io-surface` 0.3.2 (already in the lockfile). Send the
+  surface only when it changes, then a tiny per-frame ping. No timers.
+- **Drawing:** GPUI `surface()` (`vendor/gpui-pre/src/elements/surface.rs:33`)
+  takes a `CVPixelBuffer`, but the Metal renderer
+  (`vendor/gpui-pre-apple/src/metal_renderer.rs:1158-1196`) asserts NV12. The
+  simulator surface is probably BGRA (serve-sim wraps it as 32BGRA,
+  UNVERIFIED here), so `draw_surfaces` needs a BGRA path in our vendored GPUI.
+- **Sandbox:** Claude runs its helper under `sandbox-exec` with deny-default,
+  exec limited to the bundle, `/usr/bin`, Xcode and `/Library/Developer`, no
+  network, home reads denied except CoreSimulator paths. Missing rules show up
+  as hangs, not errors.
+
+Recommended shape: a small Swift helper `canopy-sim` vendoring only idb's
+framebuffer, DTUHID and XPC files (MIT notice kept), one per visible live pane,
+under a Claude-like sandbox profile; Canopy wraps the surface with
+`CVPixelBufferCreateWithIOSurface` and draws it with `surface()`. Open before
+building: the Mach port rendezvous (an XPC service in Canopy.app or a bootstrap
+name), the framebuffer pixel format, and whether DTUHID works for touch, keys
+and buttons on a booted iOS 26.5 simulator.
+
 ## 8. Context engineering: what a quote sends
 
 Rule: **a quote is a pointer, not a copy.** The agent gets enough to find

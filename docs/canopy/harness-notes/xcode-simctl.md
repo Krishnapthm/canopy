@@ -9,9 +9,10 @@ Checked 2026-11-18 on the installed Xcode, not from memory.
   `lastUsedAt`, `dataPathSize`, `logPathSize`. `list -j` without a type has
   `devicetypes`, `runtimes`, `devices`, `pairs`.
 - `simctl boot <udid>`; `simctl shutdown <udid> | all`.
-- `simctl io <udid> screenshot [--type=png|tiff|bmp|gif|jpeg] [--display=..] [--mask=ignored|alpha|black] <file|->`.
-  `-` writes PNG to stdout. With no `--display` it prints a "No display
-  specified. Defaulting to display" note to stderr.
+- `simctl io <udid> screenshot [--type=png|tiff|bmp|gif|jpeg] [--display=..] [--mask=ignored|alpha|black] <file>`.
+  `-` is NOT stdout on Xcode 27.2: it writes a file named `-` in the current
+  folder and prints "Wrote screenshot to: <cwd>/-". With no `--display` it
+  prints a "No display specified. Defaulting to display" note to stderr.
 - On a **shut down** device, `io screenshot` does not fail fast: it waits and
   exits 60 with "Timeout waiting for screen surfaces". Check `state` first.
 - An unknown udid prints `Invalid device: <udid>`.
@@ -23,3 +24,17 @@ Checked 2026-11-18 on the installed Xcode, not from memory.
   `xcrun mcpbridge run-agent [--dry-run] [--no-xcode-tools] <agent> [args]`
   launches an agent with Xcode's config. `xcrun agent skills export [dir]`
   exports Xcode's skills.
+
+Checked 2026-11-18 for sim panes (iPhone 17, iOS 26.5):
+
+- `simctl bootstatus <udid> -b` boots if needed and waits until booted
+  (about 9 s cold); on a booted device it prints "Device already booted,
+  nothing to do." and exits 0. Plain `simctl boot` on a booted device exits
+  149 ("Unable to boot device in current state: Booted").
+- `io <udid> screenshot --type=png --mask=alpha <file>` writes a 1206x2622
+  PNG with alpha (transparent rounded corners) in about 0.5 s.
+- `list -j devices available` takes about 0.4 s.
+- simctl has no tap, swipe or key input (`help` lists none; `io` offers
+  enumerate, poll, recordVideo, screenshot). `recordVideo --mask=alpha` is
+  rendered black.
+- Device Hub's bundle id is `com.apple.dt.Devices`: `open -b com.apple.dt.Devices`.
