@@ -4,3 +4,4 @@
 /AGENTS.local.md
 .DS_Store
 __pycache__/
+/defaults/mods/*/gpui-kit.d.ts

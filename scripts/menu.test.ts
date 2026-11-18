@@ -94,7 +94,8 @@ test("confirm forwards the terminal opt-out only when the dialog offers it", asy
 test("canvas hint bar reads rebound mode keys and distinguishes the layout picker", async () => {
   const source = (await readFile(new URL("../defaults/mods/canvas-keys/main.js", import.meta.url), "utf8"))
     .replace(/^import .*;\n/gm, "").replace("export default class CanvasKeys", "class CanvasKeys");
-  const shown: string[] = [];
+  let shown: string[] = [];
+  let shownProps: Record<string, unknown> = {};
   const element: unknown = new Proxy({}, { get: (_, name) => (...args: unknown[]) => {
     if (name === "child" && typeof args[0] === "string") shown.push(args[0]);
     return element;
@@ -104,13 +105,19 @@ test("canvas hint bar reads rebound mode keys and distinguishes the layout picke
     {section:"canvas-mode", keys:"z", label:"Z", action:"canvas.new"},
     {section:"canvas-mode", keys:"b", label:"B", action:"{}"},
     {section:"canvas-mode", keys:"shift-z", label:"⇧Z", action:JSON.stringify({command:"canvas.arrange",args:{picker:true}})},
-  ], () => ({connecting:true}), () => ({}));
+  ], () => shownProps, () => ({}));
   new Hint().render();
   expect(shown).toContain("z new terminal");
   expect(shown).toContain("b invalid binding");
   expect(shown).toContain("shift-z layout picker");
-  expect(shown.some(s => s.includes("Connect:"))).toBe(true);
   expect(shown.some(s => s.includes("app.quit"))).toBe(false);
+  // A connection shows one line instead of the key list.
+  [shown, shownProps] = [[], {pointer:true}];
+  new Hint().render();
+  expect(shown).toEqual(["Click a pane to connect · Esc cancels"]);
+  [shown, shownProps] = [[], {connecting:true}];
+  new Hint().render();
+  expect(shown).toEqual(["Arrows pick a pane · Enter connects · Esc cancels"]);
 });
 
 test("full key help names object bindings without splitting their JSON", async () => {
