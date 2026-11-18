@@ -16,7 +16,7 @@ pub(in crate::window) struct WireUi {
     /// The cell whose side "+" handles show.
     pub(super) hover: Option<String>,
     /// A wire being drawn: the cell it starts at, where it starts (world) and the pointer (window).
-    drag: Option<(String, canvas::Point, Point<Pixels>)>,
+    pub(super) drag: Option<(String, canvas::Point, Point<Pixels>)>,
     /// Where the button went down on the "+" handle, to tell a click from a drag.
     down: Point<Pixels>,
     /// The handle was clicked, not dragged: the wire follows the pointer until a click picks a cell.
@@ -59,16 +59,16 @@ impl AppWindow {
 
     /// The drawn rect of a cell the current view shows.
     pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
-        let card = doc.cards.iter().find(|c| c.key() == key && doc.shows(c.space.as_ref()))?;
+        let card = doc.panes.iter().filter(|p| p.file().is_none()).find(|c| c.id == key && doc.shows(c.space.as_ref()))?;
         let view = &self.canvas_state.doc.view;
-        if card.sub.is_some() {
+        if matches!(card.kind, canvas::Kind::Sub { .. }) {
             return (*view != canvas::View::Terminals).then_some(card.rect);
         }
-        if !canvas::view_allows(view, self.live.get(&card.terminal).is_some_and(canvas_agent)) { return None; }
+        if !canvas::view_allows(view, self.live.get(&card.id).is_some_and(canvas_agent)) { return None; }
         // Match the drawn cell: an expanded one has its own size, a pill its measured one.
-        let size = match card.size {
+        let size = match card.size() {
             Some(_) => [card.rect[2].max(canvas::PILL_WIDTH), card.rect[3].max(canvas::HEADER)],
-            None => self.canvas_state.pill_sizes.borrow().get(&card.terminal).map(|v| v.3).unwrap_or([240., 36.]),
+            None => self.canvas_state.pill_sizes.borrow().get(&card.id).map(|v| v.3).unwrap_or([240., 36.]),
         };
         Some([card.rect[0], card.rect[1], size[0], size[1]])
     }
@@ -76,7 +76,7 @@ impl AppWindow {
     /// A child's status word changed: glow its born edge to `parent` if both cells are on the canvas.
     pub(in crate::window) fn pulse_status(&mut self, child: &str, parent: &str, prev: Option<&str>, word: Option<&str>, cx: &mut Context<Self>) {
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
-        let on_canvas = [child, parent].iter().all(|k| doc.cards.iter().any(|c| c.key() == *k));
+        let on_canvas = [child, parent].iter().all(|k| doc.panes.iter().filter(|p| p.file().is_none()).any(|c| c.id == *k));
         if status_pulses(prev, word, on_canvas) {
             // Spent glows go first, so closed children leave nothing behind.
             self.canvas_state.wire.pulses.retain(|_, t| t.elapsed() < PULSE);
@@ -91,7 +91,7 @@ impl AppWindow {
         let mut out: Vec<Edge> = vec![];
         let all = wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
         // Every shown cell, for edges to go around.
-        let cells: Vec<_> = doc.cards.iter().filter_map(|c| self.wire_cell(doc, &c.key())).collect();
+        let cells: Vec<_> = doc.panes.iter().filter(|p| p.file().is_none()).filter_map(|c| self.wire_cell(doc, &c.id)).collect();
         for w in all.iter().filter(|w| w.born).chain(all.iter().filter(|w| !w.born)) {
             if out.iter().any(|e| (e.key.0 == w.a && e.key.1 == w.b) || (e.key.0 == w.b && e.key.1 == w.a)) { continue; }
             if let (Some(a), Some(b)) = (self.wire_cell(doc, &w.a), self.wire_cell(doc, &w.b)) {
@@ -113,9 +113,9 @@ impl AppWindow {
         let camera = doc.camera;
         let p = camera.to_world(self.wire_local(position));
         let s = slop / camera.zoom;
-        doc.cards.iter().filter(|c| {
-            self.wire_cell(doc, &c.key()).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
-        }).max_by_key(|c| c.z).map(|c| c.key())
+        doc.panes.iter().filter(|p| p.file().is_none()).filter(|c| {
+            self.wire_cell(doc, &c.id).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
+        }).max_by_key(|c| c.z).map(|c| c.id.clone())
     }
 
     fn wire_edge_at(&self, position: Point<Pixels>) -> Option<Edge> {
@@ -139,7 +139,26 @@ impl AppWindow {
             cx.notify();
             return true;
         }
-        let busy = e.pressed_button.is_some() || self.canvas_state.drag.is_some() || self.canvas_state.rest.is_some();
+        let busy = e.pressed_button.is_some() || self.canvas_state.drag.is_some() || self.canvas_state.rest.is_some() || self.canvas_state.cell_resize.is_some() || self.canvas_state.preview_drag.is_some() || self.canvas_state.space_drag.is_some() || self.canvas_state.marquee.is_some();
+        let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
+        let point = self.wire_local(e.position);
+        let bar_height = 28. * doc.camera.zoom.clamp(0.75, 1.0) + 2.;
+        let bar_hover = if busy { None } else {
+            doc.panes.iter().filter(|p| doc.shows(p.space.as_ref()) && !matches!(p.kind, canvas::Kind::Sub { .. }))
+                .filter(|p| {
+                    let rect = if p.file().is_some() { Some(p.rect) } else { self.wire_cell(doc, &p.id) };
+                    rect.is_some_and(|r| {
+                        let [x, y] = doc.camera.to_screen([r[0], r[1]]);
+                        point[0] >= x && point[0] <= x + r[2] * doc.camera.zoom
+                            && point[1] >= y - 8. - bar_height && point[1] <= y + r[3] * doc.camera.zoom
+                    })
+                // Topmost as drawn: file panes paint under terminal panes, whatever their z.
+                }).max_by_key(|p| (p.file().is_none(), p.z)).map(|p| p.id.clone())
+        };
+        if bar_hover != self.canvas_state.bar_hover {
+            self.canvas_state.bar_hover = bar_hover;
+            cx.notify();
+        }
         let hover = if busy { None } else { self.wire_cell_at(e.position, HANDLE) };
         if hover != self.canvas_state.wire.hover {
             self.canvas_state.wire.hover = hover;
@@ -222,7 +241,7 @@ impl AppWindow {
     fn wire_connect(&mut self, a: &str, b: &str, cx: &mut Context<Self>) -> Result<(), String> {
         let doc = &mut self.canvas_state.doc;
         if a == b { return Err("A cell cannot be wired to itself".into()); }
-        if !doc.same_space(a, b) { return Err(if ![a, b].iter().all(|k| doc.cards.iter().any(|c| c.key() == *k)) { "No such cell".into() } else { "Same space only for now".into() }); }
+        if !doc.same_space(a, b) { return Err(if ![a, b].iter().all(|k| doc.panes.iter().filter(|p| p.file().is_none()).any(|c| c.id == *k)) { "No such cell".into() } else { "Same space only for now".into() }); }
         if !doc.connect(a, b) { return Err("Already wired".into()); }
         self.canvas_changed(cx);
         Ok(())
@@ -343,9 +362,9 @@ mod sticky_tests {
         if !running_alone(TEST) { return; }
         let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
         view.update_in(cx, |this, window, cx| {
-            this.canvas_state.doc.cards = serde_json::from_value(json!([
-                {"terminal":"t1","rect":[0,0,200,100],"z":0,"size":[200,100]},
-                {"terminal":"t2","rect":[400,0,200,100],"z":1,"size":[200,100]}
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"t1","kind":"terminal","props":{"size":[200,100]},"rect":[0,0,200,100],"z":0},
+                {"id":"t2","kind":"terminal","props":{"size":[200,100]},"rect":[400,0,200,100],"z":1}
             ])).unwrap();
             for t in ["t1", "t2"] { this.live.insert(t.into(), json!({})); }
             let (down, over_t2) = (point(px(200.), px(50.)), point(px(450.), px(50.)));

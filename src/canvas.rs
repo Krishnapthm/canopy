@@ -352,28 +352,22 @@ pub fn arrange(rects: &[Rect], parents: &[Option<usize>], links: &[(usize, usize
 /// One layout snapshot; restoring ignores deleted objects and leaves new objects alone.
 #[derive(Clone, Default, PartialEq)]
 pub struct Rest {
-    cards: Vec<(String, Rect)>,
+    panes: Vec<(String, Rect)>,
     spaces: Vec<(String, Rect)>,
-    previews: Vec<(String, Rect)>,
 }
 impl Rest {
     /// Capture only geometry, without terminal or panel state.
     pub fn capture(doc: &Document) -> Self {
         Self {
-            cards: doc
-                .cards
+            panes: doc
+                .panes
                 .iter()
-                .map(|c| (c.key(), c.rect))
+                .map(|c| (c.id.clone(), c.rect))
                 .collect(),
             spaces: doc
                 .spaces
                 .iter()
                 .map(|s| (s.space.clone(), s.rect))
-                .collect(),
-            previews: doc
-                .previews
-                .iter()
-                .map(|p| (p.path.clone(), p.rect))
                 .collect(),
         }
     }
@@ -382,7 +376,7 @@ impl Rest {
         let diff = |before: &[(String, Rect)], after: &[(String, Rect)]| -> Vec<(String, Rect)> {
             after.iter().filter(|(id, r)| before.iter().any(|(b, was)| b == id && was != r)).cloned().collect()
         };
-        Rest { cards: diff(&self.cards, &later.cards), spaces: diff(&self.spaces, &later.spaces), previews: diff(&self.previews, &later.previews) }
+        Rest { panes: diff(&self.panes, &later.panes), spaces: diff(&self.spaces, &later.spaces) }
     }
     /// Put each object in `moved` back where this snapshot had it, unless it has been moved again since.
     pub fn put_back(&self, moved: &Rest, doc: &mut Document) {
@@ -391,25 +385,19 @@ impl Rest {
                 *at = *r;
             }
         };
-        for c in &mut doc.cards { let key = c.key(); back(&self.cards, &moved.cards, &mut c.rect, &key); }
+        for c in &mut doc.panes { back(&self.panes, &moved.panes, &mut c.rect, &c.id); }
         for s in &mut doc.spaces { back(&self.spaces, &moved.spaces, &mut s.rect, &s.space); }
-        for p in &mut doc.previews { back(&self.previews, &moved.previews, &mut p.rect, &p.path); }
     }
     /// Restore geometry of objects that still exist.
     pub fn restore(&self, doc: &mut Document) {
-        for c in &mut doc.cards {
-            if let Some((_, r)) = self.cards.iter().find(|(id, _)| *id == c.key()) {
+        for c in &mut doc.panes {
+            if let Some((_, r)) = self.panes.iter().find(|(id, _)| *id == c.id) {
                 c.rect = *r;
             }
         }
         for s in &mut doc.spaces {
             if let Some((_, r)) = self.spaces.iter().find(|(id, _)| *id == s.space) {
                 s.rect = *r;
-            }
-        }
-        for p in &mut doc.previews {
-            if let Some((_, r)) = self.previews.iter().find(|(id, _)| *id == p.path) {
-                p.rect = *r;
             }
         }
     }
@@ -666,13 +654,50 @@ pub struct Card {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space: Option<String>,
 }
-impl Card {
-    /// The canvas identity, distinct from every real terminal address.
-    pub fn key(&self) -> String {
-        match (&self.sub, &self.parent) {
-            (Some(id), Some(parent)) => format!("sub:{parent}:{id}"),
-            _ => self.terminal.clone(),
-        }
+/// Anything on the canvas. `id` is stable and is the key wires, selection
+/// and undo use: a terminal's core address ("t3"), "sub:<parent>:<id>" for a
+/// sub-agent cell, "p<N>" for a file.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Pane {
+    pub id: String,
+    #[serde(flatten)]
+    pub kind: Kind,
+    pub rect: Rect,
+    pub z: u64,
+    /// The space (room) it lives in; None for Home.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
+}
+
+/// What a pane shows, with its kind-specific fields saved under `props`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "props", rename_all = "lowercase")]
+pub enum Kind {
+    /// A core terminal or agent. `size`: set while expanded into a live
+    /// terminal, world px at zoom 1, header included.
+    Terminal { #[serde(default, skip_serializing_if = "Option::is_none")] size: Option<Point> },
+    /// A sub-agent cell under its parent terminal.
+    Sub { parent: String, sub: String },
+    /// A text file preview.
+    File { path: String },
+}
+
+impl Pane {
+    /// The core address for a terminal pane.
+    pub fn terminal(&self) -> Option<&str> {
+        matches!(self.kind, Kind::Terminal { .. }).then_some(self.id.as_str())
+    }
+    /// The path for a file pane.
+    pub fn file(&self) -> Option<&str> {
+        if let Kind::File { path } = &self.kind { Some(path) } else { None }
+    }
+    /// The expanded terminal size, if any.
+    pub fn size(&self) -> Option<Point> {
+        if let Kind::Terminal { size } = self.kind { size } else { None }
+    }
+    /// The terminal's saved expansion state.
+    pub fn size_mut(&mut self) -> Option<&mut Option<Point>> {
+        if let Kind::Terminal { size } = &mut self.kind { Some(size) } else { None }
     }
 }
 
@@ -730,10 +755,20 @@ pub struct Document {
     pub camera: Camera,
     pub view: View,
     pub spaces: Vec<Space>,
-    pub cards: Vec<Card>,
-    pub panel: Panel,
     #[serde(default)]
-    pub previews: Vec<Preview>,
+    pub panes: Vec<Pane>,
+    /// Read from version 1 and 2 files and moved into `panes` on load;
+    /// never written.
+    #[serde(default, rename = "cards", skip_serializing)]
+    pub old_cards: Vec<Card>,
+    pub panel: Panel,
+    /// Read from version 1 and 2 files and moved into `panes` on load;
+    /// never written.
+    #[serde(default, rename = "previews", skip_serializing)]
+    pub old_previews: Vec<Preview>,
+    /// The last file pane number handed out, so a closed pane's id is never reused.
+    #[serde(default)]
+    pub file_ids: u64,
     #[serde(default)]
     pub recent_folders: Vec<String>,
     /// Last arrange layout, defaulting to tidy for older documents.
@@ -752,13 +787,15 @@ pub struct Document {
 impl Default for Document {
     fn default() -> Self {
         Self {
-            version: 2,
+            version: 3,
             camera: Camera::default(),
             view: View::All,
             spaces: vec![],
-            cards: vec![],
+            panes: vec![],
+            old_cards: vec![],
             panel: Panel::default(),
-            previews: vec![],
+            old_previews: vec![],
+            file_ids: 0,
             recent_folders: vec![],
             arrange_layout: String::new(),
             wires: vec![],
@@ -768,7 +805,7 @@ impl Default for Document {
     }
 }
 
-/// An undirected Wire edge between two cells, addressed by `Card::key()`.
+/// An undirected Wire edge between two cells, addressed by `Pane::id`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Wire {
     pub a: String,
@@ -786,10 +823,10 @@ impl Wire {
 impl Document {
     /// The space a cell lives in; None for cells on Home.
     pub fn space_of(&self, key: &str) -> Option<&Space> {
-        let id = self.cards.iter().find(|c| c.key() == key)?.space.as_ref()?;
+        let id = self.panes.iter().find(|c| c.file().is_none() && c.id == key)?.space.as_ref()?;
         self.spaces.iter().find(|s| &s.space == id)
     }
-    /// Whether a cell or preview in `space` is shown in the current place.
+    /// Whether a pane in `space` is shown in the current place.
     pub fn shows(&self, space: Option<&String>) -> bool {
         space == self.room.as_ref()
     }
@@ -802,7 +839,7 @@ impl Document {
     }
     /// Whether both cells exist and share a space (or both sit in the root space).
     pub fn same_space(&self, a: &str, b: &str) -> bool {
-        let has = |k: &str| self.cards.iter().any(|c| c.key() == k);
+        let has = |k: &str| self.panes.iter().any(|c| c.file().is_none() && c.id == k);
         has(a) && has(b) && self.space_of(a).map(|s| &s.space) == self.space_of(b).map(|s| &s.space)
     }
     /// Draws an edge between two cells of one space; false when it exists or is refused.
@@ -814,66 +851,67 @@ impl Document {
     /// Drops wires of cells that no longer exist (closing a cell removes its wires); true when any went.
     pub fn prune_wires(&mut self) -> bool {
         let before = self.wires.len();
-        let cards = &self.cards;
-        let has = |k: &String| cards.iter().any(|c| &c.key() == k);
+        let panes = &self.panes;
+        let has = |k: &String| panes.iter().any(|c| c.file().is_none() && &c.id == k);
         self.wires.retain(|w| has(&w.a) && has(&w.b));
         before != self.wires.len()
     }
     /// Move panes to the front or back, keeping each group's order and saved geometry.
     pub fn stack(&mut self, keys: &[String], front: bool) -> bool {
-        if !self.cards.iter().any(|c| keys.contains(&c.key())) { return false; }
-        // Only `z` changes: the cards keep their stored order.
-        let mut order: Vec<usize> = (0..self.cards.len()).collect();
-        order.sort_by_key(|&i| (keys.contains(&self.cards[i].key()) == front, self.cards[i].z));
+        if !self.panes.iter().any(|c| keys.contains(&c.id)) { return false; }
+        // Only `z` changes: the panes keep their stored order.
+        let mut order: Vec<usize> = (0..self.panes.len()).collect();
+        order.sort_by_key(|&i| (keys.contains(&self.panes[i].id) == front, self.panes[i].z));
         let mut changed = false;
         for (rank, i) in order.into_iter().enumerate() {
-            changed |= self.cards[i].z != rank as u64;
-            self.cards[i].z = rank as u64;
+            changed |= self.panes[i].z != rank as u64;
+            self.panes[i].z = rank as u64;
         }
         changed
     }
 
     pub fn place(&mut self, terminal: &str, point: Point, size: Point) {
         let z = self
-            .cards
+            .panes
             .iter()
             .map(|c| c.z)
             .max()
             .unwrap_or(0)
             .saturating_add(1);
-        if let Some(card) = self.cards.iter_mut().find(|c| c.key() == terminal) {
+        if let Some(card) = self.panes.iter_mut().find(|c| c.id == terminal) {
             card.rect[0] = point[0];
             card.rect[1] = point[1];
         } else {
-            self.cards.push(Card {
-                terminal: terminal.into(),
-                sub: None, parent: None,
+            self.panes.push(Pane {
+                id: terminal.into(),
+                kind: Kind::Terminal { size: None },
                 rect: [point[0], point[1], size[0], size[1]],
                 z,
-                size: None,
                 space: self.room.clone(),
             });
         }
     }
     /// Adds labelled children once and drops cells whose labels were cleared.
     pub fn sync_subs(&mut self, subs: &std::collections::HashMap<String, Vec<crate::subs::Sub>>) -> bool {
-        let before = self.cards.len();
-        self.cards.retain(|c| c.sub.as_ref().is_none_or(|id| c.parent.as_ref()
-            .and_then(|p| subs.get(p)).is_some_and(|children| children.iter().any(|s| &s.id == id))));
-        let mut changed = before != self.cards.len();
+        let before = self.panes.len();
+        self.panes.retain(|c| match &c.kind {
+            Kind::Sub { parent, sub } => subs.get(parent).is_some_and(|children| children.iter().any(|s| &s.id == sub)),
+            _ => true,
+        });
+        let mut changed = before != self.panes.len();
         let mut parents: Vec<_> = subs.keys().collect();
         parents.sort();
         for parent in parents {
-            let Some((rect, space)) = self.cards.iter().find(|c| &c.terminal == parent && c.sub.is_none()).map(|c| (c.rect, c.space.clone())) else { continue };
+            let Some((rect, space)) = self.panes.iter().find(|c| c.terminal() == Some(parent.as_str())).map(|c| (c.rect, c.space.clone())) else { continue };
             let mut children: Vec<_> = subs[parent].iter().collect();
             children.sort_by_key(|s| &s.id);
             for sub in children {
-                if self.cards.iter().any(|c| c.parent.as_ref() == Some(parent) && c.sub.as_ref() == Some(&sub.id)) { continue; }
-                let siblings: Vec<_> = self.cards.iter().filter(|c| c.parent.as_ref() == Some(parent)).map(|c| c.rect).collect();
-                let z = self.cards.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
+                if self.panes.iter().any(|c| matches!(&c.kind, Kind::Sub { parent: p, sub: id } if p == parent && id == &sub.id)) { continue; }
+                let siblings: Vec<_> = self.panes.iter().filter(|c| matches!(&c.kind, Kind::Sub { parent: p, .. } if p == parent)).map(|c| c.rect).collect();
+                let z = self.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
                 let child = child_position(rect, &siblings, [PILL_WIDTH, 36.]);
                 // The cell belongs to its parent's space.
-                self.cards.push(Card { terminal: String::new(), sub: Some(sub.id.clone()), parent: Some(parent.clone()), rect: child, z, size: None, space: space.clone() });
+                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child, z, space: space.clone() });
                 changed = true;
             }
         }
@@ -886,28 +924,7 @@ impl Document {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok((Self::default(), false)),
             Err(e) => return Err(e),
         };
-        let parsed = serde_json::from_slice::<Self>(&bytes);
-        if let Ok(mut doc) = parsed {
-            let valid_rect = |r: Rect| r.iter().all(|n| n.is_finite()) && r[2] > 0. && r[3] > 0.;
-            if doc.version != 1 && doc.version != 2 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "unsupported canvas version",
-                ));
-            }
-            if doc.version == 1 { doc.into_rooms(); }
-            if doc.camera.x.is_finite()
-                && doc.camera.y.is_finite()
-                && doc.camera.zoom.is_finite()
-                && doc.cards.iter().all(|c| valid_rect(c.rect) && c.size.is_none_or(|s| valid_rect([0., 0., s[0], s[1]])))
-                && doc.previews.iter().all(|p| valid_rect(p.rect))
-                && doc.spaces.iter().all(|s| valid_rect(s.rect))
-                && doc.panel.width.is_none_or(|w| w.is_finite() && w > 0.)
-            {
-                doc.camera.zoom = doc.camera.zoom.clamp(ZOOMS[0], ZOOMS[11]);
-                return Ok((doc, false));
-            }
-        }
+        if let Some(doc) = Self::parse(&bytes)? { return Ok((doc, false)); }
         // Preserve earlier recovery files too; never overwrite somebody's saved geometry.
         let mut bad = path.with_extension("json.bad");
         let mut n = 1;
@@ -918,15 +935,62 @@ impl Document {
         std::fs::rename(path, bad)?;
         Ok((Self::default(), true))
     }
+    /// Parses, migrates to version 3 and validates saved bytes, touching no file: None when
+    /// they are not a valid canvas, an error for a version this build cannot read.
+    pub fn parse(bytes: &[u8]) -> io::Result<Option<Self>> {
+        let Ok(mut doc) = serde_json::from_slice::<Self>(bytes) else { return Ok(None) };
+        let valid_rect = |r: Rect| r.iter().all(|n| n.is_finite()) && r[2] > 0. && r[3] > 0.;
+        if doc.version != 1 && doc.version != 2 && doc.version != 3 {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported canvas version"));
+        }
+        if doc.version == 1 { doc.into_rooms(); }
+        if doc.version == 2 { doc.into_panes(); }
+        let valid = doc.camera.x.is_finite()
+            && doc.camera.y.is_finite()
+            && doc.camera.zoom.is_finite()
+            && doc.panes.iter().all(|c| valid_rect(c.rect) && c.size().is_none_or(|s| valid_rect([0., 0., s[0], s[1]])))
+            && doc.spaces.iter().all(|s| valid_rect(s.rect))
+            && doc.panel.width.is_none_or(|w| w.is_finite() && w > 0.);
+        doc.camera.zoom = doc.camera.zoom.clamp(ZOOMS[0], ZOOMS[11]);
+        Ok(valid.then_some(doc))
+    }
     /// Version 1 to 2: a cell belonged to the space frame holding its center; now it says so,
     /// and a space is a fixed-size card on Home at its old top left.
     fn into_rooms(&mut self) {
         let center = |r: Rect| [r[0] + r[2] / 2., r[1] + r[3] / 2.];
-        for c in &mut self.cards { c.space = space_at(&self.spaces, center(c.rect)).map(|s| s.space.clone()); }
-        for p in &mut self.previews { p.space = space_at(&self.spaces, center(p.rect)).map(|s| s.space.clone()); }
+        for c in &mut self.old_cards { c.space = space_at(&self.spaces, center(c.rect)).map(|s| s.space.clone()); }
+        for p in &mut self.old_previews { p.space = space_at(&self.spaces, center(p.rect)).map(|s| s.space.clone()); }
         for s in &mut self.spaces { s.rect = [s.rect[0], s.rect[1], SPACE_CARD[0], SPACE_CARD[1]]; }
         self.version = 2;
     }
+    /// Version 2 to 3: cards and previews become panes. Ids keep the old card keys so saved
+    /// wires stay valid.
+    fn into_panes(&mut self) {
+        for Card { terminal, sub, parent, rect, z, size, space } in self.old_cards.drain(..) {
+            let (id, kind) = match (sub, parent) {
+                (Some(sub), Some(parent)) => (format!("sub:{parent}:{sub}"), Kind::Sub { parent, sub }),
+                (None, _) => (terminal, Kind::Terminal { size }),
+                _ => continue,
+            };
+            self.panes.push(Pane { id, kind, rect, z, space });
+        }
+        let max_z = self.panes.iter().map(|p| p.z).max().unwrap_or(0);
+        self.file_ids = self.old_previews.len() as u64;
+        for (i, Preview { path, rect, space }) in self.old_previews.drain(..).enumerate() {
+            self.panes.push(Pane { id: format!("p{}", i + 1), kind: Kind::File { path }, rect, z: max_z + 1 + i as u64, space });
+        }
+        self.version = 3;
+    }
+
+    /// Hand out a file pane id, including ids already present in the document.
+    pub fn next_file_id(&mut self) -> String {
+        let highest = self.panes.iter().filter(|p| p.file().is_some())
+            .filter_map(|p| p.id.strip_prefix('p')?.parse::<u64>().ok()).max().unwrap_or(0);
+        let n = 1 + self.file_ids.max(highest);
+        self.file_ids = n;
+        format!("p{n}")
+    }
+
     pub fn save(&self, path: &Path) -> io::Result<()> {
         crate::persist::write_atomic(path, serde_json::to_vec_pretty(self)?)
     }
@@ -964,6 +1028,87 @@ pub fn view_allows(view: &View, agent: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn version_2_fixture(name: &str) -> Document {
+        let path = std::env::temp_dir().join(format!("canopy-{name}-{}.json", std::process::id()));
+        std::fs::write(&path, serde_json::to_vec(&serde_json::json!({
+            "version":2, "camera":{"x":0,"y":0,"zoom":1}, "view":"all",
+            "cards":[
+                {"terminal":"t1","rect":[0,0,220,36],"z":1,"size":[800,500],"space":"s"},
+                {"terminal":"","sub":"a","parent":"t1","rect":[0,100,220,36],"z":4}
+            ],
+            "previews":[
+                {"path":"/tmp/a.md","rect":[300,0,560,420],"space":"s"},
+                {"path":"/tmp/b.md","rect":[900,0,560,420]}
+            ],
+            "wires":[{"a":"t1","b":"sub:t1:a"}],
+            "spaces":[{"space":"s","rect":[0,0,260,120],"color":"#000"}],
+            "panel":{"width":null}
+        })).unwrap()).unwrap();
+        let (doc, bad) = Document::load(&path).unwrap();
+        assert!(!bad);
+        std::fs::remove_file(path).unwrap();
+        doc
+    }
+
+    #[test]
+    fn version_2_canvas_loads_as_panes() {
+        let doc = version_2_fixture("pane-migration");
+        assert_eq!(doc.version, 3);
+        assert_eq!(doc.panes.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["t1", "sub:t1:a", "p1", "p2"]);
+        assert_eq!(doc.panes[0].kind, Kind::Terminal { size: Some([800., 500.]) });
+        assert_eq!(doc.panes[1].kind, Kind::Sub { parent: "t1".into(), sub: "a".into() });
+        assert_eq!(doc.panes[2].kind, Kind::File { path: "/tmp/a.md".into() });
+        assert_eq!(doc.panes[3].kind, Kind::File { path: "/tmp/b.md".into() });
+        assert_eq!((doc.panes[2].z, doc.panes[3].z), (5, 6));
+        assert_eq!(doc.panes.iter().map(|p| p.space.as_deref()).collect::<Vec<_>>(), [Some("s"), None, Some("s"), None]);
+        assert_eq!(doc.spaces[0].rect, [0., 0., 260., 120.]);
+        assert_eq!(doc.wires, [Wire { a: "t1".into(), b: "sub:t1:a".into(), born: false }]);
+        assert!(doc.old_cards.is_empty());
+        assert!(doc.old_previews.is_empty());
+        assert_eq!(doc.file_ids, 2);
+    }
+
+    #[test]
+    fn saved_canvas_writes_panes_only() {
+        let doc = version_2_fixture("panes-save-input");
+        let path = std::env::temp_dir().join(format!("canopy-panes-save-{}.json", std::process::id()));
+        doc.save(&path).unwrap();
+        let raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(raw["version"], 3);
+        assert_eq!(raw["panes"].as_array().unwrap().len(), 4);
+        assert!(raw.get("cards").is_none());
+        assert!(raw.get("previews").is_none());
+        assert_eq!(Document::load(&path).unwrap().0.panes, doc.panes);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn undo_restores_terminal_and_file_panes() {
+        let mut doc = version_2_fixture("panes-undo");
+        let before = doc.panes.clone();
+        let rest = Rest::capture(&doc);
+        doc.panes[0].rect[0] += 100.;
+        doc.panes[2].rect[1] += 100.;
+        rest.restore(&mut doc);
+        assert_eq!(doc.panes[0].rect, before[0].rect);
+        assert_eq!(doc.panes[2].rect, before[2].rect);
+    }
+
+    #[test]
+    fn next_file_id_never_reuses() {
+        let mut doc = Document::default();
+        let id = doc.next_file_id();
+        assert_eq!(id, "p1");
+        doc.panes.push(Pane { id, kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None });
+        doc.panes.remove(0);
+        assert_eq!(doc.next_file_id(), "p2");
+        let mut doc = Document::default();
+        for id in ["p1", "p3"] {
+            doc.panes.push(Pane { id: id.into(), kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None });
+        }
+        assert_eq!(doc.next_file_id(), "p4");
+    }
+
     #[test]
     fn spacing_is_deterministic_pinned_and_returns_to_rest() {
         let rest = [[0.,0.,100.,50.],[124.,0.,100.,50.],[248.,0.,100.,50.],[124.,74.,100.,50.]];
@@ -997,16 +1142,18 @@ mod tests {
 
     #[test]
     fn version_one_cells_move_into_their_frames_room() {
-        let mut doc = Document { version: 1, ..Document::default() };
-        doc.spaces.push(Space { space: "s".into(), rect: [0., 0., 960., 640.], color: "blue".into(), frame: true });
-        doc.place("in", [24., 24.], [220., 36.]);
-        doc.place("out", [2000., 24.], [220., 36.]);
-        doc.previews.push(Preview { path: "/tmp/a.md".into(), rect: [100., 100., 200., 100.], space: None });
+        let mut doc: Document = serde_json::from_value(serde_json::json!({
+            "version":1,"camera":{"x":0,"y":0,"zoom":1},"view":"all",
+            "spaces":[{"space":"s","rect":[0,0,960,640],"color":"blue","frame":true}],
+            "cards":[{"terminal":"in","rect":[24,24,220,36],"z":1},{"terminal":"out","rect":[2000,24,220,36],"z":2}],
+            "previews":[{"path":"/tmp/a.md","rect":[100,100,200,100]}],"panel":{"width":null}
+        })).unwrap();
         doc.into_rooms();
         assert_eq!(doc.version, 2);
+        doc.into_panes();
         assert_eq!(doc.space_of("in").map(|s| s.space.as_str()), Some("s"));
         assert!(doc.space_of("out").is_none());
-        assert_eq!(doc.previews[0].space.as_deref(), Some("s"));
+        assert_eq!(doc.panes[2].space.as_deref(), Some("s"));
         assert_eq!(doc.spaces[0].rect, [0., 0., SPACE_CARD[0], SPACE_CARD[1]]);
     }
 
@@ -1038,20 +1185,20 @@ mod tests {
         let mut doc = Document::default();
         doc.place("a",[0.,0.],[100.,50.]);
         doc.spaces.push(Space { space:"s".into(),rect:[0.,0.,200.,200.],color:"blue".into(),frame:true });
-        doc.previews.push(Preview { path:"/tmp/plan.md".into(),rect:[24.,24.,100.,80.], space: None });
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::File { path: "/tmp/plan.md".into() }, rect: [24.,24.,100.,80.], z: 2, space: None });
         let rest = Rest::capture(&doc);
         doc.spaces[0].rect = [500.,500.,900.,900.];
-        doc.previews[0].rect[0] = 600.;
-        doc.cards[0].rect[0] = 600.;
+        doc.panes[1].rect[0] = 600.;
+        doc.panes[0].rect[0] = 600.;
         doc.place("new",[500.,0.],[100.,50.]);
         rest.restore(&mut doc);
-        assert_eq!(doc.cards[0].rect,[0.,0.,100.,50.]);
+        assert_eq!(doc.panes[0].rect,[0.,0.,100.,50.]);
         assert_eq!(doc.spaces[0].rect,[0.,0.,200.,200.]);
-        assert_eq!(doc.previews[0].rect,[24.,24.,100.,80.]);
-        assert_eq!(doc.cards[1].rect[0],500.);
-        doc.cards.remove(0);
+        assert_eq!(doc.panes[1].rect,[24.,24.,100.,80.]);
+        assert_eq!(doc.panes[2].rect[0],500.);
+        doc.panes.remove(0);
         rest.restore(&mut doc);
-        assert_eq!(doc.cards.len(),1);
+        assert_eq!(doc.panes.len(),2);
     }
 
     #[test]
@@ -1061,7 +1208,7 @@ mod tests {
         for (name, r) in [("a", pill(0., 0.)), ("b", pill(244., 0.)), ("c", pill(0., 60.))] {
             doc.place(name, [r[0], r[1]], [r[2], r[3]]);
         }
-        let rects = |doc: &Document| doc.cards.iter().map(|c| c.rect).collect::<Vec<_>>();
+        let rects = |doc: &Document| doc.panes.iter().map(|c| c.rect).collect::<Vec<_>>();
         let base = Rest::capture(&doc);
         // What solving with "a" expanded to 600 x 400 does to its neighbours.
         let expanded = [0., 0., 600., 400.];
@@ -1069,18 +1216,18 @@ mod tests {
         rest[0] = expanded;
         let solved = solve(&rest, 0, expanded, GAP);
         assert_eq!(solved[0], expanded);
-        for (card, r) in doc.cards.iter_mut().zip(&solved) { card.rect = *r; }
-        doc.cards[0].size = Some([600., 400.]);
+        for (card, r) in doc.panes.iter_mut().zip(&solved) { card.rect = *r; }
+        *doc.panes[0].size_mut().unwrap() = Some([600., 400.]);
         for i in 1..3 { assert!(separated(solved[0], solved[i], GAP)); }
         let moved = base.changed(&Rest::capture(&doc));
         // A neighbour dragged since is left where the person put it.
-        doc.cards[2].rect[0] += 500.;
-        let dragged = doc.cards[2].rect;
-        doc.cards[0].size = None;
+        doc.panes[2].rect[0] += 500.;
+        let dragged = doc.panes[2].rect;
+        *doc.panes[0].size_mut().unwrap() = None;
         base.put_back(&moved, &mut doc);
-        assert_eq!(doc.cards[1].rect, pill(244., 0.));
-        assert_eq!(doc.cards[2].rect, dragged);
-        assert_eq!(doc.cards[0].rect[..2], [0., 0.]);
+        assert_eq!(doc.panes[1].rect, pill(244., 0.));
+        assert_eq!(doc.panes[2].rect, dragged);
+        assert_eq!(doc.panes[0].rect[..2], [0., 0.]);
     }
 
     #[test]
@@ -1089,21 +1236,21 @@ mod tests {
         doc.place("a", [0., 0.], [220., 36.]);
         let old = serde_json::to_string(&doc).unwrap();
         assert!(!old.contains("size"));
-        assert_eq!(serde_json::from_str::<Document>(&old).unwrap().cards[0].size, None);
-        doc.cards[0].size = Some([600., 400.]);
+        assert_eq!(serde_json::from_str::<Document>(&old).unwrap().panes[0].size(), None);
+        *doc.panes[0].size_mut().unwrap() = Some([600., 400.]);
         let saved = serde_json::to_string(&doc).unwrap();
-        assert_eq!(serde_json::from_str::<Document>(&saved).unwrap().cards[0].size, Some([600., 400.]));
+        assert_eq!(serde_json::from_str::<Document>(&saved).unwrap().panes[0].size(), Some([600., 400.]));
     }
 
     #[test]
     fn undo_keeps_each_sub_agent_cell_apart() {
-        let sub = |id: &str, x| Card { terminal: String::new(), sub: Some(id.into()), parent: Some("t1".into()), rect: [x, 0., 100., 36.], z: 0, size: None, space: None };
-        let mut doc = Document { cards: vec![sub("a", 0.), sub("b", 200.)], ..Document::default() };
+        let sub = |id: &str, x| Pane { id: format!("sub:t1:{id}"), kind: Kind::Sub { parent: "t1".into(), sub: id.into() }, rect: [x, 0., 100., 36.], z: 0, space: None };
+        let mut doc = Document { panes: vec![sub("a", 0.), sub("b", 200.)], ..Document::default() };
         let rest = Rest::capture(&doc);
-        doc.cards[0].rect[0] = 50.;
-        doc.cards[1].rect[0] = 400.;
+        doc.panes[0].rect[0] = 50.;
+        doc.panes[1].rect[0] = 400.;
         rest.restore(&mut doc);
-        assert_eq!((doc.cards[0].rect[0], doc.cards[1].rect[0]), (0., 200.));
+        assert_eq!((doc.panes[0].rect[0], doc.panes[1].rect[0]), (0., 200.));
     }
 
     #[test]
@@ -1137,15 +1284,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("canvas.json");
         let mut value = serde_json::to_value(Document::default()).unwrap();
-        value.as_object_mut().unwrap().remove("previews");
+        value["version"] = serde_json::json!(2);
         value.as_object_mut().unwrap().remove("arrange_layout");
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
-        assert!(Document::load(&path).unwrap().0.previews.is_empty());
+        assert!(Document::load(&path).unwrap().0.panes.is_empty());
         value["previews"] = serde_json::json!([{"path":"/missing.md", "rect":[1,2,400,300]}]);
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
         assert_eq!(
-            Document::load(&path).unwrap().0.previews[0].path,
-            "/missing.md"
+            Document::load(&path).unwrap().0.panes[0].file(),
+            Some("/missing.md")
         );
         value["previews"][0]["rect"][2] = serde_json::json!(-1);
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
@@ -1376,7 +1523,7 @@ mod tests {
     fn unsupported_version_is_untouched() {
         let path = std::env::temp_dir().join(format!("canopy-version-{}.json", std::process::id()));
         Document {
-            version: 3,
+            version: 4,
             ..Document::default()
         }
         .save(&path)
@@ -1515,32 +1662,32 @@ mod cell_tests {
     use std::collections::HashMap;
     #[test]
     fn old_cards_load_and_sub_cards_keep_their_position_until_labels_clear() {
-        let card: Card = serde_json::from_str(r#"{"terminal":"t1","rect":[0,0,320,36],"z":1}"#).unwrap();
-        assert!(card.sub.is_none());
         let mut doc: Document = serde_json::from_value(serde_json::json!({
             "version":1,"camera":{"x":0,"y":0,"zoom":1},"view":"all","spaces":[],
             "cards":[{"terminal":"t1","rect":[0,0,320,36],"z":1}],"panel":{"width":null}
         })).unwrap();
-        assert_eq!(doc.cards[0].key(), card.key());
+        doc.into_rooms();
+        doc.into_panes();
+        assert_eq!(doc.panes[0].id, "t1");
         let mut subs = HashMap::from([("t1".into(), vec![crate::subs::Sub { id:"a".into(), name:"task".into(), program:serde_json::Value::Null, transcript:None, done:false }])]);
         doc.spaces.push(Space { space: "s".into(), rect: [-24., -24., 368., 84.], color: "gray".into(), frame: true });
         assert!(doc.sync_subs(&subs));
-        assert_eq!(doc.cards.len(), 2);
-        assert_eq!(doc.cards[1].space, doc.cards[0].space, "a sub cell lives in its parent's space");
-        let key = doc.cards[1].key();
+        assert_eq!(doc.panes.len(), 2);
+        assert_eq!(doc.panes[1].space, doc.panes[0].space, "a sub cell lives in its parent's space");
+        let key = doc.panes[1].id.clone();
         doc.place(&key, [600., 200.], [320., 36.]);
         subs.get_mut("t1").unwrap()[0].done = true;
         assert!(!doc.sync_subs(&subs));
-        assert_eq!(&doc.cards[1].rect[..2], &[600., 200.]);
+        assert_eq!(&doc.panes[1].rect[..2], &[600., 200.]);
         let saved = serde_json::to_value(&doc).unwrap();
-        assert_eq!(saved["cards"][1]["sub"], "a");
-        assert_eq!(saved["cards"][1]["parent"], "t1");
-        assert!(saved["cards"][1].get("terminal").is_none());
+        assert_eq!(saved["panes"][1]["props"]["sub"], "a");
+        assert_eq!(saved["panes"][1]["props"]["parent"], "t1");
+        assert!(saved["panes"][1].get("terminal").is_none());
         let mut loaded: Document = serde_json::from_value(saved).unwrap();
-        assert_eq!(loaded.cards[1].key(), key);
+        assert_eq!(loaded.panes[1].id.clone(), key);
         subs.clear();
         assert!(loaded.sync_subs(&subs));
-        assert_eq!(loaded.cards.len(), 1);
+        assert_eq!(loaded.panes.len(), 1);
     }
     #[test]
     fn closing_distinguishes_processes_from_observations() {
@@ -1684,17 +1831,17 @@ mod stacking_tests {
         for (i, key) in ["t1", "t2", "t3", "t4"].iter().enumerate() {
             doc.place(key, [i as f32 * 300., 0.], [220., 36.]);
         }
-        let geometry: std::collections::HashMap<_, _> = doc.cards.iter().map(|c| (c.key(), c.rect)).collect();
+        let geometry: std::collections::HashMap<_, _> = doc.panes.iter().map(|c| (c.id.clone(), c.rect)).collect();
         let targets = vec!["t3".into(), "t1".into()];
         assert!(doc.stack(&targets, true));
-        let order = |doc: &Document| { let mut cards: Vec<_> = doc.cards.iter().collect(); cards.sort_by_key(|c| c.z); cards.iter().map(|c| c.key()).collect::<Vec<_>>() };
+        let order = |doc: &Document| { let mut cards: Vec<_> = doc.panes.iter().collect(); cards.sort_by_key(|c| c.z); cards.iter().map(|c| c.id.clone()).collect::<Vec<_>>() };
         assert_eq!(order(&doc), ["t2", "t4", "t1", "t3"]);
         assert!(!doc.stack(&targets, true), "a second press need not save again");
         assert!(doc.stack(&targets, false));
         assert_eq!(order(&doc), ["t1", "t3", "t2", "t4"]);
         let restored: Document = serde_json::from_value(serde_json::to_value(&doc).unwrap()).unwrap();
         assert_eq!(order(&restored), order(&doc));
-        assert!(restored.cards.iter().all(|c| c.rect == geometry[&c.key()]));
+        assert!(restored.panes.iter().all(|c| c.rect == geometry[&c.id]));
         assert!(!doc.stack(&["missing".into()], true));
     }
 }

@@ -1,0 +1,379 @@
+<title>Canopy Canvas Items</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column of numbered figures; each mockup sits on a "table" panel that scrolls sideways on phones. */
+:root{
+  --bg:#f5f5f2;--table:#ecebe7;--surface:#ffffff;--surface-2:#f1f0ec;--fg:#1c1c1a;--muted:#62625d;--faint:#9a9993;
+  --border:#e0dfda;--border-strong:#c7c6c0;--accent:#2f63c9;--accent-bg:#e4ecfb;--on-accent:#ffffff;
+  --ok:#2b8048;--warn:#a96d12;--hl:#f8e39a;--new:#efe7fb;--new-line:#8a6fd1;--new-fg:#3f2c78;--old:#efeeea;--old-line:#a9a8a2;
+  --font:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111111;--table:#171716;--surface:#1e1e1d;--surface-2:#262625;--fg:#ececea;--muted:#a3a39e;--faint:#6e6e69;
+  --border:#2d2d2b;--border-strong:#41413e;--accent:#7ba3f5;--accent-bg:#1f2b45;--on-accent:#0d1220;
+  --ok:#62c584;--warn:#e2ab4f;--hl:#5c4b14;--new:#251d3a;--new-line:#9d86e0;--new-fg:#d9cdfa;--old:#222220;--old-line:#55554f;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111111;--table:#171716;--surface:#1e1e1d;--surface-2:#262625;--fg:#ececea;--muted:#a3a39e;--faint:#6e6e69;
+  --border:#2d2d2b;--border-strong:#41413e;--accent:#7ba3f5;--accent-bg:#1f2b45;--on-accent:#0d1220;
+  --ok:#62c584;--warn:#e2ab4f;--hl:#5c4b14;--new:#251d3a;--new-line:#9d86e0;--new-fg:#d9cdfa;--old:#222220;--old-line:#55554f;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:15px;line-height:1.6}
+.wrap{max-width:860px;margin:0 auto;padding-block:40px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:48px}
+h1{font-size:30px;font-weight:600;letter-spacing:-0.01em;margin:0 0 8px;text-wrap:balance}
+h2{font-size:19px;font-weight:600;margin:0;text-wrap:balance}
+.lede{color:var(--muted);max-width:65ch;margin:0}
+.meta{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:12px}
+figure{margin:0;display:flex;flex-direction:column;gap:12px}
+.fhead{display:flex;gap:10px;align-items:baseline}
+.fno{font-family:var(--mono);font-size:12px;color:var(--faint)}
+.cap{color:var(--muted);max-width:65ch;margin:0}
+.scroll{overflow-x:auto;border-radius:14px}
+.table{position:relative;min-width:680px;background:var(--table);border:1px solid var(--border);border-radius:14px;overflow:hidden;font-size:12px}
+.card{position:absolute;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;overflow:hidden}
+.hd{display:flex;align-items:center;gap:6px;height:26px;padding:0 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--muted)}
+.hd b{font-weight:500;color:var(--fg)}
+.dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex:none}
+.mono{font-family:var(--mono);font-size:11px;line-height:1.6}
+.bar{height:5px;border-radius:2px;background:var(--border-strong)}
+.blk{border-radius:5px;background:var(--surface-2)}
+.pick{outline:1.5px solid var(--accent);outline-offset:1px}
+.badge{position:absolute;font-size:11px;background:var(--accent);color:var(--on-accent);padding:1px 6px;border-radius:4px;white-space:nowrap}
+.toolbar{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:5px;background:var(--surface);border:1px solid var(--border-strong);border-radius:12px}
+.tool{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);position:relative}
+.tool svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.tool.on{background:var(--accent-bg);color:var(--accent)}
+.tool .chev{position:absolute;right:2px;bottom:2px;width:7px;height:7px}
+.sep{width:1px;height:20px;background:var(--border-strong);margin:0 4px}
+.tip{position:absolute;bottom:46px;left:50%;transform:translateX(-50%);background:var(--fg);color:var(--bg);font-size:11px;padding:3px 7px;border-radius:5px;white-space:nowrap}
+.plus{position:absolute;width:15px;height:15px;border-radius:50%;border:1px solid var(--border-strong);background:var(--surface);font-size:11px;display:flex;align-items:center;justify-content:center;color:var(--muted);line-height:1}
+.pop{position:absolute;background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;padding:10px;box-shadow:0 8px 24px rgba(0,0,0,.10)}
+.lbl{font-size:11px;color:var(--faint);margin:8px 0 3px}
+.row{display:flex;align-items:center;gap:7px;padding:5px 6px;border-radius:6px}
+.row.hi{background:var(--surface-2)}
+.ref{font-family:var(--mono);font-size:11px;background:var(--surface-2);border-radius:6px;padding:6px 7px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;min-width:680px}
+.panel{position:relative;background:var(--table);border:1px solid var(--border);border-radius:14px;overflow:hidden;font-size:12px}
+.ptitle{position:absolute;left:12px;top:10px;font-size:12px;color:var(--muted)}
+.term{background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;overflow:hidden}
+.pre{font-family:var(--mono);font-size:11px;line-height:1.65;padding:10px 12px;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.c-mu{color:var(--faint)}.c-ac{color:var(--accent)}.c-ok{color:var(--ok)}
+.menu{background:var(--surface);border:1px solid var(--border-strong);border-radius:10px;padding:6px;font-size:12px}
+.it{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px}
+.it .k{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint)}
+.sl{font-size:11px;color:var(--faint);padding:6px 8px 2px}
+.ic{width:15px;height:15px;stroke:var(--muted);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.tag{font-size:11px;padding:2px 8px;border-radius:6px;display:inline-block}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.opt{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.opt.lean{border:2px solid var(--accent)}
+.opt h3{font-size:15px;font-weight:600;margin:0}
+.opt p{margin:0;font-size:13px;color:var(--muted)}
+.opt ul{margin:0;padding-left:18px;font-size:13px}
+.opt .verdict{font-size:12px;font-family:var(--mono);color:var(--faint)}
+svg.dia text{font-family:var(--font)}
+.links{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:13px}
+.links a{color:var(--accent)}
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Canopy canvas items</h1>
+  <p class="lede">Visuals for the canvas items proposal: a tabletop where agents, browsers, PDFs, images, videos, simulators and mod-made tools sit side by side, wire to each other, and quote into any agent. The full proposal, candidate libraries and research questions are in <span class="mono">docs/canopy/canvas-items-proposal.md</span>.</p>
+  <div class="meta">2026-11-17 · proposal, nothing built · PRs #9 and #10 open</div>
+</header>
+
+<figure>
+  <div class="fhead"><span class="fno">fig 1</span><h2>The tabletop</h2></div>
+  <p class="cap">One canvas you can pan forever. Every item is the same kind of object: you can drag it, resize it and wire it. The floating bottom bar puts things on the table, like Figma's toolbar. The accent edge is the agent's wire to the browser it is checking.</p>
+  <div class="scroll"><div class="table" style="height:540px">
+    <div style="display:flex;align-items:center;gap:2px;height:32px;padding:0 10px;background:var(--surface-2);border-bottom:1px solid var(--border)">
+      <span style="display:flex;gap:5px;margin-right:12px"><span class="dot" style="background:var(--border-strong);width:9px;height:9px"></span><span class="dot" style="background:var(--border-strong);width:9px;height:9px"></span><span class="dot" style="background:var(--border-strong);width:9px;height:9px"></span></span>
+      <svg class="ic" viewBox="0 0 24 24" style="margin:0 8px"><path d="M5 12l7-7 7 7M7 10v9h10v-9"/></svg>
+      <span style="padding:6px 12px;background:var(--table);border-radius:6px 6px 0 0;margin-top:7px;display:flex;gap:6px;align-items:center">web-app <span class="dot" style="background:var(--ok)"></span></span>
+      <span style="padding:6px 12px;color:var(--muted)">api</span>
+      <span style="padding:6px 8px;color:var(--faint)">+</span>
+    </div>
+    <svg style="position:absolute;left:0;top:0;pointer-events:none" width="680" height="540" viewBox="0 0 680 540" aria-hidden="true">
+      <path d="M232 190 C262 190 262 120 292 120" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+      <path d="M120 286 C120 306 110 306 110 330" fill="none" stroke="var(--old-line)" stroke-width="1"/>
+      <path d="M232 250 C268 250 268 300 300 300" fill="none" stroke="var(--old-line)" stroke-width="1"/>
+      <path d="M550 110 C566 110 566 120 580 120" fill="none" stroke="var(--old-line)" stroke-width="1"/>
+      <path d="M232 220 C420 220 470 360 488 372" fill="none" stroke="var(--old-line)" stroke-width="1" stroke-dasharray="4 3"/>
+    </svg>
+    <div class="card" style="left:22px;top:110px;width:210px;height:176px;border:1.5px solid var(--accent)">
+      <div class="hd"><b>Claude Code</b><span style="flex:1"></span><span class="dot" style="background:var(--ok)"></span>working</div>
+      <div class="mono" style="padding:8px">
+        <div style="color:var(--muted)">&gt; fix the pricing card so</div>
+        <div style="color:var(--muted)">&nbsp;&nbsp;it matches spec p.4</div>
+        <div style="margin-top:4px">● canopy item read i2</div>
+        <div>● canopy item shot i4</div>
+        <div class="c-ok">● Edit PricingCard.tsx</div>
+        <div class="c-mu">&nbsp;&nbsp;+12 −4</div>
+      </div>
+      <span class="plus" style="right:-8px;top:80px">+</span>
+    </div>
+    <div class="card" style="left:292px;top:52px;width:258px;height:160px">
+      <div class="hd"><b>localhost:3000</b><span style="flex:1"></span>browser</div>
+      <div style="padding:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
+        <div class="blk" style="height:84px"></div><div class="blk pick" style="height:84px"></div><div class="blk" style="height:84px"></div>
+      </div>
+      <span class="badge" style="left:94px;top:30px">PricingCard</span>
+    </div>
+    <div class="card" style="left:580px;top:52px;width:82px;height:170px;border-radius:18px">
+      <div style="margin:8px auto 0;width:30px;height:6px;border-radius:3px;background:var(--surface-2)"></div>
+      <div class="blk" style="margin:8px;height:120px;border-radius:8px;display:flex;flex-direction:column;gap:5px;padding:6px">
+        <div class="bar" style="width:60%"></div><div style="height:30px;border-radius:5px;background:var(--border)"></div><div style="height:30px;border-radius:5px;background:var(--border)"></div>
+      </div>
+      <div style="text-align:center;font-size:11px;color:var(--muted)">iPhone 17</div>
+    </div>
+    <div class="card" style="left:40px;top:330px;width:190px;height:120px">
+      <div class="hd"><b>spec.pdf</b><span style="flex:1"></span>p.4/12</div>
+      <div style="padding:8px 10px;display:flex;flex-direction:column;gap:5px">
+        <div class="bar" style="width:90%"></div><div class="bar" style="width:80%"></div>
+        <div style="height:9px;background:var(--hl);border-radius:2px;width:95%"></div><div style="height:9px;background:var(--hl);border-radius:2px;width:60%"></div>
+        <div class="bar" style="width:85%"></div>
+      </div>
+    </div>
+    <div class="card" style="left:300px;top:262px;width:150px;height:100px">
+      <div class="hd"><b>mock.png</b></div>
+      <div class="blk" style="margin:8px;height:56px;border-radius:6px"></div>
+    </div>
+    <div class="card" style="left:488px;top:356px;width:130px;height:30px;border-radius:15px;display:flex;align-items:center;gap:6px;padding:0 12px;font-size:11px">
+      <b style="font-weight:500">Codex</b><span style="flex:1"></span><span class="dot" style="background:var(--warn)"></span>
+    </div>
+    <div class="toolbar" role="img" aria-label="Floating toolbar: select, hand, terminal, agent, browser, open file, simulator, note, wire, mods">
+      <div class="tool on"><svg viewBox="0 0 24 24"><path d="M6 3l12 9-6 1-3 6z"/></svg></div>
+      <div class="tool"><svg viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 013 0V12M11 11.5v-8a1.5 1.5 0 013 0V12M14 5.5a1.5 1.5 0 013 0V12M17 7.5a1.5 1.5 0 013 0V15a6 6 0 01-6 6h-2a6 6 0 01-5-3l-3-5a1.5 1.5 0 012.5-1.5L8 13"/></svg></div>
+      <div class="sep"></div>
+      <div class="tool"><svg viewBox="0 0 24 24"><path d="M5 7l5 5-5 5M12 18h7"/></svg></div>
+      <div class="tool"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/></svg><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+      <div class="tool"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg><span class="tip">Browser</span></div>
+      <div class="tool"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/></svg></div>
+      <div class="tool"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg></div>
+      <div class="tool"><svg viewBox="0 0 24 24"><path d="M5 4h14v11l-5 5H5z"/><path d="M14 20v-5h5"/></svg></div>
+      <div class="sep"></div>
+      <div class="tool"><svg viewBox="0 0 24 24"><circle cx="6" cy="18" r="2"/><circle cx="18" cy="6" r="2"/><path d="M7.5 16.5C12 16 12 8 16.5 7.5"/></svg></div>
+      <div class="sep"></div>
+      <div class="tool"><svg viewBox="0 0 24 24"><path d="M5 9h3a2 2 0 104 0h3v3a2 2 0 110 4v3H5v-3a2 2 0 100-4z"/></svg><svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></div>
+    </div>
+    <div style="position:absolute;right:14px;bottom:24px;font-size:11px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-family:var(--mono)">84%</div>
+  </div></div>
+</figure>
+
+<figure>
+  <div class="fhead"><span class="fno">fig 2</span><h2>Quote from anything</h2></div>
+  <p class="cap">Select something and a quote button appears. Agents wired to that item come first. The agent gets a reference it can open itself, not a dump of the contents. This extends today's <span class="mono">quote_selection</span> → <span class="mono">quote.send</span> flow for text previews.</p>
+  <div class="scroll"><div class="grid2">
+    <div class="panel" style="height:430px">
+      <div class="ptitle">PDF: select text like a highlighter</div>
+      <div class="card" style="left:14px;top:36px;width:200px;height:250px">
+        <div class="hd"><b>spec.pdf</b><span style="flex:1"></span>p.4</div>
+        <div style="padding:12px;font-size:11px;line-height:1.6;color:var(--muted)">Pricing tiers render as three cards. <span style="background:var(--hl);color:var(--fg)">The recommended tier is centered, raised by 8px and shows a "Most popular" badge.</span> Cards share one height.</div>
+        <div style="position:absolute;left:150px;top:118px;width:24px;height:24px;border-radius:6px;border:1px solid var(--border-strong);background:var(--surface);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:13px">"</div>
+      </div>
+      <div class="pop" style="left:110px;top:150px;width:200px">
+        <div class="ref">@spec.pdf p.4 "The recommended tier is centered, raised by 8px…"</div>
+        <div class="lbl">Wired to spec.pdf</div>
+        <div class="row hi">Claude Code<span style="flex:1"></span><span class="dot" style="background:var(--ok)"></span></div>
+        <div class="lbl">Other agents</div>
+        <div class="row">Codex<span style="flex:1"></span><span class="dot" style="background:var(--warn)"></span></div>
+        <div style="margin-top:8px;border:1px solid var(--border);border-radius:6px;padding:6px;color:var(--faint);font-size:11px">Add a message</div>
+      </div>
+    </div>
+    <div class="panel" style="height:430px">
+      <div class="ptitle">Browser: pick an element or component</div>
+      <div class="card" style="left:14px;top:36px;width:290px;height:200px">
+        <div class="hd"><b>localhost:3000/pricing</b><span style="flex:1"></span><span style="color:var(--accent)">pick</span></div>
+        <div style="padding:14px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+          <div class="blk" style="height:120px"></div><div class="blk pick" style="height:120px"></div><div class="blk" style="height:120px"></div>
+        </div>
+        <span class="badge" style="left:106px;top:28px">&lt;PricingCard&gt; 88×120</span>
+      </div>
+      <div class="pop" style="left:64px;top:176px;width:216px">
+        <div class="ref">@localhost:3000/pricing &lt;PricingCard tier="pro"&gt; src/components/PricingCard.tsx:42 · main &gt; section .card:nth-child(2)</div>
+        <div class="lbl">Wired to this browser</div>
+        <div class="row hi">Claude Code<span style="flex:1"></span><span class="dot" style="background:var(--ok)"></span></div>
+        <div class="lbl">Other agents</div>
+        <div class="row">Codex<span style="flex:1"></span><span class="dot" style="background:var(--warn)"></span></div>
+        <div class="row" style="color:var(--muted)">+ New agent with this</div>
+      </div>
+    </div>
+  </div></div>
+</figure>
+
+<figure>
+  <div class="fhead"><span class="fno">fig 3</span><h2>What the agent sees, and the mods menu</h2></div>
+  <p class="cap">Wired items join the existing <span class="mono">canopy wire</span> list with their verbs. The existing session hook tells the agent when the list changes. It's all shell commands, so it works with any agent CLI. Tools added by mods sit in the toolbar's puzzle menu next to the built-in ones.</p>
+  <div class="scroll"><div class="grid2" style="grid-template-columns:minmax(0,1.35fr) minmax(0,1fr)">
+    <div class="term">
+      <div class="hd"><b>Claude Code</b><span style="flex:1"></span>t3</div>
+<pre class="pre"><span class="c-mu">⎿ Wired: spec.pdf, localhost:3000. `canopy wire` lists your peers.</span>
+
+<span class="c-ac">$ canopy wire</span>
+you: t3 "Claude Code"
+peers:
+  Codex (t5): idle
+  spec.pdf (pdf i2): page 4 of 12
+    canopy item read i2 [--page 4]
+  localhost:3000 (browser i4): /pricing
+    canopy item read i4   canopy item shot i4
+    canopy item open i4 &lt;url&gt;
+  iPhone 17 (sim i6): booted
+    canopy item shot i6   canopy item tap i6 x y
+
+<span class="c-ac">$ canopy item shot i4</span>
+<span class="c-ok">/tmp/canopy/i4-0412.png 1280×800</span></pre>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;min-width:0">
+      <div class="menu">
+        <div class="sl">Built in</div>
+        <div class="it">Browser</div>
+        <div class="it">PDF, image, video</div>
+        <div class="it">iOS simulator</div>
+        <div class="it">Note</div>
+        <div class="sl">Your mods</div>
+        <div class="it" style="background:var(--surface-2)">CI runs</div>
+        <div class="it">Postgres table</div>
+        <div class="it">Linear board</div>
+        <div style="height:1px;background:var(--border);margin:4px 0"></div>
+        <div class="it" style="color:var(--muted)">+ Make a canvas tool…</div>
+      </div>
+<pre class="pre" style="background:var(--surface-2);border-radius:8px;color:var(--muted)">mods/ci-runs/mod.json
+{ "place": "canvas",
+  "tool": { "icon": "chart.svg",
+            "label": "CI runs" } }</pre>
+    </div>
+  </div></div>
+</figure>
+
+<figure>
+  <div class="fhead"><span class="fno">fig 4</span><h2>Resting and live</h2></div>
+  <p class="cap">A native web view can't be scaled, clipped or covered by GPUI menus. So heavy items rest as a snapshot texture and only become live when you focus them. Terminal cells already work this way (pill vs expanded). Items that draw straight into GPUI (image, rasterized PDF, video through <span class="mono">surface()</span>) never need a live state.</p>
+  <div class="scroll"><div class="grid2">
+    <div class="panel" style="padding:14px;height:250px">
+      <span class="tag" style="background:var(--surface-2);color:var(--muted)">Resting · zoom 40%</span>
+      <div style="display:flex;gap:8px;align-items:flex-start;margin-top:12px">
+        <div class="card" style="position:static;width:120px"><div class="hd" style="height:20px"><b>:3000</b></div><div style="padding:6px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px"><div class="blk" style="height:40px"></div><div class="blk" style="height:40px"></div><div class="blk" style="height:40px"></div></div></div>
+        <div class="card" style="position:static;width:50px;height:90px;border-radius:12px"></div>
+        <div class="card" style="position:static;width:80px;height:60px"></div>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:12px 0 0">A still image on the GPU. Zooms, clips and layers like any card. No web process ticking, no frames requested.</p>
+    </div>
+    <div class="panel" style="padding:14px;height:250px">
+      <span class="tag" style="background:var(--accent-bg);color:var(--accent)">Live · focused</span>
+      <div class="card" style="position:static;margin-top:12px;border:1.5px solid var(--accent)">
+        <div class="hd"><b>localhost:3000/pricing</b><span style="flex:1"></span>native view</div>
+        <div style="padding:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px"><div class="blk" style="height:74px"></div><div class="blk" style="height:74px"></div><div class="blk" style="height:74px"></div></div>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin:12px 0 0">The system web view sits exactly over the card: scroll, type, pick elements. Blur or zoom out and it takes a snapshot and steps aside.</p>
+    </div>
+  </div></div>
+</figure>
+
+<figure>
+  <div class="fhead"><span class="fno">fig 5</span><h2>Where the work goes</h2></div>
+  <p class="cap">Agents talk to each other through <span class="mono">hc</span>, which doesn't change. They reach items through the <span class="mono">canopy</span> CLI over the control socket the app already has. A quote reaches an agent through the existing terminal input path. Nothing here needs a new core or a new protocol.</p>
+  <div class="scroll"><div class="table" style="padding:8px 0">
+  <svg class="dia" width="100%" viewBox="0 0 680 470" role="img"><title>Canopy item architecture</title><desc>Agent CLIs use hc to talk to agents and the canopy CLI to read items. herdr-core is unchanged. The Canopy app holds the canvas document with items and wires, one item contract, and built-in and mod item kinds.</desc>
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+    <rect x="230" y="30" width="220" height="56" rx="8" fill="var(--old)" stroke="var(--old-line)" stroke-width="1"/>
+    <text x="340" y="52" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">Any agent CLI</text>
+    <text x="340" y="70" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">Claude Code, Codex, ...</text>
+    <path d="M300 86 L300 118 L140 118 L140 148" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar)"/>
+    <path d="M380 86 L380 118 L460 118 L460 138" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar)"/>
+    <text x="150" y="138" font-size="12" fill="var(--muted)">hc: talk to agents</text>
+    <text x="470" y="132" font-size="12" fill="var(--muted)">canopy: reach items</text>
+    <rect x="40" y="150" width="200" height="150" rx="12" fill="var(--old)" stroke="var(--old-line)" stroke-width="1"/>
+    <text x="140" y="180" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">herdr-core (hc)</text>
+    <text x="140" y="204" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">PTYs, agent status</text>
+    <text x="140" y="224" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">Agent messages</text>
+    <text x="140" y="262" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">No change needed</text>
+    <rect x="280" y="140" width="360" height="252" rx="18" fill="var(--new)" stroke="var(--new-line)" stroke-width="1"/>
+    <text x="460" y="162" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--new-fg)">Canopy app</text>
+    <rect x="300" y="180" width="320" height="50" rx="8" fill="var(--surface)" stroke="var(--new-line)" stroke-width="1"/>
+    <text x="460" y="197" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">canvas.json: items + wires</text>
+    <text x="460" y="215" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">One list, every kind wireable</text>
+    <rect x="300" y="244" width="320" height="50" rx="8" fill="var(--surface)" stroke="var(--new-line)" stroke-width="1"/>
+    <text x="460" y="261" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">Item contract</text>
+    <text x="460" y="279" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">render, read, shot, selection, verbs</text>
+    <rect x="300" y="310" width="150" height="56" rx="8" fill="var(--surface)" stroke="var(--new-line)" stroke-width="1"/>
+    <text x="375" y="329" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">Built-in kinds</text>
+    <text x="375" y="347" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">Rust: pdf, web, sim</text>
+    <rect x="470" y="310" width="150" height="56" rx="8" fill="var(--surface)" stroke="var(--new-line)" stroke-width="1"/>
+    <text x="545" y="329" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">Mod kinds</text>
+    <text x="545" y="347" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">JS: anything</text>
+    <line x1="280" y1="280" x2="242" y2="280" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar)"/>
+    <rect x="40" y="420" width="12" height="12" rx="3" fill="var(--old)" stroke="var(--old-line)"/>
+    <text x="60" y="430" font-size="12" fill="var(--muted)">Exists today, unchanged</text>
+    <rect x="240" y="420" width="12" height="12" rx="3" fill="var(--new)" stroke="var(--new-line)"/>
+    <text x="260" y="430" font-size="12" fill="var(--muted)">New: one item model, two ways to make a kind</text>
+  </svg>
+  </div></div>
+</figure>
+
+<figure>
+  <div class="fhead"><span class="fno">fig 6</span><h2>Merges, then phases</h2></div>
+  <p class="cap">P1 is the shared base everything else builds on. After it lands, P2 to P5 can run in parallel worktrees on their own branches. What ships by Friday is chosen after the research session, by risk.</p>
+  <div class="scroll"><div class="table" style="padding:8px 0">
+  <svg class="dia" width="100%" viewBox="0 0 680 400" role="img"><title>Merge and phase order</title><desc>Finish README rewording on PR 9, merge PR 9, rebase and merge PR 10, then P1 foundation, then P2 viewers, P3 browser, P4 video and P5 simulators in parallel, then P6 extensibility.</desc>
+    <defs><marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+    <rect x="30" y="30" width="190" height="56" rx="8" fill="var(--old)" stroke="var(--old-line)"/>
+    <text x="125" y="49" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">#9 README rewording</text>
+    <text x="125" y="67" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">Krishna; win98 fonts call</text>
+    <line x1="220" y1="58" x2="254" y2="58" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar2)"/>
+    <rect x="256" y="30" width="150" height="56" rx="8" fill="var(--old)" stroke="var(--old-line)"/>
+    <text x="331" y="49" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">Merge #9</text>
+    <text x="331" y="67" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">CI green</text>
+    <line x1="406" y1="58" x2="440" y2="58" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar2)"/>
+    <rect x="442" y="30" width="208" height="56" rx="8" fill="var(--old)" stroke="var(--old-line)"/>
+    <text x="546" y="49" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">Rebase, merge #10</text>
+    <text x="546" y="67" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">README conflict only</text>
+    <path d="M546 86 L546 106 L340 106 L340 122" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar2)"/>
+    <rect x="190" y="124" width="300" height="56" rx="8" fill="var(--new)" stroke="var(--new-line)"/>
+    <text x="340" y="143" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--new-fg)">P1 Foundation</text>
+    <text x="340" y="161" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--new-fg)">items, contract, wire, quote, toolbar</text>
+    <path d="M340 180 L340 198 L100 198 L100 218" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar2)"/>
+    <path d="M340 180 L340 198 L260 198 L260 218" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar2)"/>
+    <path d="M340 180 L340 198 L420 198 L420 218" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar2)"/>
+    <path d="M340 180 L340 198 L580 198 L580 218" fill="none" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar2)"/>
+    <rect x="30" y="220" width="140" height="56" rx="8" fill="var(--surface)" stroke="var(--new-line)"/>
+    <text x="100" y="239" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">P2 Viewers</text>
+    <text x="100" y="257" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">image, PDF · M</text>
+    <rect x="190" y="220" width="140" height="56" rx="8" fill="var(--surface)" stroke="var(--new-line)"/>
+    <text x="260" y="239" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">P3 Browser</text>
+    <text x="260" y="257" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">web, picker · XL</text>
+    <rect x="350" y="220" width="140" height="56" rx="8" fill="var(--surface)" stroke="var(--new-line)"/>
+    <text x="420" y="239" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">P4 Video</text>
+    <text x="420" y="257" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">macOS first · M</text>
+    <rect x="510" y="220" width="140" height="56" rx="8" fill="var(--surface)" stroke="var(--new-line)"/>
+    <text x="580" y="239" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--fg)">P5 Simulators</text>
+    <text x="580" y="257" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--muted)">iOS, Android · L</text>
+    <path d="M100 276 L100 296 L340 296 L340 312" fill="none" stroke="var(--muted)" stroke-width="1.2"/>
+    <path d="M260 276 L260 296" fill="none" stroke="var(--muted)" stroke-width="1.2"/>
+    <path d="M420 276 L420 296" fill="none" stroke="var(--muted)" stroke-width="1.2"/>
+    <path d="M580 276 L580 296 L340 296" fill="none" stroke="var(--muted)" stroke-width="1.2"/>
+    <line x1="340" y1="296" x2="340" y2="314" stroke="var(--muted)" stroke-width="1.2" marker-end="url(#ar2)"/>
+    <rect x="190" y="316" width="300" height="56" rx="8" fill="var(--new)" stroke="var(--new-line)"/>
+    <text x="340" y="335" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="600" fill="var(--new-fg)">P6 Extensibility</text>
+    <text x="340" y="353" text-anchor="middle" dominant-baseline="central" font-size="12" fill="var(--new-fg)">mod kinds, web items if chosen</text>
+  </svg>
+  </div></div>
+</figure>
+
+<figure>
+  <div class="fhead"><span class="fno">fig 7</span><h2>The React question</h2></div>
+  <p class="cap">Should React come into a Rust GPUI app? The item contract doesn't depend on any one UI toolkit, so this can wait for research without blocking P1. The current lean is outlined.</p>
+  <div class="opts">
+    <div class="opt"><h3>A. Native only</h3><p>Built-ins in Rust GPUI, mods in gpui-kit JS. Today's rule.</p><ul><li>Light, one look</li><li>Everything zooms</li><li>Every viewer hand-built</li></ul><span class="verdict">baseline</span></div>
+    <div class="opt"><h3>B. Hybrid web items</h3><p>A web kind hosts any HTML or React page; a small bridge maps read, selection and verbs.</p><ul><li>pdf.js, video, Excalidraw, Mermaid</li><li>Zoom, overlay and memory cost</li><li>Changes the "no web view" mod rule</li></ul><span class="verdict">research</span></div>
+    <div class="opt"><h3>C. Whole app in React</h3><p>Rewrite the shell in Tauri or Electron.</p><ul><li>One web stack</li><li>Undoes the native pivot</li><li>Terminals live in GPUI</li></ul><span class="verdict">out</span></div>
+    <div class="opt lean"><h3>D. Defer, keep it open</h3><p>Ship A now; B can be added later as one more item kind.</p><ul><li>No rework either way</li><li>Some kinds wait</li><li>B decided on evidence</li></ul><span class="verdict">current lean</span></div>
+  </div>
+</figure>
+
+<footer class="links">
+  <span class="c-mu">Proposal: docs/canopy/canvas-items-proposal.md</span>
+  <span class="c-mu">Related: docs/canvas.md · docs/wire.md · docs/canopy/wire-lean-plan.md</span>
+</footer>
+</div>

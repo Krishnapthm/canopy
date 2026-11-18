@@ -1,7 +1,8 @@
 # Canvas layout
 
-At rest, every cell, sub-agent cell and file preview keeps `canvas_gap` world
+At rest, every cell, sub-agent cell and file pane keeps `canvas_gap` world
 pixels from its neighbours (default 24). On Home, space cards keep the same gap.
+See [Panes](panes.md) for pane kinds, helper bars and the saved form.
 
 The canvas owns a 36 px top strip on macOS, keeping the existing traffic-light
 inset. Linux and Windows keep their system title bar or menu strip above it.
@@ -59,7 +60,7 @@ whose frame held it, and the frame becomes that space's card.
 
 ## Use
 
-- Drag a cell, or resize a preview: neighbours step aside and return when you
+- Drag a cell, or resize a file pane: neighbours step aside and return when you
   move on. Drag a space card on Home: only the card moves.
 - Enter [canvas mode](keys.md) to select a collapsed cell without expanding it.
   Click a cell to select it. Shift-click adds or removes cells. Click empty
@@ -110,7 +111,7 @@ solves from rest again, nothing drifts and pushed cells return. The same
 function separates spaces after `canvas::grow` widens a space around its cells.
 Shown rectangles ease toward the result over 120 ms and frames are requested
 only while they move. On release the result becomes the new rest, and
-`canvas.json` is saved once. Undo keeps one snapshot of rectangles by cell key,
+`canvas.json` is saved once. Undo keeps one snapshot of rectangles by pane id,
 so it never brings back a closed cell.
 
 ## Restored shells
@@ -130,7 +131,8 @@ cells can be open at once. Pop-out is unchanged. The side panel is for files
 and sub-agent transcripts only.
 
 - Size: `terminal_size` (default [100, 30]) cells of the terminal font at zoom 1,
-  header included. The size is saved per cell in `canvas.json` (`size`; older files load as pills).
+  header included. The size is saved in the terminal pane's `props` in
+  `canvas.json` (`size`; older files load as pills).
 - Neighbours: expanding pins the cell and runs `canvas::solve`, so the cells
   around it give way and stay one gap clear, also of each other. Each
   expansion remembers what it moved; collapsing puts back what is still where
@@ -161,10 +163,10 @@ and sub-agent transcripts only.
 ## Tile view
 
 Press Cmd+Shift+G (Ctrl+Shift+G), the grid icon at the right of the top strip, or
-**Tile view** in the canvas menu to fit the expanded cells and previews into the
+**Tile view** in the canvas menu to fit the expanded cells and file panes into the
 visible canvas at 100% zoom, like tmux's tiled layout. With two or more cells
 selected only those tile: the others stay where they are, under the tiles.
-Otherwise every expanded cell and preview of the current space tiles, and cells
+Otherwise every expanded cell and file pane of the current space tiles, and cells
 opened later join. Collapsed cells (and space cards on Home) stay pills and line
 up along the bottom. Press again, or leave the space, to put the tiled cells
 back where they were.
@@ -220,7 +222,8 @@ saved once, as one undo step.
 
 Pane actions use the selected terminal or agent cells in the current space.
 With no pane selected there, they use the pane holding keyboard focus, if any.
-Space cards and previews are not pane targets.
+Space cards and file panes are not terminal action targets. Closing also removes
+selected file panes in the current space, without a dialog.
 
 ## Closing and stacking panes
 
@@ -231,6 +234,6 @@ them, they close at once. Cmd+A (Ctrl+Shift+A) selects every pane in the
 current space, only while the canvas has the keyboard.
 
 A click anywhere on a pane brings it to the front. The pane menu has "Bring to
-front" and "Send to back" (`canvas.front`, `canvas.back`) for the targets. Draw
-order is the `z` of each card in the saved document, so it persists like
-positions.
+front" and "Send to back" (`canvas.front`, `canvas.back`) for the targets.
+Terminal and sub-agent draw order is the `z` of each pane in the saved document,
+so it persists like positions.

@@ -49,9 +49,8 @@ impl AppWindow {
     /// What the keyboard can select in the current place: its cells and previews, and on Home the space cards.
     pub(super) fn keyboard_cells(&self, cx: &App) -> Vec<(String, canvas::Rect)> {
         let doc = &self.canvas_state.doc;
-        doc.cards.iter().filter(|c| doc.shows(c.space.as_ref()) && canvas::view_allows(&doc.view, c.sub.is_some() || self.live.get(&c.terminal).is_some_and(canvas_agent)))
-            .map(|c| (c.key(), self.pill_rect(c, cx)))
-            .chain(doc.previews.iter().filter(|p| doc.shows(p.space.as_ref())).map(|p| (p.path.clone(), p.rect)))
+        doc.panes.iter().filter(|c| doc.shows(c.space.as_ref()) && (c.file().is_some() || canvas::view_allows(&doc.view, matches!(c.kind, canvas::Kind::Sub { .. }) || self.live.get(&c.id).is_some_and(canvas_agent))))
+            .map(|c| (c.id.clone(), self.pill_rect(c, cx)))
             .chain(doc.spaces.iter().filter(|_| doc.room.is_none()).map(|s| (s.space.clone(), s.rect))).collect()
     }
 
@@ -103,7 +102,7 @@ impl AppWindow {
             "canvas.select_all" => {
                 if !self.focus.is_focused(window) { return; }
                 let doc = &self.canvas_state.doc;
-                self.canvas_state.selected = doc.cards.iter().filter(|c| c.sub.is_none() && doc.shows(c.space.as_ref())).map(|c| c.key()).collect();
+                self.canvas_state.selected = doc.panes.iter().filter(|c| c.terminal().is_some() && doc.shows(c.space.as_ref())).map(|c| c.id.clone()).collect();
             }
             "canvas.enter" => {
                 if let Some(from) = self.canvas_state.connecting.clone() {
@@ -122,15 +121,15 @@ impl AppWindow {
                         let path = self.canvas_state.subs.get(parent).into_iter().flatten().find(|s| s.id == id).and_then(|s| s.transcript.clone());
                         let Some(path) = path else { return self.fail("sub-agent transcript is not available yet"); };
                         self.open_preview(json!({"path":path}), window, cx);
-                    } else if self.canvas_state.doc.cards.iter().any(|c| c.terminal == key && c.sub.is_none()) {
+                    } else if self.canvas_state.doc.panes.iter().any(|c| c.id == key && c.terminal().is_some()) {
                         if !self.live.contains_key(&key) { return self.fail("no running terminal"); }
                         if self.canvas_state.popped.contains_key(&key) {
                             self.pop_canvas(key.clone(), true, window, cx);
                         } else { self.set_expanded(&key, true, window, cx); }
                         if let Some(pane) = self.model.pane_of(&key) { self.model.focus_pane(&pane); }
                         if let Some(t) = self.focused_cell() { t.focus.focus(window, cx); }
-                    } else {
-                        self.open_preview(json!({"path":key}), window, cx);
+                    } else if let Some(path) = self.canvas_state.doc.panes.iter().find(|p| p.id == key).and_then(|p| p.file()).map(str::to_owned) {
+                        self.open_preview(json!({"path":path}), window, cx);
                     }
                     self.canvas_state.mode = false;
                 } else { self.canvas_state.mode = false; }
@@ -174,7 +173,7 @@ impl AppWindow {
             }
             "canvas.collapse" => if let Some(key) = selected { self.set_expanded(&key, false, window, cx); },
             "canvas.connect" => {
-                let Some(key) = selected.filter(|k| self.canvas_state.doc.cards.iter().any(|c| c.key() == *k)) else { return self.fail("select a cell first"); };
+                let Some(key) = selected.filter(|k| self.canvas_state.doc.panes.iter().any(|c| c.file().is_none() && c.id == *k)) else { return self.fail("select a cell first"); };
                 self.canvas_state.mode = true;
                 self.canvas_state.connecting = Some(key);
             }
@@ -200,7 +199,7 @@ impl AppWindow {
                     let camera = self.canvas_state.doc.camera;
                     let (a, b) = (camera.to_world([0., 0.]), camera.to_world([w, h]));
                     let doc = &self.canvas_state.doc;
-                    let taken: Vec<_> = doc.cards.iter().filter(|c| doc.shows(c.space.as_ref())).map(|c| [c.rect[0], c.rect[1]]).collect();
+                    let taken: Vec<_> = doc.panes.iter().filter(|c| c.file().is_none() && doc.shows(c.space.as_ref())).map(|c| [c.rect[0], c.rect[1]]).collect();
                     let last = self.canvas_state.cascade.as_ref().filter(|(room, _)| *room == space).map(|(_, p)| *p);
                     let point = canvas::cascade(last, [a[0], a[1], b[0] - a[0], b[1] - a[1]], self.default_pane_size(window), &taken, CASCADE_STEP);
                     self.canvas_state.cascade = Some((space.clone(), point));
@@ -235,8 +234,7 @@ const CASCADE_STEP: f32 = 32.;
 
 impl State {
     fn nudge(&mut self, key: &str, direction: canvas::Point, gap: f32) -> bool {
-        let rect = self.doc.cards.iter_mut().find(|c| c.key() == key).map(|c| &mut c.rect)
-            .or_else(|| self.doc.previews.iter_mut().find(|p| p.path == key).map(|p| &mut p.rect));
+        let rect = self.doc.panes.iter_mut().find(|c| c.id == key).map(|c| &mut c.rect);
         let Some(rect) = rect else { return false };
         rect[0] += direction[0] * gap;
         rect[1] += direction[1] * gap;

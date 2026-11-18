@@ -31,10 +31,10 @@ pub fn neighbors(wires: &[Wire], me: &str) -> Vec<String> {
 /// Born edges, parent to child: a sub-agent to its parent, and a cell started by `hc run`
 /// from another cell to its parent (`parent_of` is the core's record). Computed, never stored.
 pub fn born(doc: &Document, parent_of: impl Fn(&str) -> Option<String>) -> Vec<Wire> {
-    doc.cards.iter().filter_map(|c| {
-        let key = c.key();
-        let parent = c.parent.clone().or_else(|| parent_of(&key))?;
-        (parent != key && doc.cards.iter().any(|p| p.key() == parent)).then_some(Wire { a: parent, b: key, born: true })
+    doc.panes.iter().filter(|p| p.file().is_none()).filter_map(|c| {
+        let key = c.id.clone();
+        let parent = match &c.kind { crate::canvas::Kind::Sub { parent, .. } => Some(parent.clone()), _ => parent_of(&key) }?;
+        (parent != key && doc.panes.iter().filter(|p| p.file().is_none()).any(|p| p.id == parent)).then_some(Wire { a: parent, b: key, born: true })
     }).collect()
 }
 
@@ -104,7 +104,9 @@ fn fail<T>(msg: impl Into<String>) -> Result<T, Failed> {
 fn load_doc() -> Result<Document, Failed> {
     let path = crate::mods::app_dir().join("canvas.json");
     let bytes = std::fs::read(&path).or_else(|e| fail(format!("cannot read {}: {e}", path.display())))?;
-    serde_json::from_slice(&bytes).or_else(|e| fail(format!("canvas.json: {e}")))
+    // Parse only: this runs in agents' shells and must never move the app's file aside.
+    Document::parse(&bytes).or_else(|e| fail(format!("canvas.json: {e}")))?
+        .map_or_else(|| fail("canvas.json is not a valid canvas"), Ok)
 }
 
 /// The caller: its terminal address and the cell it is.
@@ -120,7 +122,7 @@ impl Me {
         let rec = Rec::get(&addr).map_or_else(|| fail(format!("cannot read terminal {addr} from the core")), Ok)?;
         let doc = load_doc()?;
         let key = addr.clone();
-        if !doc.cards.iter().any(|c| c.key() == key) {
+        if !doc.panes.iter().filter(|p| p.file().is_none()).any(|c| c.id == key) {
             return fail(format!("{addr} is not a cell on the canvas, so nothing is wired to it"));
         }
         let mut wires = doc.wires.clone();
@@ -130,7 +132,7 @@ impl Me {
             let list: Value = serde_json::from_str(&out).unwrap_or_default();
             for t in list.as_array().or(list["terminals"].as_array()).into_iter().flatten() {
                 if let (Some(child), Some(parent)) = (t["address"].as_str(), t["parent"].as_str()) {
-                    if parent == key && doc.cards.iter().any(|c| c.key() == child) {
+                    if parent == key && doc.panes.iter().filter(|p| p.file().is_none()).any(|c| c.id == child) {
                         wires.push(Wire { a: key.clone(), b: child.into(), born: true });
                     }
                 }
@@ -358,8 +360,8 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn doc(json: Value) -> Document {
-        let mut base = serde_json::json!({"version":1,"camera":{"x":0,"y":0,"zoom":1},"view":"all","spaces":[],"panel":{"width":null},
-            "cards":[{"terminal":"t1","rect":[0,0,220,36],"z":1},{"terminal":"t2","rect":[300,0,220,36],"z":2},{"terminal":"t3","rect":[600,0,220,36],"z":3}]});
+        let mut base = serde_json::json!({"version":3,"camera":{"x":0,"y":0,"zoom":1},"view":"all","spaces":[],"panel":{"width":null},
+            "panes":[{"id":"t1","kind":"terminal","props":{},"rect":[0,0,220,36],"z":1},{"id":"t2","kind":"terminal","props":{},"rect":[300,0,220,36],"z":2},{"id":"t3","kind":"terminal","props":{},"rect":[600,0,220,36],"z":3}]});
         base.as_object_mut().unwrap().extend(json.as_object().unwrap().clone());
         serde_json::from_value(base).unwrap()
     }
@@ -375,11 +377,11 @@ mod tests {
         wires.push(Wire { a: "t3".into(), b: "t1".into(), born: false });
         assert_eq!(neighbors(&wires, "t1"), ["t2", "t3"]);
         assert_eq!(neighbors(&wires, "t2"), ["t1"]);
-        d.cards.push(crate::canvas::Card { terminal: String::new(), sub: Some("a".into()), parent: Some("t1".into()), rect: [0., 100., 220., 36.], z: 4, size: None, space: None });
+        d.panes.push(crate::canvas::Pane { id: "sub:t1:a".into(), kind: crate::canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() }, rect: [0., 100., 220., 36.], z: 4, space: None });
         let edges = born(&d, |k| (k == "t3").then(|| "t2".to_owned()));
         assert_eq!(edges, [Wire { a: "t2".into(), b: "t3".into(), born: true }, Wire { a: "t1".into(), b: "sub:t1:a".into(), born: true }]);
         // Closing a cell removes its wires.
-        d.cards.retain(|c| c.key() != "t2");
+        d.panes.retain(|c| c.id != "t2");
         assert!(d.prune_wires() && d.wires.is_empty());
     }
 
@@ -387,7 +389,7 @@ mod tests {
     fn edges_join_cells_of_one_space_only() {
         let spaces = serde_json::json!([{"space":"a","rect":[-10,-10,500,100],"color":"blue","frame":true},{"space":"b","rect":[550,-10,400,100],"color":"red","frame":true}]);
         let mut d = doc(serde_json::json!({"spaces": spaces}));
-        for (card, space) in d.cards.iter_mut().zip(["a", "a", "b"]) { card.space = Some(space.into()); }
+        for (card, space) in d.panes.iter_mut().zip(["a", "a", "b"]) { card.space = Some(space.into()); }
         assert!(d.connect("t1", "t2"));
         assert!(!d.connect("t2", "t3"), "t3 sits in another space");
     }
