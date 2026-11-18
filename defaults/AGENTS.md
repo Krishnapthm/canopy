@@ -979,7 +979,7 @@ All of it is in `herdr.d.ts`. In short:
   `agents()` (status, app, space, tab, pinned, focused; "done" turns "idle"
   once someone looks at it on any Canopy client), `terminals()`
   (every core terminal), `canvasPanes()` (every canvas pane: id, kind, props, rect, z, space),
-  `paneKinds()` (creatable kinds and their verbs), `focused()`, `layout()`, `theme()` (every color by
+  `paneKinds()` (pane kinds and their verbs), `focused()`, `layout()`, `theme()` (every color by
   name: background (the terminals', cards), canvas (behind cards), chrome
   (sidebars, bars), surface, popover, raised, hover, selected, border,
   input (a stronger border), foreground, muted, dim, accent,
@@ -1302,3 +1302,8 @@ creates a terminal here and `canvas.agents` lists installed agents here.
 `canvas.fit` toggles between fitting the selection (else everything in the current place) in the visible canvas
 (excluding the file panel) and the previous camera. The focus icon beside the
 folder icon does the same. See docs/keys.md for keys and preserved collisions.
+
+`canopy pane new file <png|jpg|gif|webp|pdf>` opens an image or PDF pane; `canopy pane read` on a PDF returns its page text.
+
+Image quotes use `canvas.pane_quote`. PDF pane actions are `canvas.pdf_find`,
+`canvas.pdf_highlight`, `canvas.pdf_prev`, `canvas.pdf_next`, and `canvas.pdf_clear`.

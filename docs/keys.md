@@ -36,6 +36,12 @@ were in last (again toggles; Ctrl+Shift+Tab walks further back).
 | ⌘O (Ctrl+O elsewhere) | Open file on the canvas |
 | Backspace / Delete | Close, using the usual agent and terminal confirmations |
 | ? | Full key list |
+| q | Quote the selected image |
+| / | Find text in the selected PDF |
+| m | Toggle highlighting in the selected PDF |
+| [ | Previous page in the selected PDF |
+| ] | Next page in the selected PDF |
+| Shift+M | Clear highlights in the selected PDF |
 
 Enter on a sub-agent opens its transcript; on a file card it opens the file.
 In the agent menu, 1-9 start the agent with that number.

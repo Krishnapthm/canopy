@@ -298,6 +298,10 @@ Expand an agent's cell and paste a quote and optional message without Enter, wai
 | `terminal` | no |
 | `argv` | no |
 | `pane` | no |
+| `kind` | no |
+| `page` | no |
+| `region` | no |
+| `crop` | no |
 
 ## `canvas.expand`
 
@@ -923,6 +927,42 @@ No arguments.
 ## `window.maximize`
 
 Maximize the window, or back.
+
+No arguments.
+
+## `canvas.pane_quote`
+
+Open the quote menu for the last selected image pane.
+
+No arguments.
+
+## `canvas.pdf_find`
+
+Toggle text search in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_highlight`
+
+Toggle text highlight mode in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_prev`
+
+Go to the previous page in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_next`
+
+Go to the next page in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_clear`
+
+Clear all highlights in the last selected PDF pane.
 
 No arguments.
 
