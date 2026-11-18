@@ -38,3 +38,38 @@ Checked 2026-11-18 for sim panes (iPhone 17, iOS 26.5):
   enumerate, poll, recordVideo, screenshot). `recordVideo --mask=alpha` is
   rendered black.
 - Device Hub's bundle id is `com.apple.dt.Devices`: `open -b com.apple.dt.Devices`.
+
+Checked 2026-11-18 for live sim panes (macOS 27.2.1, Xcode 27.2, CoreSimulator 1174.21,
+iPhone 17, iOS 26.5), with a probe and then `canopy --sim-helper` under its sandbox:
+
+- The main display is the IO port descriptor whose `state.displayClass` is 0 (two class 1
+  descriptors have no surface). Its `framebufferSurface` is a 1206x2622 IOSurface, pixel
+  format `BGRA` (0x42475241), 4 bytes per element.
+- `registerScreenCallbacksWithUUID:callbackQueue:frameCallback:surfacesChangedCallback:propertiesChangedCallback:`
+  works. surfacesChanged fires once at registration. frameCallback fired 0 times in 2 s on an
+  idle home screen and 40 to 50 times a second while swiping or typing.
+- DTUHID (`com.apple.coredevice.feature.remote.hid.digitizer` through
+  `xpc_endpoint_create_mach_port_4sim` and `xpc_connection_enable_sim2host_4sim`) answers a
+  barrier at once and takes everything: `IndigoDigitizerEvent` touch (points 0..1 from the top
+  left, eventType 0 start, 1 move, 2 end) paged the home screen and opened Search,
+  `IndigoKeyboardButtonEvent` usages 0x0b 0x0c typed "hi", `IndigoButtonEvent` page 0x0C usage
+  0x40 went Home. Legacy Indigo was not tested.
+- Rotation through `com.apple.coredevice.feature.remote.hid.vendordefined`
+  (`IndigoVendorDefinedEvent`, orientation-picker-control) is accepted (the barrier answers) but
+  does not rotate this runtime, in Safari either. idb uses it only when the runtime reports
+  device motion, else the legacy Purple port. Not supported in Canopy yet.
+- `bootstrap_check_in` of a fresh name in Canopy plus `bootstrap_look_up` in the helper hands
+  over `IOSurfaceCreateMachPort`; `IOSurfaceLookupFromMachPort` gives the same 1206x2622 BGRA
+  surface. This works under sandbox-exec with deny default, reads limited to the system, Xcode
+  and `~/Library/Developer/CoreSimulator`, and mach-lookup limited to
+  `com.apple.CoreSimulator.CoreSimulatorService` and the rendezvous name.
+- Bezels: a device type's `profile.plist` names `chromeIdentifier` (iPhone 17:
+  `com.apple.dt.devicekit.chrome.phone11`) and `framebufferMask`; `capabilities.plist` has
+  `ScreenDimensionsCapability` main-screen width 1206, height 2622, scale 3. The chrome is
+  `/Library/Developer/DeviceKit/Chrome/phone11.devicechrome/Contents/Resources`: `chrome.json`
+  and PDFs. `PhoneComposite.pdf` is 436x908 points, opaque, the 402x874 screen centered;
+  buttons are 16 points wide (`Vol BTN` 64 tall, `X_Power BTN` 101), placed by `inputs[].offsets`
+  (normal and rollover) from the anchor edge of a frame 9 points wider each side.
+  `xcrun simctl list -j devicetypes` gives each type's `bundlePath`.
+- `simctl io <udid> recordVideo --codec=h264 --force <file>` records until SIGINT, then writes
+  the movie and exits 0.
