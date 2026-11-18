@@ -232,21 +232,100 @@ Point a pane at a target, such as a browser pane's URL or a sim pane's simulator
 
 ## `canvas.sim_refresh`
 
-Take a new screenshot for the selected simulator pane.
+Take a new screenshot for the simulator pane and try live again after a failure. Acts on pane, else the selected simulator pane.
 
-No arguments.
+| Argument | Required |
+|---|---|
+| `pane` | no |
 
 ## `canvas.sim_device`
 
-List simulators in the selected simulator pane to pick another.
+Pick another simulator for a simulator pane from a menu (Xcode's version on top); picking boots it. Acts on pane, else the selected simulator pane.
 
-No arguments.
+| Argument | Required |
+|---|---|
+| `pane` | no |
 
 ## `canvas.sim_hub`
 
 Open Xcode's Device Hub to use a simulator.
 
 No arguments.
+
+## `canvas.sim_home`
+
+Press Home on a simulator pane's live device. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_screenshot`
+
+Save a simulator pane's live screen to the Desktop as a PNG. Replies with path. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_record`
+
+Start recording a simulator pane's screen to a movie on the Desktop, or stop and save it. Replies with the path when it starts. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_annotate`
+
+Draw on a still of a simulator pane's screen, then send it to an agent as a quote; again cancels. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_zoom`
+
+Resize a simulator pane: step actual (1 point per pixel, the default), in or out. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `step` | no |
+| `pane` | no |
+
+## `canvas.sim_pop`
+
+Pop a simulator pane's device out into its own window, or bring it back. Acts on pane, else the selected simulator pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.sim_reveal`
+
+Show a saved screenshot or recording in Finder.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `canvas.sim_input`
+
+An agent's input for a live simulator pane, in device points from the top left: action tap (x, y), swipe (x1, y1, x2, y2, ms, default 300), type (text, US keyboard) or press (button: home, lock, power, siri, volume-up, volume-down, action). Starts the device if the pane is off screen.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+| `action` | yes |
+| `x` | no |
+| `y` | no |
+| `x1` | no |
+| `y1` | no |
+| `x2` | no |
+| `y2` | no |
+| `ms` | no |
+| `text` | no |
+| `button` | no |
 
 ## `canvas.sync`
 

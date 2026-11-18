@@ -1,11 +1,12 @@
-//! `canopy pane new|read|shot|open|close`: agents' commands for canvas panes. Each is
-//! sugar over an app command through the control socket (`canvas.pane_new`,
-//! `canvas.pane_read`, `canvas.pane_shot`, `canvas.pane_open`, `canvas.close {pane}`).
+//! `canopy pane new|read|shot|open|tap|swipe|type|press|close`: agents' commands for canvas
+//! panes. Each is sugar over an app command through the control socket (`canvas.pane_new`,
+//! `canvas.pane_read`, `canvas.pane_shot`, `canvas.pane_open`, `canvas.sim_input` for a sim
+//! pane's tap, swipe, type and press, `canvas.close {pane}`).
 //! docs/panes.md explains them.
 
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new mod:<name> [--wire] | new sim [<udid>|booted] [--wire] | read <pane> | shot <pane> [file.png] | open <pane> <target> | close <pane>";
+const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new mod:<name> [--wire] | new sim [<udid>|booted] [--wire] | read <pane> | shot <pane> [file.png] | open <pane> <target> | tap <pane> <x> <y> | swipe <pane> <x1> <y1> <x2> <y2> [ms] | type <pane> <text> | press <pane> <button> | close <pane>";
 
 /// The app command and its arguments for `canopy pane <args>`; `caller` is
 /// `$HC_TERMINAL_ID`, which `--wire` needs.
@@ -42,9 +43,22 @@ fn request(args: &[String], caller: Option<&str>) -> Result<(&'static str, Value
             Ok(("canvas.pane_shot", json!({"pane":pane,"path":absolute(file)?})))
         }
         ["open", pane, target] => Ok(("canvas.pane_open", json!({"pane":pane,"target":target}))),
+        ["tap", pane, x, y] => Ok(("canvas.sim_input", json!({"pane":pane,"action":"tap","x":number(x)?,"y":number(y)?}))),
+        ["swipe", pane, x1, y1, x2, y2, ms @ ..] if ms.len() <= 1 => {
+            let mut a = json!({"pane":pane,"action":"swipe","x1":number(x1)?,"y1":number(y1)?,"x2":number(x2)?,"y2":number(y2)?});
+            if let Some(ms) = ms.first() { a["ms"] = json!(ms.parse::<u64>().map_err(|_| format!("{ms} is not a whole number of milliseconds"))?); }
+            Ok(("canvas.sim_input", a))
+        }
+        ["type", pane, text @ ..] if !text.is_empty() => Ok(("canvas.sim_input", json!({"pane":pane,"action":"type","text":text.join(" ")}))),
+        ["press", pane, button] => Ok(("canvas.sim_input", json!({"pane":pane,"action":"press","button":button}))),
         ["close", pane] => Ok(("canvas.close", json!({"pane":pane}))),
         _ => Err(USAGE.into()),
     }
+}
+
+/// A point coordinate.
+fn number(word: &str) -> Result<f64, String> {
+    word.parse::<f64>().ok().filter(|n| n.is_finite()).ok_or_else(|| format!("{word} is not a number"))
 }
 
 /// What a successful command prints.
@@ -109,5 +123,10 @@ mod tests {
         assert_eq!(answer("canvas.pane_shot", &Value::Null, &json!({"path":"/a.png"})), "/a.png");
         assert_eq!(answer("canvas.close", &json!({"pane":"p1"}), &Value::Null), "closed p1");
         assert_eq!(answer("canvas.pane_open", &Value::Null, &Value::Null), "ok");
+        assert_eq!(req(&["tap", "p2", "201", "437.5"], None).unwrap(), ("canvas.sim_input", json!({"pane":"p2","action":"tap","x":201.0,"y":437.5})));
+        assert_eq!(req(&["swipe", "p2", "1", "2", "3", "4", "500"], None).unwrap().1, json!({"pane":"p2","action":"swipe","x1":1.0,"y1":2.0,"x2":3.0,"y2":4.0,"ms":500}));
+        assert_eq!(req(&["type", "p2", "hello", "world"], None).unwrap().1, json!({"pane":"p2","action":"type","text":"hello world"}));
+        assert_eq!(req(&["press", "p2", "home"], None).unwrap().1, json!({"pane":"p2","action":"press","button":"home"}));
+        assert_eq!(req(&["tap", "p2", "x", "1"], None).unwrap_err(), "x is not a number");
     }
 }

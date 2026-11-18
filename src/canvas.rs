@@ -657,7 +657,7 @@ impl From<Kind> for RawKind {
 }
 
 /// Kinds `canvas.pane_new` creates, with the `canopy pane` verbs each answers.
-pub const PANE_KINDS: &[(&str, &[&str])] = &[("file", &["read", "shot", "close"]), ("sim", &["read", "shot", "open", "close"])];
+pub const PANE_KINDS: &[(&str, &[&str])] = &[("file", &["read", "shot", "close"]), ("sim", &["read", "shot", "open", "tap", "swipe", "type", "press", "close"])];
 
 /// The `canopy pane` verbs mod panes answer.
 pub const MOD_VERBS: &[&str] = &["read", "shot", "close"];
@@ -1101,7 +1101,7 @@ mod tests {
         assert_eq!(pane.kind_name(), "sub");
         assert!(pane.verbs().is_empty());
         pane.kind = Kind::Sim { udid: "U1".into() };
-        assert_eq!((pane.kind_name(), pane.verbs(), pane.sim(), pane.boxed()), ("sim", &["read", "shot", "open", "close"][..], Some("U1"), true));
+        assert_eq!((pane.kind_name(), pane.verbs(), pane.sim(), pane.boxed()), ("sim", &["read", "shot", "open", "tap", "swipe", "type", "press", "close"][..], Some("U1"), true));
         let saved = serde_json::to_value(RawKind::from(pane.kind.clone())).unwrap();
         assert_eq!(saved, serde_json::json!({"kind":"sim","props":{"udid":"U1"}}));
         assert_eq!(Kind::try_from(serde_json::from_value::<RawKind>(saved).unwrap()).unwrap(), pane.kind);

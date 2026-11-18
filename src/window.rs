@@ -2951,7 +2951,7 @@ impl AppWindow {
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
-            "canvas.sim_refresh" | "canvas.sim_device" | "canvas.sim_hub" => self.sim_command(name, window, cx),
+            name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
             "app.menu" => {
                 let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
                 let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
