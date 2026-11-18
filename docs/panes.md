@@ -99,3 +99,25 @@ keeps a closed pane's id from being reused.
 Version 1 and 2 files load with cards and previews moved into panes. Card keys
 are kept so saved wires stay valid. Older Canopy versions cannot open a version 3
 canvas.
+
+## Simulator
+
+A sim pane shows an iOS Simulator's screen on a Mac with Xcode. Click Simulator
+on the toolbar (shown only when `xcrun simctl` exists) and pick a simulator, or run
+`canopy pane new sim [<udid>|booted] [--wire]`. Picking a shut down simulator
+boots it.
+
+The screen is a screenshot (`xcrun simctl io <udid> screenshot`), taken when the
+pane opens or loads, on Refresh, and on `canopy pane open pN <udid>`. Nothing
+polls: the pane changes only when you or an agent ask. It shows the screen and does
+not take taps; use the simulator in Xcode's Device Hub.
+
+- Helper bar: Refresh, Choose simulator, Open in Device Hub, Connect, Close.
+- `canopy pane open pN <udid|booted>` points the pane at a simulator and boots it;
+  its own udid refreshes the screenshot.
+- `canopy pane read pN` gives the udid, name, runtime, state and the latest
+  screenshot file (`<temp>/canopy/sim-pN.png`).
+- Saved as `{"kind":"sim","props":{"udid":"…"}}`; an empty udid shows the list.
+
+Agents drive simulators with `xcrun simctl` or Xcode's MCP tools
+(`xcrun mcpbridge`), then refresh the pane so the person sees the result.

@@ -33,6 +33,13 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -
             BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ]).collect(),
+        canvas::Kind::Sim { udid } => [
+            (!udid.is_empty()).then(|| BarAction { icon: "icons/rotate-cw.svg".into(), label: "Refresh".into(), command: "canvas.sim_refresh".into(), args: json!({}) }),
+            Some(BarAction { icon: "icons/smartphone.svg".into(), label: "Choose simulator".into(), command: "canvas.sim_device".into(), args: json!({}) }),
+            Some(BarAction { icon: "icons/external-link.svg".into(), label: "Open in Device Hub".into(), command: "canvas.sim_hub".into(), args: json!({}) }),
+            Some(BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) }),
+            Some(BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) }),
+        ].into_iter().flatten().collect(),
         canvas::Kind::Sub { .. } => vec![],
     }
 }
@@ -117,6 +124,10 @@ mod helper_bar_tests {
         let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }] };
         assert_eq!(pane_actions(&pane, Some(&hint)).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
+        pane.kind = canvas::Kind::Sim { udid: String::new() };
+        assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.connect", "canvas.close"]);
+        pane.kind = canvas::Kind::Sim { udid: "U1".into() };
+        assert_eq!(commands(&pane)[0], "canvas.sim_refresh");
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
         assert!(pane_actions(&pane, None).is_empty());
     }

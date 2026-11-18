@@ -18,6 +18,7 @@ mod model;
 mod mirror;
 mod mirror_sync;
 mod panes;
+mod sim;
 mod skill;
 mod place;
 mod persist;

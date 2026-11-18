@@ -177,12 +177,13 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 
 ## `canvas.pane_new`
 
-Open a pane of a kind ("file" or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. Replies with pane, kind, path (files) and wired.
+Open a pane of a kind ("file", "sim" on a Mac with Xcode, or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. A sim pane shows udid (a simulator, or "booted"), else lists simulators to pick. Replies with pane, kind, path (files), udid (sim) and wired.
 
 | Argument | Required |
 |---|---|
 | `kind` | yes |
 | `path` | no |
+| `udid` | no |
 | `wire` | no |
 | `point` | no |
 
@@ -222,12 +223,30 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a pane at a target, such as a browser pane's URL; kinds without open refuse.
+Point a pane at a target, such as a browser pane's URL or a sim pane's simulator (a udid or "booted"; it boots, and its current udid refreshes the screenshot); kinds without open refuse.
 
 | Argument | Required |
 |---|---|
 | `pane` | yes |
 | `target` | yes |
+
+## `canvas.sim_refresh`
+
+Take a new screenshot for the selected simulator pane.
+
+No arguments.
+
+## `canvas.sim_device`
+
+List simulators in the selected simulator pane to pick another.
+
+No arguments.
+
+## `canvas.sim_hub`
+
+Open Xcode's Device Hub to use a simulator.
+
+No arguments.
 
 ## `canvas.sync`
 

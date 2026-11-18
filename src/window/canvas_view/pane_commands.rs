@@ -9,13 +9,14 @@ impl AppWindow {
             "canvas.pane_read" => self.pane_read(a),
             "canvas.pane_set" => self.pane_set(a, cx),
             "canvas.pane_shot" => self.pane_shot(a, window),
-            _ => self.pane_open(a),
+            _ => self.pane_open(a, window, cx),
         };
         self.answer(r);
     }
 
-    fn pane_new(&mut self, a: &Value, window: &Window, cx: &mut Context<Self>) -> Result<Value, String> {
+    fn pane_new(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
         let mut kinds = vec!["file".to_owned()];
+        if crate::sim::available() { kinds.push("sim".to_owned()); }
         kinds.extend(self.folders.iter().filter(|(_, f)| f.hint.pane.is_some()).map(|(id, _)| format!("mod:{id}")));
         let kind = a["kind"].as_str().unwrap_or_default();
         if !kinds.iter().any(|k| k == kind) {
@@ -36,10 +37,14 @@ impl AppWindow {
             };
             (point, doc.room.clone())
         };
+        // A named simulator must exist before a pane points at it.
+        let udid = match a["udid"].as_str() { Some(target) if kind == "sim" => super::sim::resolve(target)?, _ => String::new() };
         let (id, path) = if kind == "file" {
             let path = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()).ok_or("canvas.pane_new: path must be absolute")?;
             let (id, path) = self.add_file_pane(std::path::Path::new(path), point, space, cx)?;
             (id, Some(path))
+        } else if kind == "sim" {
+            (self.add_sim_pane(udid.clone(), point, space, window, cx), None)
         } else {
             (self.add_mod_pane(kind.to_owned(), point, space, cx), None)
         };
@@ -49,6 +54,7 @@ impl AppWindow {
         }
         let mut reply = json!({"pane":id,"kind":kind,"wired":a["wire"].is_string()});
         if let Some(path) = path { reply["path"] = json!(path); }
+        if kind == "sim" { reply["udid"] = json!(udid); }
         Ok(reply)
     }
 
@@ -76,6 +82,7 @@ impl AppWindow {
                 Ok(json!({"text":canvas::envelope(id, "file", &[("path", path)], &text)}))
             }
             canvas::Kind::Mod { kind, props } => Ok(json!({"text":canvas::envelope(id, kind, &[], props.get("text").and_then(Value::as_str).unwrap_or(""))})),
+            canvas::Kind::Sim { udid } => Ok(json!({"text":self.sim_read(id, udid)})),
             canvas::Kind::Terminal { .. } => Err(format!("pane {id} is a terminal: read it with hc read {id}")),
             canvas::Kind::Sub { parent, .. } => Err(format!("pane {id} is a sub-agent cell: read its parent with hc read {parent}")),
         }
@@ -112,10 +119,15 @@ impl AppWindow {
         Ok(json!({"path":path}))
     }
 
-    fn pane_open(&self, a: &Value) -> Result<Value, String> {
+    fn pane_open(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
         let Some(id) = a["pane"].as_str() else { return Err("canvas.pane_open needs pane".into()); };
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
-        Err(format!("pane {id} ({}) has no verb open", pane.kind_name()))
+        if pane.sim().is_none() { return Err(format!("pane {id} ({}) has no verb open", pane.kind_name())); }
+        // A sim pane shows the simulator (a udid or "booted"), booting it; its own udid refreshes.
+        let target = a["target"].as_str().ok_or("canvas.pane_open needs target")?;
+        let udid = super::sim::resolve(target)?;
+        self.point_sim(id, udid.clone(), window, cx);
+        Ok(json!({"pane":id,"udid":udid}))
     }
 }
 
@@ -144,7 +156,7 @@ mod tests {
                 stamp: std::time::UNIX_EPOCH,
             });
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
-            assert_eq!(this.pane_new(&json!({"kind":"mod:nope"}), window, cx).unwrap_err(), "canvas.pane_new: kind must be one of: file, mod:note");
+            assert_eq!(this.pane_new(&json!({"kind":"mod:nope"}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
             let reply = this.pane_new(&json!({"kind":"mod:note","wire":"t1"}), window, cx).unwrap();
             assert_eq!(reply, json!({"pane":"p1","kind":"mod:note","wired":true}));
             assert_eq!(crate::wire::neighbors(&this.canvas_state.doc.wires, "t1"), ["p1"]);
@@ -165,6 +177,10 @@ mod tests {
             this.close_canvas_cell(&json!({"pane":blank["pane"]}), window, cx);
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == blank["pane"]), "a blank note closes without asking");
             assert!(this.canvas_state.doc.wires.is_empty());
+            // A sim pane before simctl answers: read says what it knows; open needs a target.
+            this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.], z: 9, space: None });
+            assert_eq!(this.pane_read(&json!({"pane":"p9"})).unwrap()["text"], canvas::envelope("p9", "sim", &[("udid", "")], "No simulator picked yet."));
+            assert_eq!(this.pane_open(&json!({"pane":"p9"}), window, cx).unwrap_err(), "canvas.pane_open needs target");
         });
     }
 
@@ -175,7 +191,7 @@ mod tests {
         view.update_in(cx, |this, window, cx| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
-            assert_eq!(this.pane_new(&json!({"kind":"browser","path":path}), window, cx).unwrap_err(), "canvas.pane_new: kind must be one of: file, mod:note");
+            assert_eq!(this.pane_new(&json!({"kind":"browser","path":path}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
             assert_eq!(this.pane_new(&json!({"kind":"file","path":"README.md"}), window, cx).unwrap_err(), "canvas.pane_new: path must be absolute");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"point":null}), window, cx).unwrap_err(), "invalid canvas point");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"wire":"missing"}), window, cx).unwrap_err(), "missing is not a terminal pane on the canvas");
@@ -187,7 +203,7 @@ mod tests {
             assert_eq!(read["text"], canvas::envelope(id, "file", &[("path", reply["path"].as_str().unwrap())], &canvas::read_preview(&path).unwrap()));
             assert_eq!(this.pane_read(&json!({"pane":"missing"})).unwrap_err(), "no pane missing");
             assert_eq!(this.pane_read(&json!({"pane":"t1"})).unwrap_err(), "pane t1 is a terminal: read it with hc read t1");
-            assert_eq!(this.pane_open(&json!({"pane":id,"target":"x"})).unwrap_err(), format!("pane {id} (file) has no verb open"));
+            assert_eq!(this.pane_open(&json!({"pane":id,"target":"x"}), window, cx).unwrap_err(), format!("pane {id} (file) has no verb open"));
             this.canvas_state.doc.room = Some("other".into());
             assert_eq!(this.pane_shot(&json!({"pane":id}), window).unwrap_err(), format!("pane {id} is in another space: go there first"));
             let moved = this.pane_new(&json!({"kind":"file","path":path,"point":[10000,10000]}), window, cx).unwrap();
