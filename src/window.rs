@@ -5632,7 +5632,8 @@ mod tests {
     /// fresh app home: a window takes process-wide things (the app home, the
     /// mods' request channel) that tests beside it would otherwise share.
     pub(super) fn in_own_process(name: &str) {
-        let home = std::path::PathBuf::from(format!("/tmp/herdr-window-test-{}-{}", name.replace("::", "-"), std::process::id()));
+        // temp_dir, not "/tmp": on Windows "/tmp/x" has no drive, so it is not absolute.
+        let home = std::env::temp_dir().join(format!("herdr-window-test-{}-{}", name.replace("::", "-"), std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", &if name.contains("::") { name.to_owned() } else { format!("window::tests::{name}") }, "--nocapture", "--test-threads=1"])
