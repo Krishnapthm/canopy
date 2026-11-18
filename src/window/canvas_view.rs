@@ -7,6 +7,7 @@ mod wire_view;
 mod keyboard;
 mod helper_bar;
 mod pane_commands;
+mod browser;
 
 /// What an inline name edit renames: a space (by id) or the tab of a cell (by tab id).
 #[derive(Clone, PartialEq)]
@@ -100,6 +101,8 @@ pub(super) struct State {
     pub(super) tile: Option<Tile>,
     /// The pressed cell has moved `canvas::DRAG_THRESHOLD` px, so the press is a drag (see `drag_live`).
     drag_live: bool,
+    /// Browser panes' web views and snapshots (not saved).
+    pub(super) browsers: browser::Browsers,
 }
 
 /// Tile view of the current place (leaving it calls `State::untile`): the camera from before
@@ -195,6 +198,7 @@ impl State {
             hint_timer: None,
             tile: None,
             drag_live: false,
+            browsers: Default::default(),
         }
     }
     /// The requested camera before animation finishes, for keyboard integration tests.
@@ -317,7 +321,7 @@ impl AppWindow {
     fn canvas_members(&self) -> Vec<Option<String>> {
         self.canvas_state.doc.panes.iter().map(|c| {
             let addr = match &c.kind {
-                canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => return c.space.clone(),
+                canvas::Kind::File { .. } | canvas::Kind::Mod { .. } | canvas::Kind::Browser { .. } => return c.space.clone(),
                 canvas::Kind::Sub { parent, .. } => parent,
                 canvas::Kind::Terminal { .. } => &c.id,
             };
@@ -572,7 +576,7 @@ impl AppWindow {
             .iter()
             .map(|i| {
                 doc.panes.get(*i)
-                    .and_then(|c| match &c.kind { canvas::Kind::Sub { parent, .. } => Some(parent.as_str()), canvas::Kind::Terminal { .. } => self.live.get(&c.id)?["parent"].as_str(), canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => None })
+                    .and_then(|c| match &c.kind { canvas::Kind::Sub { parent, .. } => Some(parent.as_str()), canvas::Kind::Terminal { .. } => self.live.get(&c.id)?["parent"].as_str(), canvas::Kind::File { .. } | canvas::Kind::Mod { .. } | canvas::Kind::Browser { .. } => None })
                     .and_then(|p| indices.iter().position(|j| ids[*j] == p))
             })
             .collect();
@@ -782,6 +786,7 @@ impl AppWindow {
                 state.previews.remove(&path);
             }
         }
+        self.sync_browsers();
         self.canvas_changed(cx);
         cx.notify();
     }
@@ -1218,6 +1223,7 @@ impl AppWindow {
     }
 
     fn load_previews(&mut self, cx: &mut Context<Self>) {
+        self.sync_browsers();
         let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
         if let Some(path) = &self.canvas_state.file {
             if rendered(path) { paths.push(path.clone()); }
@@ -1962,7 +1968,7 @@ impl AppWindow {
         // The core says where a cell lives (None: Home); one it does not know yet keeps its last space.
         let members: Vec<_> = self.canvas_state.doc.panes.iter().map(|c| {
             let addr = match &c.kind {
-                canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => return None,
+                canvas::Kind::File { .. } | canvas::Kind::Mod { .. } | canvas::Kind::Browser { .. } => return None,
                 canvas::Kind::Sub { parent, .. } => parent,
                 canvas::Kind::Terminal { .. } => &c.id,
             };
@@ -1991,7 +1997,8 @@ impl AppWindow {
     }
     pub(super) fn quote_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
         let (Some(path), Some(text)) = (a["path"].as_str(), a["text"].as_str()) else { return self.fail("quote needs path and text"); };
-        if !std::path::Path::new(path).is_absolute() || text.is_empty() { return self.fail("quote needs an absolute path and non-empty text"); }
+        // A browser pick points at a URL and may have no text.
+        if a["kind"] != "browser" && (!std::path::Path::new(path).is_absolute() || text.is_empty()) { return self.fail("quote needs an absolute path and non-empty text"); }
         if name == "quote.menu" {
             // The selection stays live (copyable) until the person opens the menu from its icon.
             self.clear_quote_mark(cx);
@@ -2692,6 +2699,12 @@ impl AppWindow {
                     area = area.child(self.preview_card(card, card.file().unwrap(), view, camera, cx));
                 }
             }
+        }
+        for card in shown_doc.panes.iter().filter(|p| p.url().is_some() && shown_doc.shows(p.space.as_ref())) {
+            if !canvas::visible(camera, card.rect, viewport) { continue; }
+            let (title, detail) = self.browser_title(card);
+            let body = self.browser_body(card, camera, cx);
+            area = area.child(self.pane_card(card, "icons/globe.svg".into(), title, detail, body, camera, cx));
         }
         for card in shown_doc.panes.iter().filter(|p| p.mod_name().is_some() && shown_doc.shows(p.space.as_ref())) {
             if !canvas::visible(camera, card.rect, viewport) { continue; }
@@ -3626,6 +3639,7 @@ mod preview_tests {
 }
 
 fn format_quote(quote: &Value, cwd: Option<&str>) -> String {
+    if quote["kind"] == "browser" { return browser::format_quote(quote, cwd); }
     let path = std::path::Path::new(quote["path"].as_str().unwrap_or_default());
     let display = cwd.and_then(|cwd| path.strip_prefix(cwd).ok()).unwrap_or(path);
     let mut header = format!("@{}", display.display());

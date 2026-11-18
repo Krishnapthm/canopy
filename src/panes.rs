@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new mod:<name> [--wire] | read <pane> | shot <pane> [file.png] | open <pane> <target> | close <pane>";
+const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new browser <url> [--wire] | new mod:<name> [--wire] | read <pane> | shot <pane> [file.png] | open <pane> <target> | close <pane>";
 
 /// The app command and its arguments for `canopy pane <args>`; `caller` is
 /// `$HC_TERMINAL_ID`, which `--wire` needs.
@@ -20,8 +20,9 @@ fn request(args: &[String], caller: Option<&str>) -> Result<(&'static str, Value
             }
             Ok(("canvas.pane_new", a))
         }
-        ["new", kind, path] | ["new", kind, path, "--wire"] => {
-            let mut a = json!({"kind":kind,"path":absolute(path)?});
+        ["new", kind, target] | ["new", kind, target, "--wire"] => {
+            // A browser pane's target is a URL, checked by the window; a file's is a path.
+            let mut a = if *kind == "browser" { json!({"kind":kind,"url":target}) } else { json!({"kind":kind,"path":absolute(target)?}) };
             if words.len() == 4 {
                 a["wire"] = json!(caller.filter(|s| !s.is_empty()).ok_or("--wire works only inside a Canopy terminal ($HC_TERMINAL_ID is not set)")?);
             }
@@ -44,13 +45,14 @@ fn answer(name: &str, args: &Value, reply: &Value) -> String {
     match name {
         "canvas.pane_new" => {
             let pane = reply["pane"].as_str().unwrap_or_default();
-            let path = reply["path"].as_str().or(reply["kind"].as_str()).unwrap_or_default();
+            let path = reply["path"].as_str().or(reply["url"].as_str()).or(reply["kind"].as_str()).unwrap_or_default();
             let wired = if reply["wired"] == true { ", wired to you" } else { "" };
             format!("{pane}: {path}{wired}. Read it with canopy pane read {pane}")
         }
         "canvas.pane_read" => reply["text"].as_str().unwrap_or_default().to_owned(),
         "canvas.pane_shot" => reply["path"].as_str().unwrap_or_default().to_owned(),
         "canvas.close" => format!("closed {}", args["pane"].as_str().unwrap_or_default()),
+        "canvas.pane_open" if reply["url"].is_string() => format!("{}: {}", reply["pane"].as_str().unwrap_or_default(), reply["url"].as_str().unwrap_or_default()),
         _ => "ok".into(),
     }
 }
@@ -83,6 +85,8 @@ mod tests {
         for caller in [None, Some("")] {
             assert_eq!(req(&["new", "file", "README.md", "--wire"], caller).unwrap_err(), "--wire works only inside a Canopy terminal ($HC_TERMINAL_ID is not set)");
         }
+        assert_eq!(req(&["new", "browser", "localhost:3000", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"browser","url":"localhost:3000","wire":"t1"})));
+        assert_eq!(answer("canvas.pane_new", &Value::Null, &json!({"pane":"p3","kind":"browser","url":"http://localhost:3000","wired":false})), "p3: http://localhost:3000. Read it with canopy pane read p3");
         assert_eq!(req(&["read", "p1"], None).unwrap(), ("canvas.pane_read", json!({"pane":"p1"})));
         assert_eq!(req(&["shot", "p1"], None).unwrap(), ("canvas.pane_shot", json!({"pane":"p1"})));
         assert_eq!(req(&["shot", "p1", "a.PNG"], None).unwrap(), ("canvas.pane_shot", json!({"pane":"p1","path":std::path::absolute("a.PNG").unwrap()})));
@@ -97,5 +101,6 @@ mod tests {
         assert_eq!(answer("canvas.pane_shot", &Value::Null, &json!({"path":"/a.png"})), "/a.png");
         assert_eq!(answer("canvas.close", &json!({"pane":"p1"}), &Value::Null), "closed p1");
         assert_eq!(answer("canvas.pane_open", &Value::Null, &Value::Null), "ok");
+        assert_eq!(answer("canvas.pane_open", &Value::Null, &json!({"pane":"p2","url":"http://localhost:3000"})), "p2: http://localhost:3000");
     }
 }

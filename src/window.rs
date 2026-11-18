@@ -403,6 +403,9 @@ pub struct AppWindow {
     person: settings::Person,
     /// What the last command made or why it didn't (for callers that wait for it).
     reply: Option<Value>,
+    /// The control socket caller of the command running now. A command that answers later
+    /// (a browser pane's read or shot) takes it and sends its reply when ready.
+    held_reply: Option<std::sync::mpsc::Sender<Value>>,
     /// The `where` label last written per terminal address.
     written_where: HashMap<String, String>,
     /// `herdr.seen` turns written but not yet back from the core.
@@ -507,6 +510,7 @@ impl AppWindow {
             written_view: String::new(),
             person: settings::Person::default(),
             reply: None,
+            held_reply: None,
             written_where: HashMap::new(),
             written_seen: HashMap::new(),
             looked: HashMap::new(),
@@ -2874,6 +2878,11 @@ impl AppWindow {
             self.create_canvas(args, window, cx);
             return json!({"asked":"space"});
         }
+        // A browser pane opened or pointed by a click asks for its URL.
+        if person && ((name == "canvas.pane_new" && args["kind"] == "browser" && args["url"].is_null()) || (name == "canvas.pane_open" && args["target"].is_null())) {
+            self.ask_url(name, args, window, cx);
+            return json!({ "asked": "url" });
+        }
         if person && name.ends_with(".rename") && args.get("name").is_none_or(Value::is_null) {
             self.ask_name(name, args, window, cx);
             return json!({ "asked": "name" });
@@ -2936,6 +2945,19 @@ impl AppWindow {
         self.open_overlay("rename".into(), spec, window, cx);
     }
 
+    /// Asks the person for a web address, then runs `name` with it (url for pane_new,
+    /// target for pane_open), starting from the pane's current page.
+    fn ask_url(&mut self, name: &str, mut args: Value, window: &mut Window, cx: &mut Context<Self>) {
+        if !args.is_object() { args = json!({}); }
+        let pane = Self::arg(&args, "pane").and_then(|id| self.canvas_state.doc.panes.iter().find(|p| p.id == id));
+        let current = pane.and_then(|p| p.url()).unwrap_or("").to_owned();
+        let field = if name == "canvas.pane_open" { "target" } else { "url" };
+        let spec = json!({ "mod": "prompt", "kind": "dialog", "width": 420, "props": {
+            "title": "open a page", "label": "Address", "field": field, "value": current, "submit": "Open",
+            "hint": "localhost:3000 opens over http; other bare names over https", "command": { "name": name, "args": args } } });
+        self.open_overlay(mods::new_overlay_id(), spec, window, cx);
+    }
+
     fn dispatch(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
@@ -2951,6 +2973,7 @@ impl AppWindow {
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
+            "canvas.browser_back" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external" => self.browser_command(name, a, window, cx),
             "app.menu" => {
                 let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
                 let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
@@ -3845,7 +3868,9 @@ impl AppWindow {
             Request::CloseOverlay { id } => self.close_overlay(&id, window, cx),
             Request::Refresh => self.refresh_mods(cx),
             Request::Control { cmd, reply } => {
-                let _ = reply.send(self.control(cmd, window, cx));
+                self.held_reply = Some(reply);
+                let answer = self.control(cmd, window, cx);
+                if let Some(reply) = self.held_reply.take() { let _ = reply.send(answer); }
             }
         }
     }

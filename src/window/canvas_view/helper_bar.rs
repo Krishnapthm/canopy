@@ -33,6 +33,20 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -
             BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ]).collect(),
+        canvas::Kind::Browser { .. } => [
+            ("icons/arrow-left.svg", "Back", "canvas.browser_back"),
+            ("icons/rotate-cw.svg", "Reload", "canvas.browser_reload"),
+            ("icons/house.svg", "Home", "canvas.browser_home"),
+            ("icons/globe.svg", "Open URL", "canvas.pane_open"),
+            ("icons/crosshair.svg", "Pick an element to quote", "canvas.browser_pick"),
+            ("icons/camera.svg", "Screenshot", "canvas.browser_shot"),
+            ("icons/external-link.svg", "Open in browser", "canvas.browser_external"),
+            ("icons/link.svg", "Connect", "canvas.connect"),
+            ("icons/x.svg", "Close", "canvas.close"),
+        ].into_iter().map(|(icon, label, command)| BarAction {
+            icon: icon.into(), label: label.into(), command: command.into(),
+            args: if command == "canvas.pane_open" { json!({"pane":pane.id}) } else { json!({}) },
+        }).collect(),
         canvas::Kind::Sub { .. } => vec![],
     }
 }
@@ -117,7 +131,9 @@ mod helper_bar_tests {
         let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }] };
         assert_eq!(pane_actions(&pane, Some(&hint)).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
-        pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
+        pane.kind = canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into() };
+        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.pane_open", "canvas.browser_pick", "canvas.browser_shot", "canvas.browser_external", "canvas.connect", "canvas.close"]);
+                pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
         assert!(pane_actions(&pane, None).is_empty());
     }
 }
