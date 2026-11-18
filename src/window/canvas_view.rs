@@ -7,6 +7,8 @@ mod wire_view;
 mod keyboard;
 mod helper_bar;
 mod pane_commands;
+mod image_pane;
+mod pdf;
 
 /// What an inline name edit renames: a space (by id) or the tab of a cell (by tab id).
 #[derive(Clone, PartialEq)]
@@ -100,6 +102,16 @@ pub(super) struct State {
     pub(super) tile: Option<Tile>,
     /// The pressed cell has moved `canvas::DRAG_THRESHOLD` px, so the press is a drag (see `drag_live`).
     drag_live: bool,
+    /// An image region drag: pane id, start and current window points.
+    region: Option<(String, Point<Pixels>, Point<Pixels>)>,
+    /// Pixel sizes of open images, by path.
+    image_sizes: HashMap<String, (u32, u32)>,
+    /// One viewer per PDF pane, by pane id.
+    pdfs: HashMap<String, Entity<gpui_pdf::PdfView>>,
+    /// Viewers whose pane closed, released on the next render (release needs a Window).
+    pdf_drops: Vec<Entity<gpui_pdf::PdfView>>,
+    /// Image paths that failed to load, so each toasts once.
+    image_errors: HashSet<String>,
 }
 
 /// Tile view of the current place (leaving it calls `State::untile`): the camera from before
@@ -195,6 +207,11 @@ impl State {
             hint_timer: None,
             tile: None,
             drag_live: false,
+            region: None,
+            image_sizes: HashMap::new(),
+            pdfs: HashMap::new(),
+            pdf_drops: Vec::new(),
+            image_errors: HashSet::new(),
         }
     }
     /// The requested camera before animation finishes, for keyboard integration tests.
@@ -318,6 +335,7 @@ impl AppWindow {
         self.canvas_state.doc.panes.iter().map(|c| {
             let addr = match &c.kind {
                 canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => return c.space.clone(),
+                canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } => return c.space.clone(),
                 canvas::Kind::Sub { parent, .. } => parent,
                 canvas::Kind::Terminal { .. } => &c.id,
             };
@@ -572,7 +590,7 @@ impl AppWindow {
             .iter()
             .map(|i| {
                 doc.panes.get(*i)
-                    .and_then(|c| match &c.kind { canvas::Kind::Sub { parent, .. } => Some(parent.as_str()), canvas::Kind::Terminal { .. } => self.live.get(&c.id)?["parent"].as_str(), canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => None })
+                    .and_then(|c| match &c.kind { canvas::Kind::Sub { parent, .. } => Some(parent.as_str()), canvas::Kind::Terminal { .. } => self.live.get(&c.id)?["parent"].as_str(), canvas::Kind::File { .. } | canvas::Kind::Mod { .. } | canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } => None })
                     .and_then(|p| indices.iter().position(|j| ids[*j] == p))
             })
             .collect();
@@ -782,6 +800,8 @@ impl AppWindow {
                 state.previews.remove(&path);
             }
         }
+        self.prune_images(ids);
+        self.prune_pdf_views();
         self.canvas_changed(cx);
         cx.notify();
     }
@@ -1171,7 +1191,7 @@ impl AppWindow {
             return;
         }
         let room = self.canvas_state.doc.room.clone();
-        if let Err(e) = self.add_file_pane(std::path::Path::new(path), point, room, cx) {
+        if let Err(e) = self.add_file_pane(std::path::Path::new(path), point, room, window, cx) {
             self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx);
         }
     }
@@ -1182,17 +1202,33 @@ impl AppWindow {
         self.canvas_state.doc.camera.to_world([f32::from(size.width) / 2., f32::from(size.height) / 2.])
     }
 
-    /// Opens `path` as a file pane at `point` in `space`, or moves its pane there when it is
-    /// already open; returns the pane id and the canonical path. Err says why it can't.
-    pub(super) fn add_file_pane(&mut self, path: &std::path::Path, point: canvas::Point, space: Option<String>, cx: &mut Context<Self>) -> Result<(String, String), String> {
-        if canvas::read_preview(path).is_err() {
-            let name = path.file_name().unwrap_or_default().to_string_lossy();
-            return Err(format!("Can't preview {name}"));
+    /// Opens or moves a file-backed pane, returning its id, canonical path and kind.
+    pub(super) fn add_file_pane(&mut self, path: &std::path::Path, point: canvas::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Result<(String, String, String), String> {
+        let kind = canvas::file_kind(path);
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        match kind {
+            "file" if canvas::read_preview(path).is_err() => return Err(format!("Can't preview {name}")),
+            "pdf" if !pdf::has_pdf_header(path) => return Err(format!("Can't open {name}: not a PDF")),
+            _ => {}
         }
-        let path = path.canonicalize().map_err(|e| format!("Can't open {}: {e}", path.display()))?;
-        let path = path.to_string_lossy().into_owned();
+        if kind == "image" && !path.is_file() {
+            return Err(format!("Can't open {name}: not a readable image"));
+        }
+        let canonical = path.canonicalize().map_err(|e| match kind {
+            "image" => format!("Can't open {name}: not a readable image"),
+            _ => format!("Can't open {}: {e}", path.display()),
+        })?.to_string_lossy().into_owned();
+        let (kind, size) = match kind {
+            "image" => {
+                let size = self.open_image(path, &canonical).map_err(|_| format!("Can't open {name}: not a readable image"))?;
+                (canvas::Kind::Image { path: canonical.clone() }, size)
+            }
+            "pdf" => (canvas::Kind::Pdf { path: canonical.clone(), highlights: vec![] }, [560., 720.]),
+            _ => (canvas::Kind::File { path: canonical.clone() }, [560., 420.]),
+        };
+        let path = canonical;
         let doc = &mut self.canvas_state.doc;
-        let id = if let Some(pane) = doc.panes.iter_mut().find(|p| p.file() == Some(path.as_str())) {
+        let (id, kind_name) = if let Some(pane) = doc.panes.iter_mut().find(|p| p.path() == Some(path.as_str())) {
             pane.rect[0] = point[0];
             pane.rect[1] = point[1];
             let id = pane.id.clone();
@@ -1201,21 +1237,20 @@ impl AppWindow {
                 pane.space = space;
                 doc.wires.retain(|w| w.a != id && w.b != id);
             }
-            id
+            (id, pane.kind_name().to_owned())
         } else {
             let id = doc.next_file_id();
             let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-            doc.panes.push(canvas::Pane {
-                id: id.clone(), kind: canvas::Kind::File { path: path.clone() },
-                rect: [point[0], point[1], 560., 420.], z, space,
-            });
-            id
+            let pane = canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], size[0], size[1]], z, space };
+            let kind_name = pane.kind_name().to_owned();
+            doc.panes.push(pane);
+            (id, kind_name)
         };
-        self.load_previews(cx);
+        self.load_previews(window, cx);
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
-        Ok((id, path))
+        Ok((id, path, kind_name))
     }
     /// Opens a mod pane at its own saved rect; its mod copy receives the pane id.
     fn add_mod_pane(&mut self, kind: String, point: canvas::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
@@ -1229,7 +1264,9 @@ impl AppWindow {
         id
     }
 
-    fn load_previews(&mut self, cx: &mut Context<Self>) {
+    fn load_previews(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_pdf_views(window, cx);
+        self.sync_image_sizes(window, cx);
         let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
         if let Some(path) = &self.canvas_state.file {
             if rendered(path) { paths.push(path.clone()); }
@@ -1791,7 +1828,7 @@ impl AppWindow {
         if !self.has_canvas() || !self.listed_once || !core_layout_answered(self.documents.get("")) {
             return;
         }
-        self.load_previews(cx);
+        self.load_previews(window, cx);
         let missing: Vec<_> = self
             .live
             .keys()
@@ -1975,6 +2012,7 @@ impl AppWindow {
         let members: Vec<_> = self.canvas_state.doc.panes.iter().map(|c| {
             let addr = match &c.kind {
                 canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => return None,
+                canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } => return None,
                 canvas::Kind::Sub { parent, .. } => parent,
                 canvas::Kind::Terminal { .. } => &c.id,
             };
@@ -2698,10 +2736,17 @@ impl AppWindow {
                     ),
             );
         }
-        for card in shown_doc.panes.iter().filter(|p| p.file().is_some() && shown_doc.shows(p.space.as_ref())) {
+        for card in shown_doc.panes.iter().filter(|p| p.path().is_some() && shown_doc.shows(p.space.as_ref())) {
             if canvas::visible(camera, card.rect, viewport) {
-                if let Some((view, _)) = state.previews.get(card.file().unwrap()) {
-                    area = area.child(self.preview_card(card, card.file().unwrap(), view, camera, cx));
+                match &card.kind {
+                    canvas::Kind::File { path } => {
+                        if let Some((view, _)) = state.previews.get(path) {
+                            area = area.child(self.preview_card(card, path, view, camera, cx));
+                        }
+                    }
+                    canvas::Kind::Image { path } => area = area.child(self.image_card(card, path, camera, cx)),
+                    canvas::Kind::Pdf { path, .. } => area = area.children(self.pdf_card(card, path, camera, cx)),
+                    _ => {}
                 }
             }
         }
@@ -3641,6 +3686,7 @@ fn format_quote(quote: &Value, cwd: Option<&str>) -> String {
     let path = std::path::Path::new(quote["path"].as_str().unwrap_or_default());
     let display = cwd.and_then(|cwd| path.strip_prefix(cwd).ok()).unwrap_or(path);
     let mut header = format!("@{}", display.display());
+    if let Some(body) = viewer_quote(quote, &header) { return with_message(quote, body); }
     if let Some(start) = quote["start"].as_u64() {
         header.push_str(&format!(":{start}"));
         if let Some(end) = quote["end"].as_u64().filter(|end| *end != start) { header.push_str(&format!("-{end}")); }
@@ -3650,9 +3696,28 @@ fn format_quote(quote: &Value, cwd: Option<&str>) -> String {
     let body = if ext.eq_ignore_ascii_case("md") {
         format!("{header}\n{}", text.split('\n').map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n"))
     } else { format!("{header}\n```{ext}\n{text}\n```") };
+    with_message(quote, body)
+}
+
+/// Appends the quote's optional message after a blank line.
+fn with_message(quote: &Value, body: String) -> String {
     match quote["message"].as_str().map(str::trim).filter(|m| !m.is_empty()) {
         Some(message) => format!("{body}\n\n{message}"),
         None => body,
+    }
+}
+
+/// The quote body for image and PDF panes (`kind` set), after the `@path` header.
+fn viewer_quote(quote: &Value, header: &str) -> Option<String> {
+    let text = quote["text"].as_str().unwrap_or_default().trim_end_matches(['\r', '\n']);
+    match quote["kind"].as_str()? {
+        "pdf" => Some(format!("{header} page {}\n{}", quote["page"].as_u64().unwrap_or_default(), text.split('\n').map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n"))),
+        "image-region" => {
+            let r = |i: usize| quote["region"][i].as_u64().unwrap_or_default();
+            Some(format!("{header} region {},{} {}x{} {}", r(0), r(1), r(2), r(3), quote["crop"].as_str().unwrap_or_default()))
+        }
+        "image" => Some(header.to_owned()),
+        _ => None,
     }
 }
 
@@ -3694,6 +3759,17 @@ fn code_quote(path: &str, text: &str) -> Value {
 mod quote_tests {
     use super::{code_quote, markdown_quote, format_quote};
     use serde_json::json;
+    #[test]
+    fn formats_viewer_quotes_with_their_source_location() {
+        let pdf = json!({"kind":"pdf","path":"/work/a.pdf","page":2,"text":"first\nsecond"});
+        assert_eq!(format_quote(&pdf, Some("/work")), "@a.pdf page 2\n> first\n> second");
+        let mut region = json!({"kind":"image-region","path":"/work/a.png","region":[2,3,4,5],"crop":"/tmp/crop.png"});
+        assert_eq!(format_quote(&region, Some("/work")), "@a.png region 2,3 4x5 /tmp/crop.png");
+        region["message"] = json!("  explain this  ");
+        assert_eq!(format_quote(&region, None), "@/work/a.png region 2,3 4x5 /tmp/crop.png\n\nexplain this");
+        assert_eq!(format_quote(&json!({"kind":"image","path":"/work/a.png","text":"a.png"}), Some("/work")), "@a.png");
+    }
+
     #[test]
     fn quote_sources_and_format() {
         assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","pane":"p1"}), None), "@/a.md\n> a");

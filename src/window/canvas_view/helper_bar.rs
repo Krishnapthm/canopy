@@ -27,6 +27,27 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -
             BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ],
+        canvas::Kind::Image { .. } => vec![
+            BarAction { icon: "icons/quote.svg".into(), label: "Quote image".into(), command: "canvas.pane_quote".into(), args: json!({}) },
+            BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
+            BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
+        ],
+        canvas::Kind::Pdf { highlights, .. } => {
+            let mut actions = vec![
+                BarAction { icon: "icons/search.svg".into(), label: "Find".into(), command: "canvas.pdf_find".into(), args: json!({}) },
+                BarAction { icon: "icons/highlighter.svg".into(), label: "Highlight text".into(), command: "canvas.pdf_highlight".into(), args: json!({}) },
+                BarAction { icon: "icons/chevron-up.svg".into(), label: "Previous page".into(), command: "canvas.pdf_prev".into(), args: json!({}) },
+                BarAction { icon: "icons/chevron-down.svg".into(), label: "Next page".into(), command: "canvas.pdf_next".into(), args: json!({}) },
+            ];
+            if !highlights.is_empty() {
+                actions.push(BarAction { icon: "icons/eraser.svg".into(), label: "Clear highlights".into(), command: "canvas.pdf_clear".into(), args: json!({}) });
+            }
+            actions.extend([
+                BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
+                BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
+            ]);
+            actions
+        }
         canvas::Kind::Mod { .. } => hint.into_iter().flat_map(|h| &h.actions).map(|a| BarAction {
             icon: a.icon.clone().into(), label: a.label.clone().into(), command: a.command.clone(), args: a.args.clone(),
         }).chain([
@@ -49,7 +70,8 @@ impl AppWindow {
     pub(super) fn helper_bars(&self, doc: &Document, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let state = &self.canvas_state;
         if state.drag.is_some() || state.cell_resize.is_some() || state.preview_drag.is_some()
-            || state.space_drag.is_some() || state.marquee.is_some() || state.rest.is_some() || (state.wire.drag.is_some() && !state.wire.sticky) {
+            || state.space_drag.is_some() || state.marquee.is_some() || state.rest.is_some() || (state.wire.drag.is_some() && !state.wire.sticky)
+            || state.region.is_some() {
             return vec![];
         }
         // A wire following the pointer keeps its pane's bar up, to show Connect as active.
@@ -131,6 +153,18 @@ mod helper_bar_tests {
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
         assert!(pane_actions(&pane, None).is_empty());
+    }
+    #[test]
+    fn viewer_actions_include_clear_only_when_there_are_marks() {
+        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None };
+        let commands = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
+        assert_eq!(commands(&pane), ["canvas.pane_quote", "canvas.connect", "canvas.close"]);
+        pane.kind = canvas::Kind::Pdf { path: "/a.pdf".into(), highlights: vec![] };
+        assert_eq!(commands(&pane), ["canvas.pdf_find", "canvas.pdf_highlight", "canvas.pdf_prev", "canvas.pdf_next", "canvas.connect", "canvas.close"]);
+        if let canvas::Kind::Pdf { highlights, .. } = &mut pane.kind {
+            highlights.push(canvas::PdfMark { page: 1, quote: "a".into(), occurrence: 0 });
+        }
+        assert_eq!(commands(&pane), ["canvas.pdf_find", "canvas.pdf_highlight", "canvas.pdf_prev", "canvas.pdf_next", "canvas.pdf_clear", "canvas.connect", "canvas.close"]);
     }
 
     #[test]
