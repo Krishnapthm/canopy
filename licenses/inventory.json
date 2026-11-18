@@ -129,6 +129,13 @@
       ]
     },
     {
+      "name": "react-grab 0.2.0 (browser pane picker)",
+      "source": "https://www.npmjs.com/package/react-grab/v/0.2.0 dist/index.global.js, unchanged; Canopy removes its network URLs at runtime (src/window/canvas_view/browser.rs).",
+      "files": [
+        "vendor/react-grab/LICENSE"
+      ]
+    },
+    {
       "name": "Lucide / Feather icons (defaults/icons and shipped mods)",
       "source": "https://github.com/lucide-icons/lucide",
       "files": [

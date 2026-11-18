@@ -62,6 +62,14 @@ gpui_linux = { package = "gpui-pre-linux", version = "=0.3.8", features = ["rend
 
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui-wry = { path = "vendor/gpui-kit/crates/webview" }
+# Browser panes (src/window/canvas_view/browser.rs): wry builds the WKWebView; objc2 takes its snapshot.
+# All already come in through gpui-wry's lb-wry, so they add no crates.
+wry = { package = "lb-wry", version = "0.53.3" }
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSError", "NSString", "NSURL"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }
 gpui_macos = { package = "gpui-pre-macos", version = "=0.3.8", features = ["render-to-image"] }
 libc = "0.2"
 
