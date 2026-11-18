@@ -89,6 +89,14 @@ behaviour. "Done" means its checks pass and the docs listed travel with it.
 - Unverified until P3 builds: `WKWebView.takeSnapshot` through wry's macOS
   extension, and placement under zoom. Fail plans: no snapshot → resting
   state shows URL and title only; no react-grab → DOM picker only.
+- P3 build (2026-11-18, macOS 27.2, lb-wry 0.53.3): `takeSnapshot` works on
+  a hidden WKWebView once it has non-zero bounds (gpui-wry makes views 0x0
+  until drawn). react-grab `getSource` works in WKWebView on React 19.2 +
+  Vite 6, but returns the component's definition (`PricingCard.jsx:1:30`)
+  with a bare file name; Canopy searches the project for the file and scans
+  to the returned JSX. wry reports no failed load (`Started` fires only on
+  commit) and its `url()` panics before any commit. Live placement under
+  zoom is still unverified: the Mac was locked, so no frames were drawn.
 
 ### Shortcut hints (every step)
 
