@@ -57,9 +57,10 @@ impl AppWindow {
         self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":text.into()}}), window, cx);
     }
 
-    /// The drawn rect of a cell the current view shows.
+    /// The drawn rect of a pane the current view shows.
     pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
-        let card = doc.panes.iter().filter(|p| p.file().is_none()).find(|c| c.id == key && doc.shows(c.space.as_ref()))?;
+        let card = doc.panes.iter().find(|c| c.id == key && doc.shows(c.space.as_ref()))?;
+        if card.file().is_some() { return Some(card.rect); }
         let view = &self.canvas_state.doc.view;
         if matches!(card.kind, canvas::Kind::Sub { .. }) {
             return (*view != canvas::View::Terminals).then_some(card.rect);
@@ -91,7 +92,7 @@ impl AppWindow {
         let mut out: Vec<Edge> = vec![];
         let all = wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
         // Every shown cell, for edges to go around.
-        let cells: Vec<_> = doc.panes.iter().filter(|p| p.file().is_none()).filter_map(|c| self.wire_cell(doc, &c.id)).collect();
+        let cells: Vec<_> = doc.panes.iter().filter_map(|c| self.wire_cell(doc, &c.id)).collect();
         for w in all.iter().filter(|w| w.born).chain(all.iter().filter(|w| !w.born)) {
             if out.iter().any(|e| (e.key.0 == w.a && e.key.1 == w.b) || (e.key.0 == w.b && e.key.1 == w.a)) { continue; }
             if let (Some(a), Some(b)) = (self.wire_cell(doc, &w.a), self.wire_cell(doc, &w.b)) {
@@ -113,9 +114,9 @@ impl AppWindow {
         let camera = doc.camera;
         let p = camera.to_world(self.wire_local(position));
         let s = slop / camera.zoom;
-        doc.panes.iter().filter(|p| p.file().is_none()).filter(|c| {
+        doc.panes.iter().filter(|c| {
             self.wire_cell(doc, &c.id).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
-        }).max_by_key(|c| c.z).map(|c| c.id.clone())
+        }).max_by_key(|c| (c.file().is_none(), c.z)).map(|c| c.id.clone())
     }
 
     fn wire_edge_at(&self, position: Point<Pixels>) -> Option<Edge> {
@@ -240,8 +241,10 @@ impl AppWindow {
 
     fn wire_connect(&mut self, a: &str, b: &str, cx: &mut Context<Self>) -> Result<(), String> {
         let doc = &mut self.canvas_state.doc;
-        if a == b { return Err("A cell cannot be wired to itself".into()); }
-        if !doc.same_space(a, b) { return Err(if ![a, b].iter().all(|k| doc.panes.iter().filter(|p| p.file().is_none()).any(|c| c.id == *k)) { "No such cell".into() } else { "Same space only for now".into() }); }
+        if a == b { return Err("A pane cannot be wired to itself".into()); }
+        if ![a, b].iter().all(|k| doc.panes.iter().any(|c| c.id == *k)) { return Err("No such pane".into()); }
+        if [a, b].iter().all(|k| doc.panes.iter().any(|c| c.id == *k && c.file().is_some())) { return Err("Wire a file pane to a terminal or agent".into()); }
+        if !doc.same_space(a, b) { return Err("Same space only for now".into()); }
         if !doc.connect(a, b) { return Err("Already wired".into()); }
         self.canvas_changed(cx);
         Ok(())

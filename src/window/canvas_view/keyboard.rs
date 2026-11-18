@@ -173,7 +173,7 @@ impl AppWindow {
             }
             "canvas.collapse" => if let Some(key) = selected { self.set_expanded(&key, false, window, cx); },
             "canvas.connect" => {
-                let Some(key) = selected.filter(|k| self.canvas_state.doc.panes.iter().any(|c| c.file().is_none() && c.id == *k)) else { return self.fail("select a cell first"); };
+                let Some(key) = selected.filter(|k| self.canvas_state.doc.panes.iter().any(|c| c.id == *k)) else { return self.fail("select a cell first"); };
                 self.canvas_state.mode = true;
                 self.canvas_state.connecting = Some(key);
             }

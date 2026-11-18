@@ -24,6 +24,7 @@ pub(super) fn pane_actions(pane: &canvas::Pane) -> Vec<BarAction> {
         ],
         canvas::Kind::File { path } => vec![
             BarAction { icon: "icons/panel-right.svg", label: "Open as tab", command: "preview.open", args: json!({"path":path}) },
+            BarAction { icon: "icons/link.svg", label: "Connect", command: "canvas.connect", args: json!({}) },
             BarAction { icon: "icons/x.svg", label: "Close", command: "canvas.close", args: json!({}) },
         ],
         canvas::Kind::Sub { .. } => vec![],
@@ -103,7 +104,7 @@ mod helper_bar_tests {
         *pane.size_mut().unwrap() = Some([800., 500.]);
         assert_eq!(commands(&pane)[1], "canvas.collapse");
         pane.kind = canvas::Kind::File { path: "/tmp/a.md".into() };
-        assert_eq!(commands(&pane), ["preview.open", "canvas.close"]);
+        assert_eq!(commands(&pane), ["preview.open", "canvas.connect", "canvas.close"]);
         assert_eq!(pane_actions(&pane)[0].args, json!({"path":"/tmp/a.md"}));
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
         assert!(pane_actions(&pane).is_empty());

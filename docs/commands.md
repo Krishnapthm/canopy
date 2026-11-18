@@ -151,7 +151,7 @@ No arguments.
 
 ## `quote.menu`
 
-Open the quote popover listing running agents, at point or the pointer.
+Open the quote popover at point or the pointer: agents wired to the quoted pane first, then other running agents, then installed agents to start with the quote.
 
 | Argument | Required |
 |---|---|
@@ -160,10 +160,11 @@ Open the quote popover listing running agents, at point or the pointer.
 | `end` | no |
 | `text` | yes |
 | `point` | no |
+| `pane` | no |
 
 ## `canvas.close`
 
-Close every selected pane (else the focused one) behind one dialog listing them, or the named terminal; terminals is the confirmed list, ending them all without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
+Close every selected pane (else the focused one) behind one dialog listing them, the named terminal, or one file pane by id (pane); terminals is the confirmed list, ending them all without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
 
 | Argument | Required |
 |---|---|
@@ -171,6 +172,44 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 | `terminals` | no |
 | `confirmed` | no |
 | `dont_ask` | no |
+| `pane` | no |
+
+## `canvas.pane_new`
+
+Open a pane of a kind ("file") at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A path already open moves its pane. Replies with pane, path and wired.
+
+| Argument | Required |
+|---|---|
+| `kind` | yes |
+| `path` | yes |
+| `wire` | no |
+| `point` | no |
+
+## `canvas.pane_read`
+
+A pane's text inside a <pane-content> envelope that marks it as untrusted, cut at 256 KiB. Replies with text.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+
+## `canvas.pane_shot`
+
+Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); refuses when it is off screen. Replies with path.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+| `path` | no |
+
+## `canvas.pane_open`
+
+Point a pane at a target, such as a browser pane's URL; kinds without open refuse.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+| `target` | yes |
 
 ## `canvas.sync`
 
@@ -211,7 +250,7 @@ Clear finished sub-agent cells and their labels, optionally one id.
 
 ## `wire.connect`
 
-Draw a Wire edge between two cells of one space (cell keys: a terminal address, or sub:<parent>:<id>). Cells in different spaces are refused.
+Draw a Wire edge between two panes of one space (pane ids: a terminal address, sub:<parent>:<id>, or p<N> for a file pane). Panes in different spaces, and two file panes, are refused.
 
 | Argument | Required |
 |---|---|
@@ -240,6 +279,7 @@ Expand an agent's cell and paste a quote and optional message without Enter, wai
 | `message` | no |
 | `terminal` | no |
 | `argv` | no |
+| `pane` | no |
 
 ## `canvas.expand`
 

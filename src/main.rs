@@ -17,6 +17,7 @@ mod links;
 mod model;
 mod mirror;
 mod mirror_sync;
+mod panes;
 mod place;
 mod persist;
 #[cfg(target_os = "macos")]
@@ -53,7 +54,8 @@ Usage:
   canopy status                 what the window shows, and any errors
   canopy shot [file.png]        save the last window frame (default: canopy-shot.png)
   canopy hook sub-start|sub-stop|session-end|wire|idle  report a session hook (JSON on stdin, best effort)
-  canopy wire [tell|reply|wait|read ...]  Wire: list peers and mail, or send a message to a wired cell
+  canopy wire                   who you are, and the peers and panes wired to you
+  canopy pane new file <path> [--wire] | read|shot|close <pane> | open <pane> <target>  canvas panes
   canopy spawn <program> --name <n> [--model <m>] [-- <message>]  start an agent beside this one, wired to it
   canopy check <mod folder>     load a mod once and report what's wrong
   canopy config                 Settings defaults and explanations
@@ -98,6 +100,7 @@ fn main() {
     if args.get(1).is_some_and(|s| s == "spawn") {
         std::process::exit(wire::spawn_cli(&args[2..]));
     }
+    if args.get(1).is_some_and(|s| s == "pane") { std::process::exit(panes::cli(&args[2..])); }
     #[cfg(target_os = "macos")]
     macos_check::startup(&args);
     #[cfg(windows)]

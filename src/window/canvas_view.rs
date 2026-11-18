@@ -6,6 +6,7 @@ use gpui::AnimationExt as _;
 mod wire_view;
 mod keyboard;
 mod helper_bar;
+mod pane_commands;
 
 /// What an inline name edit renames: a space (by id) or the tab of a cell (by tab id).
 #[derive(Clone, PartialEq)]
@@ -765,8 +766,28 @@ impl AppWindow {
             .into_iter().collect()
     }
 
+    /// Removes file panes, their selection and previews no longer in use.
+    fn close_file_panes(&mut self, ids: &[String], cx: &mut Context<Self>) {
+        let state = &mut self.canvas_state;
+        let paths: Vec<_> = state.doc.panes.iter().filter(|p| ids.contains(&p.id)).filter_map(|p| p.file().map(str::to_owned)).collect();
+        state.doc.panes.retain(|p| !ids.contains(&p.id));
+        state.selected.retain(|id| !ids.contains(id));
+        for path in paths {
+            if state.file.as_ref() != Some(&path) && !state.doc.panes.iter().any(|p| p.file() == Some(path.as_str())) {
+                state.previews.remove(&path);
+            }
+        }
+        self.canvas_changed(cx);
+        cx.notify();
+    }
+
     /// Closes the selected cell with confirmation appropriate to its current kind.
     pub(super) fn close_canvas_cell(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = a["pane"].as_str() {
+            let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return self.fail(format!("no pane {id}")) };
+            if pane.file().is_none() { return self.fail(format!("pane {id} is a {}: close it with canvas.close {{terminal}}", pane.kind_name())); }
+            return self.close_file_panes(&[id.to_owned()], cx);
+        }
         if a["terminal"].is_null() && self.wire_delete_selected(window, cx) { return; }
         // The confirmed dialog hands back the whole list; terminate it as is.
         if let Some(list) = a["terminals"].as_array() {
@@ -777,19 +798,10 @@ impl AppWindow {
             Some(key) => key.to_owned(),
             None => {
                 if !self.focus.is_focused(window) { return; }
-                let state = &mut self.canvas_state;
-                let files: Vec<_> = state.doc.panes.iter().filter(|p| state.selected.contains(&p.id) && state.doc.shows(p.space.as_ref()))
-                    .filter_map(|p| Some((p.id.clone(), p.file()?.to_owned()))).collect();
+                let state = &self.canvas_state;
+                let files: Vec<_> = state.doc.panes.iter().filter(|p| state.selected.contains(&p.id) && state.doc.shows(p.space.as_ref()) && p.file().is_some()).map(|p| p.id.clone()).collect();
                 if !files.is_empty() {
-                    state.doc.panes.retain(|p| !files.iter().any(|(id, _)| id == &p.id));
-                    state.selected.retain(|id| !files.iter().any(|(closed, _)| closed == id));
-                    for (_, path) in files {
-                        if state.file.as_ref() != Some(&path) && !state.doc.panes.iter().any(|p| p.file() == Some(path.as_str())) {
-                            state.previews.remove(&path);
-                        }
-                    }
-                    self.canvas_changed(cx);
-                    cx.notify();
+                    self.close_file_panes(&files, cx);
                     if self.targets(window).is_empty() { return; }
                 }
                 // Every target pane closes behind one dialog; only spaces and sub-agents take the single path.
@@ -1054,18 +1066,7 @@ impl AppWindow {
                 Ok(p) if p.iter().all(|v| v.is_finite()) => p,
                 _ => return self.fail("invalid canvas point"),
             },
-            None => {
-                let size = self
-                    .bounds
-                    .borrow()
-                    .get("canopy-canvas")
-                    .map(|b| b.size)
-                    .unwrap_or(window.viewport_size());
-                self.canvas_state
-                    .doc
-                    .camera
-                    .to_world([f32::from(size.width) / 2., f32::from(size.height) / 2.])
-            }
+            None => self.view_center(window),
         };
         let Some(path) = args["path"].as_str() else {
             let paths = cx.prompt_for_paths(PathPromptOptions {
@@ -1104,32 +1105,44 @@ impl AppWindow {
             cx.notify();
             return;
         }
-        let path = std::path::Path::new(path);
+        let room = self.canvas_state.doc.room.clone();
+        if let Err(e) = self.add_file_pane(std::path::Path::new(path), point, room, cx) {
+            self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx);
+        }
+    }
+
+    /// The viewport centre in world pixels.
+    pub(super) fn view_center(&self, window: &Window) -> canvas::Point {
+        let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
+        self.canvas_state.doc.camera.to_world([f32::from(size.width) / 2., f32::from(size.height) / 2.])
+    }
+
+    /// Opens `path` as a file pane at `point` in `space`, or moves its pane there when it is
+    /// already open; returns the pane id and the canonical path. Err says why it can't.
+    pub(super) fn add_file_pane(&mut self, path: &std::path::Path, point: canvas::Point, space: Option<String>, cx: &mut Context<Self>) -> Result<(String, String), String> {
         if canvas::read_preview(path).is_err() {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
-            self.open_overlay(
-                mods::new_overlay_id(),
-                json!({"kind":"toast","notification":{"title":format!("Can't preview {name}")}}),
-                window,
-                cx,
-            );
-            return;
+            return Err(format!("Can't preview {name}"));
         }
-        let Ok(path) = path.canonicalize() else {
-            return;
-        };
+        let path = path.canonicalize().map_err(|e| format!("Can't open {}: {e}", path.display()))?;
         let path = path.to_string_lossy().into_owned();
         let doc = &mut self.canvas_state.doc;
         let id = if let Some(pane) = doc.panes.iter_mut().find(|p| p.file() == Some(path.as_str())) {
             pane.rect[0] = point[0];
             pane.rect[1] = point[1];
-            pane.id.clone()
+            let id = pane.id.clone();
+            // A pane that changes space leaves its wires behind: wires join one space only.
+            if pane.space != space {
+                pane.space = space;
+                doc.wires.retain(|w| w.a != id && w.b != id);
+            }
+            id
         } else {
             let id = doc.next_file_id();
             let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
             doc.panes.push(canvas::Pane {
-                id: id.clone(), kind: canvas::Kind::File { path },
-                rect: [point[0], point[1], 560., 420.], z, space: doc.room.clone(),
+                id: id.clone(), kind: canvas::Kind::File { path: path.clone() },
+                rect: [point[0], point[1], 560., 420.], z, space,
             });
             id
         };
@@ -1137,6 +1150,7 @@ impl AppWindow {
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
+        Ok((id, path))
     }
     fn load_previews(&mut self, cx: &mut Context<Self>) {
         let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
@@ -1579,6 +1593,8 @@ impl AppWindow {
         self.canvas_state.save.pending = false;
         // Debounced: each change restarts the 500 ms timer. Camera animation saves once from its last frame.
         if self.canvas_state.rest.is_some() || self.canvas_state.layout_motion.is_some() || self.canvas_state.motion.target.is_some() || self.canvas_state.motion.frame { return; }
+        // Mods see panes once a move settles, not every drag frame.
+        if mods::publish_canvas_panes(serde_json::to_value(&self.canvas_state.doc.panes).unwrap_or_default()) { self.refresh_snapshot_mods(cx); }
         if !self.canvas_state.writable || !self.canvas_state.save.changed() {
             return;
         }
@@ -1959,15 +1975,19 @@ impl AppWindow {
         }).detach();
     }
 
-    /// Opens the quote popover: running agents as rows, the quoted file's space first.
+    /// Opens the quote popover: agents wired to the quoted pane first, then other
+    /// running agents (the quoted file's space first).
     fn quote_menu(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> String {
         let path = std::path::Path::new(a["path"].as_str().unwrap_or_default());
         let home = self.model.spaces.iter().filter(|s| path.starts_with(&s.folder)).max_by_key(|s| s.folder.len()).map(|s| s.id.as_str());
+        // Agents wired to the quoted pane come first.
+        let wired: Vec<String> = a["pane"].as_str().map(|pane| crate::wire::neighbors(&crate::wire::all(&self.canvas_state.doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned)), pane)).unwrap_or_default();
         let mut rows: Vec<_> = self.live.iter().filter(|(_, rec)| canvas_agent(rec)).map(|(addr, rec)| {
             let name = self.pill_name(addr);
             let (icon, tint) = program_icon(rec);
             let elsewhere = self.model.pane_of(addr).and_then(|p| self.model.space_of(&p)).map(|s| s.id.as_str()) != home;
-            ((elsewhere, name.clone(), addr.clone()), json!({"terminal":addr,"name":name,"icon":icon,"tint":tint}))
+            let is_wired = wired.contains(addr);
+            ((!is_wired, elsewhere, name.clone(), addr.clone()), json!({"terminal":addr,"name":name,"icon":icon,"tint":tint,"wired":is_wired}))
         }).collect();
         rows.sort_by(|a, b| a.0.cmp(&b.0));
         let mut quote = a.clone();
@@ -1982,12 +2002,13 @@ impl AppWindow {
 
     /// A finished selection in a preview TextView shows the quote icon at the mouse-up
     /// point; the selection stays live, so it can still be copied.
-    fn quote_selection(&mut self, path: &str, view: &Entity<gpui_base::TextViewState>, position: Point<Pixels>, _window: &mut Window, cx: &mut Context<Self>) {
+    fn quote_selection(&mut self, path: &str, pane: Option<&str>, view: &Entity<gpui_base::TextViewState>, position: Point<Pixels>, _window: &mut Window, cx: &mut Context<Self>) {
         let text = view.read(cx).selected_text();
         if text.trim().is_empty() { return; }
         let mut quote = if rendered(path) {
             markdown_quote(path, &preview_source(path), &text)
         } else { code_quote(path, &text) };
+        if let Some(pane) = pane { quote["pane"] = json!(pane); }
         quote["point"] = json!({"x": f32::from(position.x), "y": f32::from(position.y)});
         self.clear_quote_mark(cx);
         self.canvas_state.quote_chip = Some((quote, Some(view.clone())));
@@ -2132,6 +2153,7 @@ impl AppWindow {
         let path = std::path::Path::new(file);
         let drag = card.id.clone();
         let resize = drag.clone();
+        let quote_pane = card.id.clone();
         let quote_path = file.to_owned();
         let quote_view = view.clone();
         (div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
@@ -2154,7 +2176,7 @@ impl AppWindow {
                         gpui::ImageSource::Image(BLANK.clone())
                     })
                     .on_link_click(|_, _, _, _| {}))
-                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, &quote_view, e.position, window, cx))))
+                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, Some(&quote_pane), &quote_view, e.position, window, cx))))
                 .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(ui::RADIUS))
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
                     .hover(|d| d.border_color(c("foreground")))
@@ -3237,7 +3259,7 @@ impl AppWindow {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
                         gpui::ImageSource::Image(BLANK.clone())
                     }).on_link_click(|_,_,_,_|{}))
-                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, &quote_view, e.position, window, cx))));
+                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, None, &quote_view, e.position, window, cx))));
             } else if state.file.is_some() {
                 body = body.child(
                     div()
@@ -3572,6 +3594,7 @@ mod quote_tests {
     use serde_json::json;
     #[test]
     fn quote_sources_and_format() {
+        assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","pane":"p1"}), None), "@/a.md\n> a");
         let q = code_quote("/work/a.rs", "    12  fn main() {}\n    13    x");
         assert_eq!(q["text"], "fn main() {}\n  x");
         assert_eq!(format_quote(&q, Some("/work")), "@a.rs:12-13\n```rs\nfn main() {}\n  x\n```");

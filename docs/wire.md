@@ -12,6 +12,10 @@ or click the "+" and then the other cell. Esc or a click on empty canvas
 cancels. In canvas mode, `c` starts a connection; select the other cell and
 press Enter. Connecting types nothing into either terminal.
 
+File panes can be wired to terminals and agents, but not to each other.
+`canopy wire` lists a wired file pane with its path and verbs, for example
+`README.md (p1): file /work/README.md - canopy pane read|shot|close p1`.
+
 Inside a Canopy terminal:
 
 ```sh
@@ -48,7 +52,7 @@ Parent-child edges are automatic. Closing a cell removes its edges.
 ## How it works
 
 Drawn edges are stored in `canvas.json` as `wires: [{a, b, born}]`, using
-cell keys: a terminal address or `sub:<parent>:<id>`. Parent-child (born)
+pane ids: a terminal address, `sub:<parent>:<id>` or `p<N>`. Parent-child (born)
 edges are computed from sub-agent cells and the core's `parent` records.
 `wire.connect {a, b}` and `wire.remove {a, b}` manage drawn edges.
 

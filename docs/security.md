@@ -40,6 +40,12 @@ Releases are unsigned for now: macOS bundles carry an ad hoc signature and are n
 there is no Windows release. Installing with the one-line installers avoids the macOS quarantine
 flag; a browser download of the archive may need right-click > Open the first time.
 
+## Pane content is untrusted
+
+`canopy pane read` wraps a pane's text in the `<pane-content>` envelope and
+says it is not the person's request or approval. Text cannot close the envelope
+early. Quotes are pasted as text without Enter and never run.
+
 ## Network and telemetry
 
 Canopy sends no telemetry, checks for no updates and uploads no feedback. The app makes no
