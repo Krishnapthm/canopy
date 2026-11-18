@@ -12,7 +12,7 @@
 #                                and folders that lost a file are made new
 #
 # Only content decides: a file with any change, or one the note doesn't know,
-# keeps its checkout time and rebuilds.
+# keeps its checkout time and rebuilds. A .gitattributes change rebuilds all.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -42,6 +42,13 @@ case "${1:-}" in
     now=$(mktemp)
     trap 'rm -f "$now"' EXIT
     sources > "$now"
+    # .gitattributes decides checked-out bytes (line endings) without changing
+    # blob ids, so when it changed no file can be trusted to match the note.
+    attrs() { awk -F'\t' '$2 ~ /(^|\/)\.gitattributes$/' "$1"; }
+    if [[ "$(attrs "$note")" != "$(attrs "$now")" ]]; then
+      echo "ci-sources: .gitattributes changed, everything builds"
+      exit 0
+    fi
     # Same path, same blob: unchanged.
     # (macOS awk can't print NUL: one name per line, tr makes them NUL-separated.)
     awk -F'\t' 'NR == FNR { seen[$2] = $1; next } seen[$2] == $1 { print $2 }' "$note" "$now" \
