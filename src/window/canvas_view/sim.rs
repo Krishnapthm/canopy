@@ -1,8 +1,11 @@
-//! Sim panes: an iOS Simulator's screen on the canvas. The screen is a screenshot
-//! taken when the pane opens, on Refresh and on `canopy pane open`; nothing polls.
-//! See docs/panes.md.
+//! Sim panes: an iOS Simulator on the canvas. A booted simulator is live on macOS (its
+//! framebuffer, touch and keys, in Xcode's bezel; see sim_screen.rs) while the pane is shown;
+//! a simctl screenshot, taken when the pane opens, on Refresh and on `canopy pane open`, is the
+//! resting and fallback picture. Nothing polls. See docs/panes.md.
 use super::*;
 use crate::sim::{self, Device};
+#[cfg(target_os = "macos")]
+use super::sim_screen::{AgentStep, By, Live, SimEvent, SimScreen};
 
 /// What a sim pane's body shows.
 pub(super) enum Screen {
@@ -23,32 +26,41 @@ pub(super) enum Screen {
 pub(super) struct SimView {
     pub screen: Screen,
     pub device: Option<Device>,
+    /// Every available simulator as of the last refresh, for the picker menu.
+    pub devices: Vec<Device>,
     /// The latest screenshot as a file, for `canopy pane read`.
     pub png: Option<std::path::PathBuf>,
+    /// The device itself, once a booted simulator is known.
+    #[cfg(target_os = "macos")]
+    pub live: Option<Entity<SimScreen>>,
+    /// The pop-out window showing the device.
+    #[cfg(target_os = "macos")]
+    pub popped: Option<WindowHandle<SimWindow>>,
     _task: Option<Task<()>>,
+    #[cfg(target_os = "macos")]
+    _events: Option<Subscription>,
 }
 
 /// What a background refresh found.
 enum Found {
     Pick(Vec<Device>),
-    Gone,
-    Off(Device),
-    Shot(Device, Arc<RenderImage>, std::path::PathBuf),
+    Gone(Vec<Device>),
+    Off(Device, Vec<Device>),
+    Shot(Device, Vec<Device>, Arc<RenderImage>, std::path::PathBuf),
 }
 
 /// Asks simctl about `udid` (empty: list devices to pick), boots it when asked,
 /// and takes a screenshot of a booted device. Blocking.
 fn look(pane: &str, udid: &str, boot: bool) -> Result<Found, String> {
     let devices = sim::devices()?;
+    sim::xcode_version();
     if udid.is_empty() { return Ok(Found::Pick(devices)); }
-    let Some(mut device) = devices.into_iter().find(|d| d.udid == udid) else { return Ok(Found::Gone) };
+    let Some(mut device) = devices.iter().find(|d| d.udid == udid).cloned() else { return Ok(Found::Gone(devices)) };
     if boot && !device.booted {
         sim::boot(udid)?;
         device.booted = true;
-        // shortcut: bootstatus returns before the home screen has drawn its icons; a fixed wait, until the live pane (P5b) shows frames.
-        std::thread::sleep(std::time::Duration::from_secs(4));
     }
-    if !device.booted { return Ok(Found::Off(device)); }
+    if !device.booted { return Ok(Found::Off(device, devices)); }
     let path = std::env::temp_dir().join("canopy").join(format!("sim-{pane}.png"));
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| format!("Can't save the screenshot: {e}"))?;
     // A dropped refresh's simctl keeps running: each one writes its own file, then renames it.
@@ -61,7 +73,7 @@ fn look(pane: &str, udid: &str, boot: bool) -> Result<Found, String> {
     let mut rgba = image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(|e| format!("simctl screenshot: {e}"))?.into_rgba8();
     // GPUI draws BGRA.
     for p in rgba.pixels_mut() { p.0.swap(0, 2); }
-    Ok(Found::Shot(device, Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(rgba)])), path))
+    Ok(Found::Shot(device, devices, Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(rgba)])), path))
 }
 
 /// Finds a simulator for `canvas.pane_new` and `canvas.pane_open`: a udid, or
@@ -90,18 +102,31 @@ impl AppWindow {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-        // A phone screen (about 1:2.17) under the 36 px header.
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], 320., 720.], z, space });
+        // A phone in its bezel (about 1:2) under the 36 px header.
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], 340., 700.], z, space });
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         self.refresh_sim(&id, true, window, cx);
         id
     }
 
-    /// Drops the views of closed sim panes and frees their screenshots.
+    /// Drops the views of closed sim panes: frees their screenshots, stops their helpers and
+    /// recordings, and closes their pop-out windows.
     pub(super) fn forget_sims(&mut self, ids: &[String], cx: &mut App) {
         for id in ids {
-            if let Some(SimView { screen: Screen::Shot(old), .. }) = self.canvas_state.sims.remove(id) { drop_shot(old, cx); }
+            let Some(view) = self.canvas_state.sims.remove(id) else { continue };
+            if let Screen::Shot(old) = view.screen { drop_shot(old, cx); }
+            #[cfg(target_os = "macos")]
+            {
+                if let Some(screen) = &view.live {
+                    screen.update(cx, |s, cx| {
+                        if s.recording.is_some() { let _ = s.record(By::You, cx); }
+                        s.shown = false;
+                        s.sync(cx);
+                    });
+                }
+                if let Some(handle) = view.popped { let _ = handle.update(cx, |_, window, _| window.remove_window()); }
+            }
         }
     }
 
@@ -109,7 +134,12 @@ impl AppWindow {
     /// The last screenshot stays up until the new one is ready.
     pub(super) fn refresh_sim(&mut self, id: &str, boot: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(udid) = self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| p.sim()).map(str::to_owned) else { return };
-        let view = self.canvas_state.sims.entry(id.to_owned()).or_insert(SimView { screen: Screen::Loading, device: None, png: None, _task: None });
+        let view = self.canvas_state.sims.entry(id.to_owned()).or_insert(SimView {
+            screen: Screen::Loading, device: None, devices: vec![], png: None, _task: None,
+            #[cfg(target_os = "macos")] live: None,
+            #[cfg(target_os = "macos")] popped: None,
+            #[cfg(target_os = "macos")] _events: None,
+        });
         if !sim::available() {
             view.screen = Screen::NoXcode;
             return;
@@ -127,19 +157,81 @@ impl AppWindow {
             let _ = this.update_in(cx, |this, window, cx| {
                 let Some(view) = this.canvas_state.sims.get_mut(&pane) else { return };
                 match found {
-                    Ok(Found::Pick(devices)) => { view.device = None; set_screen(view, Screen::Pick(devices), cx); }
-                    Ok(Found::Gone) => { view.device = None; set_screen(view, Screen::Gone, cx); }
-                    Ok(Found::Off(device)) => { view.device = Some(device); set_screen(view, Screen::Off, cx); }
-                    Ok(Found::Shot(device, image, png)) => { view.device = Some(device); view.png = Some(png); set_screen(view, Screen::Shot(image), cx); }
+                    Ok(Found::Pick(devices)) => { view.device = None; view.devices = devices.clone(); set_screen(view, Screen::Pick(devices), cx); }
+                    Ok(Found::Gone(devices)) => { view.device = None; view.devices = devices; set_screen(view, Screen::Gone, cx); }
+                    Ok(Found::Off(device, devices)) => { view.device = Some(device); view.devices = devices; set_screen(view, Screen::Off, cx); }
+                    Ok(Found::Shot(device, devices, image, png)) => {
+                        view.device = Some(device);
+                        view.devices = devices;
+                        view.png = Some(png);
+                        set_screen(view, Screen::Shot(image), cx);
+                    }
                     Err(error) => {
                         set_screen(view, Screen::Failed(error.clone()), cx);
                         this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":error}}), window, cx);
                     }
                 }
+                #[cfg(target_os = "macos")]
+                this.attach_live(&pane, window, cx);
                 cx.notify();
             });
         }));
         cx.notify();
+    }
+
+    /// Gives a sim pane its device view once its simulator is known and booted, and hands it
+    /// the latest screenshot; a different simulator gets a new one.
+    #[cfg(target_os = "macos")]
+    fn attach_live(&mut self, pane: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.canvas_state.sims.get_mut(pane) else { return };
+        let Some(device) = view.device.clone() else { return };
+        if view.live.as_ref().is_some_and(|s| s.read(cx).device.udid != device.udid) {
+            let old = view.live.take().unwrap();
+            view._events = None;
+            old.update(cx, |s, cx| { s.shown = false; s.sync(cx); });
+            if let Some(handle) = view.popped.take() { let _ = handle.update(cx, |_, window, _| window.remove_window()); }
+        }
+        let shot = if let Screen::Shot(image) = &view.screen { Some(image.clone()) } else { None };
+        let screen = view.live.get_or_insert_with(|| cx.new(|cx| SimScreen::new(pane.to_owned(), device.clone(), cx))).clone();
+        if view._events.is_none() {
+            let id = pane.to_owned();
+            view._events = Some(cx.subscribe_in(&screen, window, move |this, _, event, window, cx| this.sim_event(&id, event, window, cx)));
+        }
+        screen.update(cx, |s, cx| {
+            s.device = device;
+            s.set_shot(shot, cx);
+            s.sync(cx);
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sim_event(&mut self, pane: &str, event: &SimEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match event {
+            SimEvent::Toast(title) => self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":title}}), window, cx),
+            SimEvent::Saved { title, path } => self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{
+                "title":title, "body":path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                "action":{"name":"canvas.sim_reveal","args":{"path":path}}}}), window, cx),
+            SimEvent::Quote(quote) => {
+                let mut quote = quote.clone();
+                quote["point"] = json!({"x": f32::from(self.pointer.x), "y": f32::from(self.pointer.y)});
+                self.quote_menu(&quote, window, cx);
+            }
+            SimEvent::Changed => cx.notify(),
+            SimEvent::Fallback => self.refresh_sim(pane, false, window, cx),
+        }
+    }
+
+    /// Runs a helper for every sim pane drawn now (or popped out) and stops the rest. Called
+    /// after a canvas render with the panes it drew; changes only what differs.
+    #[cfg(target_os = "macos")]
+    pub(super) fn show_sims(&self, drawn: &[String], cx: &mut Context<Self>) {
+        let changed: Vec<(Entity<SimScreen>, bool)> = self.canvas_state.sims.iter().filter_map(|(id, view)| {
+            let screen = view.live.as_ref()?;
+            let shown = drawn.contains(id) || view.popped.is_some();
+            (screen.read(cx).shown != shown).then(|| (screen.clone(), shown))
+        }).collect();
+        if changed.is_empty() { return; }
+        cx.defer(move |cx| for (screen, shown) in changed { screen.update(cx, |s, cx| { s.shown = shown; s.sync(cx); }); });
     }
 
     /// Points a sim pane at a simulator (empty: back to the list) and shows it, booting it if needed.
@@ -159,19 +251,193 @@ impl AppWindow {
         self.canvas_state.selected.iter().rev().find(|id| doc.panes.iter().any(|p| &p.id == *id && p.sim().is_some())).cloned()
     }
 
-    /// canvas.sim_refresh, canvas.sim_device and canvas.sim_hub.
-    pub(in crate::window) fn sim_command(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if name == "canvas.sim_hub" {
-            let r = sim::open_device_hub();
-            if let Err(e) = &r { self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx); }
-            return self.answer(r.map(|_| json!({})));
+    /// The `canvas.sim_*` commands; all but sim_hub, sim_reveal and sim_input act on the sim
+    /// pane named by `pane`, else the selected one.
+    pub(in crate::window) fn sim_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        let toast = |this: &mut Self, e: &str, window: &mut Window, cx: &mut Context<Self>| this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx);
+        match name {
+            "canvas.sim_hub" => {
+                let r = sim::open_device_hub();
+                if let Err(e) = &r { toast(self, e, window, cx); }
+                return self.answer(r.map(|_| json!({})));
+            }
+            "canvas.sim_reveal" => {
+                let Some(path) = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()) else { return self.fail("canvas.sim_reveal needs an absolute path") };
+                let r = std::process::Command::new("open").arg("-R").arg(path).status().map_err(|e| format!("Can't show {path}: {e}"));
+                return self.answer(r.map(|_| json!({})));
+            }
+            "canvas.sim_input" => return self.sim_input(a, window, cx),
+            _ => {}
         }
-        let Some(id) = self.selected_sim() else { return self.fail(format!("{name}: select a simulator pane first")) };
-        if name == "canvas.sim_device" { self.point_sim(&id, String::new(), window, cx); } else { self.refresh_sim(&id, false, window, cx); }
+        let named = a["pane"].as_str().filter(|id| self.canvas_state.doc.panes.iter().any(|p| &p.id == id && p.sim().is_some())).map(str::to_owned);
+        let Some(id) = named.or_else(|| self.selected_sim()) else { return self.fail(format!("{name}: select a simulator pane first, or name one with pane")) };
+        match name {
+            "canvas.sim_device" => return self.sim_picker(&id, window, cx),
+            "canvas.sim_refresh" => {
+                #[cfg(target_os = "macos")]
+                if let Some(screen) = self.canvas_state.sims.get(&id).and_then(|v| v.live.clone()) { screen.update(cx, |s, cx| s.retry(cx)); }
+                self.refresh_sim(&id, false, window, cx);
+            }
+            #[cfg(target_os = "macos")]
+            _ => {
+                let Some(screen) = self.canvas_state.sims.get(&id).and_then(|v| v.live.clone()) else {
+                    return self.fail(format!("{name}: the simulator is not booted"));
+                };
+                let result = match name {
+                    "canvas.sim_home" => { screen.update(cx, |s, _| s.press("home", By::You)); Ok(json!({})) }
+                    "canvas.sim_screenshot" => screen.update(cx, |s, cx| s.screenshot(By::You, cx)).map(|p| json!({"path":p})),
+                    "canvas.sim_record" => screen.update(cx, |s, cx| s.record(By::You, cx)).map(|p| json!({"path":p})),
+                    "canvas.sim_annotate" => screen.update(cx, |s, cx| s.annotate(cx)).map(|_| json!({})),
+                    "canvas.sim_zoom" => self.zoom_sim(&id, a["step"].as_str().unwrap_or("actual"), &screen, cx),
+                    "canvas.sim_pop" => { self.pop_sim(&id, &screen, window, cx); Ok(json!({})) }
+                    _ => Err(format!("unknown command {name}")),
+                };
+                if let Err(e) = &result { toast(self, e, window, cx); }
+                return self.answer(result);
+            }
+            #[cfg(not(target_os = "macos"))]
+            _ => return self.fail("Live simulators need macOS"),
+        }
         self.answer(Ok(json!({})));
     }
 
-    /// The body of a sim pane: its screen, or what stands in for it.
+    /// The simulator picker: every available simulator, the current one checked, with Xcode's
+    /// version on top. Picking one points the pane at it, booting it.
+    fn sim_picker(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.canvas_state.sims.get(id) else { return self.answer(Ok(json!({}))) };
+        let current = view.device.as_ref().map(|d| d.udid.as_str());
+        let mut items = vec![json!([sim::xcode_version().unwrap_or_else(|| "Xcode".into()), null, {}])];
+        for d in &view.devices {
+            let mark = if Some(d.udid.as_str()) == current { "✓ " } else { "" };
+            let state = if d.booted { " · Booted" } else { "" };
+            items.push(json!([format!("{mark}{} · {}{state}", d.name, d.runtime), "canvas.pane_open", {"pane":id,"target":d.udid}]));
+        }
+        items.push(json!(["Open Device Hub", "canvas.sim_hub", {}]));
+        self.open_menu("primary", json!({"items":items}), None, window, cx);
+        self.answer(Ok(json!({})));
+    }
+
+    /// Resizes a sim pane so its device draws at 1 point per pixel ("actual"), or one step
+    /// larger ("in") or smaller ("out"). The top left stays put.
+    #[cfg(target_os = "macos")]
+    fn zoom_sim(&mut self, id: &str, step: &str, screen: &Entity<SimScreen>, cx: &mut Context<Self>) -> Result<Value, String> {
+        let s = screen.read(cx);
+        let Some(points) = s.points() else { return Err("The device size is not known yet".into()) };
+        let now = s.scale().unwrap_or(1.);
+        let scale = match step { "in" => now * 1.25, "out" => now * 0.8, _ => 1. }.clamp(0.2, 3.);
+        let chrome = s.info.as_ref().and_then(|i| i.chrome.as_ref());
+        let outer = chrome.map_or(points, |c| [c.size[0] + 2. * c.pad, c.size[1]]);
+        let margin = 2. * super::sim_screen::MARGIN;
+        let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return Err(format!("no pane {id}")) };
+        // The body is the pane minus its 36 px header and 1 px borders.
+        pane.rect[2] = outer[0] * scale + margin + 2.;
+        pane.rect[3] = outer[1] * scale + margin + canvas::HEADER + 2.;
+        self.solve_layout(Some(id), None, cx);
+        self.canvas_changed(cx);
+        cx.notify();
+        Ok(json!({"scale":scale}))
+    }
+
+    /// Pops a sim pane's device out into its own window, or brings it back.
+    #[cfg(target_os = "macos")]
+    fn pop_sim(&mut self, id: &str, screen: &Entity<SimScreen>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.canvas_state.sims.get_mut(id) else { return };
+        if let Some(handle) = view.popped.take() {
+            let _ = handle.update(cx, |_, window, _| window.remove_window());
+            screen.update(cx, |s, cx| { s.popped = false; cx.notify(); });
+            return cx.notify();
+        }
+        let (name, runtime) = { let d = &screen.read(cx).device; (d.name.clone(), d.runtime.clone()) };
+        let owner = window.window_handle().downcast::<AppWindow>().unwrap();
+        let app = cx.entity().downgrade();
+        let (pane, closed, shown) = (id.to_owned(), id.to_owned(), screen.clone());
+        let outer = screen.read(cx).info.as_ref().and_then(|i| i.chrome.as_ref()).map_or([454., 908.], |c| [c.size[0] + 2. * c.pad, c.size[1]]);
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(outer[0] * 0.8 + 40.), px(outer[1] * 0.8 + 80.)), cx))),
+            ..Default::default()
+        };
+        let opened_by = owner;
+        let id = id.to_owned();
+        let screen = screen.clone();
+        // Opening draws the window at once, and its helper bar reads this window: open it once
+        // this update has ended, or gpui refuses the nested update.
+        cx.defer(move |cx| {
+            let opened = cx.open_window(options, move |window, cx| {
+                window.set_window_title(&format!("{name} · {runtime}"));
+                window.on_window_should_close(cx, move |_, cx| {
+                    let _ = owner.update(cx, |this, _, cx| {
+                        if let Some(view) = this.canvas_state.sims.get_mut(&closed) {
+                            view.popped = None;
+                            if let Some(s) = &view.live { s.update(cx, |s, cx| { s.popped = false; cx.notify(); }); }
+                        }
+                        cx.notify();
+                    });
+                    true
+                });
+                cx.new(|cx| {
+                    // The bar's labels follow the pane's state.
+                    let follow = app.upgrade().map(|app| cx.observe(&app, |_, _, cx| cx.notify()));
+                    SimWindow { app, pane, screen: shown, _follow: follow }
+                })
+            });
+            let _ = opened_by.update(cx, |this, window, cx| match opened {
+                Ok(handle) => {
+                    if let Some(view) = this.canvas_state.sims.get_mut(&id) { view.popped = Some(handle); }
+                    screen.update(cx, |s, cx| { s.popped = true; s.shown = true; s.sync(cx); cx.notify(); });
+                    cx.notify();
+                }
+                Err(e) => this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":format!("Can't open a window: {e}")}}), window, cx),
+            });
+        });
+        cx.notify();
+    }
+
+    /// A sim pane's helper bar labels for its state: stop a recording, end an annotation,
+    /// bring a popped-out device back.
+    #[cfg(target_os = "macos")]
+    pub(super) fn sim_relabel(&self, id: &str, mut actions: Vec<super::helper_bar::BarAction>, cx: &App) -> Vec<super::helper_bar::BarAction> {
+        let Some(screen) = self.canvas_state.sims.get(id).and_then(|v| v.live.as_ref()) else { return actions };
+        let s = screen.read(cx);
+        for a in &mut actions {
+            match a.command.as_str() {
+                "canvas.sim_record" if s.recording.is_some() => { a.icon = "icons/square.svg".into(); a.label = "Stop recording".into(); }
+                "canvas.sim_annotate" if s.annotation.is_some() => a.label = "Cancel annotation".into(),
+                "canvas.sim_pop" if s.popped => a.label = "Bring back".into(),
+                _ => {}
+            }
+        }
+        actions
+    }
+
+    /// The helper bar of a popped-out sim pane's window: the device's own actions.
+    #[cfg(target_os = "macos")]
+    pub(super) fn sim_bar(&self, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        const KEEP: [&str; 6] = ["canvas.sim_home", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate", "canvas.sim_device", "canvas.sim_pop"];
+        let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
+        let actions = super::helper_bar::pane_actions(pane, None).into_iter().filter(|a| KEEP.contains(&a.command.as_str())).collect();
+        let actions = self.sim_relabel(id, actions, cx);
+        Some(self.bar(id, actions, 1., false, cx).into_any_element())
+    }
+
+    /// `canopy pane tap|swipe|type|press`: an agent's input for a sim pane, in device points.
+    fn sim_input(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(not(target_os = "macos"))]
+        { let _ = (a, window, cx); return self.fail("Live simulators need macOS"); }
+        #[cfg(target_os = "macos")]
+        {
+            let Some(id) = a["pane"].as_str() else { return self.fail("canvas.sim_input needs pane") };
+            if !self.canvas_state.doc.panes.iter().any(|p| p.id == id && p.sim().is_some()) { return self.fail(format!("{id} is not a simulator pane")); }
+            let Some(screen) = self.canvas_state.sims.get(id).and_then(|v| v.live.clone()) else {
+                return self.fail(format!("{id}: the simulator is not booted; boot it with canopy pane open {id} <udid>"));
+            };
+            let steps = match agent_steps(a, screen.read(cx).points()) { Ok(steps) => steps, Err(e) => return self.fail(e) };
+            screen.update(cx, |s, cx| s.agent(steps, cx));
+            let _ = window;
+            self.answer(Ok(json!({})));
+        }
+    }
+
+    /// The body of a sim pane: its device, or what stands in for it.
     pub(super) fn sim_body(&self, card: &canvas::Pane, cx: &mut Context<Self>) -> AnyElement {
         let id = card.id.clone();
         let name = self.sim_device(card).map_or("the simulator".to_owned(), |d| d.name.clone());
@@ -186,6 +452,15 @@ impl AppWindow {
                 .on_click(cx.listener(move |this, _, window, cx| action(this, &id, window, cx)))
         };
         let Some(view) = self.canvas_state.sims.get(&id) else { return center().into_any_element() };
+        #[cfg(target_os = "macos")]
+        if let Some(screen) = view.live.as_ref().filter(|_| matches!(view.screen, Screen::Shot(_) | Screen::Loading)) {
+            if view.popped.is_some() {
+                return center().child(note(format!("{name} is in its own window"))).child(button("Bring back", cx, |this, id, w, cx| {
+                    if let Some(screen) = this.canvas_state.sims.get(id).and_then(|v| v.live.clone()) { this.pop_sim(id, &screen, w, cx); }
+                })).into_any_element();
+            }
+            return div().size_full().bg(c("canvas")).child(AnyView::from(screen.clone()).cached(StyleRefinement::default().size_full())).into_any_element();
+        }
         match &view.screen {
             Screen::Shot(image) => center().p(px(8.)).child(img(image.clone()).size_full().object_fit(gpui::ObjectFit::Contain)).into_any_element(),
             Screen::Loading => center().into_any_element(),
@@ -213,31 +488,132 @@ impl AppWindow {
         self.canvas_state.sims.get(&card.id)?.device.as_ref().filter(|d| card.sim() == Some(d.udid.as_str()))
     }
 
-    /// The header title and detail of a sim pane.
-    pub(super) fn sim_title(&self, card: &canvas::Pane) -> (String, String) {
-        match self.sim_device(card) {
-            Some(d) => (d.name.clone(), if d.booted { d.runtime.clone() } else { format!("{} · Shut down", d.runtime) }),
-            None => ("Simulator".into(), String::new()),
+    /// The header title and detail of a sim pane: name, then runtime and live status.
+    pub(super) fn sim_title(&self, card: &canvas::Pane, cx: &App) -> (String, String) {
+        let Some(d) = self.sim_device(card) else { return ("Simulator".into(), String::new()) };
+        if !d.booted { return (d.name.clone(), format!("{} · Shut down", d.runtime)); }
+        #[cfg(target_os = "macos")]
+        if let Some(screen) = self.canvas_state.sims.get(&card.id).and_then(|v| v.live.as_ref()) {
+            return (d.name.clone(), format!("{} · {}", d.runtime, screen.read(cx).status()));
         }
+        let _ = cx;
+        (d.name.clone(), d.runtime.clone())
     }
 
-    /// `canopy pane read` for a sim pane: the device and where its latest screenshot is.
-    pub(super) fn sim_read(&self, id: &str, udid: &str) -> String {
+    /// `canopy pane read` for a sim pane: the device, its screen as a fresh PNG, what you and
+    /// agents did lately, and how to drive it.
+    pub(super) fn sim_read(&self, id: &str, udid: &str, cx: &App) -> String {
         let view = self.canvas_state.sims.get(id);
         let device = view.and_then(|v| v.device.as_ref());
-        let png = view.and_then(|v| v.png.as_ref()).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-        let mut attrs = vec![("udid", udid)];
-        if let Some(d) = device { attrs.extend([("name", d.name.as_str()), ("runtime", d.runtime.as_str()), ("state", if d.booted { "booted" } else { "shutdown" })]); }
-        if !png.is_empty() { attrs.push(("screenshot", png.as_str())); }
+        let mut png = view.and_then(|v| v.png.as_ref()).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut attrs = vec![("udid", udid.to_owned())];
+        let mut extra = String::new();
+        #[cfg(target_os = "macos")]
+        if let Some(screen) = view.and_then(|v| v.live.as_ref()).map(|s| s.read(cx)) {
+            let fresh = std::env::temp_dir().join("canopy").join(format!("sim-{id}-now.png"));
+            if std::fs::create_dir_all(fresh.parent().unwrap()).is_ok() && screen.save_now(&fresh) { png = fresh.to_string_lossy().into_owned(); }
+            attrs.push(("live", (if matches!(screen.live, Live::On { input: true }) { "yes" } else { "no" }).to_owned()));
+            if let Some([w, h]) = screen.points() { attrs.push(("points", format!("{w}x{h}"))); }
+            if let Some(r) = &screen.recording { attrs.push(("recording", r.path.to_string_lossy().into_owned())); }
+            if !screen.log.is_empty() { extra = format!("\n\nRecent activity (local time):\n{}", screen.log.iter().map(|l| format!("- {l}")).collect::<Vec<_>>().join("\n")); }
+            extra.push_str(&format!("\n\nDrive it in device points (0,0 is the top left): canopy pane tap {id} <x> <y>, canopy pane swipe {id} <x1> <y1> <x2> <y2> [ms], canopy pane type {id} <text>, canopy pane press {id} home|lock|siri|volume-up|volume-down|action."));
+        }
+        let _ = cx;
+        if let Some(d) = device { attrs.extend([("name", d.name.clone()), ("runtime", d.runtime.clone()), ("state", (if d.booted { "booted" } else { "shutdown" }).to_owned())]); }
+        if !png.is_empty() { attrs.push(("screenshot", png.clone())); }
         let body = match (udid.is_empty(), device, png.is_empty()) {
             _ if let Some(Screen::Failed(error)) = view.map(|v| &v.screen) => format!("The last refresh failed: {error}"),
             _ if matches!(view.map(|v| &v.screen), Some(Screen::Loading | Screen::Booting)) => "Refreshing; read again in a moment.".to_owned(),
             (true, ..) => "No simulator picked yet.".to_owned(),
             (_, None, _) => "The simulator is not available.".to_owned(),
-            (_, Some(d), false) => format!("{} ({}). The screenshot file shows its screen as last refreshed. Refresh it with: canopy pane open {id} {udid}", d.name, d.runtime),
+            (_, Some(d), false) => format!("{} ({}). The screenshot file shows its screen.{extra}", d.name, d.runtime),
             (_, Some(d), true) => format!("{} ({}) has no screenshot yet. Boot it and show it with: canopy pane open {id} {udid}", d.name, d.runtime),
         };
+        let attrs: Vec<(&str, &str)> = attrs.iter().map(|(k, v)| (*k, v.as_str())).collect();
         canvas::envelope(id, "sim", &attrs, &body)
+    }
+}
+
+/// An agent's input request as steps, checked against the screen size in points.
+#[cfg(target_os = "macos")]
+fn agent_steps(a: &Value, points: Option<[f32; 2]>) -> Result<Vec<AgentStep>, String> {
+    use crate::sim_live::Input;
+    let [w, h] = points.ok_or("the screen size is not known yet; try again in a moment")?;
+    let num = |key: &str| a[key].as_f64().ok_or_else(|| format!("canvas.sim_input: {key} must be a number"));
+    let at = |x: f64, y: f64| -> Result<[f64; 2], String> {
+        if !(0.0..=w as f64).contains(&x) || !(0.0..=h as f64).contains(&y) { return Err(format!("({x}, {y}) is outside the {w}x{h} point screen")); }
+        Ok([x / w as f64, y / h as f64])
+    };
+    match a["action"].as_str().unwrap_or_default() {
+        "tap" => {
+            let (x, y) = (num("x")?, num("y")?);
+            let p = at(x, y)?;
+            Ok(vec![AgentStep::Input(Input::Gesture { ms: 60, from: p, to: p }), AgentStep::Note(format!("tapped ({x}, {y})"))])
+        }
+        "swipe" => {
+            let (x1, y1, x2, y2) = (num("x1")?, num("y1")?, num("x2")?, num("y2")?);
+            let (from, to) = (at(x1, y1)?, at(x2, y2)?);
+            let ms = a["ms"].as_u64().unwrap_or(300).clamp(50, 5000);
+            Ok(vec![AgentStep::Input(Input::Gesture { ms, from, to }), AgentStep::Note(format!("swiped from ({x1}, {y1}) to ({x2}, {y2}) in {ms} ms"))])
+        }
+        "type" => {
+            let text = a["text"].as_str().filter(|t| !t.is_empty()).ok_or("canvas.sim_input: type needs text")?;
+            let (_, skipped) = crate::sim_live::type_text(text);
+            if skipped > 0 { return Err(format!("{skipped} characters can't be typed on a US hardware keyboard; paste them instead")); }
+            Ok(vec![AgentStep::Type(text.to_owned())])
+        }
+        "press" => {
+            let button = a["button"].as_str().unwrap_or_default();
+            if !crate::sim_live::BUTTONS.iter().any(|(n, ..)| *n == button) {
+                return Err(format!("unknown button {button:?}; use one of: {}", crate::sim_live::BUTTONS.iter().map(|b| b.0).collect::<Vec<_>>().join(", ")));
+            }
+            Ok(vec![AgentStep::Press(button.to_owned())])
+        }
+        other => Err(format!("canvas.sim_input: unknown action {other:?} (tap, swipe, type or press)")),
+    }
+}
+
+/// A sim pane's device in its own window, with the pane's helper bar along the bottom.
+#[cfg(target_os = "macos")]
+pub(super) struct SimWindow {
+    app: WeakEntity<AppWindow>,
+    pane: String,
+    screen: Entity<SimScreen>,
+    _follow: Option<Subscription>,
+}
+
+#[cfg(target_os = "macos")]
+impl Render for SimWindow {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let bar = self.app.update(cx, |app, cx| app.sim_bar(&self.pane, cx)).ok().flatten();
+        div().size_full().flex().flex_col().bg(c("canvas")).text_color(c("foreground")).font_family(".SystemUIFont")
+            .child(div().flex_1().min_h_0().child(AnyView::from(self.screen.clone())))
+            .when_some(bar, |d, bar| d.child(div().flex().justify_center().pb(px(12.)).child(bar)))
+    }
+}
+
+#[cfg(test)]
+#[cfg(target_os = "macos")]
+mod tests {
+    use super::{AgentStep, agent_steps};
+    use crate::sim_live::Input;
+    use serde_json::json;
+
+    fn inputs(steps: &[AgentStep]) -> Vec<Input> {
+        steps.iter().filter_map(|s| if let AgentStep::Input(i) = s { Some(*i) } else { None }).collect()
+    }
+
+    #[test]
+    fn agent_points_map_to_the_screen() {
+        let pts = Some([402., 874.]);
+        let tap = agent_steps(&json!({"action":"tap","x":201,"y":437}), pts).unwrap();
+        assert_eq!(inputs(&tap), [Input::Gesture { ms: 60, from: [0.5, 0.5], to: [0.5, 0.5] }]);
+        assert_eq!(agent_steps(&json!({"action":"tap","x":500,"y":10}), pts).err().unwrap(), "(500, 10) is outside the 402x874 point screen");
+        let swipe = agent_steps(&json!({"action":"swipe","x1":0,"y1":0,"x2":402,"y2":874,"ms":100}), pts).unwrap();
+        assert_eq!(inputs(&swipe), [Input::Gesture { ms: 100, from: [0., 0.], to: [1., 1.] }]);
+        assert!(agent_steps(&json!({"action":"type","text":"héllo"}), pts).unwrap_err().starts_with("1 characters"));
+        assert!(agent_steps(&json!({"action":"press","button":"menu"}), pts).unwrap_err().starts_with("unknown button"));
+        assert!(agent_steps(&json!({"action":"tap","x":1,"y":1}), None).is_err());
     }
 }
 

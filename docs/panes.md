@@ -141,22 +141,46 @@ and labels each page's text with `[page N]` in the body.
 
 ## Simulator
 
-A sim pane shows an iOS Simulator's screen on a Mac with Xcode. Click Simulator
-on the toolbar (shown only when `xcrun simctl` exists) and pick a simulator, or run
-`canopy pane new sim [<udid>|booted] [--wire]`. Picking a shut down simulator
+A sim pane is an iOS Simulator on the canvas, live, in Xcode's own bezel. Click
+Simulator on the toolbar (shown only when `xcrun simctl` exists) and pick a simulator,
+or run `canopy pane new sim [<udid>|booted] [--wire]`. Picking a shut down simulator
 boots it.
 
-The screen is a screenshot (`xcrun simctl io <udid> screenshot`), taken when the
-pane opens or loads, on Refresh, and on `canopy pane open pN <udid>`. Nothing
-polls: the pane changes only when you or an agent ask. It shows the screen and does
-not take taps; use the simulator in Xcode's Device Hub.
+**Use it.** Click to tap, drag to swipe, two-finger scroll on a trackpad to scroll.
+After a click the pane takes the keyboard: typing goes to the simulator (US layout),
+Cmd+V types the clipboard, Cmd+Shift+H is Home, Escape gives the keyboard back to the
+canvas. The bezel's side buttons (action, volume, power) press like the real ones.
+The header says the runtime and the state: Live, Connecting, Screenshot or Recording.
 
-- Helper bar: Refresh, Choose simulator, Open in Device Hub, Connect, Close.
-- `canopy pane open pN <udid|booted>` points the pane at a simulator and boots it;
-  its own udid refreshes the screenshot.
-- `canopy pane read pN` gives the udid, name, runtime, state and the latest
-  screenshot file (`<temp>/canopy/sim-pN.png`).
-- Saved as `{"kind":"sim","props":{"udid":"…"}}`; an empty udid shows the list.
+- Helper bar: Home, Screenshot, Record, Annotate, Zoom out, Actual size, Zoom in, Pop
+  out, Choose simulator, Refresh, Open in Device Hub, Connect, Close.
+- Screenshot and Record save to the Desktop with Simulator's file names; the toast
+  shows the file in Finder. Record again to stop.
+- Annotate freezes the screen; draw on it, then Send to agent opens the quote menu with
+  the marked PNG (the agent gets `@<path>` and what it shows). Escape or Cancel ends it.
+- Actual size draws the device at 1 point per canvas pixel; Zoom in and out step by 25%.
+- Pop out moves the device into its own window with its own bar; close the window or
+  press Bring back to return it.
+- Choose simulator opens a menu of every simulator, Xcode's version on top.
 
-Agents drive simulators with `xcrun simctl` or Xcode's MCP tools
-(`xcrun mcpbridge`), then refresh the pane so the person sees the result.
+**Agents** drive it in device points, 0,0 at the top left:
+`canopy pane tap pN <x> <y>`, `swipe pN <x1> <y1> <x2> <y2> [ms]`, `type pN <text>`,
+`press pN home|lock|power|siri|volume-up|volume-down|action`. They start the device for
+15 seconds even when the pane is off screen. `canopy pane read pN` gives the udid,
+name, runtime, state, `live`, the size in points, a fresh screenshot of the live screen
+(`<temp>/canopy/sim-pN-now.png`) and the last 12 things the person and agents did. Apps
+are installed and launched with `xcrun simctl`. Saved as
+`{"kind":"sim","props":{"udid":"…"}}`; an empty udid shows the list.
+
+**How it works.** While the pane is drawn (or popped out), Canopy starts a copy of
+itself as the simulator helper under `sandbox-exec`: no network, reads only the system,
+Xcode and `~/Library/Developer/CoreSimulator`. The helper (src/sim_live.m, after facebook/idb)
+opens the simulator through CoreSimulator and hands Canopy the framebuffer IOSurface
+over a Mach port; Canopy draws it with gpui's `surface()`, with no copy or video
+encoding. Then the helper writes one line per presented frame, so a still screen costs
+nothing. Input goes back on its stdin and reaches the guest over DTUHID. The pane
+leaving the screen, closing or the app quitting stops the helper. If it fails, a toast
+says why and the pane shows a `simctl` screenshot (taken on open, Refresh and
+`canopy pane open`); Refresh tries live again. The bezel is Xcode's DeviceKit artwork,
+rendered once to `<temp>/canopy/sim-chrome`. Recording uses `simctl io recordVideo`.
+Rotation is not supported yet.

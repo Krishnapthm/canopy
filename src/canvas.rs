@@ -686,7 +686,7 @@ pub const PANE_KINDS: &[(&str, &[&str])] = &[
     ("file", &["read", "shot", "close"]),
     ("image", &["read", "shot", "close"]),
     ("pdf", &["read", "shot", "close"]),
-    ("sim", &["read", "shot", "open", "close"]),
+    ("sim", &["read", "shot", "open", "tap", "swipe", "type", "press", "close"]),
 ];
 
 /// The pane kind for a local file, picked by extension.
@@ -1151,7 +1151,7 @@ mod tests {
         assert_eq!(pane.kind_name(), "sub");
         assert!(pane.verbs().is_empty());
         pane.kind = Kind::Sim { udid: "U1".into() };
-        assert_eq!((pane.kind_name(), pane.verbs(), pane.sim(), pane.boxed()), ("sim", &["read", "shot", "open", "close"][..], Some("U1"), true));
+        assert_eq!((pane.kind_name(), pane.verbs(), pane.sim(), pane.boxed()), ("sim", &["read", "shot", "open", "tap", "swipe", "type", "press", "close"][..], Some("U1"), true));
         let saved = serde_json::to_value(RawKind::from(pane.kind.clone())).unwrap();
         assert_eq!(saved, serde_json::json!({"kind":"sim","props":{"udid":"U1"}}));
         assert_eq!(Kind::try_from(serde_json::from_value::<RawKind>(saved).unwrap()).unwrap(), pane.kind);

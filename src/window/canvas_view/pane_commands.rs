@@ -6,7 +6,7 @@ impl AppWindow {
     pub(in crate::window) fn pane_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
         let r = match name {
             "canvas.pane_new" => self.pane_new(a, window, cx),
-            "canvas.pane_read" => self.pane_read(a),
+            "canvas.pane_read" => self.pane_read(a, cx),
             "canvas.pane_set" => self.pane_set(a, cx),
             "canvas.pane_shot" => self.pane_shot(a, window),
             _ => self.pane_open(a, window, cx),
@@ -73,7 +73,7 @@ impl AppWindow {
         Ok(json!({}))
     }
 
-    fn pane_read(&self, a: &Value) -> Result<Value, String> {
+    fn pane_read(&self, a: &Value, cx: &App) -> Result<Value, String> {
         let Some(id) = a["pane"].as_str() else { return Err("canvas.pane_read needs pane".into()); };
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
         match &pane.kind {
@@ -87,7 +87,7 @@ impl AppWindow {
             }
             canvas::Kind::Pdf { path, .. } => Ok(json!({"text":pdf::read_pdf(id, path)?})),
             canvas::Kind::Mod { kind, props } => Ok(json!({"text":canvas::envelope(id, kind, &[], props.get("text").and_then(Value::as_str).unwrap_or(""))})),
-            canvas::Kind::Sim { udid } => Ok(json!({"text":self.sim_read(id, udid)})),
+            canvas::Kind::Sim { udid } => Ok(json!({"text":self.sim_read(id, udid, cx)})),
             canvas::Kind::Terminal { .. } => Err(format!("pane {id} is a terminal: read it with hc read {id}")),
             canvas::Kind::Sub { parent, .. } => Err(format!("pane {id} is a sub-agent cell: read its parent with hc read {parent}")),
         }
@@ -165,13 +165,13 @@ mod tests {
             let reply = this.pane_new(&json!({"kind":"mod:note","wire":"t1"}), window, cx).unwrap();
             assert_eq!(reply, json!({"pane":"p1","kind":"mod:note","wired":true}));
             assert_eq!(crate::wire::neighbors(&this.canvas_state.doc.wires, "t1"), ["p1"]);
-            assert_eq!(this.pane_read(&json!({"pane":"p1"})).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], ""));
+            assert_eq!(this.pane_read(&json!({"pane":"p1"}), cx).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], ""));
             assert!(this.pane_set(&json!({"pane":"p1","props":{"text":"hello"}}), cx).is_ok());
-            assert_eq!(this.pane_read(&json!({"pane":"p1"})).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], "hello"));
+            assert_eq!(this.pane_read(&json!({"pane":"p1"}), cx).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], "hello"));
             assert_eq!(this.pane_set(&json!({"pane":"p1","props":3}), cx).unwrap_err(), "canvas.pane_set: props must be an object");
             assert_eq!(this.pane_set(&json!({"pane":"t1","props":{}}), cx).unwrap_err(), "pane t1 is a terminal: only mod panes take canvas.pane_set");
             assert_eq!(this.pane_set(&json!({"pane":"p1","props":{"text":"x".repeat(1024 * 1024 + 1)}}), cx).unwrap_err(), "canvas.pane_set: props over 1 MiB");
-            assert_eq!(this.pane_read(&json!({"pane":"p1"})).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], "hello"));
+            assert_eq!(this.pane_read(&json!({"pane":"p1"}), cx).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], "hello"));
             assert_eq!(this.pane_set(&json!({"props":{}}), cx).unwrap_err(), "canvas.pane_set needs pane");
             // An agent cannot delete the person's text; the confirmed dialog's list can.
             this.close_canvas_cell(&json!({"pane":"p1"}), window, cx);
@@ -184,7 +184,7 @@ mod tests {
             assert!(this.canvas_state.doc.wires.is_empty());
             // A sim pane before simctl answers: read says what it knows; open needs a target.
             this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.], z: 9, space: None });
-            assert_eq!(this.pane_read(&json!({"pane":"p9"})).unwrap()["text"], canvas::envelope("p9", "sim", &[("udid", "")], "No simulator picked yet."));
+            assert_eq!(this.pane_read(&json!({"pane":"p9"}), cx).unwrap()["text"], canvas::envelope("p9", "sim", &[("udid", "")], "No simulator picked yet."));
             assert_eq!(this.pane_open(&json!({"pane":"p9"}), window, cx).unwrap_err(), "canvas.pane_open needs target");
         });
     }
@@ -204,10 +204,10 @@ mod tests {
             let id = reply["pane"].as_str().unwrap();
             assert_eq!(reply["wired"], true);
             assert_eq!(crate::wire::neighbors(&this.canvas_state.doc.wires, "t1"), [id]);
-            let read = this.pane_read(&json!({"pane":id})).unwrap();
+            let read = this.pane_read(&json!({"pane":id}), cx).unwrap();
             assert_eq!(read["text"], canvas::envelope(id, "file", &[("path", reply["path"].as_str().unwrap())], &canvas::read_preview(&path).unwrap()));
-            assert_eq!(this.pane_read(&json!({"pane":"missing"})).unwrap_err(), "no pane missing");
-            assert_eq!(this.pane_read(&json!({"pane":"t1"})).unwrap_err(), "pane t1 is a terminal: read it with hc read t1");
+            assert_eq!(this.pane_read(&json!({"pane":"missing"}), cx).unwrap_err(), "no pane missing");
+            assert_eq!(this.pane_read(&json!({"pane":"t1"}), cx).unwrap_err(), "pane t1 is a terminal: read it with hc read t1");
             assert_eq!(this.pane_open(&json!({"pane":id,"target":"x"}), window, cx).unwrap_err(), format!("pane {id} (file) has no verb open"));
             this.canvas_state.doc.room = Some("other".into());
             assert_eq!(this.pane_shot(&json!({"pane":id}), window).unwrap_err(), format!("pane {id} is in another space: go there first"));
@@ -240,7 +240,7 @@ mod tests {
         view.update_in(cx, |this, window, cx| {
             let png = this.run_as("canvas.pane_new", json!({"kind":"file","path":image}), false, window, cx);
             assert_eq!(png["kind"], "image", "{png}");
-            let read = this.pane_read(&json!({"pane":png["pane"]})).unwrap();
+            let read = this.pane_read(&json!({"pane":png["pane"]}), cx).unwrap();
             assert!(read["text"].as_str().unwrap().contains("kind=\"image\""));
             assert!(read["text"].as_str().unwrap().contains("size=\"10x6\""));
             // A PNG saved as .jpg still opens: the size is read from the bytes.
@@ -252,7 +252,7 @@ mod tests {
             assert_eq!(reply["kind"], "pdf", "{reply}");
             assert_eq!(std::fs::read(&pdf).unwrap(), bytes);
             let id = reply["pane"].as_str().unwrap();
-            let read = this.pane_read(&json!({"pane":id})).unwrap();
+            let read = this.pane_read(&json!({"pane":id}), cx).unwrap();
             let text = read["text"].as_str().unwrap();
             assert!(text.contains("pages=\"1\""), "{text}");
             assert!(text.contains("[page 1]\nHello canvas"), "{text}");

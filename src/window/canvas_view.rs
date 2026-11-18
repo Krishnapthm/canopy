@@ -10,6 +10,8 @@ mod pane_commands;
 mod image_pane;
 mod pdf;
 mod sim;
+#[cfg(target_os = "macos")]
+mod sim_screen;
 
 /// What an inline name edit renames: a space (by id) or the tab of a cell (by tab id).
 #[derive(Clone, PartialEq)]
@@ -2766,12 +2768,17 @@ impl AppWindow {
             };
             area = area.child(self.pane_card(card, icon, title, String::new(), body, camera, cx));
         }
+        let mut drawn_sims = vec![];
         for card in shown_doc.panes.iter().filter(|p| p.sim().is_some() && shown_doc.shows(p.space.as_ref())) {
             if !canvas::visible(camera, card.rect, viewport) { continue; }
-            let (title, detail) = self.sim_title(card);
+            drawn_sims.push(card.id.clone());
+            let (title, detail) = self.sim_title(card, cx);
             let body = self.sim_body(card, cx);
             area = area.child(self.pane_card(card, "icons/smartphone.svg".into(), title, detail, body, camera, cx));
         }
+        // A live simulator streams only while its pane is drawn.
+        #[cfg(target_os = "macos")]
+        self.show_sims(&drawn_sims, cx);
         let cards: HashMap<_, _> = shown_doc
             .panes
             .iter()
@@ -3705,7 +3712,10 @@ fn format_quote(quote: &Value, cwd: Option<&str>) -> String {
     }
     let text = quote["text"].as_str().unwrap_or_default().trim_end_matches(['\r', '\n']);
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default();
-    let body = if ext.eq_ignore_ascii_case("md") {
+    // An image (a sim pane's annotation) is the file and what it shows, not a code block.
+    let body = if ["png", "jpg", "jpeg"].iter().any(|e| ext.eq_ignore_ascii_case(e)) {
+        format!("{header}\n{text}")
+    } else if ext.eq_ignore_ascii_case("md") {
         format!("{header}\n{}", text.split('\n').map(|line| format!("> {line}")).collect::<Vec<_>>().join("\n"))
     } else { format!("{header}\n```{ext}\n{text}\n```") };
     with_message(quote, body)
@@ -3798,6 +3808,7 @@ mod quote_tests {
         assert_eq!(format_quote(&json!({"path":"/a.md","start":12,"end":12,"text":"a\n"}), None), "@/a.md:12\n> a");
         assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","message":"  why?\n"}), None), "@/a.md\n> a\n\nwhy?");
         assert_eq!(format_quote(&json!({"path":"/a.md","text":"a","message":" "}), None), "@/a.md\n> a");
+        assert_eq!(format_quote(&json!({"path":"/t/s.png","text":"Annotated screenshot","message":"fix this"}), None), "@/t/s.png\nAnnotated screenshot\n\nfix this");
     }
 }
 
