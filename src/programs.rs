@@ -99,12 +99,14 @@ pub fn startable() -> Vec<Value> {
     })
 }
 
-/// Each startable agent's command (`run[0]`) and its skills folder, `~/` expanded.
+/// Each startable agent's command (`run[0]`) and its skills folder, `~/` expanded against
+/// `$CANOPY_SKILL_HOME` when set (scripts/dev keeps the install in its scratch folder), else home.
 pub fn skill_folders() -> Vec<(String, std::path::PathBuf)> {
+    let home = std::env::var_os("CANOPY_SKILL_HOME").map(std::path::PathBuf::from).unwrap_or_else(crate::mods::home);
     TABLE.with(|t| t.borrow().programs.values().filter_map(|e| {
         let command = e.run.first()?;
         let folder = e.skills.as_ref()?;
-        let path = folder.strip_prefix("~/").map_or_else(|| std::path::PathBuf::from(folder), |rest| crate::mods::home().join(rest));
+        let path = folder.strip_prefix("~/").map_or_else(|| std::path::PathBuf::from(folder), |rest| home.join(rest));
         Some((command.clone(), path))
     }).collect())
 }

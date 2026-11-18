@@ -1,5 +1,5 @@
-// Mounted while Option is held on the canvas (the key list, from keys.json), or while a wire is
-// being connected (one line: `pointer` for a wire following the pointer, `connecting` for the keyboard).
+// Mounted while a wire is being connected: one line, `pointer` for a wire following the pointer,
+// `connecting` for the keyboard. Without either it lists the canvas-mode keys from keys.json.
 import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import { keys, props, theme } from "herdr";

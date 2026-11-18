@@ -313,6 +313,8 @@ struct Overlay {
     kind: OverlayKind,
     slot: String,
     at: Point<Pixels>,
+    /// Popup hangs above the floating block under the pointer.
+    above: bool,
     /// As designed; drawn at the current zoom. Up to 1: a share of the window.
     size: Size<f32>,
     expires: Option<Instant>,
@@ -2977,6 +2979,7 @@ impl AppWindow {
             "preview.open" => self.open_preview(a.clone(), window, cx),
             "canvas.hand" => {
                 self.canvas_state.hand = a["on"].as_bool().unwrap_or(!self.canvas_state.hand);
+                if mods::publish_window(self.window_json(window)) { self.refresh_snapshot_mods(cx); }
                 cx.notify();
             }
             "canvas.create" => {
@@ -3667,9 +3670,13 @@ impl AppWindow {
             // No height: as tall as the content, up to most of the window.
             _ => size(num("width", 420.0), num("height", 0.85)),
         };
+        let above = (spec.get("at").and_then(Value::as_str) == Some("above")).then(|| {
+            self.bounds.borrow().iter().find(|(id, bounds)| id.starts_with("float:") && !id.ends_with("#content") && bounds.contains(&self.pointer))
+                .map(|(_, bounds)| point(self.pointer.x - px(16.), bounds.origin.y - px(8.)))
+        }).flatten();
         let at = match spec.get("at") {
             Some(v) if v.get("x").is_some() => point(px(num_in(v, "x")), px(num_in(v, "y"))),
-            _ => self.pointer,
+            _ => above.unwrap_or(self.pointer),
         };
         let top = (spec.get("at").and_then(Value::as_str) == Some("top")).then(|| num("offset", 0.0));
         let fit = layout.is_none() && (kind == OverlayKind::Popup || (matches!(kind, OverlayKind::Dialog | OverlayKind::Window) && spec.get("height").is_none()));
@@ -3703,6 +3710,7 @@ impl AppWindow {
             kind,
             slot,
             at,
+            above: above.is_some(),
             size,
             expires: (kind == OverlayKind::Toast).then(|| Instant::now() + Duration::from_millis(timeout as u64)),
             focus,
@@ -3963,6 +3971,7 @@ impl AppWindow {
             if active {
                 self.sync(window, cx);
             } else {
+                self.hide_key_hints(window, cx);
                 self.looked.clear();
                 // A key-up lost to another app would leave Space pan stuck on.
                 self.canvas_state.space_down = false;
@@ -4464,7 +4473,7 @@ impl AppWindow {
                                 let id = o.id.clone();
                                 move |this, _, w, cx| this.close_overlay(&id, w, cx)
                             }))
-                            .child(position_popup(at, body))
+                            .child(position_popup(at, o.above, body))
                             .into_any_element(),
                     );
                 }
@@ -4518,7 +4527,10 @@ fn nearest(cur: Bounds<Pixels>, dir: &str, candidates: impl IntoIterator<Item = 
         .map(|(_, _, _, id)| id)
 }
 
-fn position_popup(at: Point<Pixels>, body: Stateful<Div>) -> Anchored {
+fn position_popup(at: Point<Pixels>, above: bool, body: Stateful<Div>) -> Anchored {
+    if above {
+        return anchored().anchor(gpui::Anchor::BottomLeft).position(at).snap_to_window_with_margin(px(8.)).child(body);
+    }
     anchored()
         .position(point(at.x.max(px(8.0)), at.y.max(px(8.0))))
         .snap_to_window_with_margin(px(8.0))
@@ -4912,6 +4924,9 @@ impl Render for AppWindow {
                 }
             }))
             .on_modifiers_changed(cx.listener(|this, e: &ModifiersChangedEvent, window, cx| this.canvas_modifiers(e.modifiers, window, cx)))
+            .capture_key_down(cx.listener(|this, _: &KeyDownEvent, window, cx| {
+                this.hide_key_hints(window, cx);
+            }))
             .on_key_up(cx.listener(|this, e: &KeyUpEvent, _, cx| {
                 if e.keystroke.key == "space" {
                     this.canvas_state.space_down = false;
@@ -5527,6 +5542,7 @@ mod tests {
         struct Popup {
             height: f32,
             edge: bool,
+            above: bool,
         }
         impl Render for Popup {
             fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -5538,6 +5554,7 @@ mod tests {
                 };
                 div().size_full().child(super::position_popup(
                     at,
+                    self.above,
                     div()
                         .id("popup")
                         .debug_selector(|| "popup".into())
@@ -5547,17 +5564,21 @@ mod tests {
                 ))
             }
         }
-        let (view, cx) = cx.add_window_view(|_, _| Popup { height: 72.0, edge: false });
-        for (height, edge) in [(72.0, false), (72.0, true), (300.0, true)] {
+        let (view, cx) = cx.add_window_view(|_, _| Popup { height: 72.0, edge: false, above: false });
+        for (height, edge, above) in [(72.0, false, false), (72.0, true, false), (300.0, true, false), (72.0, false, true)] {
             view.update(cx, |view, cx| {
                 view.height = height;
                 view.edge = edge;
+                view.above = above;
                 cx.notify();
             });
             cx.run_until_parked();
             let bounds = cx.debug_bounds("popup").unwrap();
             assert_eq!(bounds.size, size(px(220.0), px(height)));
-            if edge {
+            if above {
+                assert_eq!(bounds.origin, point(px(100.0), px(200.0 - height)));
+                assert_eq!(bounds.bottom(), px(200.0));
+            } else if edge {
                 let viewport = cx.update(|window, _| window.viewport_size());
                 assert_eq!(bounds.bottom_right(), point(viewport.width - px(8.0), viewport.height - px(8.0)));
             } else {
@@ -5669,7 +5690,7 @@ export default class Probe extends View {
     }
 
     /// Real pointer events through hit testing: box select, group drag, double-click to enter,
-    /// click out to leave, Option to show actions.
+    /// click out to leave, delayed Cmd/Ctrl hints with terminal focus.
     #[gpui::test]
     fn figma_mouse(cx: &mut TestAppContext) {
         use gpui::{point, px, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent};
@@ -5729,12 +5750,39 @@ export default class Probe extends View {
         assert!(state(cx).1, "a click on empty canvas leaves the cell");
         assert!(cx.update(|window, cx| view.read(cx).focus.is_focused(window)));
 
-        cx.simulate_modifiers_change(Modifiers { alt: true, ..Default::default() });
-        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_some()), "Option shows actions");
-        cx.update(|window, _| window.refresh());
+        cx.update(|window, _| window.activate_window());
+        let hint = if cfg!(target_os = "macos") { Modifiers { platform: true, ..none } } else { Modifiers { control: true, ..none } };
+        cx.simulate_modifiers_change(Modifiers { alt: true, ..none });
+        assert!(view.update(cx, |this, _| this.canvas_state.hint_timer.is_none()), "Option no longer starts hints");
+        cx.simulate_modifiers_change(hint);
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_none()), "a short press does not show hints");
         cx.run_until_parked();
         cx.simulate_modifiers_change(none);
-        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_none()), "releasing Option hides them");
+        cx.executor().advance_clock(std::time::Duration::from_millis(400));
+        cx.run_until_parked();
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_none()), "release cancels the delay");
+
+        // Hints also work with a terminal focused, without swallowing its key down.
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.canvas_state.selected = vec!["t1".into()];
+            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_state.settle_for_test();
+            window.refresh();
+        }));
+        assert!(!state(cx).1);
+        cx.run_until_parked();
+        cx.simulate_modifiers_change(hint);
+        let held_state = cx.update(|window, cx| view.update(cx, |this, _| (this.canvas_state.hint_timer.is_some(), window.is_window_active(), this.has_canvas(), window.modifiers())));
+        assert!(held_state.0, "terminal focus starts the hold delay: {held_state:?}");
+        cx.run_until_parked();
+        cx.executor().advance_clock(std::time::Duration::from_millis(400));
+        cx.run_until_parked();
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_some()), "a hold shows hints with terminal focus");
+        cx.simulate_keystrokes("f13");
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_none() && this.canvas_state.hint_timer.is_none()), "any key hides hints");
+        cx.simulate_modifiers_change(none);
+        cx.simulate_click(at(60., 700.), none);
+        cx.run_until_parked();
 
         // The shipped keys: Shift+1 fits everything; the platform's leave key leaves an entered cell.
         // This window's layout is "test", so the shipped `layout:main` keys apply to it here.

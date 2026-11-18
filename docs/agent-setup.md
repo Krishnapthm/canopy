@@ -13,6 +13,9 @@ text changes, only if the file contains its installed-by-Canopy mark, and
 leaves an unmarked file alone. Run `canopy skill remove` before uninstalling
 to remove marked files, including those for agents no longer installed.
 It removes the `canopy` folder only when empty.
+`CANOPY_SKILL_HOME` replaces the home folder for `~/` in `skills`;
+`scripts/dev` sets it to `$TMPDIR/canopy-dev/skill-home`, so development
+never writes the real harness folders.
 
 Claude and Codex receive a short launch note naming the skill. Claude's
 session and prompt hook says `Wired: ...` when peers change (and lists them

@@ -91,6 +91,8 @@ impl AppWindow {
             "maximized": window.is_maximized(),
             "fullscreen": window.is_fullscreen(),
             "active": self.window_active,
+            "hand": self.canvas_state.hand,
+            "keys": self.canvas_state.actions.is_some(),
         })
     }
 

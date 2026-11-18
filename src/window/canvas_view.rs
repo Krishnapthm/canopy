@@ -92,8 +92,10 @@ pub(super) struct State {
     marquee: Option<(Point<Pixels>, Point<Pixels>, Vec<String>)>,
     /// The selection a cell drag carries along: the solver keeps them where the drag put them.
     group: Vec<String>,
-    /// Option (Alt) held on the canvas: each target cell shows its actions, with keys from keys.json.
+    /// Held Cmd (Ctrl elsewhere): surface hints use the current bindings.
     pub(super) actions: Option<Vec<(String, String, String)>>,
+    /// Pending hold delay, cancelled on release or any key down.
+    pub(super) hint_timer: Option<Task<anyhow::Result<()>>>,
     /// Tile view is on (`canvas.tile`): what it fills, and the geometry to put back.
     pub(super) tile: Option<Tile>,
     /// The pressed cell has moved `canvas::DRAG_THRESHOLD` px, so the press is a drag (see `drag_live`).
@@ -190,6 +192,7 @@ impl State {
             marquee: None,
             group: vec![],
             actions: None,
+            hint_timer: None,
             tile: None,
             drag_live: false,
         }
@@ -1011,15 +1014,34 @@ impl AppWindow {
         ]);
         canvas::space_at(&self.canvas_state.doc.spaces, p).map(|s| s.space.clone())
     }
-    /// Option alone, while the canvas has the keyboard, shows each cell's actions (the window
-    /// root forwards modifier changes: they only reach the focused element's ancestors).
+    /// The window root forwards modifier changes, including while a terminal has focus.
     pub(in crate::window) fn canvas_modifiers(&mut self, m: gpui::Modifiers, window: &mut Window, cx: &mut Context<Self>) {
-        let held = self.has_canvas() && m.alt && !m.platform && !m.control && self.canvas_state.mode && self.focus.is_focused(window);
-        if held != self.canvas_state.actions.is_some() {
-            self.canvas_state.actions = held.then(crate::keys::listing);
-            self.sync(window, cx);
-            cx.notify();
+        let held = self.has_canvas() && window.is_window_active() && !m.alt && !m.shift && !m.function
+            && if cfg!(target_os = "macos") { m.platform && !m.control } else { m.control && !m.platform };
+        if !held {
+            self.hide_key_hints(window, cx);
+        } else if self.canvas_state.hint_timer.is_none() && self.canvas_state.actions.is_none() {
+            self.canvas_state.hint_timer = Some(cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor().timer(Duration::from_millis(400)).await;
+                this.update_in(cx, |this, window, cx| this.show_key_hints(window, cx))
+            }));
         }
+    }
+
+    fn show_key_hints(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.canvas_state.actions = Some(crate::keys::listing());
+        if mods::publish_window(self.window_json(window)) { self.refresh_snapshot_mods(cx); }
+        self.sync(window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn hide_key_hints(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.canvas_state.hint_timer.is_none() && self.canvas_state.actions.is_none() { return; }
+        self.canvas_state.hint_timer = None;
+        self.canvas_state.actions = None;
+        if mods::publish_window(self.window_json(window)) { self.refresh_snapshot_mods(cx); }
+        self.sync(window, cx);
+        cx.notify();
     }
     /// Shows a space's room (None: Home) with the camera it had there; a first visit fits what is inside.
     pub(super) fn go_room(&mut self, room: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
@@ -1064,7 +1086,7 @@ impl AppWindow {
     pub(super) fn panel_mods(&self) -> Vec<(String, Instance)> {
         if !self.has_canvas() { return vec![]; }
         let mut slots = vec![];
-        if self.canvas_state.actions.is_some() || self.canvas_state.connecting.is_some() {
+        if self.canvas_state.connecting.is_some() {
             slots.push(("canvas-keys".into(), Instance { name: "canvas-keys".into(), props: json!({"connecting":self.canvas_state.connecting.is_some()}) }));
         }
         // A wire following the pointer (helper bar Connect, a clicked "+") shows only its one-line
@@ -3108,8 +3130,8 @@ impl AppWindow {
             // Like Claude's header, the canvas controls sit at the right end, beside the panel.
             bar = bar.child(crumbs.child(div().flex_1().h_full())).child(tabs.flex_none().px(px(8.)));
         }
-        if state.actions.is_some() || self.connect_hint() {
-            area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(if self.connect_hint() { 32. } else { 72. }))
+        if self.connect_hint() {
+            area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(32.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(self.render_slot("canvas-keys", cx)));
         }
@@ -3428,20 +3450,28 @@ pub(super) fn cell_slot(addr: &str) -> String {
 }
 
 /// Hover labels use the window-owned tooltip, including the current key binding when present.
-struct StripTooltip(SharedString);
+struct StripTooltip(SharedString, Option<SharedString>);
 impl Render for StripTooltip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         gpui_base::Tooltip::new("strip-tooltip").m(px(4.)).px(px(8.)).py(px(4.))
-            .rounded(px(6.)).bg(c("popover")).text_color(c("foreground")).text_size(px(12.)).child(self.0.clone())
+            .rounded(px(6.)).bg(c("popover")).text_color(c("foreground")).text_size(px(12.))
+            .child(gpui_base::h_flex().gap(px(8.)).child(self.0.clone())
+                .when_some(self.1.clone(), |d, key| d.child(div().text_color(c("muted-foreground")).child(key))))
     }
 }
 fn strip_tooltip(label: String, command: Option<&str>) -> impl Fn(&mut Window, &mut App) -> AnyView + use<> {
     let command = command.map(str::to_owned);
     move |_, cx| {
-        let key = command.as_deref().and_then(|command| crate::keys::listing().into_iter().find(|(_, _, a)| a == command).map(|(_, k, _)| k));
-        let text = key.map_or_else(|| label.clone(), |k| format!("{label} ({k})"));
-        cx.new(|_| StripTooltip(text.into())).into()
+        let key = command.as_deref().and_then(|command| action_key(&crate::keys::listing(), command));
+        cx.new(|_| StripTooltip(label.clone().into(), key.map(Into::into))).into()
     }
+}
+
+/// Prefer the binding used while navigating the canvas.
+fn action_key(keys: &[(String, String, String)], command: &str) -> Option<String> {
+    keys.iter().filter(|(_, _, action)| action == command)
+        .min_by_key(|(section, _, _)| match section.as_str() { "canvas-mode" => 0, "layout:main" => 1, "global" => 2, _ => 3 })
+        .map(|(_, key, _)| crate::keys::pretty(key))
 }
 
 /// A 24 px plain icon button for canvas and panel controls.
@@ -3973,4 +4003,19 @@ mod pane_action_tests {
         });
     }
 
+}
+
+
+#[cfg(test)]
+mod hint_tests {
+    #[test]
+    fn tooltip_keys_prefer_canvas_then_layout_then_global() {
+        let mut rows: Vec<_> = [("mod:test", "q"), ("global", "cmd-x"), ("layout:main", "cmd-w"), ("canvas-mode", "x")]
+            .into_iter().map(|(section, key)| (section.into(), key.into(), "canvas.close".into())).collect();
+        for expected in ["x", "cmd-w", "cmd-x", "q"] {
+            assert_eq!(super::action_key(&rows, "canvas.close"), Some(crate::keys::pretty(expected)));
+            rows.pop();
+        }
+        assert_eq!(super::action_key(&rows, "canvas.close"), None);
+    }
 }

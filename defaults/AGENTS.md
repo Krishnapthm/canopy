@@ -1087,8 +1087,8 @@ Canvas keys: Cmd (Ctrl on Linux) +=, +-, +0, +Shift+F, +Shift+G (tile view).
 Canvas mouse (Figma style): click selects, drag moves the selection, a drag on empty canvas draws a
 selection box (Shift adds), double-click enters a cell (expands it, focuses its terminal; on an
 expanded cell's header name it renames the tab in place instead). Clicking
-empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. Holding Option/Alt on
-the canvas shows each selected or hovered cell's actions with their keys. Expanded cells are
+empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. Holding Cmd (Ctrl elsewhere) alone for 0.4 s
+shows keys on the toolbar and helper bars, even while a terminal has focus. Expanded cells are
 100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
 neighbours back. Drag the bottom-right corner to resize; the terminal is resized on release. Several
 can be open. The wheel scrolls a focused expanded terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
@@ -1288,7 +1288,8 @@ their keys still work. The canvas toolbar has file and focus-fit buttons.
 
 Canvas keyboard: the canvas has the keyboard unless a cell is entered; then the `canvas-mode`
 key section gets first refusal and unbound keys without Ctrl, Alt or Cmd are swallowed. No idle
-timer. The hint mod reads the bindings with `keys()` and shows while Option is held. Dialogs, menus
+timer. Holding Cmd (Ctrl elsewhere) alone for 0.4 s shows surface keys; releasing it or
+pressing any key hides them. In the agent menu, 1-9 start the agent with that number. Dialogs, menus
 and inputs keep their own keys. `canvas.mode` (Cmd+Esc, Cmd+J) leaves the entered cell.
 `canvas.leave` (Esc) cancels a pending connection, else clears the selection, else goes Home;
 `canvas.enter` connects, enters the selected cell or goes into the selected space.

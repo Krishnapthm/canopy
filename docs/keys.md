@@ -9,9 +9,9 @@ the terminal, so agents can still be interrupted. Pan with Space+drag, middle
 drag or the trackpad; zoom with pinch or Cmd+scroll. On Home, double-click a
 space card (or select it and press Enter) to go inside.
 
-Hold Option (Alt) in canvas mode while the canvas has the keyboard to show keys
-on each selected or hovered pane's helper bar. The bottom bar still lists
-every canvas key. Release Option to hide the keys.
+Hold Cmd (Ctrl on Linux and Windows) alone for 0.4 s to show keys on every
+surface, including the toolbar and pane helper bars, even with a terminal
+focused. Release it or press any key to hide the hints. Option no longer shows them.
 
 Anywhere: Cmd+K or Cmd+P (Ctrl+Shift+K) opens Go to, a fuzzy search over
 spaces, terminal panes and open file tabs (then the old tab list). Cmd+1..9
@@ -31,10 +31,14 @@ were in last (again toggles; Ctrl+Shift+Tab walks further back).
 | c | Start a wire; arrows pick its other pane, Enter connects, Esc cancels |
 | Shift+A / a | Arrange (repeat the last layout) / choose a layout |
 | n / Shift+N | New terminal here / installed agent list |
+| V | Select tool |
+| T | New note pane |
+| ⌘O (Ctrl+O elsewhere) | Open file on the canvas |
 | Backspace / Delete | Close, using the usual agent and terminal confirmations |
 | ? | Full key list |
 
 Enter on a sub-agent opens its transcript; on a file card it opens the file.
+In the agent menu, 1-9 start the agent with that number.
 
 | Anywhere on the canvas | macOS | Linux / Windows |
 |---|---|---|

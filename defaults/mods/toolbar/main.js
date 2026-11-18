@@ -1,29 +1,21 @@
 // The canvas's floating bottom toolbar: tools and new panes. Mouse first; docs/panes.md.
-import { View, div, svg, image } from "gpui-kit";
-import { h_flex, v_flex } from "gpui-base";
-import { props, run, theme, ui, paneKinds, openOverlay, closeOverlay, spaces, shared, setShared, knownAgents, readTextFile, home } from "herdr";
+import { View, div } from "gpui-kit";
+import { h_flex } from "gpui-base";
+import { run, theme, ui, paneKinds, openOverlay, spaces, shared, setShared, readTextFile, home, window, keys } from "herdr";
+
+// Object bindings are serialized by serde_json with sorted field names.
+function key(action, args) {
+  const object = JSON.stringify({ args, command: action });
+  const rows = keys().filter(b => b.action === action || b.action === object);
+  const rank = section => ({ "canvas-mode": 0, "layout:main": 1, global: 2 }[section] ?? 3);
+  rows.sort((a, b) => rank(a.section) - rank(b.section));
+  return rows[0]?.label ?? "";
+}
 
 export default class Toolbar extends View {
-  init(_props, cx) {
-    this.tool = "select";
-    // A reloaded toolbar shows Select, so the canvas must be in Select too.
-    if (props()?.menu !== "agents") run("canvas.hand", { on: false });
+  init() {
     // paneKinds() scans the mods folder: read it once, not every render.
     this.kinds = paneKinds().filter(p => p.kind.startsWith("mod:"));
-    if (props()?.menu !== "agents") return;
-    const machine = spaces().find(s => s.active)?.machine;
-    const where = machine ?? "";
-    this.agents = (shared("new-menu.agents")?.[where] ?? []).filter(a => a.installed);
-    this.checking = true;
-    cx.spawn(async cx => {
-      try {
-        const agents = await knownAgents({ on: machine });
-        setShared("new-menu.agents", { ...shared("new-menu.agents"), [where]: agents });
-        this.agents = agents.filter(a => a.installed);
-      } catch { this.failed = true; }
-      this.checking = false;
-      cx.notify();
-    });
   }
   // Offers project setup once per local folder: the dialog appears when neither AGENTS.md nor
   // CLAUDE.md holds Canopy's block, and any answer (Esc included) counts. docs/agent-setup.md.
@@ -44,33 +36,27 @@ export default class Toolbar extends View {
   }
   render(cx) {
     const t = theme();
-    if (props()?.menu === "agents") {
-      return v_flex().w_full().min_h(0).p(5).bg(t.popover).text_size(ui.size.text)
-        .children((this.failed ? [] : this.agents).map(a => h_flex().id(a.key).h(ui.size.control).px(9).gap(10)
-          .rounded(ui.size.radiusSm).items_center().text_color(t.foreground).hover(s => s.bg(t.selected))
-          .child(a.tint ? svg(a.icon).size(14).text_color(t.foreground) : image(a.icon).size(14))
-          .child(div().flex_1().child(a.name))
-          .on_click(() => { closeOverlay(props().overlay); run("canvas.create", { argv: a.run, name: a.name }); })))
-        .when(this.failed || this.agents.length === 0, el => el.child(div().px(9).py(6).text_color(t.dim)
-          .child(this.checking && !this.failed ? "Checking installed agents" : "No agent CLIs found")));
-    }
     this.offerSetup(cx);
-    const button = (id, icon, label, action) => ui.iconButton(id, icon, 28).tooltip(label).on_click(action);
-    const tool = (name, icon, label) => button(name, icon, label, () => {
-      this.tool = name;
-      run("canvas.hand", { on: name === "hand" });
-      cx.notify();
-    }).when(this.tool === name, el => el.bg(t.selected).text_color(t.foreground));
+    const win = window() ?? {};
+    const space = spaces().find(s => s.active);
+    const button = (id, icon, label, action, hint) => ui.iconButton(id, icon, 28)
+      .tooltip(hint ? `${label}  ${hint}` : label).on_click(action)
+      .when(win.keys && Boolean(hint), el => el.w_auto().px(4).gap(4)
+        .child(div().text_size(11).text_color(t.muted).child(hint)));
+    const tool = (name, icon, label) => button(name, icon, label,
+      () => run("canvas.hand", { on: name === "hand" }),
+      name === "hand" ? "Space" : key("canvas.hand", { on: false }))
+      .when(win.hand === (name === "hand"), el => el.bg(t.selected).text_color(t.foreground));
     const divider = () => div().w(1).h(18).mx(4).bg(t.border);
     return h_flex().gap(2).items_center().p(2)
       .child(tool("select", "mods/toolbar/pointer.svg", "Select"))
       .child(tool("hand", "mods/toolbar/hand.svg", "Hand (pan)"))
       .child(divider())
-      .child(button("terminal", "icons/square-terminal.svg", "Terminal", () => run("canvas.create", {})))
-      .child(button("agent", "icons/bot.svg", "Agent", () => openOverlay({ mod: "toolbar", kind: "popup", at: "pointer", width: 220, props: { menu: "agents" } })))
-      .child(button("file", "mods/toolbar/file-plus.svg", "Open file", () => run("preview.open", { place: "canvas" })))
-      .children(this.kinds.map(p => button(p.kind, p.icon, p.label, () => run("canvas.pane_new", { kind: p.kind }))))
+      .child(button("terminal", "icons/square-terminal.svg", "Terminal", () => run("canvas.new"), key("canvas.new")))
+      .child(button("agent", "icons/bot.svg", "Agent", () => openOverlay({ mod: "menu", kind: "popup", at: "above", width: 220, props: { tab: "canvas-agents", target: { ...(space ? { space: space.id } : {}), ...(space?.machine ? { machine: space.machine } : {}) } } }), key("canvas.agents")))
+      .child(button("file", "mods/toolbar/file-plus.svg", "Open file", () => run("preview.open", { place: "canvas" }), key("preview.open", { place: "canvas" })))
+      .children(this.kinds.map(p => button(p.kind, p.icon, p.label, () => run("canvas.pane_new", { kind: p.kind }), key("canvas.pane_new", { kind: p.kind }))))
       .child(divider())
-      .child(button("wire", "icons/link.svg", "Connect (select a pane first)", () => run("canvas.connect", {})));
+      .child(button("wire", "icons/link.svg", "Connect (select a pane first)", () => run("canvas.connect", {}), key("canvas.connect")));
   }
 }

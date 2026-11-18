@@ -6,6 +6,7 @@
 // dialog instead, and "sub:<tab>" is a submenu of that tab with args as its
 // target, shown beside the row on hover (shadcn ContextMenuSub). A null
 // command is a section label or a note: shown, never chosen.
+// In canvas-agents, 1-9 start the agent with that number.
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -136,7 +137,7 @@ function shortcut(name, args) {
   // `pane.split:right` binds pane.split with { direction: "right" }.
   const value = args && Object.values(args)[0];
   const k = keys().find((b) => b.section === "global" && (b.action === name || b.action === `${name}:${value}`));
-  return k ? k.keys : "";
+  return k?.label ?? "";
 }
 
 export default class Menu extends View {
@@ -205,7 +206,8 @@ export default class Menu extends View {
             .child(div().flex_1().child(it[0]))
             .child(it[1].startsWith("sub:")
               ? svg("mods/workspace-chrome/chevron-right.svg").size(12).flex_none().text_color(t.muted)
-              : div().text_size(11).text_color(t.dim).child(shortcut(it[1], it[2]))), it, i))));
+              : div().text_size(11).text_color(t.dim).child(props()?.tab === "canvas-agents" && it[1] === "canvas.create"
+                ? (i < 9 ? String(i + 1) : "") : shortcut(it[1], it[2]))), it, i))));
   }
 
   render(cx) {
@@ -227,6 +229,12 @@ export default class Menu extends View {
       // The overlay is wider than the menu, for the submenu: a click on the empty part closes it.
       .on_mouse_down("left", () => closeOverlay(props().overlay))
       .on_key_down((e, cx) => {
+        if (props()?.tab === "canvas-agents" && /^[1-9]$/.test(e.key) && !Object.values(e.modifiers).some(Boolean)) {
+          const row = list.filter(it => it[1] === "canvas.create")[Number(e.key) - 1];
+          if (row) this.run(row);
+          cx.stop_propagation();
+          return;
+        }
         if (inSub) {
           if (e.key === "down") this.subAt = step(sub, this.subAt, 1);
           else if (e.key === "up") this.subAt = step(sub, this.subAt, -1);

@@ -36,9 +36,10 @@ cancel. The strip at the bottom says "Click a pane to connect · Esc cancels".
 Connect stays highlighted while its wire is drawn and while the pane has any
 edge, drawn or born (a sub-agent or `hc run` child).
 
-Tooltips give the button's name and key. Hold Option in canvas mode to see
-keys on the buttons. Bars hide during a drag, resize, marquee or pending layout, but stay up while a
-clicked wire follows the pointer.
+Tooltips show the button's name and key. Hold Cmd (Ctrl elsewhere) alone for
+0.4 s to see keys on the buttons, even while a terminal has focus. Bars hide
+during a drag, resize, marquee or pending layout, but stay up while a clicked
+wire follows the pointer.
 
 The shared helper bar draws the actions for each pane kind, scaled with zoom
 between 75% and 100%. It sits 8 px above the pane, clear of the wire handle.
