@@ -604,6 +604,8 @@ pub enum Kind {
     Pdf { path: String, highlights: Vec<PdfMark> },
     /// A pane drawn by a mod. kind: "mod:<mod name>"; props: what the mod saved with canvas.pane_set.
     Mod { kind: String, props: serde_json::Map<String, serde_json::Value> },
+    /// An iOS Simulator's screen. udid: the simulator; empty until the person picks one.
+    Sim { udid: String },
 }
 
 /// A highlight kept in canvas.json, never written into the PDF.
@@ -628,6 +630,7 @@ enum Builtin {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         highlights: Vec<PdfMark>,
     },
+    Sim { #[serde(default)] udid: String },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -656,6 +659,7 @@ impl TryFrom<RawKind> for Kind {
             Builtin::File { path } => Self::File { path },
             Builtin::Image { path } => Self::Image { path },
             Builtin::Pdf { path, highlights } => Self::Pdf { path, highlights },
+            Builtin::Sim { udid } => Self::Sim { udid },
         })
     }
 }
@@ -669,6 +673,7 @@ impl From<Kind> for RawKind {
             Kind::File { path } => Builtin::File { path },
             Kind::Image { path } => Builtin::Image { path },
             Kind::Pdf { path, highlights } => Builtin::Pdf { path, highlights },
+            Kind::Sim { udid } => Builtin::Sim { udid },
         };
         let mut value = serde_json::to_value(builtin).unwrap();
         Self { kind: value["kind"].as_str().unwrap().to_owned(), props: value["props"].take() }
@@ -681,6 +686,7 @@ pub const PANE_KINDS: &[(&str, &[&str])] = &[
     ("file", &["read", "shot", "close"]),
     ("image", &["read", "shot", "close"]),
     ("pdf", &["read", "shot", "close"]),
+    ("sim", &["read", "shot", "open", "close"]),
 ];
 
 /// The pane kind for a local file, picked by extension.
@@ -729,12 +735,12 @@ pub fn envelope(id: &str, kind: &str, attrs: &[(&str, &str)], text: &str) -> Str
 
 impl Pane {
     /// The kind's name as canvas.json saves it.
-    pub fn kind_name(&self) -> &str { match &self.kind { Kind::Terminal { .. } => "terminal", Kind::Sub { .. } => "sub", Kind::File { .. } => "file", Kind::Mod { kind, .. } => kind, Kind::Image { .. } => "image", Kind::Pdf { .. } => "pdf" } }
+    pub fn kind_name(&self) -> &str { match &self.kind { Kind::Terminal { .. } => "terminal", Kind::Sub { .. } => "sub", Kind::File { .. } => "file", Kind::Mod { kind, .. } => kind, Kind::Image { .. } => "image", Kind::Pdf { .. } => "pdf", Kind::Sim { .. } => "sim" } }
     /// The `canopy pane` verbs this pane answers (none for terminals and sub-agent cells).
     pub fn verbs(&self) -> &'static [&'static str] { if matches!(self.kind, Kind::Mod { .. }) { return MOD_VERBS; } PANE_KINDS.iter().find(|(k, _)| *k == self.kind_name()).map_or(&[], |(_, v)| v) }
 
     /// Drawn at its own saved rect: every kind but terminals and sub-agent cells.
-    pub fn boxed(&self) -> bool { matches!(self.kind, Kind::File { .. } | Kind::Mod { .. } | Kind::Image { .. } | Kind::Pdf { .. }) }
+    pub fn boxed(&self) -> bool { matches!(self.kind, Kind::File { .. } | Kind::Mod { .. } | Kind::Image { .. } | Kind::Pdf { .. } | Kind::Sim { .. }) }
     /// A mod pane's non-blank saved text (props.text): what closing it would delete.
     pub fn text(&self) -> Option<&str> {
         if let Kind::Mod { props, .. } = &self.kind { props.get("text")?.as_str().filter(|t| !t.trim().is_empty()) } else { None }
@@ -759,6 +765,10 @@ impl Pane {
     /// The path for a file pane.
     pub fn file(&self) -> Option<&str> {
         if let Kind::File { path } = &self.kind { Some(path) } else { None }
+    }
+    /// The simulator udid for a sim pane (empty: none picked yet).
+    pub fn sim(&self) -> Option<&str> {
+        if let Kind::Sim { udid } = &self.kind { Some(udid) } else { None }
     }
     /// The expanded terminal size, if any.
     pub fn size(&self) -> Option<Point> {
@@ -1140,6 +1150,11 @@ mod tests {
         pane.kind = Kind::Sub { parent: "t1".into(), sub: "a".into() };
         assert_eq!(pane.kind_name(), "sub");
         assert!(pane.verbs().is_empty());
+        pane.kind = Kind::Sim { udid: "U1".into() };
+        assert_eq!((pane.kind_name(), pane.verbs(), pane.sim(), pane.boxed()), ("sim", &["read", "shot", "open", "close"][..], Some("U1"), true));
+        let saved = serde_json::to_value(RawKind::from(pane.kind.clone())).unwrap();
+        assert_eq!(saved, serde_json::json!({"kind":"sim","props":{"udid":"U1"}}));
+        assert_eq!(Kind::try_from(serde_json::from_value::<RawKind>(saved).unwrap()).unwrap(), pane.kind);
     }
 
     fn version_2_fixture(name: &str) -> Document {

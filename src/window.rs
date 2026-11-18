@@ -2952,6 +2952,7 @@ impl AppWindow {
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
+            "canvas.sim_refresh" | "canvas.sim_device" | "canvas.sim_hub" => self.sim_command(name, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
             "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
             "app.menu" => {

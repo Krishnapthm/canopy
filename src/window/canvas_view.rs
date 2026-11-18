@@ -9,6 +9,7 @@ mod helper_bar;
 mod pane_commands;
 mod image_pane;
 mod pdf;
+mod sim;
 
 /// What an inline name edit renames: a space (by id) or the tab of a cell (by tab id).
 #[derive(Clone, PartialEq)]
@@ -33,6 +34,7 @@ pub(super) struct State {
     pub subs: HashMap<String, Vec<crate::subs::Sub>>,
     sub_watches: HashMap<String, Task<()>>,
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
+    sims: HashMap<String, sim::SimView>,
     bar_hover: Option<String>,
     preview_drag: Option<(String, bool, Point<Pixels>)>,
     pub file: Option<String>,
@@ -163,6 +165,7 @@ impl State {
             subs: HashMap::new(),
             sub_watches: HashMap::new(),
             previews: HashMap::new(),
+            sims: HashMap::new(),
             bar_hover: None,
             preview_drag: None,
             file: None,
@@ -335,7 +338,7 @@ impl AppWindow {
         self.canvas_state.doc.panes.iter().map(|c| {
             let addr = match &c.kind {
                 canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => return c.space.clone(),
-                canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } => return c.space.clone(),
+                canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } | canvas::Kind::Sim { .. } => return c.space.clone(),
                 canvas::Kind::Sub { parent, .. } => parent,
                 canvas::Kind::Terminal { .. } => &c.id,
             };
@@ -590,7 +593,7 @@ impl AppWindow {
             .iter()
             .map(|i| {
                 doc.panes.get(*i)
-                    .and_then(|c| match &c.kind { canvas::Kind::Sub { parent, .. } => Some(parent.as_str()), canvas::Kind::Terminal { .. } => self.live.get(&c.id)?["parent"].as_str(), canvas::Kind::File { .. } | canvas::Kind::Mod { .. } | canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } => None })
+                    .and_then(|c| match &c.kind { canvas::Kind::Sub { parent, .. } => Some(parent.as_str()), canvas::Kind::Terminal { .. } => self.live.get(&c.id)?["parent"].as_str(), canvas::Kind::File { .. } | canvas::Kind::Mod { .. } | canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } | canvas::Kind::Sim { .. } => None })
                     .and_then(|p| indices.iter().position(|j| ids[*j] == p))
             })
             .collect();
@@ -795,6 +798,8 @@ impl AppWindow {
         let paths: Vec<_> = state.doc.panes.iter().filter(|p| ids.contains(&p.id)).filter_map(|p| p.file().map(str::to_owned)).collect();
         state.doc.panes.retain(|p| !ids.contains(&p.id));
         state.selected.retain(|id| !ids.contains(id));
+        self.forget_sims(ids, cx);
+        let state = &mut self.canvas_state;
         for path in paths {
             if state.file.as_ref() != Some(&path) && !state.doc.panes.iter().any(|p| p.file() == Some(path.as_str())) {
                 state.previews.remove(&path);
@@ -1829,6 +1834,7 @@ impl AppWindow {
             return;
         }
         self.load_previews(window, cx);
+        self.load_sims(window, cx);
         let missing: Vec<_> = self
             .live
             .keys()
@@ -2012,7 +2018,7 @@ impl AppWindow {
         let members: Vec<_> = self.canvas_state.doc.panes.iter().map(|c| {
             let addr = match &c.kind {
                 canvas::Kind::File { .. } | canvas::Kind::Mod { .. } => return None,
-                canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } => return None,
+                canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } | canvas::Kind::Sim { .. } => return None,
                 canvas::Kind::Sub { parent, .. } => parent,
                 canvas::Kind::Terminal { .. } => &c.id,
             };
@@ -2759,6 +2765,12 @@ impl AppWindow {
                 ("icons/x.svg".into(), card.kind_name().to_owned(), div().p(px(12.)).text_color(c("muted-foreground")).child(format!("Mod {name} is not installed")).into_any_element())
             };
             area = area.child(self.pane_card(card, icon, title, String::new(), body, camera, cx));
+        }
+        for card in shown_doc.panes.iter().filter(|p| p.sim().is_some() && shown_doc.shows(p.space.as_ref())) {
+            if !canvas::visible(camera, card.rect, viewport) { continue; }
+            let (title, detail) = self.sim_title(card);
+            let body = self.sim_body(card, cx);
+            area = area.child(self.pane_card(card, "icons/smartphone.svg".into(), title, detail, body, camera, cx));
         }
         let cards: HashMap<_, _> = shown_doc
             .panes

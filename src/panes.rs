@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new mod:<name> [--wire] | read <pane> | shot <pane> [file.png] | open <pane> <target> | close <pane>";
+const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new mod:<name> [--wire] | new sim [<udid>|booted] [--wire] | read <pane> | shot <pane> [file.png] | open <pane> <target> | close <pane>";
 
 /// The app command and its arguments for `canopy pane <args>`; `caller` is
 /// `$HC_TERMINAL_ID`, which `--wire` needs.
@@ -16,6 +16,14 @@ fn request(args: &[String], caller: Option<&str>) -> Result<(&'static str, Value
         ["new", kind, rest @ ..] if kind.starts_with("mod:") && (rest.is_empty() || *rest == ["--wire"]) => {
             let mut a = json!({"kind":kind});
             if !rest.is_empty() {
+                a["wire"] = json!(caller.filter(|s| !s.is_empty()).ok_or("--wire works only inside a Canopy terminal ($HC_TERMINAL_ID is not set)")?);
+            }
+            Ok(("canvas.pane_new", a))
+        }
+        ["new", "sim", rest @ ..] if matches!(rest, [] | [_] | [_, "--wire"]) => {
+            let mut a = json!({"kind":"sim"});
+            if let Some(udid) = rest.first().filter(|w| **w != "--wire") { a["udid"] = json!(udid); }
+            if rest.last() == Some(&"--wire") {
                 a["wire"] = json!(caller.filter(|s| !s.is_empty()).ok_or("--wire works only inside a Canopy terminal ($HC_TERMINAL_ID is not set)")?);
             }
             Ok(("canvas.pane_new", a))
@@ -87,6 +95,10 @@ mod tests {
         assert_eq!(req(&["shot", "p1"], None).unwrap(), ("canvas.pane_shot", json!({"pane":"p1"})));
         assert_eq!(req(&["shot", "p1", "a.PNG"], None).unwrap(), ("canvas.pane_shot", json!({"pane":"p1","path":std::path::absolute("a.PNG").unwrap()})));
         assert_eq!(req(&["shot", "p1", "a.jpg"], None).unwrap_err(), "the shot path must end in .png");
+        assert_eq!(req(&["new", "sim"], None).unwrap(), ("canvas.pane_new", json!({"kind":"sim"})));
+        assert_eq!(req(&["new", "sim", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"sim","wire":"t1"})));
+        assert_eq!(req(&["new", "sim", "booted", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"sim","udid":"booted","wire":"t1"})));
+        assert!(req(&["new", "sim", "a", "b"], None).is_err());
         assert_eq!(req(&["open", "p1", "target"], None).unwrap(), ("canvas.pane_open", json!({"pane":"p1","target":"target"})));
         assert_eq!(req(&["close", "p1"], None).unwrap(), ("canvas.close", json!({"pane":"p1"})));
         assert_eq!(req(&["unknown"], None).unwrap_err(), USAGE);
