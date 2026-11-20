@@ -775,7 +775,7 @@ Show only this pane of its tab, or all again.
 
 ## `pane.focus`
 
-Focus a pane (or the pane showing a terminal).
+Focus a pane (or the pane showing a terminal); a file, browser or other canvas pane is selected and brought into view.
 
 | Argument | Required |
 |---|---|

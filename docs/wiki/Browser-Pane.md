@@ -27,6 +27,12 @@ A browser pane is either resting or live:
 - **Click the page** to make it live. Canopy pans the canvas so the whole pane is visible at the current zoom, and you can scroll, click and type as in any browser.
 - **Click anywhere else** in the window to rest it again. Moving the pane or the canvas also rests it, after taking a fresh snapshot.
 
+## Closing a page
+
+Closing a pane, or the space it lives in, stops its page: media is paused and the page is unloaded.
+
+A page you rested keeps running out of sight, so a video can keep playing. When a resting page that is off screen (panned away, or in another space) still has audio or video playing, Canopy shows a toast, "<page> is still playing", with a jump action that goes to the pane. It shows once, until you click the page again.
+
 ## Pick an element to quote
 
 ![A browser pane with the element picker on a button](images/browser-pane-1.png)
