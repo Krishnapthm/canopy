@@ -17,8 +17,8 @@ const MARGIN: f32 = 12.0;
 const DRAG_START: f32 = 4.0;
 const SNAP_MS: f32 = 360.0;
 
-/// Space above and below the content inside a floating block's frame.
-const FRAME_PAD: f32 = 5.0;
+/// Inset between a floating frame's border and its content, on every side.
+const FRAME_PAD: f32 = 4.0;
 /// How long a drawer takes to slide open or shut.
 const REVEAL_MS: f32 = 220.0;
 /// How long the pointer may be away before a floating block counts as not hovered.
@@ -133,7 +133,7 @@ impl AppWindow {
         let slot = slot(&f.id);
         let content = match (&f.content, self.copies.get(&slot), self.terms.get(&slot)) {
             (Content::Terminal { .. }, _, Some(t)) => {
-                div().w(settings::z(560.0)).h(settings::z(320.0)).rounded(settings::z(10.0)).overflow_hidden().child(super::shown_terminal(&t.view, cx)).into_any_element()
+                div().w(settings::z(560.0)).h(settings::z(320.0)).rounded(settings::z(ui::RADIUS_LG)).overflow_hidden().child(super::shown_terminal(&t.view, cx)).into_any_element()
             }
             (_, Some(Copy { root: Some(root), inst, .. }), _) => {
                 div().key_context(format!("Mod mod = {}", inst.name).as_str()).child(root.clone()).into_any_element()
@@ -141,7 +141,7 @@ impl AppWindow {
             (_, Some(Copy { error: Some(e), inst, .. }), _) => div()
                 .max_w(settings::z(360.0))
                 .p_2()
-                .rounded(settings::z(8.0))
+                .rounded(settings::z(ui::RADIUS))
                 .bg(c("popover"))
                 .text_xs()
                 .text_color(c("blocked"))
@@ -190,18 +190,19 @@ impl AppWindow {
         if let (Some(c), Some(n)) = (cut, natural) {
             // Held to the edge: the side away from it is what the cut hides.
             let x = if edge == Edge::Right { c.width - n.width } else { px(0.0) };
-            inner = inner.absolute().left(x).top(pad);
+            inner = inner.absolute().left(x + pad).top(pad);
         }
         let (id, owner_id, hover_id) = (f.id.clone(), owner.id.clone(), f.id.clone());
         let mut body = div()
             .id(SharedString::from(slot.clone()))
             .relative()
             .when(!empty, |b| {
-                b.py(pad)
+                b.p(pad)
                     .bg(c("popover"))
                     .border_1()
                     .border_color(c(if drag.is_some() { "accent" } else { "border" }))
-                    .rounded(settings::z(12.0))
+                    // The button radius plus the inset.
+                    .rounded(settings::z(ui::RADIUS_LG))
                     .shadow_lg()
             })
             .when_some(cut.zip(natural), |b, (c, n)| {

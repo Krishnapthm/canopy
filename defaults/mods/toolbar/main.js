@@ -50,8 +50,8 @@ export default class Toolbar extends View {
       () => run("canvas.hand", { on: name === "hand" }),
       name === "hand" ? "Space" : key("canvas.hand", { on: false }))
       .when(win.hand === (name === "hand"), el => el.bg(t.selected).text_color(t.foreground));
-    const divider = () => div().w(1).h(18).mx(4).bg(t.border);
-    return h_flex().gap(2).items_center().p(2)
+    const divider = () => div().w(1).h(18).mx(2).bg(t.border);
+    return h_flex().gap(2).items_center()
       .child(tool("select", "mods/toolbar/pointer.svg", "Select"))
       .child(tool("hand", "mods/toolbar/hand.svg", "Hand (pan)"))
       .child(divider())

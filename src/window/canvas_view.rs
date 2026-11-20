@@ -3144,10 +3144,12 @@ impl AppWindow {
         area = area.children(self.helper_bars(shown_doc, cx));
         // The bar's controls opt out of window dragging.
         let control = || div().flex().items_center().gap(px(4.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-        let home_tab = div().id("canvas-home").group("canvas-home").role(gpui::Role::Tab).aria_label("Home").aria_selected(state.doc.room.is_none()).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
-            .rounded_t(px(6.)).cursor_pointer()
+        // Expanded, the file panel fills the window: no space tabs, canvas or canvas controls.
+        let expanded = state.panel_expanded && (state.file.is_some() || state.files);
+        let strip = if expanded { bg } else { "chrome" };
+        let home_tab = strip_tab("canvas-home", state.doc.room.is_none(), c(bg), c(strip)).group("canvas-home").role(gpui::Role::Tab).aria_label("Home").aria_selected(state.doc.room.is_none()).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
+            .cursor_pointer()
             .text_color(c(if state.doc.room.is_none() { "foreground" } else { "muted-foreground" }))
-            .when(state.doc.room.is_none(), |d| d.bg(c(bg)))
             .hover(|d| d.text_color(c("foreground")))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .tooltip(strip_tooltip("Home".into(), Some("canvas.home")))
@@ -3161,10 +3163,10 @@ impl AppWindow {
             let group = SharedString::from(format!("space-tab-{id}"));
             let status = self.model.rollup(&space.tabs.iter().flat_map(|t| crate::model::addresses(&t.root)).collect::<Vec<_>>());
             let name = self.model.space_name(space, &home());
-            space_tabs = space_tabs.child(div().id(group.clone()).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(name.clone()).flex().items_center()
-                .h_full().w(px(180.)).min_w(px(96.)).gap(px(6.)).px(px(12.)).rounded_t(px(6.))
+            space_tabs = space_tabs.child(strip_tab(group.clone(), active, c(bg), c(strip)).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(name.clone()).flex().items_center()
+                .h_full().w(px(180.)).min_w(px(96.)).gap(px(6.)).px(px(12.))
                 .text_size(px(12.)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
-                .when(active, |d| d.bg(c(bg))).hover(|d| d.text_color(c("foreground"))).cursor_pointer()
+                .hover(|d| d.text_color(c("foreground"))).cursor_pointer()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, _, window, cx| this.go_room(Some(id.clone()), window, cx)))
                 .child(svg().path("mods/files/folder.svg").flex_none().size(px(14.)).text_color(c(if active { "foreground" } else { "muted-foreground" })).group_hover(group.clone(), |s| s.text_color(c("foreground"))))
@@ -3209,11 +3211,9 @@ impl AppWindow {
             .aria_label("Tile view").tooltip(strip_tooltip("Tile view".into(), Some("canvas.tile")))
             .on_click(cx.listener(|this, _, window, cx| this.tile_canvas(true, window, cx))))
             .child(tabs);
-        // Expanded, the file panel fills the window: no space tabs, canvas or canvas controls.
-        let expanded = state.panel_expanded && (state.file.is_some() || state.files);
         let mut bar = self.window_drag(div().flex().flex_none().items_center().justify_between().w_full().h(px(BAR))
             .pl(px(bar_inset(cfg!(target_os = "macos"), self.fullscreen)))
-            .bg(c(if expanded { bg } else { "chrome" })), cx);
+            .bg(c(strip)), cx);
         if !expanded {
             // Like Claude's header, the canvas controls sit at the right end, beside the panel.
             bar = bar.child(crumbs.child(div().flex_1().h_full())).child(tabs.flex_none().px(px(8.)));
@@ -3288,10 +3288,10 @@ impl AppWindow {
                 let activate = tab.clone();
                 let close = tab.clone();
                 let group = SharedString::from(format!("panel-tab-{tab}"));
-                tabs = tabs.child(div().id(group.clone()).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(label.clone()).flex().items_center().h_full()
-                    .w(px(180.)).min_w(px(96.)).px(px(12.)).gap(px(6.)).rounded_t(px(6.))
+                tabs = tabs.child(strip_tab(group.clone(), active, c("hover"), c(bg)).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(label.clone()).flex().items_center().h_full()
+                    .w(px(180.)).min_w(px(96.)).px(px(12.)).gap(px(6.))
                     .text_size(px(12.)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
-                    .when(active, |d| d.bg(c("hover"))).hover(|d| d.text_color(c("foreground"))).cursor_pointer()
+                    .hover(|d| d.text_color(c("foreground"))).cursor_pointer()
                     .tooltip(strip_tooltip(tab, None))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -3320,6 +3320,7 @@ impl AppWindow {
             }
             // The panel's part of the bar shares its color, like Claude's side panel header.
             bar = bar.child(div().flex().flex_none().when(expanded, |d| d.flex_1()).when(!expanded, |d| d.w(px(width))).h_full().items_center()
+                .pr(px(8.)).gap(px(4.))
                 .bg(c(bg)).border_b_1().border_color(c("border"))
                 .child(tabs)
                 .child(panel_button("panel-expand", if expanded { "mods/pane/unzoom.svg" } else { "mods/pane/zoom.svg" }, c("muted-foreground"), c("hover"))
@@ -3560,6 +3561,20 @@ fn action_key(keys: &[(String, String, String)], command: &str) -> Option<String
     keys.iter().filter(|(_, _, action)| action == command)
         .min_by_key(|(section, _, _)| match section.as_str() { "canvas-mode" => 0, "layout:main" => 1, "global" => 2, _ => 3 })
         .map(|(_, key, _)| crate::keys::pretty(key))
+}
+
+/// A top-strip tab: radius 8 on top and, when active, outward bottom curves that join it
+/// to what's below. GPUI can't round a corner outward, so each curve is an 8 px square of
+/// the tab's `fill` under a square of the `strip` color rounded on the corner facing the tab.
+fn strip_tab(id: impl Into<ElementId>, active: bool, fill: Hsla, strip: Hsla) -> Stateful<Div> {
+    let curve = |left: bool| {
+        div().absolute().bottom_0().size(px(ui::RADIUS)).bg(fill)
+            .map(|d| if left { d.left(px(-ui::RADIUS)) } else { d.right(px(-ui::RADIUS)) })
+            .child(div().size_full().bg(strip)
+                .map(|d| if left { d.rounded_br(px(ui::RADIUS)) } else { d.rounded_bl(px(ui::RADIUS)) }))
+    };
+    div().id(id).relative().rounded_t(px(ui::RADIUS))
+        .when(active, |d| d.bg(fill).child(curve(true)).child(curve(false)))
 }
 
 /// A 24 px plain icon button for canvas and panel controls.
