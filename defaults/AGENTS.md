@@ -1237,6 +1237,7 @@ action, x?, y?, x1?, y1?, x2?, y2?, ms?, text?, button?}` (what those verbs send
 `canvas.sim_record` (start, or stop and save a movie on the Desktop), `canvas.sim_annotate`
 (the person draws on a still and sends it to an agent as a quote: you get `@<png path>` and a
 line saying what it shows), `canvas.sim_zoom {step?: "actual" | "in" | "out"}`,
+`canvas.sim_size {size?: "actual" | "fixed"}` (physical size on this display, or the size set; omitted toggles),
 `canvas.sim_pop` (own window, or back), `canvas.sim_refresh` (new screenshot, retry live),
 `canvas.sim_device` (picker menu), `canvas.sim_hub` (Device Hub) and `canvas.sim_reveal {path}`
 (show a saved file in Finder). All but sim_hub, sim_reveal and sim_input take `pane?`, else the

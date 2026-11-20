@@ -30,6 +30,12 @@ canopy pane new sim <udid>           # a specific simulator
 
 The pane header shows the iOS version and the state: **Live**, **Connecting**, **Screenshot** or **Recording**.
 
+## Size
+
+A simulator pane keeps its size on screen at every canvas zoom. Zooming the canvas moves the pane with its top left corner but does not scale it, so zoomed out, panes can overlap. Resizing the pane or using **Zoom in** or **Zoom out** sets the size it keeps (**Fixed**, the default).
+
+**Actual size** draws the phone as big as the real one, from the phone's pixel density and this display's physical size. It follows the window to another display. If macOS or Xcode does not report those sizes, a toast says so and the pane stays fixed.
+
 ## Helper bar
 
 | Button | What it does |
@@ -38,7 +44,8 @@ The pane header shows the iOS version and the state: **Live**, **Connecting**, *
 | **Screenshot** | Saves a PNG to the Desktop. The toast shows the file. |
 | **Record** | Records a video to the Desktop. Click **Stop recording** to stop. |
 | **Annotate** | Freezes the screen so you can draw on it. **Send to agent** quotes the marked picture. See [Point Agents at Things](Point-Agents-at-Things#a-spot-on-the-simulator). |
-| **Zoom out**, **Actual size**, **Zoom in** | Changes the device size. **Actual size** is 1 point per canvas pixel. |
+| **Zoom out**, **Zoom in** | Changes the device size. The size stays when you zoom the canvas. |
+| **Actual size** | Draws the phone at its physical size on this display. The button then reads **Fixed size**: click it to go back to the size you set. |
 | **Pop out** | Moves the device to its own window. **Bring back** returns it. |
 | **Choose simulator** | Shows every simulator. Xcode's version is at the top. |
 | **Refresh** | Tries the live view again. |
