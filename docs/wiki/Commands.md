@@ -862,7 +862,7 @@ No arguments.
 
 ## `agent.focus`
 
-Show an agent (sub-agents too).
+Show an agent (sub-agents too). On the canvas it also enters its pane.
 
 | Argument | Required |
 |---|---|

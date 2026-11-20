@@ -23,7 +23,7 @@ Canopy replaces its shipped layouts and mods on every start, moving any you edit
 
 Select a layout in the [command palette](Go-To-and-Palette):
 
-- **Layout: Canopy** (`main`): the canvas with a floating toolbar.
+- **Layout: Canopy** (`main`): the canvas with a floating toolbar and a status strip.
 - **Layout: Classic** (`classic`): spaces and agents on the left, tabs above the panes, and a status bar.
 - **Layout: Terminals** (`terminals`): a space picker and tabs above the terminal panes.
 - **Layout: Canopy 98** (`win98`): a Windows 98 desktop with a taskbar.

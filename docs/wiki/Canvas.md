@@ -102,6 +102,10 @@ Edit these in `settings.json` (see [Settings and Themes](Settings-and-Themes)).
 | `tile_gap` | `0` | Space between panes in tile view, in canvas pixels. |
 | `tile_focus_grows` | `false` | Lets the selected pane take more room in tile view. |
 
+## The status strip
+
+A 24px strip under the canvas shows the branch of the open space (when it has one) and one chip per agent: a status dot and the agent's name, agents that need you first. Click a chip to go to that agent's space and type into it right away. With more than six agents, a final **+N** chip opens the picker. The palette key sits at the right.
+
 ## How it works
 
 Arrange moves panes for good and remembers the layout you chose. Tile view and focus fit are temporary views: they remember the previous positions or view only until you leave them or close the window.
