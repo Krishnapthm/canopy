@@ -35,9 +35,10 @@ Read AGENTS.local.md too when present.
   docs/wiki/ (or adds one, and lists it in docs/wiki/_Sidebar.md) and the doc
   comments in the same change: what it is, how to use it, how it works, in
   that order. Follow docs/canopy/doc-style.md and put each fact on the page
-  docs/canopy/doc-owners.md names. Short and exact, no filler, no
-  restating code. docs/wiki/ is published to the GitHub Wiki on merge. The orchestrator reviews docs for accuracy and brevity
-  before a phase is done and fixes what falls short. Document what you
+  docs/canopy/doc-owners.md names. Write for a reader new to Canopy: why
+  before how, real examples, exact facts. docs/wiki/ is published to the
+  GitHub Wiki on merge. The orchestrator reviews docs for accuracy and
+  clarity before a phase is done and fixes what falls short. Document what you
   touch, not the whole app.
 
 ## Principles
