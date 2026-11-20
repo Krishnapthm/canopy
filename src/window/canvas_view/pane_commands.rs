@@ -107,7 +107,7 @@ impl AppWindow {
             }
             canvas::Kind::Pdf { path, .. } => Ok(json!({"text":pdf::read_pdf(id, path)?})),
             canvas::Kind::Mod { kind, props } => Ok(json!({"text":canvas::envelope(id, kind, &[], props.get("text").and_then(Value::as_str).unwrap_or(""))})),
-            canvas::Kind::Sim { udid } => Ok(json!({"text":self.sim_read(id, udid, cx)})),
+            canvas::Kind::Sim { udid, .. } => Ok(json!({"text":self.sim_read(id, udid, cx)})),
             canvas::Kind::Terminal { .. } => Err(format!("pane {id} is a terminal: read it with hc read {id}")),
             canvas::Kind::Sub { parent, .. } => Err(format!("pane {id} is a sub-agent cell: read its parent with hc read {parent}")),
             canvas::Kind::Browser { .. } => Err(format!("pane {id} is a browser pane: its page answers only `canopy pane read`")),
@@ -207,7 +207,7 @@ mod tests {
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == blank["pane"]), "a blank note closes without asking");
             assert!(this.canvas_state.doc.wires.is_empty());
             // A sim pane before simctl answers: read says what it knows; open needs a target.
-            this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.], z: 9, space: None });
+            this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new(), mode: canvas::SimMode::Fixed, screen: None }, rect: [0., 0., 320., 720.], z: 9, space: None });
             assert_eq!(this.pane_read(&json!({"pane":"p9"}), cx).unwrap()["text"], canvas::envelope("p9", "sim", &[("udid", "")], "No simulator picked yet."));
             assert_eq!(this.pane_open(&json!({"pane":"p9"}), window, cx).unwrap_err(), "canvas.pane_open needs target");
         });

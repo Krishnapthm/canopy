@@ -141,6 +141,12 @@ struct Motion {
     frame: bool,
 }
 impl State {
+    /// Fits sim panes to their screen size at the camera's zoom, in the document and in the
+    /// animated copy being shown; once per frame (`Document::fit_sims`).
+    pub(super) fn fit_sims(&mut self) {
+        self.doc.fit_sims();
+        if let Some(shown) = &mut self.shown { shown.fit_sims(); }
+    }
     pub fn load() -> Self {
         let (doc, error, writable) = match Document::load(&file("canvas.json")) {
             Ok((doc, bad)) => (
@@ -612,7 +618,10 @@ impl AppWindow {
         let before = self.canvas_state.doc.clone();
         self.canvas_state.undo = Some(canvas::Rest::capture(&before));
         for (i, r) in indices.iter().zip(arranged) {
-            self.canvas_state.doc.panes[*i].rect = r;
+            let zoom = self.canvas_state.doc.camera.zoom;
+            let pane = &mut self.canvas_state.doc.panes[*i];
+            pane.rect = r;
+            pane.keep_sim_size(zoom);
         }
         self.solve_layout(Some(&ids[indices[0]]), None, cx);
         self.canvas_state.doc.arrange_layout = layout;
@@ -2547,6 +2556,7 @@ impl AppWindow {
                         if resize {
                             card.rect[2] = (card.rect[2] + d[0]).max(240.);
                             card.rect[3] = (card.rect[3] + d[1]).max(120.);
+                            card.keep_sim_size(z);
                         } else {
                             card.rect[0] += d[0];
                             card.rect[1] += d[1];

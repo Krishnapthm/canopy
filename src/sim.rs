@@ -44,6 +44,12 @@ pub fn screenshot(udid: &str, path: &std::path::Path) -> Result<(), String> {
     simctl(&["io", udid, "screenshot", "--type=png", "--mask=alpha", &path.to_string_lossy()]).map(drop)
 }
 
+/// Display points per device point that draw a device at its physical size: display points per
+/// inch times the device's pixels per point, over its pixels per inch.
+pub fn actual_scale(display_ppi: f32, device_scale: f32, pitch: f32) -> f32 {
+    display_ppi * device_scale / pitch
+}
+
 /// "Xcode 27.2 (27B52)", once per run; None without Xcode. Blocking the first time.
 pub fn xcode_version() -> Option<String> {
     static VERSION: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
@@ -122,6 +128,14 @@ mod tests {
         assert_eq!(list[1].runtime, "iOS 26.5");
         assert_eq!((list[1].device_type.as_str(), list[2].device_type.as_str()), ("", "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro"));
         assert!(parse("{}").unwrap_err().starts_with("simctl list: unexpected output"));
+    }
+
+    #[test]
+    fn actual_scale_draws_a_phone_at_its_physical_size() {
+        let scale = actual_scale(86.5, 3., 460.);
+        assert!((scale - 0.5641).abs() < 1e-3);
+        // 1320 px at 460 ppi is 2.87 in: 248 points at 86.5 points per inch.
+        assert!((1320. / 3. * scale - 248.).abs() < 0.5);
     }
 
     #[test]

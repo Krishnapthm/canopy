@@ -610,8 +610,23 @@ pub enum Kind {
     /// was last opened with (`canvas.pane_new`, `canvas.pane_open`), where Home returns.
     Browser { url: String, home: String },
     /// An iOS Simulator's screen. udid: the simulator; empty until the person picks one.
-    Sim { udid: String },
+    /// screen: the pane's on-screen size in points (header and frame included); None only in
+    /// documents saved before it existed. See `Document::fit_sims`.
+    Sim { udid: String, mode: SimMode, screen: Option<Point> },
 }
+
+/// How a sim pane sizes itself on screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SimMode {
+    /// The size the person set, in screen points.
+    #[default]
+    Fixed,
+    /// The phone's physical size on this display.
+    Actual,
+}
+
+fn is_fixed(m: &SimMode) -> bool { *m == SimMode::Fixed }
 
 /// A highlight kept in canvas.json, never written into the PDF.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -636,7 +651,11 @@ enum Builtin {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         highlights: Vec<PdfMark>,
     },
-    Sim { #[serde(default)] udid: String },
+    Sim {
+        #[serde(default)] udid: String,
+        #[serde(default, skip_serializing_if = "is_fixed")] mode: SimMode,
+        #[serde(default, skip_serializing_if = "Option::is_none")] screen: Option<Point>,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -666,7 +685,7 @@ impl TryFrom<RawKind> for Kind {
             Builtin::Browser { url, home } => Self::Browser { url, home },
             Builtin::Image { path } => Self::Image { path },
             Builtin::Pdf { path, highlights } => Self::Pdf { path, highlights },
-            Builtin::Sim { udid } => Self::Sim { udid },
+            Builtin::Sim { udid, mode, screen } => Self::Sim { udid, mode, screen },
         })
     }
 }
@@ -681,7 +700,7 @@ impl From<Kind> for RawKind {
             Kind::Browser { url, home } => Builtin::Browser { url, home },
             Kind::Image { path } => Builtin::Image { path },
             Kind::Pdf { path, highlights } => Builtin::Pdf { path, highlights },
-            Kind::Sim { udid } => Builtin::Sim { udid },
+            Kind::Sim { udid, mode, screen } => Builtin::Sim { udid, mode, screen },
         };
         let mut value = serde_json::to_value(builtin).unwrap();
         Self { kind: value["kind"].as_str().unwrap().to_owned(), props: value["props"].take() }
@@ -781,7 +800,7 @@ impl Pane {
     }
     /// The simulator udid for a sim pane (empty: none picked yet).
     pub fn sim(&self) -> Option<&str> {
-        if let Kind::Sim { udid } = &self.kind { Some(udid) } else { None }
+        if let Kind::Sim { udid, .. } = &self.kind { Some(udid) } else { None }
     }
     /// The expanded terminal size, if any.
     pub fn size(&self) -> Option<Point> {
@@ -790,6 +809,14 @@ impl Pane {
     /// The terminal's saved expansion state.
     pub fn size_mut(&mut self) -> Option<&mut Option<Point>> {
         if let Kind::Terminal { size } = &mut self.kind { Some(size) } else { None }
+    }
+    /// After the person or a command resized a sim pane's rect: that size, in screen points at
+    /// `zoom`, becomes its fixed size. Other panes are left alone.
+    pub fn keep_sim_size(&mut self, zoom: f32) {
+        if let Kind::Sim { mode, screen, .. } = &mut self.kind {
+            *mode = SimMode::Fixed;
+            *screen = Some([self.rect[2] * zoom, self.rect[3] * zoom]);
+        }
     }
 }
 
@@ -913,6 +940,18 @@ impl Wire {
 }
 
 impl Document {
+    /// Sets every sim pane's world size to its screen size at the camera's zoom; a pane without
+    /// a screen size takes its current rect as one. Cheap: called every frame.
+    pub fn fit_sims(&mut self) {
+        let zoom = self.camera.zoom;
+        for p in &mut self.panes {
+            let Kind::Sim { screen, .. } = &mut p.kind else { continue };
+            let s = *screen.get_or_insert([p.rect[2], p.rect[3]]);
+            let size = [s[0] / zoom, s[1] / zoom];
+            if p.rect[2] != size[0] { p.rect[2] = size[0]; }
+            if p.rect[3] != size[1] { p.rect[3] = size[1]; }
+        }
+    }
     /// The space a cell lives in; None for cells on Home.
     pub fn space_of(&self, key: &str) -> Option<&Space> {
         let id = self.panes.iter().find(|c| c.id == key)?.space.as_ref()?;
@@ -1182,11 +1221,39 @@ mod tests {
         pane.kind = Kind::Sub { parent: "t1".into(), sub: "a".into() };
         assert_eq!(pane.kind_name(), "sub");
         assert!(pane.verbs().is_empty());
-        pane.kind = Kind::Sim { udid: "U1".into() };
+        pane.kind = Kind::Sim { udid: "U1".into(), mode: SimMode::Fixed, screen: None };
         assert_eq!((pane.kind_name(), pane.verbs(), pane.sim(), pane.boxed()), ("sim", &["read", "shot", "open", "tap", "swipe", "type", "press", "close"][..], Some("U1"), true));
         let saved = serde_json::to_value(RawKind::from(pane.kind.clone())).unwrap();
         assert_eq!(saved, serde_json::json!({"kind":"sim","props":{"udid":"U1"}}));
         assert_eq!(Kind::try_from(serde_json::from_value::<RawKind>(saved).unwrap()).unwrap(), pane.kind);
+    }
+
+    #[test]
+    fn fit_sims_keeps_screen_size_at_any_zoom() {
+        let sim = |rect, screen| Pane { id: "p1".into(), kind: Kind::Sim { udid: "U".into(), mode: SimMode::Fixed, screen }, rect, z: 0, space: None };
+        let mut doc = Document::default();
+        doc.camera.zoom = 0.5;
+        doc.panes = vec![sim([10., 20., 1., 1.], Some([400., 800.]))];
+        doc.fit_sims();
+        assert_eq!(doc.panes[0].rect, [10., 20., 800., 1600.]);
+        // A document saved before `screen` existed: its rect, read as screen points now.
+        doc.camera.zoom = 2.;
+        doc.panes = vec![sim([5., 6., 300., 600.], None)];
+        doc.fit_sims();
+        assert_eq!(doc.panes[0].rect, [5., 6., 150., 300.]);
+        assert_eq!(doc.panes[0].kind, Kind::Sim { udid: "U".into(), mode: SimMode::Fixed, screen: Some([300., 600.]) });
+    }
+
+    #[test]
+    fn old_sim_pane_loads_fixed_and_saves_without_new_keys() {
+        let old = serde_json::json!({"id":"p1","kind":"sim","props":{"udid":"x"},"rect":[0,0,1,1],"z":0});
+        let pane: Pane = serde_json::from_value(old).unwrap();
+        assert_eq!(pane.kind, Kind::Sim { udid: "x".into(), mode: SimMode::Fixed, screen: None });
+        assert_eq!(serde_json::to_value(&pane).unwrap()["props"], serde_json::json!({"udid":"x"}));
+        let actual = Kind::Sim { udid: "x".into(), mode: SimMode::Actual, screen: Some([1., 2.]) };
+        let saved = serde_json::to_value(RawKind::from(actual.clone())).unwrap();
+        assert_eq!(saved["props"], serde_json::json!({"udid":"x","mode":"actual","screen":[1.0,2.0]}));
+        assert_eq!(Kind::try_from(serde_json::from_value::<RawKind>(saved).unwrap()).unwrap(), actual);
     }
 
     fn version_2_fixture(name: &str) -> Document {
