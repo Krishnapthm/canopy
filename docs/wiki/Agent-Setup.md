@@ -1,57 +1,73 @@
-# How agents learn Canopy
+# Agent Setup
 
-The `canopy` skill explains panes, wiring, quotes, visible helper agents and
-messaging peers. Harnesses discover it by its name and description;
-`canopy --skill` prints the same text as a fallback.
+The `canopy` skill teaches agents about panes, wiring, quotes, helpers and peer messages.
 
-On start, Canopy installs it for installed agents with a `skills` folder in
-`programs.json`: Claude Code uses `~/.claude/skills`, Codex uses
-`~/.agents/skills`. A leading `~/` expands to the home folder. Other agents
-can declare their verified folder with the same field.
-Canopy writes only `<skills>/canopy/SKILL.md`. It rewrites the file when the
-text changes, only if the file contains its installed-by-Canopy mark, and
-leaves an unmarked file alone. Run `canopy skill remove` before uninstalling
-to remove marked files, including those for agents no longer installed.
-It removes the `canopy` folder only when empty.
-`CANOPY_SKILL_HOME` replaces the home folder for `~/` in `skills`;
-`scripts/dev` sets it to `$TMPDIR/canopy-dev/skill-home`, so development
-never writes the real harness folders.
+## The canopy skill
 
-Claude and Codex receive a short launch note naming the skill. Claude's
-session and prompt hook says `Wired: ...` when peers change (and lists them
-on a fresh session). The line points to `canopy wire` for peers and panes
-and to the skill for instructions.
+Canopy installs the skill on start for installed agents whose `programs.json` entry has a `skills` folder.
 
-## Project setup
+- Claude Code: `~/.claude/skills/canopy/SKILL.md`.
+- Codex: `~/.agents/skills/canopy/SKILL.md`.
+- Other agents: `<skills>/canopy/SKILL.md`, using their entry's `skills` folder.
 
-When a local space with a folder other than the home folder opens, the toolbar offers **Teach agents
-Canopy** unless either instruction file already has Canopy's begin marker.
-The dialog shows the target path and this exact block:
+Canopy writes only its own `canopy` skill folder.
+It updates changed skill text only when the file has Canopy's installation marker.
+It leaves unmarked files alone.
 
-```markdown
-<!-- canopy:begin -->
-## Canopy
+A leading `~/` means your home folder.
+`CANOPY_SKILL_HOME` replaces that home folder when Canopy expands `~/` in skill paths.
+See [Files and Folders](Files-and-Folders) for other environment variables.
 
-This project is open in Canopy, a canvas of terminals, agents and panes (files, notes). When the person mentions panes, the canvas, wiring, quotes or peers, use the `canopy` skill.
-<!-- canopy:end -->
+Agents discover the skill by its name and description.
+Claude Code and Codex also receive a launch message naming it.
+See [Agents](Agents) to start an agent.
+
+## Teach a project
+
+![The Teach agents Canopy dialog](images/agent-setup-1.png)
+
+Canopy opens **Teach agents Canopy** once per local project folder, except your home folder.
+It skips the offer if either instruction file contains `<!-- canopy:begin -->`.
+Closing the dialog counts as an answer.
+
+1. Read the target path and the block in the dialog.
+2. Click **Add to AGENTS.md** or **Add to CLAUDE.md** to write the block.
+
+The block tells agents to use the `canopy` skill for panes, the canvas, wiring, quotes and peers.
+Canopy chooses the file as follows:
+
+- If `CLAUDE.md` has an `@AGENTS.md` or `@./AGENTS.md` line, Canopy uses `AGENTS.md`.
+- Otherwise, it uses the existing file, preferring `AGENTS.md` when both exist.
+- If neither exists, it offers to create `AGENTS.md`.
+
+Click **No** or press `Esc` to close without writing. Pressing `Enter` does not write.
+To open the dialog again, run:
+
+```sh
+canopy do mod.open --name project-setup
 ```
 
-If `CLAUDE.md` imports `AGENTS.md` on an `@AGENTS.md` or `@./AGENTS.md` line,
-the target is `AGENTS.md`. Otherwise it uses the existing file, preferring
-`AGENTS.md` when both exist, or offers a new `AGENTS.md` when neither exists.
+- **Remove block** removes an existing marked block and keeps the surrounding text.
+- **Close** closes the dialog when a block exists.
+- Adding replaces a marked block or appends it after a blank line.
+- Canopy checks for file changes before saving. A failed write shows an error toast and leaves the dialog open.
 
-Yes, shown as **Add to AGENTS.md** or **Add to CLAUDE.md**, writes the block.
-**No** or Esc closes without writing. Any answer, including Esc, counts:
-`project-setup.asked` in shared state remembers the offer per folder.
-`canopy do mod.open --name project-setup` reopens it. A marked target offers
-**Remove block**. Adding replaces an existing marked block in place or appends
-it after a blank line; removal leaves the surrounding project text.
-Writes re-read the file and check it has not changed before saving. A failed
-write shows an error toast and keeps the dialog open. Enter does not write.
-This setup supports local spaces only.
+Project writes support local spaces only.
 
-## Global files
+## Global instruction files
 
-Canopy never writes global `AGENTS.md` or `CLAUDE.md` files. **Copy
-instructions** copies the same block for the person to paste themselves.
-With no space folder, the dialog offers copying and closing only.
+Canopy never writes your global `AGENTS.md` or `CLAUDE.md`.
+Click **Copy instructions** to copy the block, then paste it yourself. The button changes to **Copied**.
+
+With no space folder, the dialog offers only **Copy instructions** and **Close**.
+
+## Remove the skill
+
+Before uninstalling Canopy, run:
+
+```sh
+canopy skill remove
+```
+
+This removes marked skill files from configured skill folders, including those for agents no longer installed.
+It keeps unmarked files and other files. It removes each `canopy` folder only when empty.
