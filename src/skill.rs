@@ -1,4 +1,4 @@
-//! Canopy's skill (src/SKILL.md) in each installed agent's global skills folder (programs.json `skills`). Written on start, only into `<folder>/canopy/`, and only over a file Canopy wrote. docs/agent-setup.md.
+//! Canopy's skill (src/SKILL.md) in each installed agent's global skills folder (programs.json `skills`). Written on start, only into `<folder>/canopy/`, and only over a file Canopy wrote. docs/wiki/Agent-Setup.md.
 
 use std::path::Path;
 

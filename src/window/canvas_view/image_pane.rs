@@ -1,4 +1,4 @@
-//! Image pane rendering and region quotes. See docs/panes.md.
+//! Image pane rendering and region quotes. See docs/wiki/Images-and-PDFs.md.
 use super::*;
 use gpui::{ObjectFit, StyledImage, img};
 use std::path::Path;

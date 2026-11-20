@@ -2,7 +2,7 @@
 //! snapshot like any other GPUI content (it zooms, clips and sits under menus). Live, after
 //! a click into it, a WKWebView sits exactly over the pane body and takes input; any click
 //! elsewhere in the window, or a camera or pane move, snapshots it and steps it aside, since
-//! a native view cannot zoom, clip or sit under GPUI. See docs/panes.md "Browser".
+//! a native view cannot zoom, clip or sit under GPUI. See docs/wiki/Browser-Pane.md.
 //!
 //! The page loads only what the person or an agent opens: no homepage, an in-memory
 //! (incognito) website store, no downloads, and the bundled react-grab with its

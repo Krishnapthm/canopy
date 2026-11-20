@@ -1115,5 +1115,3 @@ No arguments.
 Clear all highlights in the last selected PDF pane.
 
 No arguments.
-
-[Back to Canopy](../README.md)

@@ -1,7 +1,7 @@
 //! Live sim panes (macOS): the `canopy --sim-helper` process that streams a booted simulator's
 //! framebuffer and takes its input, the device bezel from Xcode's DeviceKit, and the pure math
 //! that maps a pane to device points. The Objective-C half is src/sim_live.m; the pane UI is
-//! src/window/canvas_view/sim.rs. See docs/panes.md and docs/canopy/harness-notes/xcode-simctl.md.
+//! src/window/canvas_view/sim.rs. See docs/wiki/Simulator-Devices.md and docs/canopy/harness-notes/xcode-simctl.md.
 //!
 //! One helper runs per sim pane that is shown and live. It hands Canopy the framebuffer IOSurface
 //! once (and again only if it changes), then writes `f` per presented frame: nothing moves while

@@ -1,4 +1,4 @@
-//! The canvas.pane_* commands: open, read, shoot and point canvas panes. See docs/panes.md.
+//! The canvas.pane_* commands: open, read, shoot and point canvas panes. See docs/wiki/Agent-Pane-Commands.md.
 use super::*;
 
 impl AppWindow {

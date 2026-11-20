@@ -1,7 +1,7 @@
 //! Sim panes: an iOS Simulator on the canvas. A booted simulator is live on macOS (its
 //! framebuffer, touch and keys, in Xcode's bezel; see sim_screen.rs) while the pane is shown;
 //! a simctl screenshot, taken when the pane opens, on Refresh and on `canopy pane open`, is the
-//! resting and fallback picture. Nothing polls. See docs/panes.md.
+//! resting and fallback picture. Nothing polls. See docs/wiki/Simulator-Devices.md.
 use super::*;
 use crate::sim::{self, Device};
 #[cfg(target_os = "macos")]

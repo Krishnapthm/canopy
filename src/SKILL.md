@@ -442,6 +442,6 @@ expanding; `canvas.space` goes into another space and `canvas.home` back to Home
 creates a terminal here and `canvas.agents` lists installed agents here.
 `canvas.fit` toggles between fitting the current space in the visible canvas
 (excluding the file panel) and the previous camera. The focus icon beside the
-folder icon does the same. See docs/keys.md for keys and preserved collisions.
+folder icon does the same. See https://github.com/Krishnapthm/canopy/wiki/Keys-and-Mouse for keys and preserved collisions.
 
 `canopy pane new file <png|jpg|gif|webp|pdf>` opens an image or PDF pane; `canopy pane read` on a PDF returns its page text.

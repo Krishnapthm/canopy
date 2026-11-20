@@ -2,7 +2,7 @@
 //! panes. Each is sugar over an app command through the control socket (`canvas.pane_new`,
 //! `canvas.pane_read`, `canvas.pane_shot`, `canvas.pane_open`, `canvas.sim_input` for a sim
 //! pane's tap, swipe, type and press, `canvas.close {pane}`).
-//! docs/panes.md explains them.
+//! docs/wiki/Panes.md explains them.
 
 use serde_json::{Value, json};
 

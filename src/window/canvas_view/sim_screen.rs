@@ -2,7 +2,7 @@
 //! simulator's framebuffer, drawn with gpui's `surface()` straight from its IOSurface, plus
 //! touch, keys, screenshots, recordings and annotations. It is its own entity so a frame redraws
 //! only this view, and so a pop-out window can show it. src/sim_live.rs runs the helper.
-//! See docs/panes.md.
+//! See docs/wiki/Simulator-Devices.md.
 use super::*;
 use crate::sim::Device;
 use crate::sim_live::{self, Event, Input, Phase};
