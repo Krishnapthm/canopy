@@ -6,6 +6,8 @@ The canvas is the open surface that holds a space's panes. Unlike a terminal mul
 
 This page covers moving around, selecting and arranging panes, and the views that help you focus. If "canvas mode" is new to you, read [Concepts](Concepts#typing-into-a-pane-and-canvas-mode) first.
 
+An empty space (or Home with no spaces) shows shortcut hints for new terminal, new agent, go to pane, command palette and fit; a hint shows only when its action has a key.
+
 ## Move around
 
 - **Pan:** scroll over the canvas (two fingers on a trackpad), drag with the middle mouse button, or hold `Space` and drag. You can also turn on the **Hand** tool on the toolbar and drag with the left button.
