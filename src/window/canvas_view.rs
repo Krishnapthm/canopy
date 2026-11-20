@@ -808,7 +808,7 @@ impl AppWindow {
     }
 
     /// Removes file and mod panes, their selection and previews no longer in use.
-    fn close_boxed_panes(&mut self, ids: &[String], cx: &mut Context<Self>) {
+    pub(super) fn close_boxed_panes(&mut self, ids: &[String], cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
         let paths: Vec<_> = state.doc.panes.iter().filter(|p| ids.contains(&p.id)).filter_map(|p| p.file().map(str::to_owned)).collect();
         state.doc.panes.retain(|p| !ids.contains(&p.id));
@@ -2813,6 +2813,7 @@ impl AppWindow {
         // Every pane kind joins one z-sorted list, so overlapping panes stack the same whatever they are.
         let mut pills: Vec<(u64, AnyElement)> = Vec::new();
         let mut drawn_sims = vec![];
+        let mut drawn_pages = vec![];
         for card in shown_doc.panes.iter().filter(|p| shown_doc.shows(p.space.as_ref()) && canvas::visible(camera, p.rect, viewport)) {
             let element = match &card.kind {
                 // Drawn by the terminal path below.
@@ -2827,6 +2828,7 @@ impl AppWindow {
                     element
                 }
                 canvas::Kind::Browser { .. } => {
+                    drawn_pages.push(card.id.clone());
                     let (title, detail) = self.browser_title(card);
                     let body = self.browser_body(card, camera, cx);
                     self.pane_card(card, "icons/globe.svg".into(), title, detail, body, camera, cx)
@@ -2852,6 +2854,8 @@ impl AppWindow {
         // A live simulator streams only while its pane is drawn.
         #[cfg(target_os = "macos")]
         self.show_sims(&drawn_sims, cx);
+        // A resting page that leaves sight is checked once for media still playing.
+        self.watch_pages(&drawn_pages, cx);
         let cards: HashMap<_, _> = shown_doc
             .panes
             .iter()

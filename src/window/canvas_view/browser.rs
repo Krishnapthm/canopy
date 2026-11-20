@@ -46,11 +46,14 @@ pub(in crate::window) struct Browsers {
 
 #[derive(Default)]
 struct Page {
+    /// The native view, kept (hidden) while the page rests so a page may play out of sight
+    /// and waking it does not reload.
     #[cfg(target_os = "macos")]
-    view: Option<Entity<gpui_wry::WebView>>,
-    /// The same native view, for scripts run without a GPUI context.
-    #[cfg(target_os = "macos")]
-    raw: Option<gpui_wry::WebViewHandle>,
+    native: Option<Native>,
+    /// Rested and not yet checked out of sight for media still playing (`watch_pages`).
+    watch: bool,
+    /// The "still playing" toast was raised and the page has not been woken since.
+    told: bool,
     /// The last snapshot, BGRA for GPUI.
     shot: Option<Arc<RenderImage>>,
     title: String,
@@ -68,6 +71,11 @@ struct Page {
     loads: u64,
 }
 
+/// A page's native view: the GPUI entity, and the same view for scripts run without a GPUI
+/// context. Both or neither.
+#[cfg(target_os = "macos")]
+struct Native { view: Entity<gpui_wry::WebView>, raw: gpui_wry::WebViewHandle }
+
 enum Ask {
     Read(std::sync::mpsc::Sender<Value>),
     Shot(std::path::PathBuf, std::sync::mpsc::Sender<Value>),
@@ -84,6 +92,8 @@ pub(in crate::window) enum Event {
     Open(String),
     /// The snapshot taken when the page rested (None: it failed).
     Rested(Option<image::RgbaImage>),
+    /// A resting page out of sight has media playing.
+    Playing,
 }
 
 /// Where a pane's last snapshot is kept between runs.
@@ -290,14 +300,18 @@ impl AppWindow {
         id
     }
 
-    /// Drops the views and snapshots of closed browser panes, and loads saved snapshots for
-    /// panes not seen yet this run.
+    /// Tears down the pages of closed browser panes, drops their snapshots, and loads saved
+    /// snapshots for panes not seen yet this run.
     pub(super) fn sync_browsers(&mut self) {
         let ids: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.url().is_some()).map(|p| p.id.clone()).collect();
         let pages = &mut self.canvas_state.browsers.pages;
-        pages.retain(|id, _| {
+        pages.retain(|id, page| {
             let keep = ids.contains(id);
-            if !keep { let _ = std::fs::remove_file(shot_file(id)); }
+            if !keep {
+                let _ = std::fs::remove_file(shot_file(id));
+                #[cfg(target_os = "macos")]
+                if let Some(native) = page.native.take() { destroy(native); }
+            }
             keep
         });
         for id in ids {
@@ -315,7 +329,7 @@ impl AppWindow {
         let id = pane.id.clone();
         let page = self.canvas_state.browsers.pages.get(&id);
         #[cfg(target_os = "macos")]
-        if let Some(page) = page && let (Some(view), Some(at)) = (&page.view, page.live) {
+        if let Some(page) = page && let (Some(Native { view, .. }), Some(at)) = (&page.native, page.live) {
             if at != (camera, pane.rect) || !self.browser_fits(pane, camera) {
                 let (this, id) = (cx.entity(), id.clone());
                 cx.defer(move |cx| this.update(cx, |this, cx| this.rest_browser(&id, cx)));
@@ -379,15 +393,22 @@ impl AppWindow {
                     page.shot = Some(render_image(rgba));
                 }
                 #[cfg(target_os = "macos")]
-                if page.live.is_none() && let Some(view) = &page.view { view.update(cx, |v, _| v.hide()); }
+                if page.live.is_none() && let Some(native) = &page.native { native.view.update(cx, |v, _| v.hide()); }
                 cx.notify();
+            }
+            Event::Playing => {
+                if std::mem::replace(&mut page.told, true) { return; }
+                let title = Some(page.title.clone()).filter(|t| !t.is_empty())
+                    .or_else(|| self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| p.url()).map(|u| u.split_once("://").map_or(u, |(_, r)| r).split(['/', '?', '#']).next().unwrap_or(u).to_owned()))
+                    .unwrap_or_else(|| id.clone());
+                self.toast(Toast { title: format!("{title} is still playing"), body: None, level: Level::Info, action: Some(("pane.focus".into(), json!({"pane": id}))) }, window, cx);
             }
             Event::Message(body) => {
                 if !std::mem::take(&mut page.picking) { return; }
                 let Ok(message) = serde_json::from_str::<Value>(&body) else { return };
                 if let Some(error) = message["error"].as_str() {
                     tracing::warn!("browser pane {id}: {error}");
-                    self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":"Pick failed","body":error,"level":"error"}}), window, cx);
+                    self.toast(Toast { title: "Pick failed".into(), body: Some(error.into()), level: Level::Error, action: None }, window, cx);
                 } else if message["pick"].is_object() {
                     self.browser_picked(&id, &message["pick"], window, cx);
                 }
@@ -520,10 +541,10 @@ impl AppWindow {
                     let reply = cx.background_executor().spawn(async move { rx.recv().unwrap_or_else(|_| json!({"error":"the page went away"})) }).await;
                     let _ = this.update_in(cx, |this, window, cx| {
                         let note = match reply["path"].as_str() {
-                            Some(path) => json!({"title":"Screenshot saved","body":path,"level":"info"}),
-                            None => json!({"title":"Screenshot failed","body":reply["error"],"level":"error"}),
+                            Some(path) => Toast { title: "Screenshot saved".into(), body: Some(path.into()), level: Level::Info, action: None },
+                            None => Toast { title: "Screenshot failed".into(), body: reply["error"].as_str().map(str::to_owned), level: Level::Error, action: None },
                         };
-                        this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":note}), window, cx);
+                        this.toast(note, window, cx);
                     });
                 }).detach();
             }
@@ -572,7 +593,7 @@ impl AppWindow {
         }
         let made = self.canvas_state.browsers.pages.get(id).is_some_and(Page::has_view);
         if let Err(e) = self.ensure_view(id, window, cx) {
-            self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":"Page not opened","body":e,"level":"error"}}), window, cx);
+            self.toast(Toast { title: "Page not opened".into(), body: Some(e), level: Level::Error, action: None }, window, cx);
             return;
         }
         // A new view already loads the saved URL.
@@ -583,7 +604,7 @@ impl AppWindow {
     /// The click on a resting page.
     fn wake_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let Err(e) = self.wake_browser_result(id, window, cx) {
-            self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":"Page not opened","body":e,"level":"error"}}), window, cx);
+            self.toast(Toast { title: "Page not opened".into(), body: Some(e), level: Level::Error, action: None }, window, cx);
         }
     }
 }
@@ -591,7 +612,7 @@ impl AppWindow {
 impl Page {
     fn has_view(&self) -> bool {
         #[cfg(target_os = "macos")]
-        return self.view.is_some();
+        return self.native.is_some();
         #[cfg(not(target_os = "macos"))]
         false
     }
@@ -603,6 +624,18 @@ fn page_url(view: &wry::WebView) -> Option<String> {
     use wry::WebViewExtMacOS as _;
     // SAFETY: called on the main thread with a live WKWebView.
     unsafe { view.webview().URL()?.absoluteString() }.map(|s| s.to_string())
+}
+
+/// Closes a page for good: pauses its media, navigates it away, takes the WKWebView off the
+/// window, then drops both handles. Dropping alone only hides the view (gpui-wry) and detaches
+/// it (wry), so a page that was playing would keep playing.
+#[cfg(target_os = "macos")]
+fn destroy(native: Native) {
+    use wry::WebViewExtMacOS as _;
+    let wv = native.raw.raw();
+    let _ = wv.evaluate_script("document.querySelectorAll('video,audio').forEach(m => m.pause())");
+    let _ = wv.load_url("about:blank");
+    wv.webview().removeFromSuperview();
 }
 
 /// Snapshots a page into `done` on the main thread: RGBA at the screen's backing scale, None
@@ -626,8 +659,8 @@ fn snapshot(view: &wry::WebView, done: impl FnOnce(Option<image::RgbaImage>) + '
 #[cfg(target_os = "macos")]
 impl AppWindow {
     /// Makes the pane's web view (hidden, loading the saved URL) unless it has one.
-    // shortcut: a view lives until its pane closes, so each page opened this run keeps a WebKit
-    // process and its hidden page's (throttled) scripts; drop views on rest if memory matters.
+    // shortcut: a view lives until its pane closes (`destroy`), so each page opened this run keeps
+    // a WebKit process and its hidden page's (throttled) scripts; drop views on rest if memory matters.
     fn ensure_view(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         if self.canvas_state.browsers.pages.get(id).is_some_and(Page::has_view) { return Ok(()); }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.url().is_some()).ok_or_else(|| format!("no browser pane {id}"))?;
@@ -668,8 +701,7 @@ impl AppWindow {
             v.handle()
         });
         let page = self.canvas_state.browsers.pages.entry(id.to_owned()).or_default();
-        page.view = Some(view);
-        page.raw = Some(raw);
+        page.native = Some(Native { view, raw });
         self.begin_load(id, cx);
         Ok(())
     }
@@ -706,7 +738,8 @@ impl AppWindow {
         self.ensure_view(id, window, cx)?;
         let page = self.canvas_state.browsers.pages.get_mut(id).unwrap();
         page.live = Some((camera, pane.rect));
-        let view = page.view.clone().unwrap();
+        (page.told, page.watch) = (false, false);
+        let view = page.native.as_ref().unwrap().view.clone();
         view.update(cx, |v, _| {
             v.show();
             let _ = v.raw().zoom(camera.zoom as f64);
@@ -722,15 +755,34 @@ impl AppWindow {
     /// shows blank. A resting page with a view only refreshes its snapshot.
     pub(super) fn rest_browser(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(page) = self.canvas_state.browsers.pages.get_mut(id) else { return };
-        let Some(view) = page.view.clone() else { return };
+        let Some(view) = page.native.as_ref().map(|n| n.view.clone()) else { return };
         page.live = None;
         // A pick not finished before the page rests is over.
         page.picking = false;
+        page.watch = true;
         let Some(tx) = self.canvas_state.browsers.events.clone() else { return };
         let owned = id.to_owned();
         view.update(cx, |v, _| { let _ = v.focus_parent(); snapshot(v.raw(), move |shot| { let _ = tx.try_send((owned, Event::Rested(shot))); }); });
         self.note_browser_url(id, cx);
         cx.notify();
+    }
+
+    /// Checks, once, each resting page that is no longer drawn (another place, or off the
+    /// canvas view) for media still playing; a playing one is toasted (`Event::Playing`).
+    pub(super) fn watch_pages(&self, drawn: &[String], cx: &mut Context<Self>) {
+        let unseen: Vec<String> = self.canvas_state.browsers.pages.iter()
+            .filter(|(id, p)| p.watch && !p.told && !drawn.contains(id)).map(|(id, _)| id.clone()).collect();
+        if unseen.is_empty() { return; }
+        let this = cx.entity();
+        cx.defer(move |cx| this.update(cx, |this, _| for id in unseen {
+            let Some(page) = this.canvas_state.browsers.pages.get_mut(&id) else { continue };
+            page.watch = false;
+            let (Some(raw), Some(tx)) = (page.native.as_ref().map(|n| n.raw.clone()), this.canvas_state.browsers.events.clone()) else { continue };
+            let script = "[...document.querySelectorAll('video,audio')].some(m => !m.paused && !m.ended && m.readyState > 2)";
+            let _ = raw.raw().evaluate_script_with_callback(script, move |result| {
+                if result.trim() == "true" { let _ = tx.try_send((id.clone(), Event::Playing)); }
+            });
+        }));
     }
 
     /// Runs a script in the page; false when the pane has no view.
@@ -741,7 +793,7 @@ impl AppWindow {
     }
 
     fn raw_browser(&self, id: &str) -> Option<gpui_wry::WebViewHandle> {
-        self.canvas_state.browsers.pages.get(id)?.raw.clone()
+        self.canvas_state.browsers.pages.get(id)?.native.as_ref().map(|n| n.raw.clone())
     }
 
     fn navigate_browser(&mut self, id: &str, url: &str, cx: &mut Context<Self>) {
@@ -802,6 +854,7 @@ impl AppWindow {
         self.ensure_view(id, window, cx)
     }
     pub(super) fn rest_browser(&mut self, _: &str, _: &mut Context<Self>) {}
+    pub(super) fn watch_pages(&self, _: &[String], _: &mut Context<Self>) {}
     fn eval_browser(&mut self, _: &str, _: &str) -> bool { false }
     fn navigate_browser(&mut self, _: &str, _: &str, _: &mut Context<Self>) {}
     fn answer_browser(&mut self, _: &str, _: Ask) {}

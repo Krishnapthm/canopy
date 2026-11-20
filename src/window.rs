@@ -291,6 +291,26 @@ struct Copy {
     error: Option<String>,
 }
 
+/// A notification (defaults/mods/toast): see AGENTS.md "Toasts" for when to raise one.
+pub(crate) struct Toast { pub title: String, pub body: Option<String>, pub level: Level, pub action: Option<(String, Value)> }
+
+#[derive(Clone, Copy)]
+pub(crate) enum Level { Info, Success, Warning, Error }
+
+impl Level {
+    fn name(self) -> &'static str {
+        match self { Level::Info => "info", Level::Success => "success", Level::Warning => "warning", Level::Error => "error" }
+    }
+}
+
+/// The overlay spec `open_overlay` takes for a toast; absent fields are left out.
+fn toast_json(t: &Toast) -> Value {
+    let mut note = json!({"title": t.title, "level": t.level.name()});
+    if let Some(body) = &t.body { note["body"] = json!(body); }
+    if let Some((name, args)) = &t.action { note["action"] = json!({"name": name, "args": args}); }
+    json!({"kind": "toast", "notification": note})
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum OverlayKind {
     Dialog,
@@ -1888,6 +1908,11 @@ impl AppWindow {
         }
     }
 
+    /// Opens a notification toast.
+    pub(crate) fn toast(&mut self, t: Toast, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_overlay(mods::new_overlay_id(), toast_json(&t), window, cx);
+    }
+
     fn layout_notice(&mut self, title: &str, body: &str, window: &mut Window, cx: &mut Context<Self>) {
         let spec = json!({"kind":"toast", "notification":{"title":title,"body":body,"level":"info"}});
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
@@ -3056,6 +3081,9 @@ impl AppWindow {
                 }
                 let addrs = self.model.remove_space(&id);
                 self.kill(&addrs, cx);
+                // Terminals went with the space; its file, browser and other boxed panes stay on the canvas document, so close them too (this tears down browser pages).
+                let boxed: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.boxed() && p.space.as_deref() == Some(id.as_str())).map(|p| p.id.clone()).collect();
+                if !boxed.is_empty() { self.close_boxed_panes(&boxed, cx); }
             }
             "space.rename" => {
                 let Some(id) = Self::owned(a, "id").or_else(|| self.model.active.clone()) else { return self.fail("no space to rename") };
@@ -3190,6 +3218,14 @@ impl AppWindow {
                 }
             }
             "pane.focus" => {
+                // A boxed canvas pane (file, browser, mod...): go to its place, select it, bring it into view.
+                if let Some(id) = Self::owned(a, "pane") && let Some(space) = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.boxed()).map(|p| p.space.clone()) {
+                    self.go_room(space, window, cx);
+                    self.canvas_state.selected = vec![id.clone()];
+                    self.reveal_pane(&id, window, cx);
+                    cx.notify();
+                    return;
+                }
                 if Self::arg(a, "pane").is_none()
                     && let Some(terminal) = Self::arg(a, "terminal")
                     && let Some(block) = self.chrome.visible_blocks().into_iter().find(|n| n.terminal() == Some(terminal))
@@ -5123,6 +5159,16 @@ fn changed_asset_paths(home: &std::path::Path, changed: &[std::path::PathBuf]) -
 mod tests {
     use gpui::{div, point, px, size, Context, IntoElement, Render, TestAppContext, Window};
     use gpui::prelude::*;
+
+    #[test]
+    fn toasts_become_overlay_specs() {
+        let full = super::Toast { title: "T".into(), body: Some("B".into()), level: super::Level::Warning, action: Some(("pane.focus".into(), serde_json::json!({"pane": "p2"}))) };
+        assert_eq!(super::toast_json(&full), serde_json::json!({"kind":"toast","notification":{"title":"T","body":"B","level":"warning","action":{"name":"pane.focus","args":{"pane":"p2"}}}}));
+        let bare = super::Toast { title: "T".into(), body: None, level: super::Level::Info, action: None };
+        assert_eq!(super::toast_json(&bare), serde_json::json!({"kind":"toast","notification":{"title":"T","level":"info"}}));
+        let levels = [super::Level::Info, super::Level::Success, super::Level::Warning, super::Level::Error].map(super::Level::name);
+        assert_eq!(levels, ["info", "success", "warning", "error"]);
+    }
 
     #[test]
     fn going_back_into_a_split_column_takes_its_top_pane_whatever_the_fractions() {
