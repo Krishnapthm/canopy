@@ -477,7 +477,7 @@ impl AppWindow {
         self.rest_browser(id, cx);
         let camera = self.canvas_state.doc.camera;
         let origin = self.bounds.borrow().get("canopy-canvas").map(|b| b.origin).unwrap_or_default();
-        let [x, y] = camera.to_screen([pane.rect[0] + 16., pane.rect[1] + canvas::HEADER]);
+        let [x, y] = camera.to_screen([pane.rect[0] + 16., pane.rect[1] + canvas::header_world(camera.zoom)]);
         quote["point"] = json!({"x": f32::from(origin.x) + x, "y": f32::from(origin.y) + y});
         tracing::debug!("browser pick in {id}: {}", format_quote(&quote, None));
         self.quote_menu(&quote, window, cx);

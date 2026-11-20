@@ -2293,25 +2293,37 @@ impl AppWindow {
         self.pane_card(card, "mods/files/file.svg".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned(), path.parent().unwrap_or(path).to_string_lossy().into_owned(), body, camera, cx)
     }
 
-    /// The shared saved-rect frame, header drag and resize corner for boxed panes.
+    /// A pane header: a fixed screen-size row (icon 16, gap 8, text 13/18) at any zoom. Callers
+    /// add their children and listeners; overflowing text is cut by the pane's own clipping.
+    fn pane_header() -> Div {
+        div().flex().items_start().px(px(12.)).py(px(9.)).gap(px(8.)).text_size(px(13.)).line_height(px(18.))
+            .text_color(c("foreground")).overflow_hidden()
+    }
+
+    /// The shared saved-rect frame, header drag and resize corner for boxed panes. It occludes
+    /// the panes beneath it and raises itself on a click.
     fn pane_card(&self, card: &canvas::Pane, icon: SharedString, title: String, detail: String, body: AnyElement, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
         let p = camera.to_screen([card.rect[0], card.rect[1]]);
         let drag = card.id.clone();
         let resize = drag.clone();
+        let raise = drag.clone();
         (div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
                 .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).overflow_hidden()
+                .occlude()
+                // Capture phase: the header and corner stop propagation, and a click anywhere raises.
+                .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, _, cx| if e.button == MouseButton::Left { this.raise_pane(&raise, cx); }))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(div().flex().items_center().gap(px(8.)).px(px(12.)).h(px(36. * camera.zoom)).flex_none().border_b_1().border_color(c("border"))
+                .child(Self::pane_header().h(px(canvas::HEADER)).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                         this.begin_layout();
                         this.canvas_state.selected = vec![drag.clone()];
                         this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                         this.canvas_state.preview_drag = Some((drag.clone(), false, e.position)); cx.stop_propagation();
                     }))
-                    .child(svg().path(icon).size(px(16.)).text_color(c("foreground")))
-                    .child(div().text_ellipsis().child(title))
-                    .child(div().flex_1().min_w_0().text_ellipsis().text_color(c("muted-foreground")).child(detail)))
+                    .child(div().flex_none().mt(px(1.)).child(svg().path(icon).size(px(16.)).text_color(c("foreground"))))
+                    .child(div().min_w_0().truncate().child(title))
+                    .child(div().flex_1().min_w_0().truncate().text_color(c("muted-foreground")).child(detail)))
                 .child(div().flex_1().min_h_0().overflow_hidden().child(body))
                 .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(ui::RADIUS))
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
@@ -2751,43 +2763,44 @@ impl AppWindow {
                     ),
             );
         }
-        for card in shown_doc.panes.iter().filter(|p| p.path().is_some() && shown_doc.shows(p.space.as_ref())) {
-            if canvas::visible(camera, card.rect, viewport) {
-                match &card.kind {
-                    canvas::Kind::File { path } => {
-                        if let Some((view, _)) = state.previews.get(path) {
-                            area = area.child(self.preview_card(card, path, view, camera, cx));
-                        }
-                    }
-                    canvas::Kind::Image { path } => area = area.child(self.image_card(card, path, camera, cx)),
-                    canvas::Kind::Pdf { path, .. } => area = area.children(self.pdf_card(card, path, camera, cx)),
-                    _ => {}
-                }
-            }
-        }
-        for card in shown_doc.panes.iter().filter(|p| p.url().is_some() && shown_doc.shows(p.space.as_ref())) {
-            if !canvas::visible(camera, card.rect, viewport) { continue; }
-            let (title, detail) = self.browser_title(card);
-            let body = self.browser_body(card, camera, cx);
-            area = area.child(self.pane_card(card, "icons/globe.svg".into(), title, detail, body, camera, cx));
-        }
-        for card in shown_doc.panes.iter().filter(|p| p.mod_name().is_some() && shown_doc.shows(p.space.as_ref())) {
-            if !canvas::visible(camera, card.rect, viewport) { continue; }
-            let name = card.mod_name().unwrap();
-            let (icon, title, body) = if let Some(hint) = self.folders.get(name).and_then(|f| f.hint.pane.as_ref()) {
-                (SharedString::from(hint.icon.clone()), hint.label.clone(), self.render_slot(&format!("pane:{}", card.id), cx))
-            } else {
-                ("icons/x.svg".into(), card.kind_name().to_owned(), div().p(px(12.)).text_color(c("muted-foreground")).child(format!("Mod {name} is not installed")).into_any_element())
-            };
-            area = area.child(self.pane_card(card, icon, title, String::new(), body, camera, cx));
-        }
+        // Every pane kind joins one z-sorted list, so overlapping panes stack the same whatever they are.
+        let mut pills: Vec<(u64, AnyElement)> = Vec::new();
         let mut drawn_sims = vec![];
-        for card in shown_doc.panes.iter().filter(|p| p.sim().is_some() && shown_doc.shows(p.space.as_ref())) {
-            if !canvas::visible(camera, card.rect, viewport) { continue; }
-            drawn_sims.push(card.id.clone());
-            let (title, detail) = self.sim_title(card, cx);
-            let body = self.sim_body(card, cx);
-            area = area.child(self.pane_card(card, "icons/smartphone.svg".into(), title, detail, body, camera, cx));
+        for card in shown_doc.panes.iter().filter(|p| shown_doc.shows(p.space.as_ref()) && canvas::visible(camera, p.rect, viewport)) {
+            let element = match &card.kind {
+                // Drawn by the terminal path below.
+                canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } => continue,
+                canvas::Kind::File { path } => {
+                    let Some((view, _)) = state.previews.get(path) else { continue };
+                    self.preview_card(card, path, view, camera, cx)
+                }
+                canvas::Kind::Image { path } => self.image_card(card, path, camera, cx),
+                canvas::Kind::Pdf { path, .. } => {
+                    let Some(element) = self.pdf_card(card, path, camera, cx) else { continue };
+                    element
+                }
+                canvas::Kind::Browser { .. } => {
+                    let (title, detail) = self.browser_title(card);
+                    let body = self.browser_body(card, camera, cx);
+                    self.pane_card(card, "icons/globe.svg".into(), title, detail, body, camera, cx)
+                }
+                canvas::Kind::Mod { .. } => {
+                    let name = card.mod_name().unwrap();
+                    let (icon, title, body) = if let Some(hint) = self.folders.get(name).and_then(|f| f.hint.pane.as_ref()) {
+                        (SharedString::from(hint.icon.clone()), hint.label.clone(), self.render_slot(&format!("pane:{}", card.id), cx))
+                    } else {
+                        ("icons/x.svg".into(), card.kind_name().to_owned(), div().p(px(12.)).text_color(c("muted-foreground")).child(format!("Mod {name} is not installed")).into_any_element())
+                    };
+                    self.pane_card(card, icon, title, String::new(), body, camera, cx)
+                }
+                canvas::Kind::Sim { .. } => {
+                    drawn_sims.push(card.id.clone());
+                    let (title, detail) = self.sim_title(card, cx);
+                    let body = self.sim_body(card, cx);
+                    self.pane_card(card, "icons/smartphone.svg".into(), title, detail, body, camera, cx)
+                }
+            };
+            pills.push((card.z, element));
         }
         // A live simulator streams only while its pane is drawn.
         #[cfg(target_os = "macos")]
@@ -2835,20 +2848,17 @@ impl AppWindow {
             }
         }
         let edge_layer = self.wire_layer(viewport);
-        let mut pills = Vec::new();
         for (parent, sub, card) in sub_pills {
             let rect = card.rect;
             let key = card.id.clone();
             let [x, y] = camera.to_screen([rect[0], rect[1]]);
             let z = camera.zoom;
             let (icon, tint) = program_icon(&json!({"program":sub.program}));
-            let mut pill = div().id(SharedString::from(format!("canvas-sub-{parent}-{}", sub.id)))
+            let mut pill = Self::pane_header().id(SharedString::from(format!("canvas-sub-{parent}-{}", sub.id)))
                 .absolute().left(px(x)).top(px(y)).w(px(rect[2] * z)).h(px(rect[3] * z))
                 .rounded(px(ui::RADIUS * z)).border_1().border_color(c(if state.selected.contains(&key) { "ring" } else { "border" })).bg(c("surface"))
-                .when(sub.done, |d| d.opacity(0.5))
-                .flex().items_start().px(px(12. * z)).py(px(9. * z)).gap(px(8. * z))
-                .text_size(px(13. * z)).line_height(px(18. * z)).text_color(c("foreground")).overflow_hidden()
-                .child(div().flex_none().mt(px(z)).child(icon_element(&icon, tint, px(16. * z), c("foreground"))));
+                .when(sub.done, |d| d.opacity(0.5)).occlude()
+                .child(div().flex_none().mt(px(1.)).child(icon_element(&icon, tint, px(16.), c("foreground"))));
             let text = div().flex_1().min_w_0().child(div().text_ellipsis().when(sub.done, |d| d.text_color(c("muted-foreground")))
                 .child(format!("{} · {}", sub.name, if sub.done { "done" } else { "working" })));
             pill = pill.child(text);
@@ -2882,23 +2892,15 @@ impl AppWindow {
             let [cw, ch] = [card.rect[2], card.rect[3]];
             let is_synced = synced.contains(&addr);
             let frame_color = c(if is_synced { "accent" } else if state.selected.contains(&addr) { "ring" } else { "border" });
-            let mut pill = div()
+            // A collapsed pill is a box at world size; its header contents keep their screen size, clipped.
+            let mut pill = Self::pane_header()
                 .id(SharedString::from(format!("canvas-{addr}")))
-                .when(!expanded, |d| d.absolute().left(px(x)).top(px(y)).rounded(px(ui::RADIUS * z)).border_1().border_color(frame_color).bg(c("surface")))
+                .when(!expanded, |d| d.absolute().left(px(x)).top(px(y)).rounded(px(ui::RADIUS * z)).border_1().border_color(frame_color).bg(c("surface")).occlude())
                 .w(px(cw * z))
-                .h(px(if expanded { canvas::HEADER } else { ch } * z))
-                .flex()
-                .items_start()
-                .px(px(12. * z))
-                .py(px(9. * z))
-                .gap(px(8. * z))
-                .text_size(px(13. * z))
-                .line_height(px(18. * z))
-                .text_color(c("foreground"))
-                .overflow_hidden();
+                .h(px(if expanded { canvas::HEADER } else { ch * z }));
             let (icon, tint) = program_icon(rec);
             // Glyphs sit on the first line, so a two-line name keeps its icon top-left.
-            pill = pill.child(div().flex_none().mt(px(1. * z)).child(icon_element(&icon, tint, px(16. * z), c("foreground"))));
+            pill = pill.child(div().flex_none().mt(px(1.)).child(icon_element(&icon, tint, px(16.), c("foreground"))));
             // On an expanded cell, double-clicking the name edits its tab's name in place (a pill enters instead).
             let tab_id = self.model.pane_of(&addr).and_then(|p| self.model.tab_of(&p)).map(|t| t.id.clone()).filter(|_| expanded);
             let editing = tab_id.as_ref().and_then(|id| state.rename.as_ref().filter(|(t, _, _)| *t == Rename::Tab(id.clone())));
@@ -2906,8 +2908,8 @@ impl AppWindow {
                 .when_some(editing, |d, (_, input, _)| d.child(gpui_base::Input::new(input)))
                 .when(editing.is_none(), |d| d.child(name.clone()))
                 .id(SharedString::from(format!("canvas-name-{addr}")));
-            let pill_badge = is_synced.then(|| div().flex_none().px(px(5. * z)).rounded(px(3. * z)).border_1().border_color(c("accent"))
-                .text_size(px(10. * z)).line_height(px(16. * z)).font_weight(FontWeight::SEMIBOLD).text_color(c("accent")).child("SYNC"));
+            let pill_badge = is_synced.then(|| div().flex_none().px(px(5.)).rounded(px(3.)).border_1().border_color(c("accent"))
+                .text_size(px(10.)).line_height(px(16.)).font_weight(FontWeight::SEMIBOLD).text_color(c("accent")).child("SYNC"));
             pill = pill.child(match tab_id {
                 Some(id) => name_box.on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     let editing = this.canvas_state.rename.as_ref().is_some_and(|(t, _, _)| *t == Rename::Tab(id.clone()));
@@ -2922,8 +2924,8 @@ impl AppWindow {
                 pill = pill.child(
                     svg()
                         .path("mods/workspace-chrome/spinner.svg")
-                        .size(px(12. * z))
-                        .mt(px(3. * z))
+                        .size(px(12.))
+                        .mt(px(3.))
                         .text_color(c("muted-foreground"))
                         .with_animation(
                             "working",
@@ -2937,8 +2939,8 @@ impl AppWindow {
                 pill = pill.child(
                     svg()
                         .path("frame/settings/bell.svg")
-                        .size(px(12. * z))
-                        .mt(px(3. * z))
+                        .size(px(12.))
+                        .mt(px(3.))
                         .text_color(c("muted-foreground")),
                 );
             }
@@ -2946,8 +2948,8 @@ impl AppWindow {
                 pill = pill.child(
                     svg()
                         .path("icons/external-link.svg")
-                        .size(px(12. * z))
-                        .mt(px(3. * z))
+                        .size(px(12.))
+                        .mt(px(3.))
                         .text_color(c("muted-foreground")),
                 );
             }
@@ -3008,7 +3010,7 @@ impl AppWindow {
             // The entered cell always draws live: its terminal holds the keyboard, Cmd+Esc included.
             let entered = !state.mode && state.selected.last() == Some(&card.id);
             let live = self.terms.get(&slot).filter(|_| entered || z >= canvas::EXPANDED_MIN_ZOOM);
-            let body_size = size(px(card.rect[2] - 2.), px(card.rect[3] - canvas::HEADER - 2.));
+            let body_size = size(px(card.rect[2] - 2.), px(card.rect[3] - canvas::header_world(z) - 2.));
             // A tile squeezed below readable size shows who it is instead, and its program keeps its grid.
             let compact = state.tile.is_some() && !entered && (cw < canvas::TILE_COMPACT[0] || ch < canvas::TILE_COMPACT[1]);
             if let Some(t) = self.terms.get(&slot) {
@@ -3070,8 +3072,7 @@ impl AppWindow {
                         .into_any_element(),
                     None => div().size_full().bg(crate::terminal::hsla(crate::vt::theme().bg)).into_any_element(),
                 });
-            // Eight resize zones over the edges and corners of an expanded cell; selected cells show handles.
-            let show = state.selected.contains(&card.id);
+            // Eight invisible resize zones over the edges and corners of an expanded cell.
             let zones: Vec<_> = if card.size().is_none() { vec![] } else {
                 [(-1i8, -1i8), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].into_iter().map(|zone| {
                     let addr = resize_addr.clone();
@@ -3087,8 +3088,7 @@ impl AppWindow {
                         .absolute().cursor(cursor).flex().items_center().justify_center();
                     let d = match zone.0 { -1 => d.left_0().w(thick(zone.1)), 1 => d.right_0().w(thick(zone.1)), _ => d.left(px(corner)).right(px(corner)) };
                     let d = match zone.1 { -1 => d.top_0().h(thick(zone.0)), 1 => d.bottom_0().h(thick(zone.0)), _ => d.top(px(corner)).bottom(px(corner)) };
-                    d.when(show, |d| d.child(div().size(px(6.)).bg(c("surface")).border_1().border_color(c("ring"))))
-                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                    d.on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                             this.begin_layout();
                             this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                             this.canvas_state.selected = vec![addr.clone()];
@@ -3114,6 +3114,7 @@ impl AppWindow {
                 .overflow_hidden()
                 .flex()
                 .flex_col()
+                .occlude()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(pill)
                 .child(body)

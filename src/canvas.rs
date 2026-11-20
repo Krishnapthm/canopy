@@ -25,6 +25,8 @@ pub const PILL_WIDTH: f32 = 220.;
 pub const SPACE_CARD: Point = [260., 120.];
 /// The header strip of an expanded cell at zoom 1: the pill's one-line height.
 pub const HEADER: f32 = 36.;
+/// The header's height in world px at `zoom`: headers keep their screen size.
+pub fn header_world(zoom: f32) -> f32 { HEADER / zoom }
 /// Below this camera zoom an expanded cell shows a flat stand-in instead of live text.
 pub const EXPANDED_MIN_ZOOM: f32 = 0.5;
 
@@ -1139,6 +1141,17 @@ mod tests {
             assert!(serde_json::from_value::<Kind>(bad).is_err());
         }
         assert_eq!(serde_json::from_value::<Kind>(serde_json::json!({"kind":"mod:note"})).unwrap(), Kind::Mod { kind: "mod:note".into(), props: Default::default() });
+    }
+
+    #[test]
+    fn stack_raises_one_pane_to_the_front() {
+        let mut doc = Document::default();
+        for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
+            doc.panes.push(Pane { id: id.into(), kind: Kind::Terminal { size: None }, rect: [0.; 4], z: i as u64, space: None });
+        }
+        assert!(doc.stack(&["a".into()], true));
+        assert_eq!(doc.panes.iter().find(|p| p.id == "a").unwrap().z, 2);
+        assert!(!doc.stack(&["a".into()], true));
     }
 
     #[test]
