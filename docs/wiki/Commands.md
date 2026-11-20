@@ -299,7 +299,7 @@ Copy a browser pane's page URL to the clipboard and toast it (pane, else the sel
 
 ## `canvas.browser_viewport`
 
-Resize a browser pane to a preset page size: size responsive (a new pane's size), mobile (390x844) or desktop (1280x800); the top left stays put (pane, else the selected pane).
+Resize a browser pane to a preset page size: size responsive (a new pane's size), mobile (390x844) or desktop (1280x800), exact at 100% zoom (the width at any zoom); the top left stays put (pane, else the selected pane).
 
 | Argument | Required |
 |---|---|

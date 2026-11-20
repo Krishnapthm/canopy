@@ -65,7 +65,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.browser_shot", &[opt("pane")], "Save a browser pane's page to <temp>/canopy/<pane>.png and toast the path (pane, else the selected pane)."),
     cmd("canvas.browser_external", &[opt("pane")], "Open a browser pane's page in the system browser (pane, else the selected pane)."),
     cmd("canvas.browser_copy", &[opt("pane")], "Copy a browser pane's page URL to the clipboard and toast it (pane, else the selected pane)."),
-    cmd("canvas.browser_viewport", &[req("size"), opt("pane")], "Resize a browser pane to a preset page size: size responsive (a new pane's size), mobile (390x844) or desktop (1280x800); the top left stays put (pane, else the selected pane)."),
+    cmd("canvas.browser_viewport", &[req("size"), opt("pane")], "Resize a browser pane to a preset page size: size responsive (a new pane's size), mobile (390x844) or desktop (1280x800), exact at 100% zoom (the width at any zoom); the top left stays put (pane, else the selected pane)."),
     cmd("canvas.browser_expand", &[opt("pane")], "Expand a browser pane's live page into a tab of the top strip that fills the canvas area, or collapse it again (pane, else the selected pane). Escape, any space tab or Home, and closing the pane collapse it."),
     cmd("canvas.browser_pop", &[opt("pane")], "Pop a browser pane's page out into its own window, or bring it back (pane, else the selected pane). The pane shows \"Popped out\" meanwhile."),
     cmd("canvas.browser_clear", &[opt("pane"), opt("confirmed")], "Delete the cookies, storage and cache of every browser pane (asks first unless confirmed)."),

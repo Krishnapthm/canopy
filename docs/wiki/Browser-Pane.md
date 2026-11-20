@@ -44,14 +44,14 @@ Drag the pane by the header's edges, or by the [helper bar](Toolbar-and-Helper-B
 | **Open in default browser** | Opens the current address in your usual browser. |
 | **Copy link** | Copies the address and shows a toast. |
 | **Save screenshot** | Saves the page to `<temp>/canopy/<pane>.png` and shows the path in a toast. |
-| **Viewport: Responsive / Mobile / Desktop** | Resizes the pane to a new pane's size, a 390 x 844 page or a 1280 x 800 page. The top left stays put, and a check marks the current size. |
-| **Expand** / **Collapse** | See below. |
+| **Viewport: Responsive / Mobile / Desktop** | Resizes the pane to a new pane's size, a 390 x 844 page or a 1280 x 800 page, exact at 100% zoom (the width at any zoom, since the header keeps its screen size). The top left stays put, and a check marks the current size. |
+| **Expand** | See below. |
 | **Pop out** / **Bring back** | See below. |
 | **Clear browsing data** | After a confirmation, deletes the cookies, storage and cache of every browser pane. |
 
 ### Expand
 
-**Expand** makes the page live and fills the whole canvas area with it, at 100% zoom. The top strip gets a tab for it, right after its space's tab (after Home for a pane on Home), with the page title and a close button. Nothing else on the canvas is drawn meanwhile. **Collapse** with the tab's close button, the menu, the same command again, Escape (when the canvas has the keyboard, not the page), a click on any space tab or Home, or by closing the pane. The page then rests in its pane as usual.
+**Expand** makes the page live and fills the whole canvas area with it, at 100% zoom. The top strip gets a tab for it, right after its space's tab (after Home for a pane on Home), with the page title and a close button. Nothing else on the canvas is drawn meanwhile. **Collapse** with the tab's close button, the same command again, Escape (when the canvas has the keyboard, not the page), a click on any space tab or Home, or by closing the pane. The page then rests in its pane as usual.
 
 ### Pop out
 
@@ -115,7 +115,7 @@ Both wait for the page to finish loading, time out after 30 seconds, and work ev
 | **Pick an element to quote** | Starts the element picker. |
 | **Screenshot** | Saves the page to `<temp>/canopy/<pane>.png` and shows the path in a toast. |
 | **Open in browser** | Opens the current address in your usual browser. |
-| **Expand**, **Pop out** | The same as in the ⋯ menu; they read **Collapse** and **Bring back** when active. |
+| **Expand**, **Pop out** | The same as in the ⋯ menu; Pop out reads **Bring back** while the page is popped out. |
 | **Connect**, **Close** | Draws a wire, or closes the pane. |
 
 ## Privacy

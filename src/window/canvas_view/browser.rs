@@ -53,8 +53,9 @@ impl Viewport {
     }
 }
 
-/// The pane size (world px, header and 2 px frame included) that gives the page `viewport`:
-/// Responsive is a new pane's size, Mobile a 390x844 page, Desktop 1280x800.
+/// The pane size (world px, header and 2 px frame included) that gives the page `viewport` at
+/// 100% zoom: Responsive is a new pane's size, Mobile a 390x844 page, Desktop 1280x800. The
+/// width holds at any zoom; the height does not, since the header keeps its screen size.
 fn viewport_size(viewport: Viewport) -> canvas::Point {
     match viewport {
         Viewport::Responsive => SIZE,
@@ -475,7 +476,6 @@ impl AppWindow {
     fn browser_menu(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
         let size = [pane.rect[2], pane.rect[3]];
-        let expanded = self.canvas_state.browser_tab.as_deref() == Some(id);
         let popped = self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some());
         let at = json!({"pane": id});
         let mut items = vec![
@@ -489,7 +489,8 @@ impl AppWindow {
             items.push(json!([format!("{mark}Viewport: {}{}", name[..1].to_uppercase(), &name[1..]), "canvas.browser_viewport", {"pane": id, "size": name}]));
         }
         items.extend([
-            json!([if expanded { "Collapse" } else { "Expand" }, "canvas.browser_expand", at]),
+            // An expanded page hides its pane, menu included: its strip tab collapses it.
+            json!(["Expand", "canvas.browser_expand", at]),
             json!([if popped { "Bring back" } else { "Pop out" }, "canvas.browser_pop", at]),
             json!(["Clear browsing data", "canvas.browser_clear", at]),
         ]);
@@ -744,18 +745,11 @@ impl AppWindow {
         }
     }
 
-    /// A browser pane's helper bar labels for its state: collapse an expanded page, bring back
-    /// a popped one.
+    /// A browser pane's helper bar labels for its state: bring back a popped page. (An expanded
+    /// page hides its pane and bar, so no Collapse label is needed.)
     pub(super) fn browser_relabel(&self, id: &str, mut actions: Vec<super::helper_bar::BarAction>) -> Vec<super::helper_bar::BarAction> {
-        let expanded = self.canvas_state.browser_tab.as_deref() == Some(id);
         let popped = self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some());
-        for a in &mut actions {
-            match a.command.as_str() {
-                "canvas.browser_expand" if expanded => { a.icon = "icons/minimize-2.svg".into(); a.label = "Collapse".into(); }
-                "canvas.browser_pop" if popped => a.label = "Bring back".into(),
-                _ => {}
-            }
-        }
+        for a in actions.iter_mut().filter(|a| popped && a.command == "canvas.browser_pop") { a.label = "Bring back".into(); }
         actions
     }
 
