@@ -1,32 +1,36 @@
-# Sub-agents
+# Sub-Agents
 
-There are two kinds. Real helpers are agents another agent started with
-`canopy spawn <program> --name <n> [--model <m>] [-- <task>]` when you asked it
-for sub-agents, helpers or peers: each is a full terminal in its parent's folder
-and space, wired to the parent, that you can open and type into. `canopy wire`
-lists their addresses; the parent messages them with `hc send`, reads their
-screens with `hc read` and waits with `hc wait --children any`. When a task is
-given, Canopy appends a request to report back with `hc send <parent> "..."`
-when done or stuck (see [Wire](wire.md)). The rest of this page is about the
-other kind.
+A sub-agent is a helper that an agent starts. Canopy shows it beside its parent.
 
-In-process helpers appear as named cells beside their parent, joined by an
-edge. They show working, then done; done cells dim. They are observations,
-not independent terminals.
+![An agent with two sub-agents beside it](images/sub-agents-1.png)
 
-Drag a cell to keep it somewhere else. Click to follow its read-only
-transcript in the side panel, including when the file appears later.
-Talk to a sub-agent through its parent's terminal. Pick "Clear finished" on
-the parent to remove its done cells, or select a done cell and press Backspace
-or Delete. Working
-cells refuse deletion with a toast. Ending the parent session clears all
-its sub-agent cells.
+## Helper agents
 
-Session hooks publish `canopy.sub.<id>` labels on the parent terminal.
-Start marks working, Stop marks done, and restarting the same id marks
-working again. Names prefer the transcript sidecar's description, then the
-stop payload's description, then the agent type. Names are plain text,
-limited to 256 characters. Label events and folder changes refresh them.
-`canvas.json` stores each sub-agent cell as a pane of kind `sub` with
-`props.parent` and `props.sub`, position and stacking order; existing terminal
-cards still load. Transcript changes use the existing folder watcher and text preview, with agent markup shown literally.
+An agent uses `canopy spawn` to start a helper in a real terminal, wired to its parent.
+The helper starts in the caller's folder and space.
+See [CLI](CLI) for the command syntax and [Wiring](Wiring) for messaging with `hc`.
+
+When the agent supplies a task, Canopy appends this sentence.
+It replaces `<parent>` with the caller's terminal address:
+
+```text
+When you are done or stuck, report to your parent with: hc send <parent> "<what you did or need>"
+```
+
+No sentence is added without a task.
+
+## In-process sub-agents
+
+In-process sub-agents run inside their parent agent, without separate terminals.
+Their named panes show **working**, then **done**. Done panes dim.
+
+- Click a sub-agent pane to follow its read-only transcript in the [Files panel](Files-Panel).
+- Talk to the sub-agent through its parent's terminal.
+
+## Clear finished sub-agents
+
+- Right-click the parent pane and select **Clear finished** to remove its done sub-agent panes.
+- To remove one done pane, select it and press `Backspace` or `Delete`.
+
+A working sub-agent refuses deletion because its pane cannot stop it independently.
+The toast says **This sub-agent is still working. Stop it through its parent.**
