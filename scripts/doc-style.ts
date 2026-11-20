@@ -5,8 +5,9 @@
 // checks every hand-written page. `bun scripts/docs.ts check` runs it too.
 import { readdir, readFile } from "node:fs/promises";
 
-const banned = ["simply", "easily", "seamless", "seamlessly", "powerful", "robust", "leverage", "utilize", "note that"];
-const bannedRe = new RegExp(`\\b(${banned.join("|")})\\b`, "i");
+const banned = ["simply", "easily", "seamless", "seamlessly", "powerful", "robust", "leverage", "utilize"];
+// "Note that" is filler only as an opener, not in "a note that has text".
+const bannedRe = new RegExp(`\\b(${banned.join("|")})\\b|(?:^|[.!?:]\\s+)(note that)\\b`, "i");
 
 /** Every style problem in one page, as `file:line: problem`. */
 export function lintStyle(file: string, source: string): string[] {
@@ -31,7 +32,7 @@ export function lintStyle(file: string, source: string): string[] {
       if (!/^(https?:|#|images\/|mailto:)/.test(target) && !/^[A-Za-z][A-Za-z0-9-]*(#[\w-]+)?$/.test(target))
         at(i, `link target "${target}": use Page-Name, Page-Name#heading, images/... or a full URL`);
     const bad = text.replace(/\]\([^)]*\)/g, "]").match(bannedRe);
-    if (bad) at(i, `filler word "${bad[1]}"`);
+    if (bad) at(i, `filler word "${bad[1] ?? bad[2]}"`);
   }
   return errors;
 }
