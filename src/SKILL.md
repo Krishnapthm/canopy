@@ -185,7 +185,7 @@ focused pane.
 canopy do space.new --name api --folder /path/to/api
 canopy do tab.new --name "fix login" --argv '["claude"]' --task "Look at the login bug"
 canopy do pane.split --direction right --pane p12
-canopy do agent.focus --terminal t7
+canopy do agent.focus --terminal t7   # on the canvas: also enters that pane
 ```
 
 For a remote space:

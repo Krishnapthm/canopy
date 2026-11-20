@@ -1373,6 +1373,17 @@ impl AppWindow {
         self.agent = Some(addr.to_owned());
     }
 
+    /// On the canvas: goes to the agent's space, brings its pane into view and
+    /// enters it, so the next keystroke goes to that agent.
+    fn enter_canvas_agent(&mut self, addr: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(space) = self.canvas_state.doc.panes.iter().find(|c| c.id == addr).map(|c| c.space.clone()) else { return };
+        self.go_room(space, window, cx);
+        self.canvas_state.selected = vec![addr.clone()];
+        self.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+        // After entering: the expanded cell is what must be on screen.
+        self.reveal_pane(&addr, window, cx);
+    }
+
     /// The parent chain's top: the agent a sub-agent belongs to in the agent order.
     fn root_agent(&self, addr: &str) -> String {
         let mut cur = addr.to_owned();
@@ -3339,6 +3350,9 @@ impl AppWindow {
                     return self.fail(format!("no running terminal {t:?}"));
                 }
                 self.focus_agent(&t);
+                if self.has_canvas() {
+                    self.enter_canvas_agent(t, window, cx);
+                }
             }
             "agent.next" | "agent.prev" => {
                 let order = self.agent_order();
@@ -6666,7 +6680,8 @@ export default class SystemToast extends View {
     #[test]
     fn shipped_layouts_parse_and_show_what_they_promise() {
         let main = super::default_layout("main");
-        assert!(matches!(main.kind, super::Kind::Canvas));
+        assert!(main.walk().iter().any(|n| matches!(n.kind, super::Kind::Canvas)));
+        assert!(main.find("status").is_some());
         assert!(main.find("sidebar").is_none());
         let classic=super::default_layout("classic");
         assert!(classic.find("sidebar").is_some());

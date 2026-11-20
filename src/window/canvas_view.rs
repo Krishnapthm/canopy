@@ -1565,6 +1565,17 @@ impl AppWindow {
         self.canvas_state.rename = Some((target, input, sub));
         cx.notify();
     }
+    /// Glides the camera to center a pane at the same zoom when it is not wholly on screen.
+    pub(super) fn reveal_pane(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let visible = self.bounds.borrow().get("canopy-canvas").map(|b| [f32::from(b.size.width), f32::from(b.size.height)]);
+        let rect = self.canvas_state.doc.panes.iter().find(|c| c.id == id).map(|c| c.rect);
+        let from = self.canvas_state.doc.camera;
+        if let (Some(visible), Some(rect)) = (visible, rect) && let Some(to) = canvas::reveal(from, rect, visible) {
+            self.canvas_state.motion.target = Some((from, to, std::time::Instant::now(), [visible[0] / 2., visible[1] / 2.]));
+            self.animate_camera(window, cx);
+        }
+    }
+
     fn animate_camera(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.canvas_state.motion.frame { return; }
         self.canvas_state.motion.frame = true;
