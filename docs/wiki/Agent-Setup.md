@@ -71,3 +71,7 @@ canopy skill remove
 
 This removes marked skill files from configured skill folders, including those for agents no longer installed.
 It keeps unmarked files and other files. It removes each `canopy` folder only when empty.
+
+## Troubleshooting
+
+- **The dialog offers "a new file", then an error toast says "Could not write AGENTS.md" with "Text file exceeds 1 MiB".** The instruction file is larger than 1 MiB, so Canopy cannot read it. Reduce the file below 1 MiB, then open the dialog again.

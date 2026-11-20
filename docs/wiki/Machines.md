@@ -29,3 +29,6 @@ hc machine add user@host
 - **Adding the machine needs a password or a host key answer.** The dialog tells you to run `hc machine add <host>` in a terminal.
   Run that command to answer the prompts.
 - **The remote needs herdr-core.** Follow [herdr-core](herdr-core) for installation. The dialog gives the same terminal command when the core is missing or incompatible.
+- **A card says "`name` is a Mac: allow its folders once".** macOS asks on that Mac's screen before an agent reads Desktop, Documents or Downloads.
+  Click **Open the setting on `name`**. Press **+** and add the herdr-core file the card shows, to give it Full Disk Access.
+- **The dialog says agents stop when you disconnect.** The server ends your programs when your last login closes. Run the `sudo loginctl enable-linger` command from the dialog on that machine once.
