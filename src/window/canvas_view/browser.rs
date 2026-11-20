@@ -4,6 +4,9 @@
 //! elsewhere in the window, or a camera or pane move, snapshots it and steps it aside, since
 //! a native view cannot zoom, clip or sit under GPUI. See docs/wiki/Browser-Pane.md.
 //!
+//! A browser pane's header is its controls: back, forward, reload, an address field and a
+//! "⋯" menu (viewport, expand into a top-strip tab, pop out into a window, clear data).
+//!
 //! The page loads only what the person or an agent opens: no homepage, an in-memory
 //! (incognito) website store, no downloads, and the bundled react-grab with its
 //! update check and font import removed.
@@ -32,6 +35,33 @@ const LOAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(15);
 const SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
 /// Default size of a new browser pane, world px.
 pub(super) const SIZE: [f32; 2] = [960., 680.];
+
+/// A preset page size, set from the "⋯" menu or `canvas.browser_viewport`.
+#[derive(Clone, Copy)]
+enum Viewport { Responsive, Mobile, Desktop }
+
+impl Viewport {
+    const ALL: [Viewport; 3] = [Viewport::Responsive, Viewport::Mobile, Viewport::Desktop];
+
+    fn name(self) -> &'static str {
+        match self { Viewport::Responsive => "responsive", Viewport::Mobile => "mobile", Viewport::Desktop => "desktop" }
+    }
+
+    fn parse(size: Option<&str>) -> Result<Self, String> {
+        Self::ALL.into_iter().find(|v| Some(v.name()) == size)
+            .ok_or_else(|| format!("size is responsive, mobile or desktop, not {}", size.unwrap_or("missing")))
+    }
+}
+
+/// The pane size (world px, header and 2 px frame included) that gives the page `viewport`:
+/// Responsive is a new pane's size, Mobile a 390x844 page, Desktop 1280x800.
+fn viewport_size(viewport: Viewport) -> canvas::Point {
+    match viewport {
+        Viewport::Responsive => SIZE,
+        Viewport::Mobile => [390. + 2., 844. + canvas::HEADER + 2.],
+        Viewport::Desktop => [1280. + 2., 800. + canvas::HEADER + 2.],
+    }
+}
 /// Opening tags in a quote are cut to this many characters, visible text to `TEXT_CUT`.
 const TAG_CUT: usize = 80;
 const TEXT_CUT: usize = 200;
@@ -69,6 +99,10 @@ struct Page {
     picking: bool,
     /// Counts loads, so a load's time limit leaves later loads alone.
     loads: u64,
+    /// The header's address field, made when the pane is first drawn.
+    url_input: Option<(Entity<gpui_base::input::InputState>, Subscription)>,
+    /// The window showing the page while it is popped out; the pane has no view meanwhile.
+    popped: Option<AnyWindowHandle>,
 }
 
 /// A page's native view: the GPUI entity, and the same view for scripts run without a GPUI
@@ -300,10 +334,11 @@ impl AppWindow {
         id
     }
 
-    /// Tears down the pages of closed browser panes, drops their snapshots, and loads saved
-    /// snapshots for panes not seen yet this run.
-    pub(super) fn sync_browsers(&mut self) {
+    /// Tears down the pages (and pop-out windows) of closed browser panes, drops their
+    /// snapshots, and loads saved snapshots for panes not seen yet this run.
+    pub(super) fn sync_browsers(&mut self, cx: &mut Context<Self>) {
         let ids: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.url().is_some()).map(|p| p.id.clone()).collect();
+        if self.canvas_state.browser_tab.as_ref().is_some_and(|id| !ids.contains(id)) { self.canvas_state.browser_tab = None; }
         let pages = &mut self.canvas_state.browsers.pages;
         pages.retain(|id, page| {
             let keep = ids.contains(id);
@@ -311,6 +346,7 @@ impl AppWindow {
                 let _ = std::fs::remove_file(shot_file(id));
                 #[cfg(target_os = "macos")]
                 if let Some(native) = page.native.take() { destroy(native); }
+                if let Some(window) = page.popped.take() { let _ = window.update(cx, |_, window, _| window.remove_window()); }
             }
             keep
         });
@@ -328,6 +364,17 @@ impl AppWindow {
     pub(super) fn browser_body(&self, pane: &canvas::Pane, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
         let id = pane.id.clone();
         let page = self.canvas_state.browsers.pages.get(&id);
+        if page.is_some_and(|p| p.popped.is_some()) {
+            let id = id.clone();
+            return div().size_full().flex().flex_col().items_center().justify_center().gap(px(12.)).p(px(16.)).bg(c("canvas")).text_color(c("muted-foreground"))
+                .child("Popped out")
+                .child(div().id(SharedString::from(format!("browser-{id}-back"))).role(gpui::Role::Button).aria_label("Bring back")
+                    .px(px(12.)).py(px(4.)).rounded(px(ui::RADIUS_SM)).border_1().border_color(c("border")).text_color(c("foreground")).cursor_pointer()
+                    .hover(|d| d.bg(c("hover"))).child("Bring back")
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_pop", json!({"pane": id}), window, cx))))
+                .into_any_element();
+        }
         #[cfg(target_os = "macos")]
         if let Some(page) = page && let (Some(Native { view, .. }), Some(at)) = (&page.native, page.live) {
             if at != (camera, pane.rect) || !self.browser_fits(pane, camera) {
@@ -356,6 +403,120 @@ impl AppWindow {
         let title = self.canvas_state.browsers.pages.get(&pane.id).map(|p| p.title.clone()).filter(|t| !t.is_empty());
         let url = pane.url().unwrap_or_default().to_owned();
         match title { Some(title) => (title, url), None => (url, String::new()) }
+    }
+
+    /// A browser pane's header controls: back, forward, reload, the address field, and "⋯".
+    pub(super) fn browser_header(&self, id: &str, cx: &mut Context<Self>) -> AnyElement {
+        let button = |slot: &'static str, icon: &'static str, label: &'static str, command: &'static str, cx: &mut Context<Self>| {
+            let id = id.to_owned();
+            panel_button(slot, icon, c("muted-foreground"), c("hover")).aria_label(label).tooltip(strip_tooltip(label.into(), Some(command)))
+                .on_click(cx.listener(move |this, _, window, cx| this.run_key(command, json!({"pane": id}), window, cx)))
+        };
+        let (reset, more) = (id.to_owned(), id.to_owned());
+        let field = self.canvas_state.browsers.pages.get(id).and_then(|p| p.url_input.as_ref()).map(|(input, _)| input.clone());
+        div().flex().flex_1().min_w_0().items_center().gap(px(4.))
+            .child(button("browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
+            .child(button("browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
+            .child(button("browser-reload", "icons/rotate-cw.svg", "Reload", "canvas.browser_reload", cx))
+            .child(div().flex().flex_1().min_w_0().h(px(24.)).px(px(8.)).items_center().overflow_hidden()
+                .rounded(px(ui::RADIUS_SM)).bg(c("canvas")).border_1().border_color(c("border"))
+                // Typing in the field is not a pane drag.
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .capture_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
+                    if e.keystroke.key == "escape" { this.reset_url(&reset, window, cx); cx.stop_propagation(); }
+                }))
+                .children(field.map(|input| gpui_base::Input::new(&input))))
+            .child(panel_button("browser-more", "icons/ellipsis.svg", c("muted-foreground"), c("hover")).aria_label("More").tooltip(strip_tooltip("More".into(), None))
+                .on_click(cx.listener(move |this, _, window, cx| this.browser_menu(&more, window, cx))))
+            .into_any_element()
+    }
+
+    /// Makes each browser pane's address field, and keeps its text at the pane's URL unless the
+    /// person is typing in it. Enter opens what was typed (`canvas.pane_open`, which makes
+    /// `localhost:3000` a URL and refuses non-web schemes). Runs from `render`, which has a window.
+    pub(in crate::window) fn sync_browser_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let urls: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| Some((p.id.clone(), p.url()?.to_owned()))).collect();
+        for (id, url) in urls {
+            let Some(page) = self.canvas_state.browsers.pages.get_mut(&id) else { continue };
+            match &page.url_input {
+                Some((input, _)) => {
+                    let stale = input.read(cx).value().to_string() != url && !input.read(cx).focus_handle(cx).is_focused(window);
+                    if stale { input.update(cx, |input, cx| input.set_value(url, window, cx)); }
+                }
+                None => {
+                    let input = cx.new(|cx| {
+                        let mut input = gpui_base::input::InputState::new(window, cx).placeholder("Search or enter address");
+                        input.set_value(url, window, cx);
+                        input
+                    });
+                    let pane = id.clone();
+                    let sub = cx.subscribe_in(&input, window, move |this, input, event, window, cx| {
+                        if !matches!(event, gpui_base::input::InputEvent::PressEnter { .. }) { return; }
+                        let target = input.read(cx).value().to_string();
+                        this.focus.focus(window, cx);
+                        this.run_key("canvas.pane_open", json!({"pane": pane, "target": target}), window, cx);
+                    });
+                    if let Some(page) = self.canvas_state.browsers.pages.get_mut(&id) { page.url_input = Some((input, sub)); }
+                }
+            }
+        }
+    }
+
+    /// Escape in the address field: the pane's URL back in it, and the keyboard back to the canvas.
+    fn reset_url(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let url = self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| p.url()).unwrap_or_default().to_owned();
+        if let Some(input) = self.canvas_state.browsers.pages.get(id).and_then(|p| p.url_input.as_ref().map(|(input, _)| input.clone())) {
+            input.update(cx, |input, cx| input.set_value(url, window, cx));
+        }
+        self.focus.focus(window, cx);
+    }
+
+    /// The header's "⋯" menu, at the pointer.
+    fn browser_menu(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
+        let size = [pane.rect[2], pane.rect[3]];
+        let expanded = self.canvas_state.browser_tab.as_deref() == Some(id);
+        let popped = self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some());
+        let at = json!({"pane": id});
+        let mut items = vec![
+            json!(["Open in default browser", "canvas.browser_external", at]),
+            json!(["Copy link", "canvas.browser_copy", at]),
+            json!(["Save screenshot", "canvas.browser_shot", at]),
+        ];
+        for viewport in Viewport::ALL {
+            let mark = if viewport_size(viewport) == size { "✓ " } else { "" };
+            let name = viewport.name();
+            items.push(json!([format!("{mark}Viewport: {}{}", name[..1].to_uppercase(), &name[1..]), "canvas.browser_viewport", {"pane": id, "size": name}]));
+        }
+        items.extend([
+            json!([if expanded { "Collapse" } else { "Expand" }, "canvas.browser_expand", at]),
+            json!([if popped { "Bring back" } else { "Pop out" }, "canvas.browser_pop", at]),
+            json!(["Clear browsing data", "canvas.browser_clear", at]),
+        ]);
+        self.open_menu("primary", json!({"items": items}), Some(window.mouse_position()), window, cx);
+    }
+
+    /// The expanded browser's tab for the top strip (None when none is expanded): globe, the
+    /// page title, and a close button that collapses it.
+    pub(super) fn browser_tab_strip(&self, fill: Hsla, strip: Hsla, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let pane = self.canvas_state.browser_tab.as_ref().and_then(|id| self.canvas_state.doc.panes.iter().find(|p| &p.id == id))?;
+        let (title, _) = self.browser_title(pane);
+        Some(strip_tab("browser-tab", true, fill, strip).role(gpui::Role::Tab).aria_selected(true).aria_label(title.clone())
+            .flex().items_center().h_full().w(px(180.)).min_w(px(96.)).gap(px(6.)).px(px(12.))
+            .text_size(px(12.)).text_color(c("foreground"))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(svg().path("icons/globe.svg").flex_none().size(px(14.)).text_color(c("foreground")))
+            .child(div().flex_1().min_w_0().truncate().child(title))
+            .child(panel_button("browser-tab-close", "mods/pane/close.svg", c("muted-foreground"), c("hover")).aria_label("Collapse")
+                .tooltip(strip_tooltip("Collapse".into(), Some("canvas.browser_expand")))
+                .on_click(cx.listener(|this, _, window, cx| this.collapse_browser(window, cx))))
+            .into_any_element())
+    }
+
+    /// What the canvas area shows while a browser is expanded (None when none is): its live page.
+    pub(super) fn expanded_browser(&self, bg: Hsla) -> Option<AnyElement> {
+        let page = self.canvas_state.browsers.pages.get(self.canvas_state.browser_tab.as_ref()?)?;
+        Some(div().id("canopy-browser-tab").relative().flex_1().h_full().overflow_hidden().bg(bg).children(page.view_element()).into_any_element())
     }
 
     /// Whether the pane body lies wholly inside the canvas: a native view cannot be clipped.
@@ -495,7 +656,8 @@ impl AppWindow {
                 None => quote["source"]["file"] = json!(file),
             }
         }
-        self.rest_browser(id, cx);
+        // The quote popover cannot sit over a live page: an expanded one collapses.
+        if self.canvas_state.browser_tab.as_deref() == Some(id) { self.collapse_browser(window, cx); } else { self.rest_browser(id, cx); }
         let camera = self.canvas_state.doc.camera;
         let origin = self.bounds.borrow().get("canopy-canvas").map(|b| b.origin).unwrap_or_default();
         let [x, y] = camera.to_screen([pane.rect[0] + 16., pane.rect[1] + canvas::header_world(camera.zoom)]);
@@ -516,7 +678,8 @@ impl AppWindow {
         }
     }
 
-    /// canvas.browser_back | reload | home | pick | shot | external.
+    /// canvas.browser_back | forward | reload | home | pick | shot | external | copy | viewport
+    /// | expand | pop | clear.
     pub(in crate::window) fn browser_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
         let id = match self.browser_target(a) { Ok(id) => id, Err(e) => return self.fail(e) };
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap();
@@ -526,8 +689,38 @@ impl AppWindow {
             "canvas.browser_home" => self.load_browser(&id, &home, false, window, cx),
             "canvas.browser_reload" => self.eval_or_load(&id, "location.reload()", &url, window, cx),
             "canvas.browser_back" => self.eval_or_load(&id, "history.back()", &url, window, cx),
+            "canvas.browser_forward" => self.eval_or_load(&id, "history.forward()", &url, window, cx),
+            "canvas.browser_copy" => {
+                cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                self.toast(Toast { title: "Link copied".into(), body: Some(url), level: Level::Success, action: None }, window, cx);
+            }
+            "canvas.browser_viewport" => match Viewport::parse(a["size"].as_str()) {
+                Ok(viewport) => self.size_browser(&id, viewport, cx),
+                Err(e) => self.fail(e),
+            },
+            "canvas.browser_expand" => {
+                let expanded = self.canvas_state.browser_tab.as_deref() == Some(id.as_str());
+                self.collapse_browser(window, cx);
+                if !expanded && let Err(e) = self.expand_browser(&id, window, cx) { self.fail(e); }
+            }
+            "canvas.browser_pop" => {
+                if let Err(e) = self.pop_browser(&id, window, cx) { self.fail(e); }
+            }
+            "canvas.browser_clear" => {
+                if a["confirmed"].as_bool() != Some(true) {
+                    return self.confirm("Clear browsing data?", "Cookies, storage and cache for every browser pane are deleted.", "Clear", name, json!({"pane": id, "confirmed": true}), window, cx);
+                }
+                match self.clear_browsing_data() {
+                    Ok(()) => self.toast(Toast { title: "Browsing data cleared".into(), body: None, level: Level::Success, action: None }, window, cx),
+                    Err(e) => self.fail(e),
+                }
+            }
             "canvas.browser_pick" => {
-                if let Err(e) = self.wake_browser_result(&id, window, cx) { return self.fail(e); }
+                // Another page expanded gives way; the expanded page itself is already live.
+                if self.canvas_state.browser_tab.as_deref() != Some(id.as_str()) {
+                    self.collapse_browser(window, cx);
+                    if let Err(e) = self.wake_browser_result(&id, window, cx) { return self.fail(e); }
+                }
                 let page = self.canvas_state.browsers.pages.get_mut(&id).unwrap();
                 page.picking = true;
                 if page.loading { page.pick = true; } else { self.eval_browser(&id, "window.__canopy && window.__canopy.pick()"); }
@@ -549,6 +742,30 @@ impl AppWindow {
                 }).detach();
             }
         }
+    }
+
+    /// A browser pane's helper bar labels for its state: collapse an expanded page, bring back
+    /// a popped one.
+    pub(super) fn browser_relabel(&self, id: &str, mut actions: Vec<super::helper_bar::BarAction>) -> Vec<super::helper_bar::BarAction> {
+        let expanded = self.canvas_state.browser_tab.as_deref() == Some(id);
+        let popped = self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some());
+        for a in &mut actions {
+            match a.command.as_str() {
+                "canvas.browser_expand" if expanded => { a.icon = "icons/minimize-2.svg".into(); a.label = "Collapse".into(); }
+                "canvas.browser_pop" if popped => a.label = "Bring back".into(),
+                _ => {}
+            }
+        }
+        actions
+    }
+
+    /// Sets a browser pane to a preset page size; the top left stays put.
+    fn size_browser(&mut self, id: &str, viewport: Viewport, cx: &mut Context<Self>) {
+        let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return };
+        [pane.rect[2], pane.rect[3]] = viewport_size(viewport);
+        self.solve_layout(Some(id), None, cx);
+        self.canvas_changed(cx);
+        cx.notify();
     }
 
     /// Runs script in a page that has a view; else loads `url` (a reload with no view is a load).
@@ -610,6 +827,14 @@ impl AppWindow {
 }
 
 impl Page {
+    /// The live view as an element filling its parent.
+    fn view_element(&self) -> Option<AnyElement> {
+        #[cfg(target_os = "macos")]
+        return self.native.as_ref().map(|n| div().size_full().child(n.view.clone()).into_any_element());
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+
     fn has_view(&self) -> bool {
         #[cfg(target_os = "macos")]
         return self.native.is_some();
@@ -638,6 +863,28 @@ fn destroy(native: Native) {
     wv.webview().removeFromSuperview();
 }
 
+/// Lays a resting view out at its pane's body size, zoom 1. gpui-wry sizes a view only while it
+/// is drawn; a resting page still lays out (read) and snapshots (shot) this way.
+#[cfg(target_os = "macos")]
+fn fit_view(view: &gpui_wry::WebView, rect: canvas::Rect) {
+    let _ = view.raw().set_bounds(wry::Rect {
+        position: wry::dpi::LogicalPosition::new(0., 0.).into(),
+        size: wry::dpi::LogicalSize::new(rect[2] as f64, (rect[3] - canvas::HEADER).max(1.) as f64).into(),
+    });
+    let _ = view.raw().zoom(1.);
+}
+
+/// A popped-out page's window: one web view, no pick mode and no link to the canvas.
+#[cfg(target_os = "macos")]
+struct BrowserWindow { native: Option<Native> }
+
+#[cfg(target_os = "macos")]
+impl Render for BrowserWindow {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().bg(gpui::white()).children(self.native.as_ref().map(|n| n.view.clone()))
+    }
+}
+
 /// Snapshots a page into `done` on the main thread: RGBA at the screen's backing scale, None
 /// when WebKit fails.
 #[cfg(target_os = "macos")]
@@ -663,6 +910,7 @@ impl AppWindow {
     // a WebKit process and its hidden page's (throttled) scripts; drop views on rest if memory matters.
     fn ensure_view(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         if self.canvas_state.browsers.pages.get(id).is_some_and(Page::has_view) { return Ok(()); }
+        if self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some()) { return Err(format!("pane {id} is popped out: bring it back first")); }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.url().is_some()).ok_or_else(|| format!("no browser pane {id}"))?;
         let (url, rect) = (pane.url().unwrap().to_owned(), pane.rect);
         let tx = self.browser_events(window, cx);
@@ -692,17 +940,136 @@ impl AppWindow {
         let view = cx.new(|cx| gpui_wry::WebView::new(webview, window, cx));
         let raw = view.update(cx, |v, _| {
             v.hide();
-            // gpui-wry sizes a view only while it is drawn; a resting page still lays out
-            // (read) and snapshots (shot) at the pane's body size, zoom 1.
-            let _ = v.raw().set_bounds(wry::Rect {
-                position: wry::dpi::LogicalPosition::new(0., 0.).into(),
-                size: wry::dpi::LogicalSize::new(rect[2] as f64, (rect[3] - canvas::HEADER).max(1.) as f64).into(),
-            });
+            fit_view(v, rect);
             v.handle()
         });
         let page = self.canvas_state.browsers.pages.entry(id.to_owned()).or_default();
         page.native = Some(Native { view, raw });
         self.begin_load(id, cx);
+        Ok(())
+    }
+
+    /// Expands a page into the top strip's tab: live over the whole canvas area, at zoom 1. The
+    /// canvas then draws nothing else (`render_canvas`). Refuses a popped page, or one in
+    /// another space.
+    fn expand_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).cloned().ok_or_else(|| format!("no pane {id}"))?;
+        if !self.canvas_state.doc.shows(pane.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
+        self.ensure_view(id, window, cx)?;
+        // Only one page is live: the others step aside.
+        let others: Vec<String> = self.canvas_state.browsers.pages.iter().filter(|(k, p)| k.as_str() != id && p.live.is_some()).map(|(k, _)| k.clone()).collect();
+        for other in others { self.rest_browser(&other, cx); }
+        let camera = self.canvas_state.doc.camera;
+        let page = self.canvas_state.browsers.pages.get_mut(id).unwrap();
+        page.live = Some((camera, pane.rect));
+        (page.told, page.watch) = (false, false);
+        page.native.as_ref().unwrap().view.update(cx, |v, _| {
+            v.show();
+            let _ = v.raw().zoom(1.);
+            let _ = v.raw().focus();
+        });
+        self.canvas_state.browser_tab = Some(id.to_owned());
+        self.canvas_state.selected = vec![id.to_owned()];
+        cx.notify();
+        Ok(())
+    }
+
+    /// Puts the expanded page (if any) back in its pane: laid out at the pane's size again, then
+    /// rested the usual way. Called by every way out: the command, Escape, any space tab, close.
+    pub(super) fn collapse_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.canvas_state.browser_tab.take() else { return };
+        let rect = self.canvas_state.doc.panes.iter().find(|p| p.id == id).map(|p| p.rect);
+        if let (Some(rect), Some(native)) = (rect, self.canvas_state.browsers.pages.get(&id).and_then(|p| p.native.as_ref())) {
+            native.view.update(cx, |v, _| fit_view(v, rect));
+        }
+        // shortcut: the snapshot is taken right after the resize, so it may predate WebKit's relayout; a rested page re-snapshots when it next loads.
+        self.rest_browser(&id, cx);
+        self.focus.focus(window, cx);
+        cx.notify();
+    }
+
+    /// Pops a page out into its own window, or brings it back. The pane's own view is destroyed
+    /// meanwhile and the pane says so; the window loads the pane's current URL in a fresh,
+    /// private web view and is not tracked after that.
+    fn pop_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        if let Some(popped) = self.canvas_state.browsers.pages.get_mut(id).and_then(|p| p.popped.take()) {
+            let _ = popped.update(cx, |_, window, _| window.remove_window());
+            return Ok(cx.notify());
+        }
+        if self.canvas_state.browser_tab.as_deref() == Some(id) { self.collapse_browser(window, cx); }
+        self.note_browser_url(id, cx);
+        let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.url().is_some()).cloned().ok_or_else(|| format!("no browser pane {id}"))?;
+        let (title, _) = self.browser_title(&pane);
+        let page = self.canvas_state.browsers.pages.get_mut(id).ok_or_else(|| format!("no browser pane {id}"))?;
+        if let Some(native) = page.native.take() { destroy(native); }
+        (page.live, page.picking, page.pick, page.loading, page.watch) = (None, false, false, false, false);
+        for ask in std::mem::take(&mut page.waiting) {
+            let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
+            let _ = tx.send(json!({"error": "the page was popped out"}));
+        }
+        let url = pane.url().unwrap().to_owned();
+        let owner = window.window_handle().downcast::<AppWindow>().unwrap();
+        let (closed, id) = (id.to_owned(), id.to_owned());
+        let failed = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+        let build_failed = failed.clone();
+        let options = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(pane.rect[2]), px(pane.rect[3])), cx))),
+            ..Default::default()
+        };
+        // Opening draws the window at once: do it once this update has ended.
+        cx.defer(move |cx| {
+            let opened = cx.open_window(options, move |window, cx| {
+                window.set_window_title(&title);
+                window.on_window_should_close(cx, move |_, cx| {
+                    let _ = owner.update(cx, |this, _, cx| {
+                        if let Some(page) = this.canvas_state.browsers.pages.get_mut(&closed) { page.popped = None; }
+                        cx.notify();
+                    });
+                    true
+                });
+                let built = wry::WebViewBuilder::new()
+                    .with_url(url)
+                    .with_incognito(true)
+                    .with_accept_first_mouse(true)
+                    .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
+                    .with_download_started_handler(|_, _| false)
+                    .build_as_child(window);
+                let native = match built {
+                    Ok(webview) => {
+                        let view = cx.new(|cx| gpui_wry::WebView::new(webview, window, cx));
+                        let raw = view.update(cx, |v, _| v.handle());
+                        Some(Native { view, raw })
+                    }
+                    Err(e) => { *build_failed.borrow_mut() = Some(e.to_string()); None }
+                };
+                cx.new(|cx| {
+                    cx.on_release(|this: &mut BrowserWindow, _| { if let Some(native) = this.native.take() { destroy(native); } }).detach();
+                    BrowserWindow { native }
+                })
+            });
+            let _ = owner.update(cx, |this, window, cx| {
+                let error = match (opened, failed.take()) {
+                    (Ok(handle), None) => {
+                        if let Some(page) = this.canvas_state.browsers.pages.get_mut(&id) { page.popped = Some(handle.into()); }
+                        return cx.notify();
+                    }
+                    (Ok(handle), Some(e)) => { let _ = handle.update(cx, |_, window, _| window.remove_window()); e }
+                    (Err(e), _) => e.to_string(),
+                };
+                this.toast(Toast { title: "Pop out failed".into(), body: Some(error), level: Level::Error, action: None }, window, cx);
+            });
+        });
+        cx.notify();
+        Ok(())
+    }
+
+    /// Deletes the cookies, storage and cache of every page that has a view. (Each pane's store
+    /// is private and in memory, so a pane with no view holds none.)
+    // shortcut: no completion wait, WebKit finishes the delete in the background; add one if a toast must follow it.
+    fn clear_browsing_data(&mut self) -> Result<(), String> {
+        for native in self.canvas_state.browsers.pages.values().filter_map(|p| p.native.as_ref()) {
+            native.raw.raw().clear_all_browsing_data().map_err(|e| format!("cannot clear browsing data: {e}"))?;
+        }
         Ok(())
     }
 
@@ -854,6 +1221,14 @@ impl AppWindow {
         self.ensure_view(id, window, cx)
     }
     pub(super) fn rest_browser(&mut self, _: &str, _: &mut Context<Self>) {}
+    pub(super) fn collapse_browser(&mut self, _: &mut Window, _: &mut Context<Self>) {}
+    fn expand_browser(&mut self, _: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
+        Err("browser panes run on macOS only for now".into())
+    }
+    fn pop_browser(&mut self, _: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
+        Err("browser panes run on macOS only for now".into())
+    }
+    fn clear_browsing_data(&mut self) -> Result<(), String> { Err("browser panes run on macOS only for now".into()) }
     pub(super) fn watch_pages(&self, _: &[String], _: &mut Context<Self>) {}
     fn eval_browser(&mut self, _: &str, _: &str) -> bool { false }
     fn navigate_browser(&mut self, _: &str, _: &str, _: &mut Context<Self>) {}
@@ -863,7 +1238,7 @@ impl AppWindow {
 #[cfg(test)]
 mod tests {
     // Explicit: a glob would bring gpui's own `test` attribute in.
-    use super::{GRAB_REQUESTS, REACT_GRAB, format_quote, jsx_lines, page_script, resolve_source, web_url};
+    use super::{GRAB_REQUESTS, REACT_GRAB, SIZE, Viewport, format_quote, jsx_lines, page_script, resolve_source, viewport_size, web_url};
     use serde_json::json;
 
     #[test]
@@ -874,6 +1249,16 @@ mod tests {
         for url in ["fonts.googleapis.com", "react-grab.com/api", "react-grab.com/open-file"] { assert!(!script.contains(url), "{url} left in the page script"); }
         assert_eq!(script.matches("react-grab.com").count(), 1);
         assert!(script.starts_with("window.__REACT_GRAB_DISABLED__ = true;"));
+    }
+
+    #[test]
+    fn viewports_parse_and_size_the_pane() {
+        let size = |name| viewport_size(Viewport::parse(Some(name)).unwrap());
+        // The page plus the 2 px frame and the 36 px header.
+        assert_eq!(size("responsive"), SIZE);
+        assert_eq!(size("mobile"), [392., 882.]);
+        assert_eq!(size("desktop"), [1282., 838.]);
+        for bad in [Some("tablet"), Some("Mobile"), None] { assert!(Viewport::parse(bad).is_err(), "{bad:?}"); }
     }
 
     #[test]

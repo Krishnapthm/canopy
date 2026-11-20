@@ -109,6 +109,8 @@ pub(super) struct State {
     drag_live: bool,
     /// Browser panes' web views and snapshots (not saved).
     pub(super) browsers: browser::Browsers,
+    /// The browser pane expanded into a tab of the top strip, filling the canvas area (not saved).
+    pub(super) browser_tab: Option<String>,
     /// An image region drag: pane id, start and current window points.
     region: Option<(String, Point<Pixels>, Point<Pixels>)>,
     /// Pixel sizes of open images, by path.
@@ -222,6 +224,7 @@ impl State {
             tile: None,
             drag_live: false,
             browsers: Default::default(),
+            browser_tab: None,
             region: None,
             image_sizes: HashMap::new(),
             pdfs: HashMap::new(),
@@ -820,7 +823,7 @@ impl AppWindow {
                 state.previews.remove(&path);
             }
         }
-        self.sync_browsers();
+        self.sync_browsers(cx);
         self.prune_images(ids);
         self.prune_pdf_views();
         self.canvas_changed(cx);
@@ -1086,6 +1089,8 @@ impl AppWindow {
     }
     /// Shows a space's room (None: Home) with the camera it had there; a first visit fits what is inside.
     pub(super) fn go_room(&mut self, room: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        // Any space tab or Home puts an expanded browser back, even the place already shown.
+        self.collapse_browser(window, cx);
         if room == self.canvas_state.doc.room { return; }
         let first = !self.canvas_state.doc.cameras.contains_key(&room.clone().unwrap_or_default());
         self.end_canvas_drag(cx);
@@ -1286,7 +1291,7 @@ impl AppWindow {
     }
 
     fn load_previews(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.sync_browsers();
+        self.sync_browsers(cx);
         self.sync_pdf_views(window, cx);
         self.sync_image_sizes(window, cx);
         let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
@@ -2310,7 +2315,7 @@ impl AppWindow {
                     })
                     .on_link_click(|_, _, _, _| {}))
                     .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, Some(&quote_pane), &quote_view, e.position, window, cx))).into_any_element();
-        self.pane_card(card, "mods/files/file.svg".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned(), path.parent().unwrap_or(path).to_string_lossy().into_owned(), body, camera, cx)
+        self.pane_card(card, "mods/files/file.svg".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned(), path.parent().unwrap_or(path).to_string_lossy().into_owned(), None, body, camera, cx)
     }
 
     /// A pane header: a fixed screen-size row (icon 16, gap 8, text 13/18) at any zoom. Callers
@@ -2321,8 +2326,10 @@ impl AppWindow {
     }
 
     /// The shared saved-rect frame, header drag and resize corner for boxed panes. It occludes
-    /// the panes beneath it and raises itself on a click.
-    fn pane_card(&self, card: &canvas::Pane, icon: SharedString, title: String, detail: String, body: AnyElement, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
+    /// the panes beneath it and raises itself on a click. `header` (a browser pane's controls)
+    /// replaces the icon, title and detail inside the same header.
+    #[allow(clippy::too_many_arguments)]
+    fn pane_card(&self, card: &canvas::Pane, icon: SharedString, title: String, detail: String, header: Option<AnyElement>, body: AnyElement, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
         let p = camera.to_screen([card.rect[0], card.rect[1]]);
         let drag = card.id.clone();
         let resize = drag.clone();
@@ -2341,9 +2348,13 @@ impl AppWindow {
                         this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                         this.canvas_state.preview_drag = Some((drag.clone(), false, e.position)); cx.stop_propagation();
                     }))
-                    .child(div().flex_none().mt(px(1.)).child(svg().path(icon).size(px(16.)).text_color(c("foreground"))))
-                    .child(div().min_w_0().truncate().child(title))
-                    .child(div().flex_1().min_w_0().truncate().text_color(c("muted-foreground")).child(detail)))
+                    .map(|head| match header {
+                        Some(header) => head.px(px(8.)).py(px(6.)).items_center().child(header),
+                        None => head
+                            .child(div().flex_none().mt(px(1.)).child(svg().path(icon).size(px(16.)).text_color(c("foreground"))))
+                            .child(div().min_w_0().truncate().child(title))
+                            .child(div().flex_1().min_w_0().truncate().text_color(c("muted-foreground")).child(detail)),
+                    }))
                 .child(div().flex_1().min_h_0().overflow_hidden().child(body))
                 .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(ui::RADIUS))
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
@@ -2814,7 +2825,8 @@ impl AppWindow {
         let mut pills: Vec<(u64, AnyElement)> = Vec::new();
         let mut drawn_sims = vec![];
         let mut drawn_pages = vec![];
-        for card in shown_doc.panes.iter().filter(|p| shown_doc.shows(p.space.as_ref()) && canvas::visible(camera, p.rect, viewport)) {
+        // An expanded browser fills the canvas area: no other pane is drawn.
+        for card in shown_doc.panes.iter().filter(|p| state.browser_tab.is_none() && shown_doc.shows(p.space.as_ref()) && canvas::visible(camera, p.rect, viewport)) {
             let element = match &card.kind {
                 // Drawn by the terminal path below.
                 canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } => continue,
@@ -2829,9 +2841,9 @@ impl AppWindow {
                 }
                 canvas::Kind::Browser { .. } => {
                     drawn_pages.push(card.id.clone());
-                    let (title, detail) = self.browser_title(card);
+                    let header = self.browser_header(&card.id, cx);
                     let body = self.browser_body(card, camera, cx);
-                    self.pane_card(card, "icons/globe.svg".into(), title, detail, body, camera, cx)
+                    self.pane_card(card, SharedString::default(), String::new(), String::new(), Some(header), body, camera, cx)
                 }
                 canvas::Kind::Mod { .. } => {
                     let name = card.mod_name().unwrap();
@@ -2840,13 +2852,13 @@ impl AppWindow {
                     } else {
                         ("icons/x.svg".into(), card.kind_name().to_owned(), div().p(px(12.)).text_color(c("muted-foreground")).child(format!("Mod {name} is not installed")).into_any_element())
                     };
-                    self.pane_card(card, icon, title, String::new(), body, camera, cx)
+                    self.pane_card(card, icon, title, String::new(), None, body, camera, cx)
                 }
                 canvas::Kind::Sim { .. } => {
                     drawn_sims.push(card.id.clone());
                     let (title, detail) = self.sim_title(card, cx);
                     let body = self.sim_body(card, cx);
-                    self.pane_card(card, "icons/smartphone.svg".into(), title, detail, body, camera, cx)
+                    self.pane_card(card, "icons/smartphone.svg".into(), title, detail, None, body, camera, cx)
                 }
             };
             pills.push((card.z, element));
@@ -3193,17 +3205,23 @@ impl AppWindow {
         // Expanded, the file panel fills the window: no space tabs, canvas or canvas controls.
         let expanded = state.panel_expanded && (state.file.is_some() || state.files);
         let strip = if expanded { bg } else { "chrome" };
-        let home_tab = strip_tab("canvas-home", state.doc.room.is_none(), c(bg), c(strip)).group("canvas-home").role(gpui::Role::Tab).aria_label("Home").aria_selected(state.doc.room.is_none()).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
+        // The expanded browser's tab is the active one; the place it came from draws inactive.
+        let home_active = state.doc.room.is_none() && state.browser_tab.is_none();
+        let home_tab = strip_tab("canvas-home", home_active, c(bg), c(strip)).group("canvas-home").role(gpui::Role::Tab).aria_label("Home").aria_selected(home_active).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
             .cursor_pointer()
-            .text_color(c(if state.doc.room.is_none() { "foreground" } else { "muted-foreground" }))
+            .text_color(c(if home_active { "foreground" } else { "muted-foreground" }))
             .hover(|d| d.text_color(c("foreground")))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .tooltip(strip_tooltip("Home".into(), Some("canvas.home")))
-            .child(svg().path("icons/house.svg").size(px(14.)).text_color(c(if state.doc.room.is_none() { "foreground" } else { "muted-foreground" })).group_hover("canvas-home", |s| s.text_color(c("foreground"))))
+            .child(svg().path("icons/house.svg").size(px(14.)).text_color(c(if home_active { "foreground" } else { "muted-foreground" })).group_hover("canvas-home", |s| s.text_color(c("foreground"))))
             .on_click(cx.listener(|this, _, window, cx| this.go_room(None, window, cx)));
+        // The expanded browser's tab sits right after its pane's space tab, else after Home.
+        let browser_space = state.browser_tab.as_ref().and_then(|id| state.doc.panes.iter().find(|p| &p.id == id)).and_then(|p| p.space.clone())
+            .filter(|id| self.model.spaces.iter().any(|s| s.id == *id && !root_space(s)));
+        let mut browser_tab = self.browser_tab_strip(c(bg), c(strip), cx);
         let mut space_tabs = div().id("canvas-space-tabs").role(gpui::Role::TabList).flex().min_w_0().h_full().overflow_x_scroll();
         for space in self.model.spaces.iter().filter(|s| !root_space(s)) {
-            let active = state.doc.room.as_ref() == Some(&space.id);
+            let active = state.doc.room.as_ref() == Some(&space.id) && state.browser_tab.is_none();
             let id = space.id.clone();
             let close = id.clone();
             let group = SharedString::from(format!("space-tab-{id}"));
@@ -3224,9 +3242,10 @@ impl AppWindow {
                         cx.stop_propagation();
                         this.run_key("space.close", json!({"id":close}), window, cx);
                     }))));
+            if browser_space.as_ref() == Some(&space.id) { space_tabs = space_tabs.children(browser_tab.take()); }
         }
         let crumbs = div().flex().flex_1().min_w_0().h_full().items_center()
-            .child(home_tab).child(space_tabs)
+            .child(home_tab).children(browser_tab).child(space_tabs)
             .child(panel_button("canvas-space-new", "mods/workspace-chrome/plus.svg", c("muted-foreground"), c("hover"))
                 .flex_none().aria_label("New space").tooltip(strip_tooltip("New space".into(), Some("space.new")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -3274,7 +3293,7 @@ impl AppWindow {
             .min_h_0()
             .w_full()
             .flex()
-            .when(!expanded, |d| d.child(area));
+            .when(!expanded, |d| d.child(match self.expanded_browser(c(bg)) { Some(page) => page, None => area.into_any_element() }));
         // The panel's border and resize grip run the whole window height, over the bar too.
         let mut grip = None;
         if state.file.is_some() || state.files {

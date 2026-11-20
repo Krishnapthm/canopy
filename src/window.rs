@@ -3015,7 +3015,8 @@ impl AppWindow {
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
-            "canvas.browser_back" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external" => self.browser_command(name, a, window, cx),
+            "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
+            | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop" | "canvas.browser_clear" => self.browser_command(name, a, window, cx),
             name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
             "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
@@ -4953,6 +4954,7 @@ impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Sim panes keep their screen size at any zoom; every geometry read below sees it.
         self.canvas_state.fit_sims();
+        self.sync_browser_inputs(window, cx);
         self.release_pdf_drops(window, cx);
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
