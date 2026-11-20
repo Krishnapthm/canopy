@@ -78,7 +78,7 @@ update, uninstall and the build commands.
 - Headings: Toolbar, Helper bar, Shortcut hints.
 - Owns: every toolbar button in order (Select, Hand, Terminal, Agent, Open file, Browser, Simulator, mod pane kinds such as Note, Connect)
   and when a button is hidden, the Hand tool, the helper bar (where it shows, when it hides), the **Connect** button behaviour,
-  tooltips, holding `Cmd` (`Ctrl`) for 0.4 s to show keys, the **Teach agents Canopy** toolbar offer (one line, link).
+  tooltips, the **Teach agents Canopy** toolbar offer (one line, link). Keys-and-Mouse owns the 0.4 s key hints.
 - Links: each kind page for that kind's own helper bar buttons (do not list them here). Wiring for what a wire does.
   Agent-Setup for the teach offer. Layouts-and-Mods for mod-declared actions.
 - Read: old docs/panes.md "Toolbar" and "Helper bar", old docs/mods.md "Toolbar state and shortcut hints",
@@ -226,7 +226,7 @@ update, uninstall and the build commands.
 ## Keys-and-Mouse
 
 - Headings: Mouse, Show keys, Canvas mode keys, Keys anywhere, Change shortcuts, keys.json.
-- Owns: the key tables (canvas mode, anywhere, macOS and Linux/Windows), mouse gestures, Settings > Shortcuts recorder,
+- Owns: the key tables (canvas mode, anywhere, macOS and Linux/Windows), mouse gestures, holding `Cmd` (`Ctrl`) for 0.4 s to show keys, Settings > Shortcuts recorder,
   reset and conflicts, `keys.json` sections and rules, the recovery key `Ctrl+Alt+Shift+Esc`.
 - Links: Canvas, Terminals, Images-and-PDFs for what the keys do.
 - Read: old docs/keys.md, old docs/settings.md "Shortcuts", src/keys/ shipped files.
