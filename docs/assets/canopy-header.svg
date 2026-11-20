@@ -1,0 +1,383 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="t d">
+<!-- README header. Plain SVG, no script: GitHub shows it as an image, so it pans itself with CSS animation (see .pan below; 36s loop, 16:9). Panes are vector drawings of the real Canopy theme and icons; claude and codex marks are LobeHub (MIT). Edit the pane groups and the keyframes in place. Light and dark follow prefers-color-scheme; reduced motion stops the pan. -->
+<title id="t">Canopy</title>
+<desc id="d">A free canvas of agent, terminal, browser and iOS simulator panes joined by wires, slowly panning across the canvas.</desc>
+<style>
+:root{--canvas:#111;--chrome:#0c0c0c;--surface:#0c0c0c;--raised:#1a1a1a;--fg:#ededed;--mut:#ededed99;--dim:#999;--bd:#ededed1f;--sel:#ededed1f;--acc:#8fa8c8;--work:#dca04a;--blk:#f7768e;--ok:#4aae72;--mag:#be98b7;--cyan:#8fc8d6}
+@media (prefers-color-scheme:light){:root{--canvas:#fafafa;--chrome:#efefef;--surface:#efefef;--raised:#fff;--fg:#111;--mut:#111111a6;--dim:#666;--bd:#11111124;--sel:#11111112;--acc:#2b5f9e;--work:#82530a;--blk:#b4183f;--ok:#0b6b3f;--mag:#8a1a66;--cyan:#1a6870}}
+.cv{fill:var(--canvas)}.ch{fill:var(--chrome)}.sf{fill:var(--surface)}.rs{fill:var(--raised)}.sel{fill:var(--sel)}
+.f{fill:var(--fg)}.m{fill:var(--mut)}.d{fill:var(--dim)}.a{fill:var(--acc)}.w{fill:var(--work)}.b{fill:var(--blk)}.g{fill:var(--ok)}.p{fill:var(--mag)}.c{fill:var(--cyan)}
+.bd{fill:none;stroke:var(--bd)}.bd2{stroke:var(--bd)}.bdf{fill:var(--bd)}.ring{fill:none;stroke:var(--acc);stroke-width:1.5}
+.ic{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+use.f{color:var(--fg)}use.m{color:var(--mut)}
+.mono{font:11px "JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;fill:var(--fg)}
+.ui{font:12px Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
+.wire{fill:none;stroke:var(--acc);stroke-width:1.5;opacity:.45}
+.flow{fill:none;stroke:var(--acc);stroke-width:1.5;stroke-linecap:round;stroke-dasharray:2 12;animation:flow 1.4s linear infinite}
+.port{fill:var(--raised);stroke:var(--acc);stroke-width:1.5}
+.ptr{fill:var(--fg);stroke:var(--canvas);stroke-width:1.6;stroke-linejoin:round}
+.halo{fill:none;stroke:var(--canvas);stroke-width:4.4;stroke-linecap:round;stroke-linejoin:round}
+.hand{fill:none;stroke:var(--fg);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.pan{animation:pan 36s infinite cubic-bezier(.65,0,.35,1)}
+.rest{animation:rest 36s infinite linear}
+.hov{opacity:0;animation:hov 36s infinite linear}
+.handc{opacity:0;animation:hand 36s infinite linear}
+.pulse{animation:pulse 1.8s ease-in-out infinite}
+.blink{animation:blink 1.1s steps(1) infinite}
+@keyframes pan{0%,5.56%{transform:translate(0px,0px)}16.67%,27.78%{transform:translate(-700px,0px)}38.89%,47.22%{transform:translate(-968px,0px)}61.11%,72.22%{transform:translate(-300px,-170px)}91.67%,100%{transform:translate(0px,0px)}}
+@keyframes rest{0%,4.44%{opacity:1}6.67%,90.28%{opacity:0}92.78%,100%{opacity:1}}
+@keyframes hov{0%,17.22%{opacity:0}19.44%,26.11%{opacity:1}28.33%,100%{opacity:0}}
+@keyframes hand{0%,4.44%{opacity:0}6.67%,16.67%{opacity:1}18.33%,26.67%{opacity:0}28.89%,90.28%{opacity:1}92.78%,100%{opacity:0}}
+@keyframes flow{to{stroke-dashoffset:-14}}
+@keyframes pulse{50%{opacity:.4}}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<defs>
+<g id="i-pointer" class="ic"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" /></g>
+<g id="i-hand" class="ic"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+  <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" />
+  <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+  <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></g>
+<g id="i-terminal" class="ic"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></g>
+<g id="i-bot" class="ic"><path d="M12 8V4H8" />
+  <rect width="16" height="12" x="4" y="8" rx="2" />
+  <path d="M2 14h2" />
+  <path d="M20 14h2" />
+  <path d="M15 13v2" />
+  <path d="M9 13v2" /></g>
+<g id="i-filePlus" class="ic"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+  <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+  <path d="M9 15h6" />
+  <path d="M12 18v-6" /></g>
+<g id="i-file" class="ic"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+  <path d="M14 2v4a2 2 0 0 0 2 2h4" /></g>
+<g id="i-note" class="ic"><path d="M21 9a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 15 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z" />
+  <path d="M15 3v5a1 1 0 0 0 1 1h5" /></g>
+<g id="i-link" class="ic"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></g>
+<g id="i-x" class="ic"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>
+<g id="i-expand" class="ic"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/></g>
+<g id="i-house" class="ic"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8" />
+  <path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></g>
+<g id="i-grid" class="ic"><rect width="7" height="7" x="3" y="3" rx="1" />
+  <rect width="7" height="7" x="14" y="3" rx="1" />
+  <rect width="7" height="7" x="14" y="14" rx="1" />
+  <rect width="7" height="7" x="3" y="14" rx="1" /></g>
+<g id="i-panel" class="ic"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></g>
+<g id="i-enter" class="ic"><polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></g>
+<g id="i-folder" class="ic"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></g>
+<g id="i-plus" class="ic"><path d="M5 12h14"/><path d="M12 5v14"/></g>
+<g id="i-globe" class="ic"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></g>
+<g id="i-phone" class="ic"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></g>
+<g id="i-reload" class="ic"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></g>
+<g id="i-camera" class="ic"><path d="M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z"/><circle cx="12" cy="13" r="3"/></g>
+<g id="i-rec" class="ic"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></g>
+<g id="i-pencil" class="ic"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></g>
+<g id="i-back" class="ic"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></g>
+<g id="i-fwd" class="ic"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></g>
+<symbol id="b-claude" viewBox="0 0 24 24"><path clip-rule="evenodd" d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" fill-rule="evenodd"></path></symbol>
+<symbol id="b-codex" viewBox="0 0 24 24"><path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff"></path><path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#lobe-icons-codex-_R_0_)"></path><defs><linearGradient gradientUnits="userSpaceOnUse" id="lobe-icons-codex-_R_0_" x1="12" x2="12" y1="3" y2="21"><stop stop-color="#B1A7FF"></stop><stop offset=".5" stop-color="#7A9DFF"></stop><stop offset="1" stop-color="#3941FF"></stop></linearGradient></defs></symbol>
+<clipPath id="win"><rect width="1280" height="720" rx="14"/></clipPath>
+<clipPath id="cvs"><rect y="36" width="1280" height="684"/></clipPath>
+</defs>
+<g clip-path="url(#win)">
+<rect class="cv" width="1280" height="720"/>
+<g clip-path="url(#cvs)"><g class="pan">
+<path class="wire" d="M448 150C478 150 478 130 508 130"/><path class="flow" d="M448 150C478 150 478 130 508 130"/><circle class="port" cx="448" cy="150" r="3.5"/><circle class="port" cx="508" cy="130" r="3.5"/>
+<path class="wire" d="M448 230C478 230 478 368 508 368"/><path class="flow" d="M448 230C478 230 478 368 508 368"/><circle class="port" cx="448" cy="230" r="3.5"/><circle class="port" cx="508" cy="368" r="3.5"/>
+<path class="wire" d="M848 130C878 130 878 150 908 150"/><path class="flow" d="M848 130C878 130 878 150 908 150"/><circle class="port" cx="848" cy="130" r="3.5"/><circle class="port" cx="908" cy="150" r="3.5"/>
+<path class="wire" d="M448 640C478 640 478 600 508 600"/><path class="flow" d="M448 640C478 640 478 600 508 600"/><circle class="port" cx="448" cy="640" r="3.5"/><circle class="port" cx="508" cy="600" r="3.5"/>
+<path class="wire" d="M848 600C878 600 878 640 908 640"/><path class="flow" d="M848 600C878 600 878 640 908 640"/><circle class="port" cx="848" cy="600" r="3.5"/><circle class="port" cx="908" cy="640" r="3.5"/>
+<path class="wire" d="M1468 200C1498 200 1498 260 1528 260"/><path class="flow" d="M1468 200C1498 200 1498 260 1528 260"/><circle class="port" cx="1468" cy="200" r="3.5"/><circle class="port" cx="1528" cy="260" r="3.5"/>
+<path class="wire" d="M1788 300C1818 300 1818 200 1848 200"/><path class="flow" d="M1788 300C1818 300 1818 200 1848 200"/><circle class="port" cx="1788" cy="300" r="3.5"/><circle class="port" cx="1848" cy="200" r="3.5"/>
+<path class="wire" d="M1788 520C1818 520 1818 540 1848 540"/><path class="flow" d="M1788 520C1818 520 1818 540 1848 540"/><circle class="port" cx="1788" cy="520" r="3.5"/><circle class="port" cx="1848" cy="540" r="3.5"/>
+<g transform="translate(48 84)">
+<clipPath id="c0"><rect width="400" height="330" rx="10"/></clipPath>
+<rect class="sf" width="400" height="330" rx="10"/>
+<g clip-path="url(#c0)">
+<use href="#b-claude" x="11" y="7" width="14" height="14"/>
+<text class="ui f" x="31" y="18">claude</text><text class="ui d" x="78.6" y="18">web-app</text>
+<text class="ui m" x="374" y="18" text-anchor="end">Working</text>
+<circle class="w pulse" cx="386" cy="14" r="3.5"/>
+<rect class="bdf" y="28" width="400" height="1"/>
+<rect class="b" x="0" y="147" width="400" height="16" opacity=".16"/><rect class="g" x="0" y="163" width="400" height="16" opacity=".16"/><rect class="g" x="0" y="179" width="400" height="16" opacity=".16"/><text class="mono" x="12" y="47" xml:space="preserve"><tspan class="a">&gt; </tspan>add a Hand tool to the canvas toolbar</text>
+
+<text class="mono" x="12" y="79" xml:space="preserve"><tspan class="f">● </tspan>I'll wire a Hand button to canvas.hand.</text>
+<text class="mono" x="12" y="95" xml:space="preserve"><tspan class="g">● </tspan>Read<tspan class="d">(defaults/mods/toolbar/main.js)</tspan></text>
+<text class="mono" x="12" y="111" xml:space="preserve"><tspan class="d">  └ Read 58 lines</tspan></text>
+<text class="mono" x="12" y="127" xml:space="preserve"><tspan class="g">● </tspan>Edit<tspan class="d">(defaults/mods/toolbar/main.js)</tspan></text>
+<text class="mono" x="12" y="143" xml:space="preserve"><tspan class="d">  └ Added 3 lines, removed 1 line</tspan></text>
+<text class="mono" x="12" y="159" xml:space="preserve"><tspan class="d">    53 </tspan><tspan class="b">-   run("canvas.hand", { on: false });</tspan></text>
+<text class="mono" x="12" y="175" xml:space="preserve"><tspan class="d">    53 </tspan><tspan class="g">+   run("canvas.hand", { on: name === "hand" });</tspan></text>
+<text class="mono" x="12" y="191" xml:space="preserve"><tspan class="d">    54 </tspan><tspan class="g">+   cx.notify();</tspan></text>
+<text class="mono" x="12" y="207" xml:space="preserve"><tspan class="w">● </tspan>Bash<tspan class="d">(cargo test --locked)</tspan></text>
+<text class="mono" x="12" y="223" xml:space="preserve"><tspan class="d">  └ test result: </tspan><tspan class="g">ok</tspan><tspan class="d">. 214 passed; 0 failed</tspan></text>
+
+<text class="mono" x="12" y="255" xml:space="preserve"><tspan class="f">● </tspan>Hand pans the canvas. Space + drag too.</text><rect class="bd" x="10" y="294" width="380" height="28" rx="8"/><text class="mono" x="20" y="312" xml:space="preserve"><tspan class="a">&gt;</tspan> </text><rect class="f blink" x="35" y="301" width="6.6" height="13"/>
+</g>
+<rect class="bd" width="400" height="330" rx="10"/><rect class="ring" x="-3" y="-3" width="406" height="336" rx="13"/>
+</g>
+<g transform="translate(48 474)">
+<clipPath id="c1"><rect width="400" height="330" rx="10"/></clipPath>
+<rect class="sf" width="400" height="330" rx="10"/>
+<g clip-path="url(#c1)">
+<use href="#i-terminal" transform="translate(11 7) scale(0.5833333333333334)" class="m"/>
+<text class="ui f" x="31" y="18">bun dev</text>
+
+
+<rect class="bdf" y="28" width="400" height="1"/>
+<text class="mono" x="12" y="47" xml:space="preserve"><tspan class="a">$ </tspan>bun run dev</text>
+
+<text class="mono" x="12" y="79" xml:space="preserve">  <tspan class="g">VITE</tspan> ready in 312 ms</text>
+
+<text class="mono" x="12" y="111" xml:space="preserve">  <tspan class="g">-&gt;</tspan>  Local:   <tspan class="a">http://localhost:5173/</tspan></text>
+<text class="mono" x="12" y="127" xml:space="preserve">  <tspan class="d">-&gt;</tspan>  Network: use --host to expose</text>
+
+<text class="mono" x="12" y="159" xml:space="preserve"><tspan class="d">12:04:11 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Overview.tsx</text>
+<text class="mono" x="12" y="175" xml:space="preserve"><tspan class="d">12:04:12 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Chart.tsx</text>
+<text class="mono" x="12" y="191" xml:space="preserve"><tspan class="d">12:04:19 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Overview.tsx</text>
+<text class="mono" x="12" y="207" xml:space="preserve"><tspan class="d">12:04:26 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Stat.tsx</text>
+</g>
+<rect class="bd" width="400" height="330" rx="10"/>
+</g>
+<g transform="translate(508 84)">
+<clipPath id="c2"><rect width="340" height="170" rx="10"/></clipPath>
+<rect class="sf" width="340" height="170" rx="10"/>
+<g clip-path="url(#c2)">
+<use href="#i-terminal" transform="translate(11 7) scale(0.5833333333333334)" class="m"/>
+<text class="ui f" x="31" y="18">cargo test</text>
+
+
+<rect class="bdf" y="28" width="340" height="1"/>
+<text class="mono" x="12" y="47" xml:space="preserve"><tspan class="a">$ </tspan>cargo test --locked</text>
+<text class="mono" x="12" y="63" xml:space="preserve"><tspan class="g">   Compiling</tspan> canopy v0.1.0</text>
+<text class="mono" x="12" y="79" xml:space="preserve"><tspan class="g">    Finished</tspan> test profile in 14.21s</text>
+<text class="mono" x="12" y="95" xml:space="preserve"><tspan class="g">     Running</tspan> unittests src/main.rs</text>
+<text class="mono" x="12" y="111" xml:space="preserve">running 214 tests</text>
+<text class="mono" x="12" y="127" xml:space="preserve">test canvas::pan::hand_drags ... <tspan class="g">ok</tspan></text>
+<text class="mono" x="12" y="143" xml:space="preserve">test result: <tspan class="g">ok</tspan>. 214 passed; 0 failed</text>
+</g>
+<rect class="bd" width="340" height="170" rx="10"/>
+</g>
+<g transform="translate(508 314)">
+<clipPath id="c3"><rect width="340" height="108" rx="10"/></clipPath>
+<rect class="sf" width="340" height="108" rx="10"/>
+<g clip-path="url(#c3)">
+<use href="#i-note" transform="translate(11 7) scale(0.5833333333333334)" class="m"/>
+<text class="ui f" x="31" y="18">Note</text>
+
+
+<rect class="bdf" y="28" width="340" height="1"/>
+<text class="ui f" x="12" y="48">ship the hand tool</text>
+<text class="ui m" x="12" y="65">[x] toolbar button</text>
+<text class="ui m" x="12" y="82">[x] space + drag pans</text>
+<text class="ui m" x="12" y="99">[ ] tooltip keys</text>
+</g>
+<rect class="bd" width="340" height="108" rx="10"/>
+</g>
+<g transform="translate(508 482)">
+<clipPath id="c4"><rect width="340" height="330" rx="10"/></clipPath>
+<rect class="sf" width="340" height="330" rx="10"/>
+<g clip-path="url(#c4)">
+<use href="#i-file" transform="translate(11 7) scale(0.5833333333333334)" class="m"/>
+<text class="ui f" x="31" y="18">wire.rs</text><text class="ui d" x="85.19999999999999" y="18">src/canvas</text>
+
+
+<rect class="bdf" y="28" width="340" height="1"/>
+<rect class="sel" x="0" y="99" width="340" height="16" opacity="1"/><text class="mono" x="12" y="47" xml:space="preserve"><tspan class="d">21 </tspan><tspan class="d">/// A wire joins two pane edges.</tspan></text>
+<text class="mono" x="12" y="63" xml:space="preserve"><tspan class="d">22 </tspan><tspan class="p">pub fn </tspan><tspan class="a">curve</tspan>(a: <tspan class="c">P</tspan>, b: <tspan class="c">P</tspan>) -&gt; [<tspan class="c">P</tspan>; <tspan class="w">4</tspan>] {</text>
+<text class="mono" x="12" y="79" xml:space="preserve"><tspan class="d">23 </tspan>    <tspan class="p">let</tspan> dx = (b.x - a.x).abs() * <tspan class="w">0.5</tspan>;</text>
+<text class="mono" x="12" y="95" xml:space="preserve"><tspan class="d">24 </tspan>    <tspan class="p">let</tspan> dx = dx.max(<tspan class="w">48.0</tspan>);</text>
+<text class="mono" x="12" y="111" xml:space="preserve"><tspan class="d">25 </tspan>    [a, a + v(dx, <tspan class="w">0.</tspan>), b - v(dx, <tspan class="w">0.</tspan>), b]</text>
+<text class="mono" x="12" y="127" xml:space="preserve"><tspan class="d">26 </tspan>}</text>
+<text class="mono" x="12" y="143" xml:space="preserve"><tspan class="d">27 </tspan></text>
+<text class="mono" x="12" y="159" xml:space="preserve"><tspan class="d">28 </tspan><tspan class="d">/// Flow dots ride the curve in flight.</tspan></text>
+<text class="mono" x="12" y="175" xml:space="preserve"><tspan class="d">29 </tspan><tspan class="p">pub fn </tspan><tspan class="a">at</tspan>(c: &amp;[<tspan class="c">P</tspan>; <tspan class="w">4</tspan>], t: <tspan class="c">f32</tspan>) -&gt; <tspan class="c">P</tspan> {</text>
+<text class="mono" x="12" y="191" xml:space="preserve"><tspan class="d">30 </tspan>    <tspan class="p">let</tspan> u = <tspan class="w">1.0</tspan> - t;</text>
+<text class="mono" x="12" y="207" xml:space="preserve"><tspan class="d">31 </tspan>    <tspan class="p">let</tspan> (u2, t2) = (u * u, t * t);</text>
+<text class="mono" x="12" y="223" xml:space="preserve"><tspan class="d">32 </tspan>    c[<tspan class="w">0</tspan>] * u2 * u + c[<tspan class="w">1</tspan>] * <tspan class="w">3.</tspan> * u2 * t</text>
+<text class="mono" x="12" y="239" xml:space="preserve"><tspan class="d">33 </tspan>        + c[<tspan class="w">2</tspan>] * <tspan class="w">3.</tspan> * u * t2 + c[<tspan class="w">3</tspan>] * t2 * t</text>
+<text class="mono" x="12" y="255" xml:space="preserve"><tspan class="d">34 </tspan>}</text>
+</g>
+<rect class="bd" width="340" height="330" rx="10"/>
+</g>
+<g transform="translate(908 84)">
+<clipPath id="c9"><rect width="560" height="420" rx="10"/></clipPath>
+<rect class="sf" width="560" height="420" rx="10"/>
+<g clip-path="url(#c9)">
+<use href="#i-globe" transform="translate(11 7) scale(0.5833333333333334)" class="m"/>
+<text class="ui f" x="31" y="18">localhost:5173</text><text class="ui d" x="131.39999999999998" y="18">browser</text>
+
+
+<rect class="bdf" y="28" width="560" height="1"/>
+<rect y="29" width="560" height="32" class="rs"/><rect class="bdf" y="60" width="560" height="1"/>
+<use href="#i-back" transform="translate(14 36) scale(0.6666666666666666)" class="m"/><use href="#i-fwd" transform="translate(38 36) scale(0.6666666666666666)" class="m"/><use href="#i-reload" transform="translate(62 36) scale(0.6666666666666666)" class="m"/>
+<rect class="sel" x="92" y="35" width="440" height="20" rx="10"/><text class="ui m" x="108" y="49" style="font-size:11px">localhost:5173/overview</text>
+<rect y="61" width="560" height="360" fill="#ffffff"/><rect y="61" width="128" height="360" fill="#f6f6f4"/><rect x="128" y="61" width="1" height="360" fill="#e4e4e7"/>
+<text class="ui" x="16" y="90" style="font-size:14px;font-weight:700" fill="#18181b">Acme</text>
+<rect x="8" y="120" width="112" height="24" rx="6" fill="#e8e8e4"/><rect x="16" y="126" width="12" height="12" rx="3" fill="#2563eb"/><text class="ui" x="36" y="136" style="font-size:11.5px" fill="#18181b">Overview</text>
+<rect x="16" y="154" width="12" height="12" rx="3" fill="#a1a1aa"/><text class="ui" x="36" y="164" style="font-size:11.5px" fill="#52525b">Orders</text>
+<rect x="16" y="182" width="12" height="12" rx="3" fill="#a1a1aa"/><text class="ui" x="36" y="192" style="font-size:11.5px" fill="#52525b">Customers</text>
+<rect x="16" y="210" width="12" height="12" rx="3" fill="#a1a1aa"/><text class="ui" x="36" y="220" style="font-size:11.5px" fill="#52525b">Reports</text>
+<rect x="16" y="238" width="12" height="12" rx="3" fill="#a1a1aa"/><text class="ui" x="36" y="248" style="font-size:11.5px" fill="#52525b">Settings</text>
+<text class="ui" x="152" y="92" style="font-size:18px;font-weight:600" fill="#18181b">Overview</text><text class="ui" x="152" y="108" style="font-size:11px" fill="#71717a">Last 30 days</text>
+<g transform="translate(152 124)"><rect width="120" height="66" rx="8" fill="#ffffff" stroke="#e4e4e7"/>
+<text class="ui" x="12" y="20" style="font-size:10px" fill="#71717a">Visitors</text><text class="ui" x="12" y="42" style="font-size:19px;font-weight:600" fill="#18181b">24,891</text><text class="ui" x="12" y="58" style="font-size:10px" fill="#16a34a">+12.4%</text></g>
+<g transform="translate(284 124)"><rect width="120" height="66" rx="8" fill="#ffffff" stroke="#e4e4e7"/>
+<text class="ui" x="12" y="20" style="font-size:10px" fill="#71717a">Orders</text><text class="ui" x="12" y="42" style="font-size:19px;font-weight:600" fill="#18181b">1,204</text><text class="ui" x="12" y="58" style="font-size:10px" fill="#16a34a">+4.1%</text></g>
+<g transform="translate(416 124)"><rect width="120" height="66" rx="8" fill="#ffffff" stroke="#e4e4e7"/>
+<text class="ui" x="12" y="20" style="font-size:10px" fill="#71717a">Revenue</text><text class="ui" x="12" y="42" style="font-size:19px;font-weight:600" fill="#18181b">$48.2k</text><text class="ui" x="12" y="58" style="font-size:10px" fill="#16a34a">+18.9%</text></g>
+<g transform="translate(152 206)"><rect width="384" height="116" rx="8" fill="#ffffff" stroke="#e4e4e7"/><text class="ui" x="12" y="20" style="font-size:11px;font-weight:600" fill="#18181b">Revenue</text>
+<path d="M12 47L52 59L92 53L132 71L172 65L212 80L252 74L292 89L332 83L372 98L372 104L12 104Z" fill="#2563eb" opacity=".1"/><path d="M12 47L52 59L92 53L132 71L172 65L212 80L252 74L292 89L332 83L372 98" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></g>
+<g transform="translate(152 330)"><rect width="384" height="1" fill="#e4e4e7"/>
+<text class="ui" x="2" y="17" style="font-size:11px" fill="#18181b">Acme Inc</text><text class="ui" x="250" y="17" style="font-size:11px" fill="#18181b" text-anchor="end">$1,240.00</text><text class="ui" x="382" y="17" style="font-size:11px" fill="#16a34a" text-anchor="end">Paid</text></g>
+<g transform="translate(152 356)"><rect width="384" height="1" fill="#e4e4e7"/>
+<text class="ui" x="2" y="17" style="font-size:11px" fill="#18181b">Globex</text><text class="ui" x="250" y="17" style="font-size:11px" fill="#18181b" text-anchor="end">$860.50</text><text class="ui" x="382" y="17" style="font-size:11px" fill="#16a34a" text-anchor="end">Paid</text></g>
+<g transform="translate(152 382)"><rect width="384" height="1" fill="#e4e4e7"/>
+<text class="ui" x="2" y="17" style="font-size:11px" fill="#18181b">Initech</text><text class="ui" x="250" y="17" style="font-size:11px" fill="#18181b" text-anchor="end">$420.00</text><text class="ui" x="382" y="17" style="font-size:11px" fill="#a16207" text-anchor="end">Pending</text></g>
+</g>
+<rect class="bd" width="560" height="420" rx="10"/>
+</g>
+<g transform="translate(908 564)">
+<clipPath id="c5"><rect width="560" height="300" rx="10"/></clipPath>
+<rect class="sf" width="560" height="300" rx="10"/>
+<g clip-path="url(#c5)">
+<use href="#b-codex" x="11" y="7" width="14" height="14"/>
+<text class="ui f" x="31" y="18">codex</text><text class="ui d" x="72" y="18">api</text>
+<text class="ui m" x="534" y="18" text-anchor="end">Needs you</text>
+<circle class="b pulse" cx="546" cy="14" r="3.5"/>
+<rect class="bdf" y="28" width="560" height="1"/>
+<rect class="sel" x="0" y="147" width="560" height="16" opacity="1"/><text class="mono" x="12" y="47" xml:space="preserve"><tspan class="a">&gt; </tspan>review the wire curves</text>
+<text class="mono" x="12" y="63" xml:space="preserve"><tspan class="g">● </tspan>Read<tspan class="d">(src/canvas/wire.rs)</tspan></text>
+<text class="mono" x="12" y="79" xml:space="preserve"><tspan class="d">  └ Read 41 lines</tspan></text>
+<text class="mono" x="12" y="95" xml:space="preserve"><tspan class="f">● </tspan>The control points look right. One question:</text>
+<text class="mono" x="12" y="111" xml:space="preserve">  curve() clamps dx to 48px, so a very short wire</text>
+<text class="mono" x="12" y="127" xml:space="preserve">  will overshoot. Checking the diff against main.</text>
+<text class="mono" x="12" y="143" xml:space="preserve"><tspan class="b">● </tspan>Wants to run: <tspan class="f">git diff main</tspan></text>
+<text class="mono" x="12" y="159" xml:space="preserve"><tspan class="f">  1  Yes, run it</tspan></text>
+<text class="mono" x="12" y="175" xml:space="preserve"><tspan class="m">  2  Always allow in this space</tspan></text>
+<text class="mono" x="12" y="191" xml:space="preserve"><tspan class="m">  3  No, and tell codex what to do</tspan></text>
+</g>
+<rect class="bd" width="560" height="300" rx="10"/>
+</g>
+<g transform="translate(1528 150)">
+<clipPath id="c11"><rect width="260" height="520" rx="10"/></clipPath>
+<rect class="sf" width="260" height="520" rx="10"/>
+<g clip-path="url(#c11)">
+<use href="#i-phone" transform="translate(11 7) scale(0.5833333333333334)" class="m"/>
+<text class="ui f" x="31" y="18">iPhone 17 Pro</text><text class="ui d" x="124.8" y="18">Simulator</text>
+
+
+<rect class="bdf" y="28" width="260" height="1"/>
+<clipPath id="c10"><rect x="28" y="48" width="204" height="444" rx="34"/></clipPath>
+<rect x="22" y="42" width="216" height="456" rx="40" fill="#0b0b0c" stroke="#52525b" stroke-width="1.5"/>
+<g clip-path="url(#c10)"><rect x="28" y="48" width="204" height="444" fill="#fafaf9"/>
+<text class="ui" x="58" y="74" style="font-size:11px;font-weight:600" fill="#111" text-anchor="middle">9:41</text>
+<rect x="182" y="72" width="2.6" height="3" rx="1" fill="#111"/><rect x="186" y="70" width="2.6" height="5" rx="1" fill="#111"/><rect x="190" y="68" width="2.6" height="7" rx="1" fill="#111"/><rect x="194" y="66" width="2.6" height="9" rx="1" fill="#111"/>
+<rect x="202" y="66.5" width="19" height="9.5" rx="3" fill="none" stroke="#111" opacity=".5"/><rect x="203.5" y="68" width="13" height="6.5" rx="1.8" fill="#111"/>
+<rect x="100" y="54" width="60" height="18" rx="9" fill="#000"/>
+<text class="ui" x="42" y="116" style="font-size:22px;font-weight:700" fill="#111">Overview</text><text class="ui" x="42" y="133" style="font-size:11px" fill="#71717a">Last 30 days</text>
+<g transform="translate(42 150)"><rect width="88" height="60" rx="12" fill="#fff" stroke="#e4e4e7"/><text class="ui" x="10" y="18" style="font-size:10px" fill="#71717a">Visitors</text><text class="ui" x="10" y="40" style="font-size:18px;font-weight:600" fill="#18181b">24,891</text><text class="ui" x="10" y="54" style="font-size:10px" fill="#16a34a">+12.4%</text></g><g transform="translate(136 150)"><rect width="88" height="60" rx="12" fill="#fff" stroke="#e4e4e7"/><text class="ui" x="10" y="18" style="font-size:10px" fill="#71717a">Orders</text><text class="ui" x="10" y="40" style="font-size:18px;font-weight:600" fill="#18181b">1,204</text><text class="ui" x="10" y="54" style="font-size:10px" fill="#16a34a">+4.1%</text></g>
+<g transform="translate(42 222)"><rect width="182" height="104" rx="12" fill="#fff" stroke="#e4e4e7"/><text class="ui" x="12" y="20" style="font-size:11px;font-weight:600" fill="#18181b">Revenue</text><text class="ui" x="170" y="20" style="font-size:11px" fill="#16a34a" text-anchor="end">$48.2k</text>
+<path d="M12 46.4L29.5 56L47 51.2L64.5 65.6L82 60.8L99.5 72.8L117 68L134.5 80L152 75.2L169.5 87.2L169.5 92L12 92Z" fill="#2563eb" opacity=".1"/><path d="M12 46.4L29.5 56L47 51.2L64.5 65.6L82 60.8L99.5 72.8L117 68L134.5 80L152 75.2L169.5 87.2" fill="none" stroke="#2563eb" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></g>
+<text class="ui" x="42" y="350" style="font-size:12px;font-weight:600" fill="#18181b">Recent orders</text><rect x="42" y="364" width="182" height="1" fill="#e4e4e7"/><text class="ui" x="42" y="381" style="font-size:11px" fill="#18181b">Acme Inc</text><text class="ui" x="224" y="381" style="font-size:11px" fill="#3f3f46" text-anchor="end">$1,240.00</text><rect x="42" y="390" width="182" height="1" fill="#e4e4e7"/><text class="ui" x="42" y="407" style="font-size:11px" fill="#18181b">Globex</text><text class="ui" x="224" y="407" style="font-size:11px" fill="#3f3f46" text-anchor="end">$860.50</text><rect x="42" y="416" width="182" height="1" fill="#e4e4e7"/><text class="ui" x="42" y="433" style="font-size:11px" fill="#18181b">Initech</text><text class="ui" x="224" y="433" style="font-size:11px" fill="#3f3f46" text-anchor="end">$420.00</text>
+<rect x="28" y="440" width="204" height="52" fill="#fff"/><rect x="28" y="440" width="204" height="1" fill="#e4e4e7"/><circle cx="53" cy="462" r="7" fill="#2563eb" stroke="#2563eb" stroke-width="1.6"/><circle cx="104" cy="462" r="7" fill="none" stroke="#a1a1aa" stroke-width="1.6"/><circle cx="155" cy="462" r="7" fill="none" stroke="#a1a1aa" stroke-width="1.6"/><circle cx="206" cy="462" r="7" fill="none" stroke="#a1a1aa" stroke-width="1.6"/>
+<rect x="95" y="484" width="70" height="4" rx="2" fill="#111"/></g>
+</g>
+<rect class="bd" width="260" height="520" rx="10"/>
+</g>
+<g transform="translate(1848 84)">
+<clipPath id="c7"><rect width="400" height="330" rx="10"/></clipPath>
+<rect class="sf" width="400" height="330" rx="10"/>
+<g clip-path="url(#c7)">
+<use href="#b-claude" x="11" y="7" width="14" height="14"/>
+<text class="ui f" x="31" y="18">claude</text><text class="ui d" x="78.6" y="18">docs</text>
+<text class="ui m" x="374" y="18" text-anchor="end">Done</text>
+<circle class="a" cx="386" cy="14" r="3.5"/>
+<rect class="bdf" y="28" width="400" height="1"/>
+<text class="mono" x="12" y="47" xml:space="preserve"><tspan class="a">&gt; </tspan>write tests for the wire curves</text>
+
+<text class="mono" x="12" y="79" xml:space="preserve"><tspan class="g">● </tspan>Added 3 tests to src/canvas/wire.rs</text>
+<text class="mono" x="12" y="95" xml:space="preserve"><tspan class="d">  └ curve_ends, curve_is_smooth, at_midpoint</tspan></text>
+
+<text class="mono" x="12" y="127" xml:space="preserve"><tspan class="g">● </tspan>Bash<tspan class="d">(cargo test wire)</tspan></text>
+<text class="mono" x="12" y="143" xml:space="preserve"><tspan class="d">  └ test result: </tspan><tspan class="g">ok</tspan><tspan class="d">. 3 passed; 0 failed</tspan></text>
+
+<text class="mono" x="12" y="175" xml:space="preserve"><tspan class="f">● </tspan>Done. Wires now have tests. Run cargo test</text>
+<text class="mono" x="12" y="191" xml:space="preserve">  to check the whole suite.</text><rect class="bd" x="10" y="294" width="380" height="28" rx="8"/><text class="mono" x="20" y="312" xml:space="preserve"><tspan class="a">&gt;</tspan> </text><rect class="f blink" x="35" y="301" width="6.6" height="13"/>
+</g>
+<rect class="bd" width="400" height="330" rx="10"/>
+</g>
+<g transform="translate(1848 474)">
+<clipPath id="c6"><rect width="400" height="140" rx="10"/></clipPath>
+<rect class="sf" width="400" height="140" rx="10"/>
+<g clip-path="url(#c6)">
+<use href="#i-terminal" transform="translate(11 7) scale(0.5833333333333334)" class="m"/>
+<text class="ui f" x="31" y="18">git log</text>
+
+
+<rect class="bdf" y="28" width="400" height="1"/>
+<text class="mono" x="12" y="47" xml:space="preserve"><tspan class="a">$ </tspan>git log --oneline -3</text>
+<text class="mono" x="12" y="63" xml:space="preserve"><tspan class="w">7299bae</tspan> feat(canvas): draw wires as curves</text>
+<text class="mono" x="12" y="79" xml:space="preserve"><tspan class="w">1cb63de</tspan> feat(canvas): add the canvas toolbar</text>
+<text class="mono" x="12" y="95" xml:space="preserve"><tspan class="w">935f688</tspan> docs(canopy): make terminals panes</text>
+</g>
+<rect class="bd" width="400" height="140" rx="10"/>
+</g>
+<g transform="translate(1848 674)">
+<clipPath id="c8"><rect width="220" height="120" rx="10"/></clipPath>
+<rect class="sf" width="220" height="120" rx="10"/>
+<g clip-path="url(#c8)">
+<use href="#i-note" transform="translate(11 7) scale(0.5833333333333334)" class="m"/>
+<text class="ui f" x="31" y="18">Ideas</text>
+
+
+<rect class="bdf" y="28" width="220" height="1"/>
+<text class="ui f" x="12" y="48">pan inertia</text>
+<text class="ui m" x="12" y="65">a minimap</text>
+<text class="ui m" x="12" y="82">pin a pane to the glass</text>
+</g>
+<rect class="bd" width="220" height="120" rx="10"/>
+</g>
+<g class="rest"><rect class="rs bd2" x="48" y="52" width="104" height="26" rx="8"/><use href="#i-enter" transform="translate(57.5 58.5) scale(0.5416666666666666)" class="m"/>
+<use href="#i-expand" transform="translate(81.5 58.5) scale(0.5416666666666666)" class="m"/>
+<use href="#i-link" transform="translate(105.5 58.5) scale(0.5416666666666666)" class="m"/>
+<use href="#i-x" transform="translate(129.5 58.5) scale(0.5416666666666666)" class="m"/></g>
+<g class="hov"><rect class="ring" x="907" y="83" width="562" height="422" rx="11"/><rect class="rs bd2" x="908" y="52" width="185" height="26" rx="8"/><use href="#i-house" transform="translate(917.5 58.5) scale(0.5416666666666666)" class="m"/>
+<use href="#i-reload" transform="translate(941.5 58.5) scale(0.5416666666666666)" class="m"/>
+<use href="#i-camera" transform="translate(965.5 58.5) scale(0.5416666666666666)" class="m"/>
+<use href="#i-rec" transform="translate(989.5 58.5) scale(0.5416666666666666)" class="m"/>
+<use href="#i-pencil" transform="translate(1013.5 58.5) scale(0.5416666666666666)" class="m"/>
+<rect class="bdf" x="1036" y="58" width="1" height="14"/>
+<use href="#i-link" transform="translate(1046.5 58.5) scale(0.5416666666666666)" class="m"/>
+<use href="#i-x" transform="translate(1070.5 58.5) scale(0.5416666666666666)" class="m"/></g>
+</g></g>
+<rect class="ch" width="1280" height="36"/>
+<circle fill="#ff5f57" cx="20" cy="18" r="6"/><circle fill="#febc2e" cx="40" cy="18" r="6"/><circle fill="#28c840" cx="60" cy="18" r="6"/>
+<use href="#i-house" transform="translate(92 11) scale(0.5833333333333334)" class="m"/>
+<path class="cv" d="M124 36V12a6 6 0 0 1 6-6h112a6 6 0 0 1 6 6V36Z"/>
+<use href="#i-folder" transform="translate(136 12) scale(0.5833333333333334)" class="f"/><text class="ui f" x="156" y="23.5">web-app</text><circle class="w" cx="234" cy="21" r="3"/>
+<use href="#i-folder" transform="translate(266 12) scale(0.5833333333333334)" class="m"/><text class="ui m" x="286" y="23.5">api</text><circle class="b" cx="336" cy="21" r="3"/>
+<use href="#i-folder" transform="translate(368 12) scale(0.5833333333333334)" class="m"/><text class="ui m" x="388" y="23.5">docs</text>
+<use href="#i-plus" transform="translate(466 12) scale(0.5)" class="m"/>
+<use href="#i-grid" transform="translate(1210 11) scale(0.5833333333333334)" class="m"/><use href="#i-panel" transform="translate(1238 11) scale(0.5833333333333334)" class="m"/>
+<rect class="rs bd2" x="525" y="676" width="230" height="32" rx="10"/><use href="#i-pointer" transform="translate(533.5 684.5) scale(0.625)" class="m"/>
+<rect class="sel" x="557" y="678" width="28" height="28" rx="8"/><use href="#i-hand" transform="translate(563.5 684.5) scale(0.625)" class="f"/>
+<rect class="bdf" x="591" y="683" width="1" height="18"/>
+<use href="#i-terminal" transform="translate(602.5 684.5) scale(0.625)" class="m"/>
+<use href="#i-bot" transform="translate(632.5 684.5) scale(0.625)" class="m"/>
+<use href="#i-filePlus" transform="translate(662.5 684.5) scale(0.625)" class="m"/>
+<use href="#i-note" transform="translate(692.5 684.5) scale(0.625)" class="m"/>
+<rect class="bdf" x="720" y="683" width="1" height="18"/>
+<use href="#i-link" transform="translate(731.5 684.5) scale(0.625)" class="m"/>
+<g class="rest" transform="translate(372 196)"><path class="ptr" transform="scale(.85)" d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/></g><g class="hov" transform="translate(470 300)"><path class="ptr" transform="scale(.85)" d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/></g>
+<g class="handc" transform="translate(900 560)"><g transform="scale(.95)"><g class="halo"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+  <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" />
+  <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+  <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></g><g class="hand"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+  <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" />
+  <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+  <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></g></g></g>
+</g>
+<rect class="bd" x=".5" y=".5" width="1279" height="719" rx="13.5"/>
+</svg>

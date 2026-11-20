@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/canopy-header.svg" alt="Canopy: a free canvas of agent and terminal panes joined by wires" width="100%">
+</p>
+
 # Canopy
 
 A control room for agents and terminals. Canopy is a native Rust/GPUI desktop
