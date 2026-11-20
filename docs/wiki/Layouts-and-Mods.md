@@ -1,63 +1,67 @@
-# Layouts and mods
+# Layouts and Mods
 
-You can change the whole window, not just its colors. Layouts arrange it; mods draw the panels inside it.
+A layout arranges the window. A mod draws part of the window or a kind of pane.
 
-Read the [layout and mod guide](../defaults/AGENTS.md). This is the same guide Canopy writes into your app home on every start, so people and agents work from one source of truth.
-It covers layouts, settings, keys, overlays, mod code and the app API.
+## Built-in layouts
 
-For live folder updates, `watchFolder(path)` returns an awaitable promise with
-`cancel()`. Keep the promise and cancel it when the folder is no longer shown;
-it resolves with `[]` and releases that call without stopping other mods' watches.
+Select a layout in the [command palette](Go-To-and-Palette):
 
-The generated `herdr.d.ts` and `gpui-kit.d.ts` beside your installed guide describe the full API for your version.
+- **Layout: Canopy** (`main`): the canvas with a floating toolbar.
+- **Layout: Classic** (`classic`): spaces and agents on the left, tabs above the panes, and a status bar.
+- **Layout: Terminals** (`terminals`): a space picker and tabs above the terminal panes.
+- **Layout: Canopy 98** (`win98`): a Windows 98 desktop with a taskbar.
 
-To match the app's look, build from `ui` in the `herdr` module (buttons,
-checkbox, input, dialog pieces, rows, sizes); every shipped dialog uses it.
+## Change a layout
 
-Start with Settings for fonts, colors and sounds.
-For deeper changes, duplicate a shipped layout or mod from the command palette, then edit the copy.
-Shipped files update on start; personal copies do not.
-Save to reload. Check for errors, even when the old screen still looks fine.
+Shipped layouts and mods update on start. Personal copies do not.
 
-```sh
-canopy check ~/.config/canopy/mods/my-panel
-canopy status
-```
+1. Select the layout you want to change.
+2. Select **Duplicate layout** in the command palette.
+3. Edit the copy in `layouts/<name>-copy.json` in your app home.
+4. Save the file to reload the layout.
 
-The check loads a mod and renders it once. It does not replace looking at the result in the window.
+Canopy switches to the copy when you duplicate a layout.
+The copy still uses the original mods.
+To change their code, duplicate a mod and change the copy's `content.mod` reference.
 
-Mods can run programs, read files and use the network. Only install code you trust.
-See [security and privacy](security.md).
+See [Files and Folders](Files-and-Folders) for your app home and its files.
+
+## Write a mod
+
+Read [Security and Privacy](Security-and-Privacy) before you install a mod.
+
+1. Select **Duplicate mod** in the command palette.
+2. Type the mod's folder name.
+3. Press `Enter` to create the copy.
+4. Edit `mods/<name>-copy/main.js` in your app home.
+5. Save the file to reload the mod.
+
+Read the [layout and mod guide](https://github.com/Krishnapthm/canopy/blob/main/defaults/AGENTS.md) for the API.
+Canopy installs this guide as `AGENTS.md` in your app home.
+The generated `herdr.d.ts` and `gpui-kit.d.ts` beside it describe the full API for your version.
+
+Canopy keeps the upstream names `herdr` for the JavaScript module and `HERDR_APP_HOME` for the app home override.
 
 ## Mod panes
 
-A mod declares a canvas pane kind `mod:<name>` in `mod.json`:
+Add a `pane` block to `mod.json` to declare a pane kind named `mod:<name>`:
 
 ```json
 "pane": { "label": "Note", "icon": "mods/note/sticky-note.svg", "actions": [] }
 ```
 
-Open it with `canvas.pane_new {kind: "mod:<name>"}`. The app draws one copy per
-pane with `props().pane` set to its id. The copy lives only while its place is
-shown. `canvasPanes()` gives its saved props; save state with
-`run("canvas.pane_set", {pane, props})`. This shallow-merges the object; a string
-`props.text` is what `canopy pane read` returns.
+Each action declares `{icon, label, command, args}`.
+Actions run app commands with the pane selected.
+Canopy draws these actions before **Connect** and **Close** in the shared helper bar.
 
-Actions declare `{icon, label, command, args}`. They run app commands with the
-pane selected. After them the app adds Connect and Close in the shared helper bar.
+## Check a mod
 
-## Toolbar state and shortcut hints
+Run this command after each change:
 
-`window().hand` is true while the canvas hand tool is on (`canvas.hand`).
-Use it to highlight Hand or Select. `window().keys` becomes true after the
-person holds Cmd (Ctrl elsewhere) alone for 0.4 s; show each button's key
-beside its icon while true. Release or any key press hides the hints.
-`keys()` rows include `label`, the platform-formatted binding, such as `⇧⌘N`
-on macOS or `Ctrl+Shift+N` elsewhere. Use it in tooltips and inline hints.
+```sh
+canopy check ~/.config/canopy/mods/my-panel
+```
 
-Open a popup with `openOverlay({mod, kind: "popup", at: "above"})` to place
-its bottom 8 px above the floating block under the pointer, with its left
-edge 16 px left of the pointer. The popup snaps inside the window with an
-8 px margin. Without a floating block under the pointer it opens at the pointer.
-
-[Back to Canopy](../README.md)
+The check loads the mod and checks its initial description and eager native elements.
+It does not check layout, painting, deferred content or later asynchronous states.
+Inspect the result in the app too.

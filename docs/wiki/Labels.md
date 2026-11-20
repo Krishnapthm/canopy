@@ -1,67 +1,53 @@
 # Shared state in labels
 
-herdr-core clients (Canopy, the herdr apps, a terminal UI) share two
-things through herdr-core terminal labels: which agents a person has seen,
-and which are pinned. Look at an agent on one client and it stops being
-"done" on all of them; pin it on one and it's pinned everywhere.
+Core clients share which agents you have seen and pinned through terminal labels.
+This protocol lets other clients share that state with Canopy.
 
-Labels live on the terminal, so this state ends with it. Every client
-already gets them: `events.subscribe` snapshots carry `labels` and `turn`,
-and each `labels` event carries the whole map. Remote terminals
-(`mac/t7`) work the same way.
-
-Clients that don't know these labels keep working: everything here is
-optional, and a missing label falls back to what the client did before.
+- Labels belong to the terminal. The shared state ends with it.
+- `events.subscribe` snapshots contain `labels` and `turn`. Each `labels` event contains the whole label map.
+- Remote terminals use the same rules.
+- These labels are optional. Clients can ignore them and keep their own behavior.
 
 ## `herdr.seen=<turn>`: the last turn a person looked at
 
-`turn` is core's counter: it goes up each time the terminal stops working.
+The core increases `turn` each time the terminal leaves `working`.
+A change from `blocked` to `idle` does not increase it.
 
-Showing an agent:
+Show an agent in this order:
 
-1. `blocked` or `error`: needs you.
-2. `working`: working.
-3. Otherwise (`idle`, `done`, ...): **done** when `turn > herdr.seen`,
-   else **idle**.
+1. For `blocked` or `error`, show that it needs you.
+2. For `working`, show that it is working.
+3. Otherwise, show `done` when `turn > herdr.seen`. Show `idle` when it is not.
 
-With no `herdr.seen` label, use your own seen rules for that terminal.
+With no `herdr.seen` label, use the client's own seen rules.
 A missing label is not `0`.
 
-Writing it:
+Write the label with these rules:
 
-- When a person is looking at an agent, write `herdr.seen=<turn>`. Write
-  only to raise it, and also when it's missing (so terminals started
-  elsewhere join).
-- "Looking" means really in front of someone: the window or app in the
-  foreground and that agent drawn on screen (a peek or a floating view
-  counts; a pane covered by another terminal doesn't). A screen left on in an empty room
-  shouldn't clear everyone's "done".
-- Write once per turn while it stays on screen, not on every update: then
-  a "mark unread" from another client isn't overruled by a screen nobody
-  watches. Looking again later raises it again.
-- A turn ends with a `status` event first, then a `turn` event. Decide on
-  the `turn` event.
-- Mark unread is the one lower write: `herdr.seen=<turn - 1>`. At turn 0
-  nothing has finished yet, so there is nothing to mark.
-- A terminal a client starts gets `herdr.seen=0`.
+- Write `herdr.seen=<turn>` when you look at an agent. Raise an existing value, or write it when missing.
+- Count an agent only when its app or window is in the foreground and the agent appears on screen.
+- A peek or floating view counts. A terminal that replaces another pane's terminal hides that terminal from the seen check.
+- Write once per turn while the agent stays on screen. Do not write on every update.
+- This rule preserves another client's mark unread. Looking again later can raise the value again.
+- To mark unread, write `herdr.seen=<turn - 1>`. This is the only lower write. Do not mark unread at turn `0`.
+- Give a terminal that your client starts `herdr.seen=0`.
 
-Last writer wins. Turn counts observed progress: an agent that goes from
-blocked to idle without working again keeps its turn.
-
-How long a done row stays in place while you look at it is up to each
-client.
+The last writer wins.
+Each client chooses how long a done row stays in place while you look at it.
 
 ## `herdr.pinned=1`: pinned
 
-Present and non-empty: pinned. Unpin by writing it empty
-(`herdr.pinned=`), which removes it. Pinned agents go first, in the
-client's usual order.
-
-In the desktop app, mods pin with `terminal.pin {terminal, pinned}` and
-read `pinned` from `agents()`; they never write the label themselves.
+- A present, non-empty value means pinned.
+- To unpin, write an empty value: `herdr.pinned=`. This removes the label.
+- Show pinned agents first, in the client's usual order.
+- In Canopy mods, use `terminal.pin {terminal, pinned}` and read `pinned` from `agents()`.
+  Do not write the label directly from a mod.
 
 ## Adding more
 
-Labels suit small values that change at human speed. Use the `herdr.`
-prefix. Bigger or app-wide state belongs in documents (`doc.get`,
-`doc.set`), and state for one device stays on that device.
+- Use labels for small values that change at human speed.
+- Use the `herdr.` prefix.
+- Use documents (`doc.get`, `doc.set`) for larger values or app-wide state.
+- Keep state for one device on that device.
+
+See [Agents](Agents) for using agents in Canopy.
