@@ -1,55 +1,74 @@
 # Images and PDFs
 
-Image panes show a whole picture. PDF panes let you read, search and highlight a PDF.
+Image and PDF panes bring reference material onto the canvas: a screenshot from a bug report, a design mock, an API spec, a paper. Their main job is to let you point agents at a precise part of them, a region of an image or a passage of a PDF, instead of describing it.
+
+Open either with **Open file** on the toolbar, `Cmd+O` (`Ctrl+O` on Linux and Windows), or by dragging the file onto the canvas.
 
 ## Images
 
-Image panes support PNG, JPEG, GIF and WebP. The image fits inside the pane.
-See [Panes](Panes) for ways to open one.
+Image panes show PNG, JPEG, GIF and WebP files, scaled to fit the pane.
 
-1. Drag a region at least 4 × 4 source pixels.
-2. Click the quote icon. See [Quotes](Quotes) for the quote menu.
+### Quote part of an image
 
-Click **Quote image** in the helper bar to quote the whole image.
-You can also select the image pane and press `q` in canvas mode.
+1. Drag a box over the part you want, at least 4 by 4 pixels of the source image.
+2. Click the quote icon that appears.
+3. Pick an agent in the [quote menu](Quotes).
+
+Canopy saves the cropped region to a temporary file and gives the agent both the original path and the crop, so it can look at exactly what you selected.
+
+To quote the whole image, click **Quote image** in the helper bar, or select the pane and press `q` in canvas mode.
+
 The image helper bar also has **Connect** and **Close**.
 
 ## PDFs
 
 ![A PDF pane with highlighted text](images/images-and-pdfs-1.png)
 
-1. Click **Find** in the helper bar.
-2. Click the PDF body to give it the keyboard.
-3. Type your query.
+PDF panes let you read, search, highlight and quote a document.
 
-To highlight and quote text:
+### Find text
 
-1. Click **Highlight text** in the helper bar.
-2. Drag across the text.
-3. Click the quote icon.
+1. Click **Find** in the helper bar, or press `/` with the pane selected.
+2. Click the PDF so it has the keyboard.
+3. Type what you are looking for.
 
-Click a saved highlight to show its quote icon again.
-See [Quotes](Quotes) for the quote menu.
+### Highlight and quote
 
-- Click **Previous page** or **Next page** to move between pages.
-- Click **Clear highlights** to remove all marks. The button shows when the pane has marks.
-- The PDF helper bar also has **Connect** and **Close**.
+1. Click **Highlight text** in the helper bar, or press `m`.
+2. Drag across the text you want.
+3. Click the quote icon to send it to an agent with the file name and page number.
 
-Canopy saves marks in `canvas.json`, never in the PDF.
-See [Agent Pane Commands](Agent-Pane-Commands) for what `canopy pane read` returns for images and PDFs.
+Highlights stay on the pane, so you can mark up a spec as you read it and quote each passage when you need it. Click a saved highlight to bring its quote icon back. Highlights are saved in `canvas.json`, never in the PDF file itself.
 
-Select the PDF pane in canvas mode to use these keys:
+### Move around
+
+- Click **Previous page** or **Next page**, or press `[` and `]` with the pane selected.
+- Click **Clear highlights**, or press `Shift+M`, to remove every highlight. The button shows only when there are some.
+
+The PDF helper bar also has **Connect** and **Close**.
+
+### Keys
+
+With a PDF pane selected in canvas mode:
 
 | Key | Action |
 |---|---|
-| `/` | Toggle **Find**. |
-| `m` | Toggle **Highlight text**. |
-| `[` | Go to the previous page. |
-| `]` | Go to the next page. |
+| `/` | Turn **Find** on or off. |
+| `m` | Turn **Highlight text** on or off. |
+| `[` / `]` | Previous / next page. |
 | `Shift+M` | Clear all highlights. |
+
+## What agents can read
+
+An agent that reads an image pane with `canopy pane read` gets its path and pixel size, so it can open the file itself. For a PDF pane, it gets the path, the page count and the text with page numbers. See [Agent Pane Commands](Agent-Pane-Commands#read-a-pane).
 
 ## Troubleshooting
 
-- **A region has no quote icon.** Drag a region at least 4 × 4 source pixels.
-- **Typing does not search.** Click **Find**, then click the PDF body before typing.
-- **"The PDF is password protected".** Canopy reports this in an error toast.
+- **No quote icon appears after selecting a region.** The region is too small. Drag a box at least 4 by 4 pixels of the source image.
+- **Typing does not search the PDF.** Click **Find**, then click the PDF itself before typing.
+- **A toast says "The PDF is password protected".** Canopy cannot open password-protected PDFs.
+
+## See also
+
+- [Point Agents at Things](Point-Agents-at-Things): quotes from every pane kind, with examples.
+- [Quotes](Quotes): the quote menu and formats.

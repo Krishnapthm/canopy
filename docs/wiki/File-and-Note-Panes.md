@@ -1,43 +1,57 @@
 # File and Note Panes
 
-File panes show text files on the canvas. Note panes hold text you type for your agents to read.
+File panes and note panes put text on the canvas next to your agents. A **file pane** shows a file from disk, such as the module you are discussing or a plan an agent wrote. A **note pane** holds text you type straight into the canvas, such as a checklist, a plan or instructions you want several agents to share.
+
+Both can be wired to agents, which lets those agents find and read them.
 
 ## File panes
 
-1. Click **Open file** on the toolbar.
-2. Select a text file.
+### Open a file
 
-In canvas mode, press `Cmd+O` (`Ctrl+O` on Linux and Windows) to open the same file picker.
+- Click **Open file** on the toolbar, or press `Cmd+O` (`Ctrl+O` on Linux and Windows) in canvas mode, and pick a file.
+- Drag a file onto the canvas.
+- Ask an agent to open one next to itself. It runs:
 
-An agent can open a file beside itself and wire it:
+  ```sh
+  canopy pane new file ./README.md --wire
+  ```
 
-```sh
-canopy pane new file ./README.md --wire
-```
+If the file already has a pane, Canopy moves that pane to you instead of opening a second copy. Moving a file pane to another space removes its wires, because wires only join panes in the same space.
 
-Opening a path that already has a pane moves that pane instead of creating another.
-Moving it to another space removes its existing wires.
+### What you can do with it
 
-The file pane helper bar has three buttons:
+- **Read it.** Scroll through the file's text right on the canvas.
+- **Quote from it.** Select lines and click the quote icon to send them to an agent with the path and line numbers. See [Point Agents at Things](Point-Agents-at-Things#lines-in-a-file).
+- **Edit it.** Click **Open as tab** in the helper bar to open the file in the [Files panel](Files-Panel), where you can edit and save it.
+- **Wire it.** Click **Connect** and then an agent. The agent then sees the file in `canopy wire` and can read it with `canopy pane read`. A file can be wired to terminals and agents, but not to another file.
 
-- **Open as tab** opens the file in the [Files panel](Files-Panel) for editing.
-- **Connect** starts a wire. Select an agent pane to wire the file to it.
-- **Close** closes the pane without a dialog.
-
-Wire a file to an agent so it can find the file as a peer.
-See [Wiring](Wiring) for wires and [Agent Pane Commands](Agent-Pane-Commands) for reading pane text.
-See [Images and PDFs](Images-and-PDFs) for those file types.
+**Close** in the helper bar closes the pane without asking. The file on disk is untouched.
 
 ## Note panes
 
-1. Click **Note** on the toolbar.
+### Make a note
+
+1. Click **Note** on the toolbar, or press `t` in canvas mode.
 2. Type in the pane.
 
-Canopy saves each edit in `canvas.json` in the app home.
-Wire the note to an agent as you wire a file.
+Every edit is saved as you type, in `canvas.json` in the app home, so notes survive restarts. A note is not a file in your project, so it never shows up in Git.
 
-> **Warning:** Closing a note deletes its text. Canopy asks before closing notes with text other than whitespace.
+### Use notes with agents
 
-## Troubleshooting
+Wire a note to an agent the same way you wire a file. The agent reads it with `canopy pane read`. Some ways people use notes:
 
-- **An agent cannot close a note with text.** Only you can close it. Empty notes and notes with only whitespace can close without confirmation.
+- A plan that two paired agents both follow, so you can edit the plan in one place.
+- A running list of things you noticed while testing, to hand over in one go.
+- A scratchpad an agent writes to: agents can open a note next to themselves with `canopy pane new mod:note --wire`.
+
+### Closing a note
+
+> **Warning:** Closing a note deletes its text. Canopy asks before closing a note that has any text other than spaces.
+
+Agents cannot close a note that has text in it, even if you ask them to. Only you can.
+
+## See also
+
+- [Images and PDFs](Images-and-PDFs) for other files you open on the canvas.
+- [Agent Pane Commands](Agent-Pane-Commands) for what agents can do with these panes.
+- [Wiring](Wiring) for what a wire does.

@@ -1,11 +1,10 @@
 # Simulator Devices
 
-A sim pane puts a live iOS Simulator on the canvas, in Xcode's device bezel.
-You and your agents use the same device, so an agent can test the app it is building while you watch.
+A simulator pane puts a live iOS Simulator on the canvas, inside Xcode's device bezel. You and your agents use the same device: an agent can install the app it just built, tap through a flow and take screenshots, while you watch every step and take over with the mouse whenever you like. When something looks wrong, draw on the screen and send the marked-up picture straight to the agent.
 
 ![A live iPhone simulator pane wired to an agent](images/simulator-devices-1.png)
 
-macOS only. You need Xcode with its simulators installed.
+Simulator panes need macOS with Xcode and at least one simulator installed. For a walkthrough of an agent testing an app this way, see [Let Agents Show You](Let-Agents-Show-You#test-the-ios-app-on-a-simulator).
 
 ## Open a simulator
 
@@ -14,7 +13,7 @@ macOS only. You need Xcode with its simulators installed.
 
 The **Simulator** button shows only when Xcode's `xcrun simctl` is installed.
 
-An agent opens one from its terminal:
+An agent opens one next to itself from its terminal:
 
 ```sh
 canopy pane new sim booted --wire    # the booted simulator, wired to you
@@ -38,7 +37,7 @@ The pane header shows the iOS version and the state: **Live**, **Connecting**, *
 | **Home** | Goes to the Home screen. |
 | **Screenshot** | Saves a PNG to the Desktop. The toast shows the file. |
 | **Record** | Records a video to the Desktop. Click **Stop recording** to stop. |
-| **Annotate** | Freezes the screen so you can draw on it. **Send to agent** quotes the marked picture. |
+| **Annotate** | Freezes the screen so you can draw on it. **Send to agent** quotes the marked picture. See [Point Agents at Things](Point-Agents-at-Things#a-spot-on-the-simulator). |
 | **Zoom out**, **Actual size**, **Zoom in** | Changes the device size. **Actual size** is 1 point per canvas pixel. |
 | **Pop out** | Moves the device to its own window. **Bring back** returns it. |
 | **Choose simulator** | Shows every simulator. Xcode's version is at the top. |
@@ -57,8 +56,7 @@ canopy pane press p3 home                 # also lock, power, siri, volume-up, v
 canopy pane read p3                       # device, state, size, a fresh screenshot path, the last 12 actions
 ```
 
-An agent can drive a pane that is off screen. Canopy starts the device for 15 seconds for each command.
-Agents install and launch apps with `xcrun simctl`.
+An agent can drive a pane that is off screen: Canopy connects to the device for 15 seconds for each command. Agents install and launch apps with Xcode's own `xcrun simctl`.
 
 ## How it works
 

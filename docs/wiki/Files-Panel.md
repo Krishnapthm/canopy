@@ -1,7 +1,6 @@
 # Files Panel
 
-The files panel shows a file tree and previews beside the canvas.
-Use it to read files or edit them without opening a pane.
+The files panel is a side panel with your space's file tree and file previews. Use it when you want to browse the project, read what an agent changed, or make a quick edit yourself, without putting a pane on the canvas. It is also where sub-agent transcripts open.
 
 ![The files panel beside the canvas](images/files-panel-1.png)
 
@@ -43,7 +42,7 @@ If the file changes outside Canopy, saving fails and keeps your draft.
 
 ## Changes
 
-In the classic layout, click **Changes** to see uncommitted changes in the focused folder's Git repository.
+Changes is a quick review screen for what your agents did: every uncommitted file in the repository, with its diff. It is available in the [Classic layout](Classic-Layout). Click **Changes** at the right of the tab row to see uncommitted changes in the focused folder's Git repository.
 Click a file to see its diff, with added and removed lines.
 
 - The list shows at most 1,000 changed files.

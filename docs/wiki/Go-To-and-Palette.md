@@ -1,6 +1,6 @@
 # Go To and Palette
 
-Find a space, terminal pane or open file tab, or run a command by name.
+Two keyboard-first ways to get around. **Go to** jumps to a space, terminal or open file by typing part of its name. The **command palette** runs any app command by name, and shows its shortcut so you learn the key for next time. Both work the same in every layout.
 
 ## Go to
 

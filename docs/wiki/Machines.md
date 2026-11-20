@@ -1,6 +1,8 @@
 # Machines
 
-A machine is a computer with herdr-core that Canopy reaches over SSH.
+A machine is another computer, such as a server, a cloud VM or a Mac mini, whose terminals and agents Canopy shows in the same window as your local ones. Canopy reaches it over SSH, and the machine runs its own herdr-core.
+
+That last part is what makes machines useful: the agents run on the machine, not on your laptop. Start a long task on a server, close your laptop, and the agents keep working. Open Canopy again and they are where you left them. Machines are also a way to give agents more CPU, a different OS, or access to a network your laptop is not on.
 
 ## Add a machine
 
@@ -20,8 +22,16 @@ hc machine add user@host
 
 ## Use a machine
 
-- The **Classic** layout's sidebar groups spaces by machine when a remote machine is known.
-- Click **+** beside a connected machine to create a space there. See [Spaces](Spaces).
+Once a machine is added, you create spaces on it, and everything in those spaces (terminals, agents, helpers) runs there.
+
+- In the [Classic layout](Classic-Layout), the sidebar groups spaces by machine. Click **+** beside a connected machine to create a space there.
+- In the canvas layout, the **New space** dialog creates local spaces only. To create a space on a machine from there, run this in any Canopy terminal (the machine name is the one you added):
+
+  ```sh
+  canopy do space.new --machine vps --folder /home/me/myapp
+  ```
+
+- Remote spaces appear on Home and in the top strip like any other space. See [Spaces](Spaces).
 - Terminal addresses include the machine name: `mac/t7` is terminal `t7` on machine `mac`.
 
 ## Troubleshooting

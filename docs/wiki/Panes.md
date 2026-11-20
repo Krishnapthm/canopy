@@ -1,67 +1,69 @@
 # Panes
 
-A pane is anything on the canvas: a terminal, agent, file or another kind below.
+Everything on the canvas is a pane: a terminal, an agent, a file, a note, an image, a web page, a simulator. They all move, select, wire and close the same way, and each kind adds its own tools on top. This page covers what is common to all of them.
 
 ## Pane kinds
 
-- [Terminal](Terminals): a shell or program running in a terminal.
-- [Agent](Agents): a coding agent running in a terminal pane.
-- [Sub-agent](Sub-Agents): a helper shown beside its parent agent.
-- [File](File-and-Note-Panes): a text file preview.
-- [Note](File-and-Note-Panes): plain text you type into a pane.
-- [Image](Images-and-PDFs): an image file shown on the canvas.
-- [PDF](Images-and-PDFs): a document you can read, search and highlight.
-- [Browser](Browser-Pane): a web page on the canvas (macOS only).
-- [Simulator](Simulator-Devices): an iOS Simulator on the canvas (macOS only).
-- [Mod pane](Layouts-and-Mods): a pane drawn by an installed mod.
+| Kind | Use it for | Page |
+|---|---|---|
+| Terminal | A shell or any program. | [Terminals](Terminals) |
+| Agent | A coding agent CLI. An agent pane is a terminal pane running an agent. | [Agents](Agents) |
+| Sub-agent | A helper an agent started, shown beside it. | [Sub-Agents](Sub-Agents) |
+| File | Keeping a text file in view, or showing it to an agent. | [File and Note Panes](File-and-Note-Panes) |
+| Note | Plain text you type: a plan, a checklist, a message for agents. | [File and Note Panes](File-and-Note-Panes) |
+| Image | Screenshots and designs, with region quotes. | [Images and PDFs](Images-and-PDFs) |
+| PDF | Specs and papers you can search, highlight and quote. | [Images and PDFs](Images-and-PDFs) |
+| Browser | A web page, such as your dev server. macOS only. | [Browser Pane](Browser-Pane) |
+| Simulator | A live iOS Simulator. macOS with Xcode only. | [Simulator Devices](Simulator-Devices) |
+| Mod pane | A kind added by an installed mod. | [Layouts and Mods](Layouts-and-Mods) |
 
 ## Open a pane
 
-- Click a pane kind on the [toolbar](Toolbar-and-Helper-Bar).
-- Press `Cmd+O` (`Ctrl+O` on Linux and Windows) to choose a file.
-- Drag a file onto the canvas to open it there.
-- Ask an agent to open a pane with [`canopy pane`](Agent-Pane-Commands).
+- Click a pane kind on the [toolbar](Toolbar-and-Helper-Bar) at the bottom of the canvas.
+- Press `Cmd+O` (`Ctrl+O` on Linux and Windows) in canvas mode to pick a file. Canopy opens text files as file panes, PNG, JPEG, GIF and WebP files as image panes, and PDFs as PDF panes.
+- Drag a file from your file manager onto the canvas to open it where you drop it.
+- Ask an agent. Agents open panes with [`canopy pane new`](Agent-Pane-Commands), usually wired to themselves so you both see the same thing.
 
-Canopy chooses a text, image or PDF pane from the file's extension.
+## The helper bar
 
-## Select, close and stack panes
+Hover or select any pane and a small bar of buttons appears above its top-left corner. It holds that pane kind's common actions, such as **Reload** on a browser or **Annotate** on a simulator, plus **Connect** to draw a wire and **Close**. Hover a button to see its name and shortcut. See [Toolbar and Helper Bar](Toolbar-and-Helper-Bar).
 
-See [Canvas](Canvas) for selection and movement.
+## Close panes
 
-Terminal actions use selected terminal, agent and sub-agent panes in the current space.
-Without a selection there, they use the terminal pane holding keyboard focus, if any.
-Space cards and other pane kinds are not terminal action targets.
+Select one or more panes in canvas mode and press `Backspace` or `Delete`, or click **Close** in a pane's helper bar.
 
-1. Give the canvas the keyboard.
-2. Press `Backspace` or `Delete` to close the target panes.
-3. Click **Terminate and close all** to stop the listed terminals and their programs.
+What happens next depends on the kind:
 
-The dialog lists each terminal with its icon and name.
-Click **Cancel** or press `Esc` to cancel terminal closing.
-Selected file, image, PDF, browser and simulator panes close without a dialog, even when you cancel terminal closing.
+- **Terminals and agents** ask first, because closing one stops the program in it. The dialog lists every terminal about to close. Click **Terminate and close all** to go ahead, or **Cancel** (or `Esc`) to keep them.
+- **Files, images, PDFs, browsers and simulators** close at once. They are views, so nothing is lost: the file stays on disk.
+- **Notes** ask first when they contain text, because closing a note deletes its text.
+- **Sub-agents** close only when they are done. See [Sub-Agents](Sub-Agents).
 
-See [File and Note Panes](File-and-Note-Panes) for note closing and [Sub-Agents](Sub-Agents) for sub-agent closing.
+If you select a mix and cancel the terminal dialog, the other selected panes still close.
 
-`confirm_close_terminal` defaults to `true` in [settings](Settings-and-Themes).
-Set it to `false` to close plain terminals without a prompt. Agents still require confirmation.
+To stop being asked about plain terminals, set `confirm_close_terminal` to `false` in [settings](Settings-and-Themes), or tick **Don't ask again** when you close one from its own menu. Agents always ask.
 
-Closing a plain terminal through its own menu offers **Don't ask again**, which saves this setting as `false`.
+### Which panes an action uses
 
-Click a pane to bring it to the front. Canopy saves the stacking order.
-See [Canvas](Canvas) for **Bring to front** and **Send to back**.
+Terminal actions, such as closing or expanding, use the selected terminal, agent and sub-agent panes in the current space. With nothing selected there, they use the terminal that has the keyboard, if any.
 
-## Saved panes
+## Stacking
 
-`canvas.json` keeps each pane's ID, kind, position, size, stacking order, space and kind-specific properties.
-These properties include file paths, note text and PDF highlights.
-See [Files and Folders](Files-and-Folders) for the file's location.
+Panes can overlap when `canvas_push` is `"off"`. Click a pane to bring it to the front. Right-click a terminal for **Bring to front** or **Send to back**. Canopy saves the stacking order.
 
-## How it works
+## What Canopy saves
 
-Pane IDs identify the same panes in commands and wires:
+Your canvas lives in `canvas.json` in the [app home](Files-and-Folders). For each pane it keeps the kind, position, size, stacking order and space, plus what that kind needs: a file's path, a note's text, a PDF's highlights. The terminals themselves are kept by herdr-core, which is why they survive a restart.
 
-- Terminal and agent panes use their core addresses, such as `t3`.
-- Sub-agent panes use `sub:<parent>:<id>`.
-- All other pane kinds use `p<N>`, such as `p1`.
+## Pane IDs
 
-Canopy keeps a saved counter so closing a pane does not reuse its `p<N>` ID.
+Commands and wires name panes by ID. You see these in `canopy wire`, `canopy pane` output and `canopy ls`:
+
+- Terminals and agents use their herdr-core address, such as `t3` (or `mac/t7` on a machine called `mac`).
+- Sub-agents use `sub:<parent>:<id>`.
+- Every other pane uses `p<N>`, such as `p1`. Canopy never reuses a number, so an old ID cannot point at a new pane.
+
+## See also
+
+- [Canvas](Canvas): selecting, moving and arranging panes.
+- [Agent Pane Commands](Agent-Pane-Commands): how agents open, read and close panes.
