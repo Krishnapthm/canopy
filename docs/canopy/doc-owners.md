@@ -298,3 +298,24 @@ update, uninstall and the build commands.
 - Links: README#build-from-source (full URL) for the build commands. CONTRIBUTING.md (full URL).
 - Read: old README.md "Build from source" and "Development", justfile, CONTRIBUTING.md, AGENTS.md "Build and checks".
 - Shots: none.
+
+## Classic-Layout
+
+- Headings: Switch to Classic, The sidebar, Tabs and panes, The status bar.
+- Owns: what the Classic layout is and how to switch to it (**Layout: Classic** in the command palette), the sidebar (spaces list,
+  reorder spaces by dragging, spaces grouped by machine, **Add machine** at the bottom, the rail when narrowed, `Cmd+B` toggle),
+  tabs above the panes (new, rename, close, reorder), splitting panes in a tab, the status bar and what it shows.
+- Links: Agents#the-agents-list for the agents list. Spaces#worktrees for worktree menus. Machines for adding a machine. Layouts-and-Mods for layouts in general.
+- Read: defaults/layouts/classic.json, defaults/mods/workspace-chrome/main.js, defaults/mods/spaces/main.js (top and drag code near line 461),
+  defaults/mods/tabs/main.js, defaults/mods/workspace-status/main.js, defaults/mods/pane/main.js, src/commands.rs (pane.split, tab.*).
+- Shots: none.
+
+## Other-Layouts
+
+- Headings: Terminals layout, Canopy 98 layout.
+- Owns: the Terminals layout (space picker, tabs, the top bar, pane headers) and the Canopy 98 layout (taskbar, Start menu, desktop icons,
+  the Office Assistant balloons for blocked and done agents, the bundled games), how to switch to each and back to **Layout: Canopy**.
+- Links: Layouts-and-Mods. Go-To-and-Palette. Agents.
+- Read: defaults/layouts/terminals.json, defaults/mods/terminals-bar/main.js, defaults/mods/terminals-pane/main.js,
+  defaults/layouts/win98.json, defaults/mods/win98/main.js (top comments and role sections).
+- Shots: none.

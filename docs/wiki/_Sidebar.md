@@ -36,6 +36,8 @@
 - [Settings and Themes](Settings-and-Themes)
 - [Keys and Mouse](Keys-and-Mouse)
 - [Layouts and Mods](Layouts-and-Mods)
+- [Classic Layout](Classic-Layout)
+- [Other Layouts](Other-Layouts)
 
 **Reference**
 
