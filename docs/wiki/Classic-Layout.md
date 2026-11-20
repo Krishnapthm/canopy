@@ -1,6 +1,6 @@
 # Classic Layout
 
-The Classic layout arranges the window like an editor. Spaces and agents are on the left, tabs are above the panes, and a status bar is at the bottom.
+The Classic layout arranges the window like a code editor instead of a canvas: a sidebar on the left with your spaces and a live list of agents, tabs above split terminal panes, and a status bar at the bottom. Choose it if you prefer tabs and splits to a free canvas, or when you want the agents list, the Changes view and the worktree commands, which live in this layout.
 
 ## Switch to Classic
 
@@ -17,7 +17,7 @@ See [Agents](Agents#the-agents-list) for the agents list.
 - Click a space to open it. Click **+** beside **Spaces** to create a space.
 - Drag a space onto another space to reorder them. A line shows where it lands.
 - Drag a space only within its own machine.
-- Right-click a space for its menu. [Spaces](Spaces#worktrees) describes worktrees.
+- Right-click a space for its menu. [Spaces](Spaces#worktree-spaces) describes worktrees.
 - Once you add a machine, a header per machine groups its spaces. **This computer** comes first.
 - Click a machine header to fold its spaces. Click **+** on the header to create a space on that machine.
 - Click **Add machine** at the bottom to add a machine. See [Machines](Machines). **Settings** is above it.

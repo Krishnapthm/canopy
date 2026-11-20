@@ -1,6 +1,6 @@
 # CLI
 
-Use `canopy` to open the app, inspect its window or run app commands from a terminal.
+The `canopy` command opens the app and lets you (or an agent) inspect and drive the running window from a terminal. Most subcommands talk to the window that is already open. Agents use `canopy wire`, `canopy pane` and `canopy spawn` the most.
 
 | Command | What it does |
 |---|---|

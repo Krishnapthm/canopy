@@ -1,6 +1,8 @@
 # Agent Pane Commands
 
-Agents use `canopy pane` to open, read, photograph and close panes.
+`canopy pane` is how agents work with the panes on your canvas: open a file, note, web page or simulator next to themselves, read what is in a pane, take a picture of it, and close it again. Agents learn these commands from the `canopy` skill, so you rarely type them yourself, but knowing them helps you ask for the right thing. [Let Agents Show You](Let-Agents-Show-You) shows them in real workflows.
+
+This page is the reference for every verb. Simulator-only verbs (`tap`, `swipe`, `type`, `press`) are on [Simulator Devices](Simulator-Devices#agents-drive-the-device).
 
 ## Open a pane
 
@@ -31,7 +33,7 @@ canopy pane read p1  # print the pane's content in an envelope
 - Browser panes return their URL, title and page text.
 - See [Simulator Devices](Simulator-Devices) for simulator read results.
 
-The envelope cuts body text at 256 KiB and adds `[cut at 256 KiB]` when text exceeds that limit.
+Everything `read` returns is wrapped in an envelope (see [below](#the-envelope)). The envelope cuts body text at 256 KiB and adds `[cut at 256 KiB]` when text exceeds that limit.
 Terminal panes refuse `read`. See [Wiring](Wiring) for `hc read`.
 
 ## Take a picture of a pane
@@ -58,7 +60,7 @@ Terminal panes refuse this command. See [Terminals](Terminals) for closing termi
 
 ## The envelope
 
-`read` prints an envelope like this:
+A pane can hold text written by anyone: a web page, a downloaded PDF, a file from a dependency. Some of it may be written to manipulate an agent, such as "ignore your previous instructions". So `read` never returns pane text bare. It prints an envelope that marks the text as data and says where it came from:
 
 ```text
 <pane-content pane="p1" kind="file" path="/work/README.md">

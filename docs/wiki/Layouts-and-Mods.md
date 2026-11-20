@@ -1,6 +1,23 @@
 # Layouts and Mods
 
-A layout arranges the window. A mod draws part of the window or a kind of pane.
+Almost everything you see in Canopy, from the toolbar to the space tabs to the note pane, is built from two kinds of plain files in your app home (`~/.config/canopy`):
+
+- A **layout** is a JSON file that arranges the window: which parts go where.
+- A **mod** is a small JavaScript program that draws one part of the window, adds a pane kind, or adds commands.
+
+Because they are files, you can change them, and so can your agents.
+
+## Ask an agent to change Canopy
+
+The quickest way to customize Canopy is to describe what you want to an agent running inside it. Start with:
+
+```text
+Read ~/.config/canopy/AGENTS.md, then tell me what you can change in Canopy.
+```
+
+That file is the layout and mod guide, installed with the app. From there, ask for what you want: "move the toolbar to the top", "add a panel that lists my open pull requests", "make a pane kind for TODO lists". The agent edits the files, Canopy reloads them as soon as they are saved, and the agent can check its work with `canopy check` and `canopy shot`.
+
+Canopy replaces its shipped layouts and mods on every start, moving any you edited to personal copies, so it is cleaner to change a copy from the start (see below). Mods run with your full access, so read [Security and Privacy](Security-and-Privacy) before installing one from someone else.
 
 ## Built-in layouts
 

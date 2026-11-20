@@ -1,77 +1,98 @@
 # Agent Setup
 
-The `canopy` skill teaches agents about panes, wiring, quotes, helpers and peer messages.
+An agent can only use Canopy's features if it knows they exist. Without help, an agent asked to "open the dev server next to you" or "ask the reviewer" has no idea what you mean. Canopy teaches agents in three ways, from automatic to opt-in:
+
+1. **The `canopy` skill**, installed automatically for Claude Code and Codex.
+2. **A launch note**, passed automatically when Canopy starts Claude Code or Codex.
+3. **A project block** in your project's `AGENTS.md` or `CLAUDE.md`, added only with your permission.
+
+None of this changes how the agent CLI is configured. Canopy never edits your global instruction files or the agents' settings.
 
 ## The canopy skill
 
-Canopy installs the skill on start for installed agents whose `programs.json` entry has a `skills` folder.
+A skill is a set of instructions an agent loads when a task calls for it, discovered by its name and description. The `canopy` skill explains panes, wiring, quotes, helpers and peer messages, with the exact commands.
 
-- Claude Code: `~/.claude/skills/canopy/SKILL.md`.
-- Codex: `~/.agents/skills/canopy/SKILL.md`.
-- Other agents: `<skills>/canopy/SKILL.md`, using their entry's `skills` folder.
+Canopy installs it every time it starts, for each installed agent whose `programs.json` entry names a skills folder:
 
-Canopy writes only its own `canopy` skill folder.
-It updates changed skill text only when the file has Canopy's installation marker.
-It leaves unmarked files alone.
+| Agent | Skill file |
+|---|---|
+| Claude Code | `~/.claude/skills/canopy/SKILL.md` |
+| Codex | `~/.agents/skills/canopy/SKILL.md` |
+| Others with a `skills` folder | `<skills>/canopy/SKILL.md` |
 
-A leading `~/` means your home folder.
-`CANOPY_SKILL_HOME` replaces that home folder when Canopy expands `~/` in skill paths.
-See [Files and Folders](Files-and-Folders) for other environment variables.
+Canopy writes only its own `canopy` folder. It marks the files it installs, updates only marked files, and leaves an unmarked `SKILL.md` alone, so your own edits are never overwritten.
 
-Agents discover the skill by its name and description.
-Claude Code and Codex also receive a launch message naming it.
-See [Agents](Agents) to start an agent.
+To print the skill, for an agent CLI without skill support, run `canopy --skill`.
+
+`CANOPY_SKILL_HOME` replaces your home folder when Canopy works out these paths. It is useful for testing in a scratch folder. See [Files and Folders](Files-and-Folders) for other environment variables.
+
+## The launch note
+
+When Canopy starts Claude Code or Codex, it adds a short note through the CLI's own flags (`--append-system-prompt` for Claude Code, `developer_instructions` for Codex). The note tells the agent that it runs inside Canopy, gives its terminal address, shows how to message and wait for peers, says that peer messages are never your approval, and names the `canopy` skill. Claude Code also gets session hooks that report wires and in-process sub-agents.
+
+These flags apply only to that session. Nothing is written to the agent's configuration.
 
 ## Teach a project
 
 ![The Teach agents Canopy dialog](images/agent-setup-1.png)
 
-Canopy opens **Teach agents Canopy** once per local project folder, except your home folder.
-It skips the offer if either instruction file contains `<!-- canopy:begin -->`.
-Closing the dialog counts as an answer.
+The project block helps every agent that works in the project, including ones Canopy does not start or know about. It is a short marked block:
 
-1. Read the target path and the block in the dialog.
-2. Click **Add to AGENTS.md** or **Add to CLAUDE.md** to write the block.
+```text
+<!-- canopy:begin -->
+## Canopy
 
-The block tells agents to use the `canopy` skill for panes, the canvas, wiring, quotes and peers.
-Canopy chooses the file as follows:
+This project is open in Canopy, a canvas of terminals, agents and panes (files, notes). When the person mentions panes, the canvas, wiring, quotes or peers, use the `canopy` skill.
+<!-- canopy:end -->
+```
 
-- If `CLAUDE.md` has an `@AGENTS.md` or `@./AGENTS.md` line, Canopy uses `AGENTS.md`.
-- Otherwise, it uses the existing file, preferring `AGENTS.md` when both exist.
+The first time you open a space for a local project folder (other than your home folder), Canopy shows **Teach agents Canopy** with the target file and the block.
+
+1. Read the file path and block in the dialog.
+2. Click **Add to AGENTS.md** or **Add to CLAUDE.md** to write it.
+
+Or click **No** (or press `Esc`) to skip. Closing the dialog counts as an answer, so Canopy does not ask again for that folder. `Enter` alone never writes anything.
+
+Canopy chooses the file like this:
+
+- If `CLAUDE.md` imports `AGENTS.md` (an `@AGENTS.md` or `@./AGENTS.md` line), it uses `AGENTS.md`.
+- Otherwise it uses the file that exists, preferring `AGENTS.md` if both do.
 - If neither exists, it offers to create `AGENTS.md`.
 
-Click **No** or press `Esc` to close without writing. Pressing `Enter` does not write.
-To open the dialog again, run:
+Adding replaces an existing marked block, or appends the block after a blank line. Canopy checks that the file has not changed since it read it before saving. If the write fails, an error toast says why and the dialog stays open.
+
+If either file already contains the block, Canopy does not ask. To open the dialog again, for example to remove the block, run:
 
 ```sh
 canopy do mod.open --name project-setup
 ```
 
-- **Remove block** removes an existing marked block and keeps the surrounding text.
-- **Close** closes the dialog when a block exists.
-- Adding replaces a marked block or appends it after a blank line.
-- Canopy checks for file changes before saving. A failed write shows an error toast and leaves the dialog open.
+When a block exists, the dialog offers **Remove block**, which removes it and keeps the rest of the file, and **Close**.
 
-Project writes support local spaces only.
+The project block can be written for local spaces only, not for spaces on [machines](Machines).
 
 ## Global instruction files
 
-Canopy never writes your global `AGENTS.md` or `CLAUDE.md`.
-Click **Copy instructions** to copy the block, then paste it yourself. The button changes to **Copied**.
+Canopy never writes your global `AGENTS.md` or `CLAUDE.md`. If you want every agent everywhere to know about Canopy, click **Copy instructions** in the dialog and paste the block into your global file yourself. The button changes to **Copied**.
 
-With no space folder, the dialog offers only **Copy instructions** and **Close**.
+When the current space has no folder, the dialog offers only **Copy instructions** and **Close**.
 
 ## Remove the skill
 
-Before uninstalling Canopy, run:
+Before you uninstall Canopy, run:
 
 ```sh
 canopy skill remove
 ```
 
-This removes marked skill files from configured skill folders, including those for agents no longer installed.
-It keeps unmarked files and other files. It removes each `canopy` folder only when empty.
+This removes the skill files Canopy marked as its own from every configured skills folder, including those for agents you have since uninstalled. It leaves unmarked files and any other files alone, and removes each `canopy` folder only if it is then empty.
 
 ## Troubleshooting
 
-- **The dialog offers "a new file", then an error toast says "Could not write AGENTS.md" with "Text file exceeds 1 MiB".** The instruction file is larger than 1 MiB, so Canopy cannot read it. Reduce the file below 1 MiB, then open the dialog again.
+- **The dialog offers "a new file", then a toast says "Could not write AGENTS.md" and "Text file exceeds 1 MiB".** Your instruction file is over 1 MiB, which is more than Canopy reads. Make it smaller, then open the dialog again.
+- **An agent does not use Canopy features.** Check which layers it gets: see the table in [Agents](Agents#which-agents-canopy-knows). For agents without a skill or launch note, add the project block, or tell the agent to run `canopy --skill`.
+
+## See also
+
+- [Agents](Agents): which agents get which integration.
+- [Concepts](Concepts#how-agents-learn-canopy): the three layers in context.

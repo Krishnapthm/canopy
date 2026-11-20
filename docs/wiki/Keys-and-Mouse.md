@@ -1,6 +1,8 @@
 # Keys and Mouse
 
-Use these default shortcuts to control panes and the canvas. Change them in **Settings** > **Shortcuts**.
+Every default shortcut and mouse gesture, for reference. In the app, press `?` in canvas mode for the full key list, or hold `Cmd` (`Ctrl`) to see each button's key. Change any shortcut in **Settings** > **Shortcuts**.
+
+Keys are shown for macOS first. Many canvas-mode keys are single letters, and work only when the canvas has the keyboard (see [Concepts](Concepts#typing-into-a-pane-and-canvas-mode)).
 
 ## Mouse
 

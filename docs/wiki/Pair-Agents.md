@@ -43,10 +43,10 @@ Here is what happens behind the scenes:
 2. The message lands in the reviewer's prompt, wrapped with the sender's address and name so the reviewer knows who sent it. It looks something like this:
 
    ```text
-   <hc from="t4 Claude Code">Please review my diff for the /login rate limit (git diff main).</hc>
+   <hc from="t4 claude">Please review my diff for the /login rate limit (git diff main).</hc>
    ```
 
-3. The reviewer reads the diff, then replies the same way with `hc send t4 "..."`. Its findings appear in the writer's prompt as `<hc from="t5 Codex">...</hc>`.
+3. The reviewer reads the diff, then replies the same way with `hc send t4 "..."`. Its findings appear in the writer's prompt as `<hc from="t5 codex">...</hc>`.
 4. The writer fixes what it agrees with and asks again, until it is done.
 
 You can watch both panes the whole time. Tile them side by side with `Cmd+Shift+G` (`Ctrl+Shift+G` on Linux and Windows) if you want to read along.

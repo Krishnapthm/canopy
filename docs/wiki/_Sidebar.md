@@ -1,37 +1,45 @@
-**Start**
+**Get started**
 
 - [Home](Home)
 - [Quick Start](Quick-Start)
-- [Glossary](Glossary)
+- [Concepts](Concepts)
 
-**Canvas**
+**Guides**
+
+- [Pair Agents](Pair-Agents)
+- [Point Agents at Things](Point-Agents-at-Things)
+- [Let Agents Show You](Let-Agents-Show-You)
+- [Delegate to Helpers](Delegate-to-Helpers)
+- [Parallel Branches](Parallel-Branches)
+
+**The canvas**
 
 - [Canvas](Canvas)
 - [Spaces](Spaces)
-- [Machines](Machines)
 - [Panes](Panes)
 - [Toolbar and Helper Bar](Toolbar-and-Helper-Bar)
 - [Files Panel](Files-Panel)
 - [Go To and Palette](Go-To-and-Palette)
+- [Machines](Machines)
 
-**Pane kinds**
+**Panes**
 
 - [Terminals](Terminals)
-- [Agents](Agents)
-- [Sub-Agents](Sub-Agents)
 - [File and Note Panes](File-and-Note-Panes)
 - [Images and PDFs](Images-and-PDFs)
 - [Browser Pane](Browser-Pane)
 - [Simulator Devices](Simulator-Devices)
 
-**Agents together**
+**Agents**
 
+- [Agents](Agents)
+- [Sub-Agents](Sub-Agents)
 - [Wiring](Wiring)
 - [Quotes](Quotes)
 - [Agent Setup](Agent-Setup)
 - [Agent Pane Commands](Agent-Pane-Commands)
 
-**Customize**
+**Make it yours**
 
 - [Settings and Themes](Settings-and-Themes)
 - [Keys and Mouse](Keys-and-Mouse)
@@ -44,8 +52,9 @@
 - [CLI](CLI)
 - [Commands](Commands)
 - [Files and Folders](Files-and-Folders)
-- [Labels](Labels)
 - [herdr-core](herdr-core)
+- [Labels](Labels)
+- [Glossary](Glossary)
 
 **Help**
 

@@ -21,7 +21,7 @@ The quote is a reference, not a copy of the whole file. File paths are written r
 Open a file on the canvas (**Open file** on the toolbar, or `Cmd+O` / `Ctrl+O`), or preview it in the [Files panel](Files-Panel). Select some lines and click the quote icon. The agent receives the path, the line range and the text:
 
 ````text
-@src/api/login.rs:40-46
+@src/api/login.rs:40-42
 ```rs
 fn check_password(user: &User, given: &str) -> bool {
     user.password == given
@@ -76,7 +76,7 @@ For other pages, it describes the element by a CSS selector and its visible text
 @https://example.com/ main > section:nth-of-type(2) "Buy now"
 ```
 
-**When to use it:** "this button is misaligned on mobile", "this card should show the annual price", or any UI fix where finding the right component is half the work. [Browser Pane](Browser-Pane#pick-an-element) explains how Canopy finds the source file.
+**When to use it:** "this button is misaligned on mobile", "this card should show the annual price", or any UI fix where finding the right component is half the work. [Browser Pane](Browser-Pane#pick-an-element-to-quote) explains how Canopy finds the source file.
 
 ## A spot on the simulator
 

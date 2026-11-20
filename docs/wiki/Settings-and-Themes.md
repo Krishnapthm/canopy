@@ -1,7 +1,6 @@
 # Settings and Themes
 
-Use **Settings** to change Canopy's appearance and preferences.
-Edit `settings.json` for settings without a control in the window.
+Canopy has two places for preferences. The **Settings** window covers the common ones: appearance, themes, sounds and shortcuts. Everything else, such as canvas spacing or terminal sizes, lives in `settings.json` in your app home, which you (or an agent) can edit directly. Both apply changes immediately.
 
 ## Open settings
 

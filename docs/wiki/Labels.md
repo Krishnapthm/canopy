@@ -1,7 +1,8 @@
 # Shared state in labels
 
-Core clients share which agents you have seen and pinned through terminal labels.
-This protocol lets other clients share that state with Canopy.
+This page is for developers of other apps that connect to herdr-core. As a Canopy user you do not need it.
+
+Core clients share which agents you have seen and pinned through terminal labels. Following this protocol lets another client agree with Canopy about which agents are done and which are pinned, so marking an agent as seen in one app clears it in the other.
 
 - Labels belong to the terminal. The shared state ends with it.
 - `events.subscribe` snapshots contain `labels` and `turn`. Each `labels` event contains the whole label map.

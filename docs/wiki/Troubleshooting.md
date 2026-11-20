@@ -1,50 +1,53 @@
 # Troubleshooting
 
-Find a fix for a problem, or collect information for a bug report.
+Start here when something is not working. Problems are grouped by what you see. Each feature page also has its own troubleshooting section for problems specific to it, linked at the end.
 
-## Start here
+## Canopy does not start
 
-Read the troubleshooting section for the feature:
+- **Canopy says it needs herdr-core, or a newer one.** See [herdr-core](herdr-core#troubleshooting).
+- **Canopy cannot connect to the core.** Fix the error it shows, then click **Retry**.
+- **Nothing opens at all.** Check the [install instructions](https://github.com/Krishnapthm/canopy#install), then run `canopy` from a terminal to see any error it prints.
+- **The window is blank after waking a Mac.** Wake the display. Canopy draws again when the window is visible.
 
-- [Machines](Machines)
-- [Terminals](Terminals)
-- [Agents](Agents)
-- [File and Note Panes](File-and-Note-Panes)
-- [Images and PDFs](Images-and-PDFs)
-- [Browser Pane](Browser-Pane)
-- [Simulator Devices](Simulator-Devices)
-- [herdr-core](herdr-core)
+## Typing and scrolling
 
-## The window
-
-- **Canopy does not open.** Check the [install instructions](https://github.com/Krishnapthm/canopy#install) and [core troubleshooting](herdr-core).
-- **Settings errors appear.** See [Settings and Themes](Settings-and-Themes) for settings file errors.
-- **The Mac display was asleep.** Wake the display. Canopy resumes drawing when the window becomes visible.
-
-## Terminals and the core
-
-- **The core is missing or too old.** Follow [herdr-core](herdr-core) for the instructions shown before the main window opens.
-- **Canopy cannot connect to the core.** Resolve the displayed error, then click **Retry**.
-- **`canopy` in a terminal opens another copy.** Check that the terminal uses the same [app home](Files-and-Folders).
-  On Unix, use `canopy` by name because an absolute path bypasses the handoff to the terminal's app.
-
-See [Terminals](Terminals) for scrolling and resizing problems.
+- **Typing into a terminal does nothing.** The pane is selected, not entered. Double-click it, or select it and press `Enter`.
+- **Single keys move or close panes instead of typing.** The canvas has the keyboard (canvas mode). Double-click the terminal you want to type in.
+- **Scrolling moves the canvas instead of the output.** Enter the terminal first. Scrolling over a terminal you have not entered pans the canvas.
+- **`Esc` does not leave a terminal.** That is on purpose: `Esc` belongs to the program. Press `Cmd+Esc` (`Ctrl+Esc` on Linux and Windows), or click empty canvas.
 
 ## Agents
 
-- **An agent CLI does not appear.** See [Agents](Agents) for command detection, `programs.json` and aliases.
+- **An agent CLI is missing from the Agent menu.** Canopy only lists CLIs it can find on your `PATH`. See [Agents](Agents#troubleshooting) for `programs.json` and aliases.
+- **An agent does not know about panes, wires or helpers.** It has not learned Canopy. See [Agent Setup](Agent-Setup).
+- **An agent says it has no wires.** The wire must join the two panes in the same space. See [Pair Agents](Pair-Agents#troubleshooting).
+- **I did not get a sound or toast when an agent needed me.** Check that sounds are on in [Settings](Settings-and-Themes). Toasts appear only when you are not already looking at that agent.
 
-## Panes
+## Settings and keys
 
-See the pane pages under **Start here** for file, note, image, PDF, browser and simulator problems.
-See [Agent Pane Commands](Agent-Pane-Commands) for reading and closing panes from an agent.
+- **A toast reports an error in settings.json, keys.json or programs.json.** The toast names the file, line and column. Canopy keeps using the last good version until you fix and save the file. See [Settings and Themes](Settings-and-Themes#errors-in-settings-files).
+- **My shortcuts are in a bad state.** Press `Ctrl+Alt+Shift+Esc` to restore the default layout and keys. Canopy keeps your old files as `*.reset-<time>` backups.
 
-## Get help
+## The canopy command
 
-1. Keep the Canopy window open if it can open.
-2. Run `canopy status` in a terminal that uses the same app home.
-3. Copy the JSON output into a [bug report](https://github.com/Krishnapthm/canopy/issues/new?template=bug.yml).
-4. Include the steps to reproduce, expected behavior, Canopy version and operating system.
+- **`canopy` in a terminal opens a second copy of the app.** The terminal is using a different app home. Check `HERDR_APP_HOME` and `XDG_CONFIG_HOME` ([Files and Folders](Files-and-Folders)). Run `canopy` by name, not by full path, so a terminal inside Canopy hands off to the running app.
+- **`canopy ls`, `canopy status` or `canopy do` fails.** These talk to the running window. Open Canopy first.
 
-`canopy status` reports the window state and errors. It needs a running window.
-If the window cannot open, include the displayed error instead.
+## Problems with a specific feature
+
+- [Terminals](Terminals#troubleshooting)
+- [Agents](Agents#troubleshooting)
+- [File and Note Panes](File-and-Note-Panes)
+- [Images and PDFs](Images-and-PDFs#troubleshooting)
+- [Browser Pane](Browser-Pane#troubleshooting)
+- [Simulator Devices](Simulator-Devices#troubleshooting)
+- [Machines](Machines#troubleshooting)
+- [Agent Setup](Agent-Setup#troubleshooting)
+
+## Report a bug
+
+1. If Canopy opens, keep it open.
+2. In a terminal using the same app home, run `canopy status` and copy its output. It describes what the window shows and any errors.
+3. Open a [bug report](https://github.com/Krishnapthm/canopy/issues/new?template=bug.yml) with that output, the steps to reproduce, what you expected, your Canopy version (`canopy --version`) and your operating system.
+
+If Canopy cannot open, include the error it shows instead of the `canopy status` output.

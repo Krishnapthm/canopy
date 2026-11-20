@@ -59,7 +59,7 @@ Because the canvas is full of terminals, Canopy has to know whether a keypress i
 
 Click empty canvas, or press `Cmd+Esc` (`Ctrl+Esc` on Linux and Windows), to leave a pane and return to canvas mode. A single click on a pane selects it without entering it, which is what lets you drag terminals around without typing into them.
 
-Details: [Terminals](Terminals#enter-a-terminal), [Keys and Mouse](Keys-and-Mouse).
+Details: [Terminals](Terminals#enter-a-terminal-and-type), [Keys and Mouse](Keys-and-Mouse).
 
 ## Agents and their states
 
@@ -91,7 +91,7 @@ hc send t2 "Your tests fail on main, see @src/api.rs:40-52"
 
 The message arrives in the other agent's prompt wrapped as `<hc from="t1 claude">...</hc>`, so it always knows the message came from a peer, not from you. Canopy's instructions tell agents that a peer's message is never your approval, so an agent should still ask you before anything risky, whoever suggested it.
 
-You can also wire a file, note, browser or simulator pane to an agent. The agent then sees that pane in `canopy wire` and can read it.
+You can also wire a file or note pane to an agent. The agent then sees that pane in `canopy wire` and can read it. Wiring a browser, image, PDF or simulator pane to an agent puts that agent first when you quote from the pane.
 
 Details: [Wiring](Wiring), and the [Pair Agents](Pair-Agents) guide.
 

@@ -31,7 +31,7 @@ You now see an empty canvas. Along the top is the top strip, with **Home** and a
 
 When you open a space for a project folder for the first time, Canopy shows **Teach agents Canopy**. It offers to add a short block to your project's `AGENTS.md` or `CLAUDE.md` that says the project runs in Canopy and points agents at the `canopy` skill.
 
-Click **Add to AGENTS.md** (or **Add to CLAUDE.md**, whichever Canopy suggests). This is what lets an agent understand you when you say "open the dev server in a pane" or "ask the reviewer". You can remove the block later from the same dialog. [Agent Setup](Agent-Setup) explains exactly what gets written and where.
+Click **Add to AGENTS.md** (or **Add to CLAUDE.md**, whichever Canopy suggests). Together with the skill Canopy installs for Claude Code and Codex, this is what lets an agent understand you when you say "open the dev server in a pane" or "ask the reviewer". You can remove the block later from the same dialog. [Agent Setup](Agent-Setup) explains exactly what gets written and where.
 
 ## 4. Start an agent
 
@@ -68,7 +68,7 @@ The agent you're wired to just added a --verbose flag. Review its change
 (git diff) and send it your findings.
 ```
 
-Watch what happens. The reviewer runs `canopy wire` to find its peer, reads the diff, and sends its review with `hc send`. The review appears as a message in the first agent's pane, wrapped in `<hc from="...">` so the first agent knows it came from a peer and not from you. Canopy's instructions tell agents that a peer message is never your approval, so the first agent still asks you before doing anything risky.
+Watch what happens. The reviewer runs `canopy wire` to find its peer, reads the diff, and sends its review with `hc send`. The review appears as a message in the first agent's pane, wrapped in `<hc from="...">` so the first agent knows it came from a peer and not from you. Canopy's instructions tell agents that a peer message is never your approval, so the first agent should still ask you before doing anything risky.
 
 [Pair Agents](Pair-Agents) goes much further with this pattern.
 
