@@ -2343,6 +2343,32 @@ impl AppWindow {
                         this.canvas_state.preview_drag = Some((resize.clone(), true, e.position)); cx.stop_propagation();
                     })))).into_any_element()
     }
+    /// Shortcut hints for an empty canvas, like VS Code's empty editor: only actions that have a key.
+    fn empty_hints(&self) -> Option<AnyElement> {
+        let keys = crate::keys::listing();
+        let rows: Vec<_> = [
+            ("New terminal", "canvas.new"),
+            ("New agent", "canvas.agents"),
+            ("Go to pane", "mod.open:picker"),
+            ("Command palette", "app.palette"),
+            ("Fit all panes", "canvas.fit"),
+        ].into_iter().filter_map(|(label, command)| {
+            let binding = action_binding(&keys, command)?;
+            let caps = crate::keys::caps(&binding).into_iter().map(|cap| {
+                div().min_w(px(18.)).h(px(18.)).px(px(4.)).flex().items_center()
+                    .justify_center().rounded(px(4.)).bg(c("popover")).border_1()
+                    .border_color(c("border")).text_size(px(11.)).text_color(c("muted-foreground")).child(cap)
+            });
+            Some(div().flex().items_center().h(px(28.)).gap(px(12.))
+                .child(div().w(px(160.)).text_right().text_size(px(12.)).text_color(c("muted-foreground")).child(label))
+                .child(div().w(px(160.)).flex().gap(px(4.)).children(caps)))
+        }).collect();
+        (!rows.is_empty()).then(|| {
+            div().absolute().inset_0().flex().items_center().justify_center()
+                .child(div().flex().flex_col().children(rows)).into_any_element()
+        })
+    }
+
     pub(super) fn render_canvas(&self, cx: &mut Context<Self>) -> AnyElement {
         let state = &self.canvas_state;
         // A pane that leaves the selection leaves sync input; under two, sync ends.
@@ -3133,6 +3159,11 @@ impl AppWindow {
         }
         pills.sort_by_key(|(z, _)| *z);
         for (_, pill) in pills { area = area.child(pill); }
+        if !shown_doc.panes.iter().any(|p| shown_doc.shows(p.space.as_ref()))
+            && (state.doc.room.is_some() || self.model.spaces.iter().all(|s| root_space(s)))
+        {
+            area = area.children(self.empty_hints());
+        }
         // Edges paint above cells: they route around them, and stay visible when they cannot.
         area = area.child(edge_layer).children(self.wire_handles(cx));
         if let Some((a, b, _)) = &state.marquee {
@@ -3556,11 +3587,15 @@ fn strip_tooltip(label: String, command: Option<&str>) -> impl Fn(&mut Window, &
     }
 }
 
-/// Prefer the binding used while navigating the canvas.
 fn action_key(keys: &[(String, String, String)], command: &str) -> Option<String> {
+    action_binding(keys, command).map(|k| crate::keys::pretty(&k))
+}
+
+/// Prefer the binding used while navigating the canvas.
+fn action_binding(keys: &[(String, String, String)], command: &str) -> Option<String> {
     keys.iter().filter(|(_, _, action)| action == command)
         .min_by_key(|(section, _, _)| match section.as_str() { "canvas-mode" => 0, "layout:main" => 1, "global" => 2, _ => 3 })
-        .map(|(_, key, _)| crate::keys::pretty(key))
+        .map(|(_, key, _)| key.clone())
 }
 
 /// A top-strip tab: radius 8 on top and, when active, outward bottom curves that join it
