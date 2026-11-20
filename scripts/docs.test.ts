@@ -48,6 +48,6 @@ test("command reference comes from the catalog", () => {
   expect(page).toContain("## `pane.split`");
   expect(page).toContain("| `direction` | yes |");
   expect(page).toContain("Split a pane.");
-  expect(checkMarkdown("docs/commands.md", page, ref)).toEqual([]);
+  expect(checkMarkdown("docs/wiki/Commands.md", page, ref)).toEqual([]);
 });
 

@@ -1,0 +1,38 @@
+# Publishes docs/wiki to the GitHub Wiki. The pages are reviewed in PRs like
+# code, and the wiki is a copy: edits made on the wiki itself are overwritten.
+# The wiki repo exists only after its first page is created in the web UI.
+name: wiki
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/wiki/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Copy docs/wiki to the wiki
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+          rsync -a --delete --exclude .git docs/wiki/ wiki/
+          cd wiki
+          git add -A
+          if git diff --cached --quiet; then echo "Wiki is up to date."; exit 0; fi
+          git -c user.name=github-actions -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+            commit -m "docs: publish ${GITHUB_SHA::7}"
+          git push
