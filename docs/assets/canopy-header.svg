@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" role="img" aria-labelledby="t d">
-<!-- README header. Plain SVG, no script: GitHub shows it as an image, so it plays itself with CSS animation (56s loop, 16:9). Cards, borders, wires and helper bars follow src/window/canvas_view.rs; claude and codex marks are LobeHub (MIT). Edit the pane groups and the keyframes in place. Light and dark follow prefers-color-scheme; reduced motion shows the final overview. -->
+<!-- README header. Plain SVG, no script: GitHub shows it as an image, so it plays itself with CSS animation (67s loop, 16:9). Cards, borders, wires and helper bars follow src/window/canvas_view.rs; claude and codex marks are LobeHub (MIT). Edit the pane groups and the keyframes in place. Light and dark follow prefers-color-scheme; reduced motion shows the final overview. -->
 <title id="t">Canopy</title>
 <desc id="d">An empty canvas with keyboard hints. Panes open one by one, get connected with wires, and the camera pans and zooms across them before zooming out to show everything.</desc>
 <style>
@@ -12,58 +12,62 @@
 use.f{color:var(--fg)}use.m{color:var(--mut)}
 .mono{font:11px "JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;fill:var(--fg)}
 .ui{font:13px Geist,-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif}
-.wire{fill:none;stroke:var(--mut);stroke-width:1.5;opacity:.7}
+.wire{fill:none;stroke:var(--mut);stroke-width:2;opacity:.7}
 .dot{fill:var(--mut)}
 .spin{transform-box:fill-box;transform-origin:center;animation:spin .9s linear infinite}
 .blink{animation:blink 1.1s steps(1) infinite}
-.cam{animation:cam 56s infinite cubic-bezier(.65,0,.35,1)}
-@keyframes cam{0%{transform:translate(0px,0px) scale(1)}19.643%{transform:translate(0px,0px) scale(1)}25.893%{transform:translate(-820px,0px) scale(1)}41.429%{transform:translate(-820px,0px) scale(1)}47.143%{transform:translate(-904px,-4px) scale(1.3)}52.143%{transform:translate(-904px,-4px) scale(1.3)}58.929%{transform:translate(-300px,-170px) scale(1)}73.929%{transform:translate(-300px,-170px) scale(1)}83.929%{transform:translate(43px,131.5px) scale(0.52)}97.857%{transform:translate(43px,131.5px) scale(0.52)}98.75%{transform:translate(0px,0px) scale(1)}100%{transform:translate(0px,0px) scale(1)}}
+.cam{animation:cam 67s infinite cubic-bezier(.65,0,.35,1)}
+@keyframes cam{0%{transform:translate(0px,0px) scale(1)}11.94%{transform:translate(0px,0px) scale(1)}14.925%{transform:translate(0px,230px) scale(1)}20%{transform:translate(0px,230px) scale(1)}23.881%{transform:translate(0px,-250px) scale(1)}31.94%{transform:translate(0px,-250px) scale(1)}36.418%{transform:translate(-640px,-20px) scale(1)}45.075%{transform:translate(-640px,-20px) scale(1)}48.955%{transform:translate(-972px,-69.2px) scale(1.3)}53.433%{transform:translate(-972px,-69.2px) scale(1.3)}57.313%{transform:translate(-640px,-330px) scale(1)}65.075%{transform:translate(-640px,-330px) scale(1)}69.552%{transform:translate(-1380px,130px) scale(1)}77.91%{transform:translate(-1380px,130px) scale(1)}81.194%{transform:translate(-1380px,-110px) scale(1)}86.567%{transform:translate(-1380px,-110px) scale(1)}91.94%{transform:translate(30px,191px) scale(0.5)}98.507%{transform:translate(30px,191px) scale(0.5)}99.254%{transform:translate(0px,0px) scale(1)}100%{transform:translate(0px,0px) scale(1)}}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes blink{50%{opacity:0}}
-.o1{opacity:0;transform-box:fill-box;transform-origin:center;animation:o1 56s infinite}@keyframes o1{0%,6.786%{opacity:0;transform:scale(.96)}7.589%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o2{opacity:0;animation:o2 56s infinite}@keyframes o2{0%{opacity:0}7.5%{opacity:0}8.036%,11.786%{opacity:1}12.321%{opacity:0}100%{opacity:0}}
-.o4{opacity:0;transform-box:fill-box;transform-origin:center;animation:o4 56s infinite}@keyframes o4{0%,11.071%{opacity:0;transform:scale(.96)}11.875%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o5{opacity:0;animation:o5 56s infinite}@keyframes o5{0%{opacity:0}11.786%{opacity:0}12.321%,15.714%{opacity:1}16.25%{opacity:0}100%{opacity:0}}
-.o7{opacity:0;transform-box:fill-box;transform-origin:center;animation:o7 56s infinite}@keyframes o7{0%,13.929%{opacity:0;transform:scale(.96)}14.732%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o8{opacity:0;animation:o8 56s infinite}@keyframes o8{0%{opacity:0}14.643%{opacity:0}15.179%,18.571%{opacity:1}19.107%{opacity:0}100%{opacity:0}}
-.o10{opacity:0;transform-box:fill-box;transform-origin:center;animation:o10 56s infinite}@keyframes o10{0%,59.286%{opacity:0;transform:scale(.96)}60.089%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o11{opacity:0;animation:o11 56s infinite}@keyframes o11{0%{opacity:0}60%{opacity:0}60.536%,63.929%{opacity:1}64.464%{opacity:0}100%{opacity:0}}
-.o13{opacity:0;transform-box:fill-box;transform-origin:center;animation:o13 56s infinite}@keyframes o13{0%,62.143%{opacity:0;transform:scale(.96)}62.946%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o14{opacity:0;animation:o14 56s infinite}@keyframes o14{0%{opacity:0}62.857%{opacity:0}63.393%,66.786%{opacity:1}67.321%{opacity:0}100%{opacity:0}}
-.o16{opacity:0;transform-box:fill-box;transform-origin:center;animation:o16 56s infinite}@keyframes o16{0%,65%{opacity:0;transform:scale(.96)}65.804%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o17{opacity:0;animation:o17 56s infinite}@keyframes o17{0%{opacity:0}65.714%{opacity:0}66.25%,69.643%{opacity:1}70.179%{opacity:0}100%{opacity:0}}
-.o19{opacity:0;transform-box:fill-box;transform-origin:center;animation:o19 56s infinite}@keyframes o19{0%,37.5%{opacity:0;transform:scale(.96)}38.304%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o20{opacity:0;animation:o20 56s infinite}@keyframes o20{0%{opacity:0}38.214%{opacity:0}38.75%,42.143%{opacity:1}42.679%{opacity:0}100%{opacity:0}}
-.o22{opacity:0;transform-box:fill-box;transform-origin:center;animation:o22 56s infinite}@keyframes o22{0%,34.643%{opacity:0;transform:scale(.96)}35.446%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o23{opacity:0;animation:o23 56s infinite}@keyframes o23{0%{opacity:0}35.357%{opacity:0}35.893%,38.571%{opacity:1}39.107%{opacity:0}100%{opacity:0}}
-.o25{opacity:0;transform-box:fill-box;transform-origin:center;animation:o25 56s infinite}@keyframes o25{0%,70.357%{opacity:0;transform:scale(.96)}71.161%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o26{opacity:0;animation:o26 56s infinite}@keyframes o26{0%{opacity:0}71.071%{opacity:0}71.607%,75%{opacity:1}75.536%{opacity:0}100%{opacity:0}}
-.o27{opacity:0;transform-box:fill-box;transform-origin:center;animation:o27 56s infinite}@keyframes o27{0%,75.714%{opacity:0;transform:scale(.96)}76.518%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o28{opacity:0;transform-box:fill-box;transform-origin:center;animation:o28 56s infinite}@keyframes o28{0%,76.786%{opacity:0;transform:scale(.96)}77.589%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o30{opacity:0;transform-box:fill-box;transform-origin:center;animation:o30 56s infinite}@keyframes o30{0%,26.786%{opacity:0;transform:scale(.96)}27.589%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o31{opacity:0;animation:o31 56s infinite}@keyframes o31{0%{opacity:0}27.5%{opacity:0}28.036%,31.429%{opacity:1}31.964%{opacity:0}45.357%{opacity:0}45.893%,51.071%{opacity:1}51.607%{opacity:0}100%{opacity:0}}
-.o34{opacity:0;transform-box:fill-box;transform-origin:center;animation:o34 56s infinite}@keyframes o34{0%,31.429%{opacity:0;transform:scale(.96)}32.232%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o35{opacity:0;animation:o35 56s infinite}@keyframes o35{0%{opacity:0}32.143%{opacity:0}32.679%,36.071%{opacity:1}36.607%{opacity:0}100%{opacity:0}}
-.o36{stroke-dasharray:1;stroke-dashoffset:1;animation:o36 56s infinite}@keyframes o36{0%,16.429%{stroke-dashoffset:1}18.036%,97.143%{stroke-dashoffset:0}97.321%,100%{stroke-dashoffset:1}}
-.o37{opacity:0;transform-box:fill-box;transform-origin:center;animation:o37 56s infinite}@keyframes o37{0%,17.857%{opacity:0;transform:scale(.96)}18.661%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o38{stroke-dasharray:1;stroke-dashoffset:1;animation:o38 56s infinite}@keyframes o38{0%,17.5%{stroke-dashoffset:1}19.107%,97.143%{stroke-dashoffset:0}97.321%,100%{stroke-dashoffset:1}}
-.o39{opacity:0;transform-box:fill-box;transform-origin:center;animation:o39 56s infinite}@keyframes o39{0%,18.929%{opacity:0;transform:scale(.96)}19.732%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o40{stroke-dasharray:1;stroke-dashoffset:1;animation:o40 56s infinite}@keyframes o40{0%,30%{stroke-dashoffset:1}31.607%,97.143%{stroke-dashoffset:0}97.321%,100%{stroke-dashoffset:1}}
-.o41{opacity:0;transform-box:fill-box;transform-origin:center;animation:o41 56s infinite}@keyframes o41{0%,31.429%{opacity:0;transform:scale(.96)}32.232%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o42{stroke-dasharray:1;stroke-dashoffset:1;animation:o42 56s infinite}@keyframes o42{0%,35%{stroke-dashoffset:1}36.607%,97.143%{stroke-dashoffset:0}97.321%,100%{stroke-dashoffset:1}}
-.o43{opacity:0;transform-box:fill-box;transform-origin:center;animation:o43 56s infinite}@keyframes o43{0%,36.429%{opacity:0;transform:scale(.96)}37.232%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o44{stroke-dasharray:1;stroke-dashoffset:1;animation:o44 56s infinite}@keyframes o44{0%,38.571%{stroke-dashoffset:1}40.179%,97.143%{stroke-dashoffset:0}97.321%,100%{stroke-dashoffset:1}}
-.o45{opacity:0;transform-box:fill-box;transform-origin:center;animation:o45 56s infinite}@keyframes o45{0%,40%{opacity:0;transform:scale(.96)}40.804%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o46{stroke-dasharray:1;stroke-dashoffset:1;animation:o46 56s infinite}@keyframes o46{0%,39.643%{stroke-dashoffset:1}41.25%,97.143%{stroke-dashoffset:0}97.321%,100%{stroke-dashoffset:1}}
-.o47{opacity:0;transform-box:fill-box;transform-origin:center;animation:o47 56s infinite}@keyframes o47{0%,41.071%{opacity:0;transform:scale(.96)}41.875%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o48{stroke-dasharray:1;stroke-dashoffset:1;animation:o48 56s infinite}@keyframes o48{0%,67.143%{stroke-dashoffset:1}68.75%,97.143%{stroke-dashoffset:0}97.321%,100%{stroke-dashoffset:1}}
-.o49{opacity:0;transform-box:fill-box;transform-origin:center;animation:o49 56s infinite}@keyframes o49{0%,68.571%{opacity:0;transform:scale(.96)}69.375%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o50{stroke-dasharray:1;stroke-dashoffset:1;animation:o50 56s infinite}@keyframes o50{0%,69.286%{stroke-dashoffset:1}70.893%,97.143%{stroke-dashoffset:0}97.321%,100%{stroke-dashoffset:1}}
-.o51{opacity:0;transform-box:fill-box;transform-origin:center;animation:o51 56s infinite}@keyframes o51{0%,70.714%{opacity:0;transform:scale(.96)}71.518%,97.143%{opacity:1;transform:none}98.571%,100%{opacity:0;transform:none}}
-.o52{opacity:0;animation:o52 56s infinite}@keyframes o52{0%{opacity:0}15.536%{opacity:0}16.071%,18.929%{opacity:1}19.464%{opacity:0}16.607%{opacity:0}17.143%,20%{opacity:1}20.536%{opacity:0}29.107%{opacity:0}29.643%,32.5%{opacity:1}33.036%{opacity:0}34.107%{opacity:0}34.643%,37.5%{opacity:1}38.036%{opacity:0}37.679%{opacity:0}38.214%,41.071%{opacity:1}41.607%{opacity:0}38.75%{opacity:0}39.286%,42.143%{opacity:1}42.679%{opacity:0}66.25%{opacity:0}66.786%,69.643%{opacity:1}70.179%{opacity:0}68.393%{opacity:0}68.929%,71.786%{opacity:1}72.321%{opacity:0}100%{opacity:0}}
-.hints{animation:hints 56s infinite}@keyframes hints{0%,5.357%{opacity:1}6.786%,97.857%{opacity:0}100%{opacity:1}}
-.o53{opacity:0;animation:o53 56s infinite}@keyframes o53{0%{opacity:0}4.821%{opacity:0}5.357%,6.607%{opacity:1}7.143%{opacity:0}100%{opacity:0}}
-@media (prefers-reduced-motion:reduce){*{animation:none!important}.cam{transform:translate(43px,131.5px) scale(.52)}#hints{display:none}}
+.o1{opacity:0;transform-box:fill-box;transform-origin:center;animation:o1 67s infinite}@keyframes o1{0%,5.672%{opacity:0;transform:scale(.96)}6.343%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o2{opacity:0;animation:o2 67s infinite}@keyframes o2{0%{opacity:0}6.269%{opacity:0}6.716%,9.851%{opacity:1}10.299%{opacity:0}100%{opacity:0}}
+.o4{opacity:0;transform-box:fill-box;transform-origin:center;animation:o4 67s infinite}@keyframes o4{0%,8.06%{opacity:0;transform:scale(.96)}8.731%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o5{opacity:0;animation:o5 67s infinite}@keyframes o5{0%{opacity:0}8.657%{opacity:0}9.104%,11.94%{opacity:1}12.388%{opacity:0}100%{opacity:0}}
+.o7{opacity:0;transform-box:fill-box;transform-origin:center;animation:o7 67s infinite}@keyframes o7{0%,15.821%{opacity:0;transform:scale(.96)}16.493%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o8{opacity:0;animation:o8 67s infinite}@keyframes o8{0%{opacity:0}16.418%{opacity:0}16.866%,19.701%{opacity:1}20.149%{opacity:0}100%{opacity:0}}
+.o10{opacity:0;transform-box:fill-box;transform-origin:center;animation:o10 67s infinite}@keyframes o10{0%,24.776%{opacity:0;transform:scale(.96)}25.448%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o11{opacity:0;animation:o11 67s infinite}@keyframes o11{0%{opacity:0}25.373%{opacity:0}25.821%,28.657%{opacity:1}29.104%{opacity:0}100%{opacity:0}}
+.o13{opacity:0;transform-box:fill-box;transform-origin:center;animation:o13 67s infinite}@keyframes o13{0%,28.358%{opacity:0;transform:scale(.96)}29.03%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o14{opacity:0;animation:o14 67s infinite}@keyframes o14{0%{opacity:0}28.955%{opacity:0}29.403%,32.239%{opacity:1}32.687%{opacity:0}100%{opacity:0}}
+.o16{opacity:0;transform-box:fill-box;transform-origin:center;animation:o16 67s infinite}@keyframes o16{0%,58.806%{opacity:0;transform:scale(.96)}59.478%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o17{opacity:0;animation:o17 67s infinite}@keyframes o17{0%{opacity:0}59.403%{opacity:0}59.851%,62.687%{opacity:1}63.134%{opacity:0}100%{opacity:0}}
+.o19{opacity:0;transform-box:fill-box;transform-origin:center;animation:o19 67s infinite}@keyframes o19{0%,82.09%{opacity:0;transform:scale(.96)}82.761%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o20{opacity:0;animation:o20 67s infinite}@keyframes o20{0%{opacity:0}82.687%{opacity:0}83.134%,85.97%{opacity:1}86.418%{opacity:0}100%{opacity:0}}
+.o22{opacity:0;transform-box:fill-box;transform-origin:center;animation:o22 67s infinite}@keyframes o22{0%,70.448%{opacity:0;transform:scale(.96)}71.119%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o23{opacity:0;animation:o23 67s infinite}@keyframes o23{0%{opacity:0}71.045%{opacity:0}71.493%,74.03%{opacity:1}74.478%{opacity:0}100%{opacity:0}}
+.o25{opacity:0;transform-box:fill-box;transform-origin:center;animation:o25 67s infinite}@keyframes o25{0%,74.328%{opacity:0;transform:scale(.96)}75%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o26{opacity:0;animation:o26 67s infinite}@keyframes o26{0%{opacity:0}74.925%{opacity:0}75.373%,78.209%{opacity:1}78.657%{opacity:0}100%{opacity:0}}
+.o27{opacity:0;transform-box:fill-box;transform-origin:center;animation:o27 67s infinite}@keyframes o27{0%,62.985%{opacity:0;transform:scale(.96)}63.657%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o28{opacity:0;transform-box:fill-box;transform-origin:center;animation:o28 67s infinite}@keyframes o28{0%,63.881%{opacity:0;transform:scale(.96)}64.552%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o30{opacity:0;transform-box:fill-box;transform-origin:center;animation:o30 67s infinite}@keyframes o30{0%,37.313%{opacity:0;transform:scale(.96)}37.985%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o31{opacity:0;animation:o31 67s infinite}@keyframes o31{0%{opacity:0}37.91%{opacity:0}38.358%,41.194%{opacity:1}41.642%{opacity:0}46.866%{opacity:0}47.313%,52.239%{opacity:1}52.687%{opacity:0}100%{opacity:0}}
+.o34{opacity:0;transform-box:fill-box;transform-origin:center;animation:o34 67s infinite}@keyframes o34{0%,41.194%{opacity:0;transform:scale(.96)}41.866%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o35{opacity:0;animation:o35 67s infinite}@keyframes o35{0%{opacity:0}41.791%{opacity:0}42.239%,45.075%{opacity:1}45.522%{opacity:0}100%{opacity:0}}
+.o36{stroke-dasharray:1;stroke-dashoffset:1;animation:o36 67s infinite}@keyframes o36{0%,10.448%{stroke-dashoffset:1}11.791%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o37{opacity:0;transform-box:fill-box;transform-origin:center;animation:o37 67s infinite}@keyframes o37{0%,11.642%{opacity:0;transform:scale(.96)}12.313%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o38{stroke-dasharray:1;stroke-dashoffset:1;animation:o38 67s infinite}@keyframes o38{0%,18.209%{stroke-dashoffset:1}19.552%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o39{opacity:0;transform-box:fill-box;transform-origin:center;animation:o39 67s infinite}@keyframes o39{0%,19.403%{opacity:0;transform:scale(.96)}20.075%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o40{stroke-dasharray:1;stroke-dashoffset:1;animation:o40 67s infinite}@keyframes o40{0%,26.866%{stroke-dashoffset:1}28.209%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o41{opacity:0;transform-box:fill-box;transform-origin:center;animation:o41 67s infinite}@keyframes o41{0%,28.06%{opacity:0;transform:scale(.96)}28.731%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o42{stroke-dasharray:1;stroke-dashoffset:1;animation:o42 67s infinite}@keyframes o42{0%,30.448%{stroke-dashoffset:1}31.791%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o43{opacity:0;transform-box:fill-box;transform-origin:center;animation:o43 67s infinite}@keyframes o43{0%,31.642%{opacity:0;transform:scale(.96)}32.313%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o44{stroke-dasharray:1;stroke-dashoffset:1;animation:o44 67s infinite}@keyframes o44{0%,39.701%{stroke-dashoffset:1}41.045%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o45{opacity:0;transform-box:fill-box;transform-origin:center;animation:o45 67s infinite}@keyframes o45{0%,40.896%{opacity:0;transform:scale(.96)}41.567%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o46{stroke-dasharray:1;stroke-dashoffset:1;animation:o46 67s infinite}@keyframes o46{0%,43.582%{stroke-dashoffset:1}44.925%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o47{opacity:0;transform-box:fill-box;transform-origin:center;animation:o47 67s infinite}@keyframes o47{0%,44.776%{opacity:0;transform:scale(.96)}45.448%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o48{stroke-dasharray:1;stroke-dashoffset:1;animation:o48 67s infinite}@keyframes o48{0%,61.194%{stroke-dashoffset:1}62.537%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o49{opacity:0;transform-box:fill-box;transform-origin:center;animation:o49 67s infinite}@keyframes o49{0%,62.388%{opacity:0;transform:scale(.96)}63.06%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o50{stroke-dasharray:1;stroke-dashoffset:1;animation:o50 67s infinite}@keyframes o50{0%,72.836%{stroke-dashoffset:1}74.179%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o51{opacity:0;transform-box:fill-box;transform-origin:center;animation:o51 67s infinite}@keyframes o51{0%,74.03%{opacity:0;transform:scale(.96)}74.701%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o52{stroke-dasharray:1;stroke-dashoffset:1;animation:o52 67s infinite}@keyframes o52{0%,76.716%{stroke-dashoffset:1}78.06%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o53{opacity:0;transform-box:fill-box;transform-origin:center;animation:o53 67s infinite}@keyframes o53{0%,77.91%{opacity:0;transform:scale(.96)}78.582%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o54{stroke-dasharray:1;stroke-dashoffset:1;animation:o54 67s infinite}@keyframes o54{0%,84.478%{stroke-dashoffset:1}85.821%,97.91%{stroke-dashoffset:0}98.06%,100%{stroke-dashoffset:1}}
+.o55{opacity:0;transform-box:fill-box;transform-origin:center;animation:o55 67s infinite}@keyframes o55{0%,85.672%{opacity:0;transform:scale(.96)}86.343%,97.91%{opacity:1;transform:none}99.104%,100%{opacity:0;transform:none}}
+.o56{opacity:0;animation:o56 67s infinite}@keyframes o56{0%{opacity:0}9.701%{opacity:0}10.149%,12.537%{opacity:1}12.985%{opacity:0}17.463%{opacity:0}17.91%,20.299%{opacity:1}20.746%{opacity:0}26.119%{opacity:0}26.567%,28.955%{opacity:1}29.403%{opacity:0}29.701%{opacity:0}30.149%,32.537%{opacity:1}32.985%{opacity:0}38.955%{opacity:0}39.403%,41.791%{opacity:1}42.239%{opacity:0}42.836%{opacity:0}43.284%,45.672%{opacity:1}46.119%{opacity:0}60.448%{opacity:0}60.896%,63.284%{opacity:1}63.731%{opacity:0}72.09%{opacity:0}72.537%,74.925%{opacity:1}75.373%{opacity:0}75.97%{opacity:0}76.418%,78.806%{opacity:1}79.254%{opacity:0}83.731%{opacity:0}84.179%,86.567%{opacity:1}87.015%{opacity:0}100%{opacity:0}}
+.hints{animation:hints 67s infinite}@keyframes hints{0%,4.478%{opacity:1}5.672%,98.507%{opacity:0}100%{opacity:1}}
+.o57{opacity:0;animation:o57 67s infinite}@keyframes o57{0%{opacity:0}4.03%{opacity:0}4.478%,5.522%{opacity:1}5.97%{opacity:0}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}.cam{transform:translate(30px,191px) scale(.5)}#hints{display:none}}
 </style>
 <defs>
 <g id="i-pointer" class="ic"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" /></g>
@@ -120,15 +124,17 @@ use.f{color:var(--fg)}use.m{color:var(--mut)}
 <g clip-path="url(#win)">
 <rect class="cv" width="1280" height="720"/>
 <g clip-path="url(#cvs)"><g class="cam">
-<path class="wire o36" pathLength="1" d="M448 150C478 150 478 130 508 130"/><g class="o37"><circle class="dot" cx="448" cy="150" r="3"/><circle class="dot" cx="508" cy="130" r="3"/></g>
-<path class="wire o38" pathLength="1" d="M448 230C478 230 478 368 508 368"/><g class="o39"><circle class="dot" cx="448" cy="230" r="3"/><circle class="dot" cx="508" cy="368" r="3"/></g>
-<path class="wire o40" pathLength="1" d="M848 130C878 130 878 150 908 150"/><g class="o41"><circle class="dot" cx="848" cy="130" r="3"/><circle class="dot" cx="908" cy="150" r="3"/></g>
-<path class="wire o42" pathLength="1" d="M1468 200C1498 200 1498 260 1528 260"/><g class="o43"><circle class="dot" cx="1468" cy="200" r="3"/><circle class="dot" cx="1528" cy="260" r="3"/></g>
-<path class="wire o44" pathLength="1" d="M1788 300C1818 300 1818 200 1848 200"/><g class="o45"><circle class="dot" cx="1788" cy="300" r="3"/><circle class="dot" cx="1848" cy="200" r="3"/></g>
-<path class="wire o46" pathLength="1" d="M1788 520C1818 520 1818 540 1848 540"/><g class="o47"><circle class="dot" cx="1788" cy="520" r="3"/><circle class="dot" cx="1848" cy="540" r="3"/></g>
-<path class="wire o48" pathLength="1" d="M448 640C478 640 478 620 508 620"/><g class="o49"><circle class="dot" cx="448" cy="640" r="3"/><circle class="dot" cx="508" cy="620" r="3"/></g>
-<path class="wire o50" pathLength="1" d="M848 620C878 620 878 640 908 640"/><g class="o51"><circle class="dot" cx="848" cy="620" r="3"/><circle class="dot" cx="908" cy="640" r="3"/></g>
-<g class="o1"><g transform="translate(48 84)">
+<path class="wire o36" pathLength="1" d="M440 330C390 330 370 282 320 282"/><g class="o37"><circle class="dot" cx="440" cy="330" r="4"/><circle class="dot" cx="320" cy="282" r="4"/></g>
+<path class="wire o38" pathLength="1" d="M640 180C640 130 640 110 640 60"/><g class="o39"><circle class="dot" cx="640" cy="180" r="4"/><circle class="dot" cx="640" cy="60" r="4"/></g>
+<path class="wire o40" pathLength="1" d="M640 510C640 560 640 580 640 630"/><g class="o41"><circle class="dot" cx="640" cy="510" r="4"/><circle class="dot" cx="640" cy="630" r="4"/></g>
+<path class="wire o42" pathLength="1" d="M440 450C390 450 370 549 320 549"/><g class="o43"><circle class="dot" cx="440" cy="450" r="4"/><circle class="dot" cx="320" cy="549" r="4"/></g>
+<path class="wire o44" pathLength="1" d="M840 320C890 320 910 344 960 344"/><g class="o45"><circle class="dot" cx="840" cy="320" r="4"/><circle class="dot" cx="960" cy="344" r="4"/></g>
+<path class="wire o46" pathLength="1" d="M1520 300C1570 300 1590 364 1640 364"/><g class="o47"><circle class="dot" cx="1520" cy="300" r="4"/><circle class="dot" cx="1640" cy="364" r="4"/></g>
+<path class="wire o48" pathLength="1" d="M1240 558C1240 608 1240 628 1240 678"/><g class="o49"><circle class="dot" cx="1240" cy="558" r="4"/><circle class="dot" cx="1240" cy="678" r="4"/></g>
+<path class="wire o50" pathLength="1" d="M1900 364C1950 364 1970 345 2020 345"/><g class="o51"><circle class="dot" cx="1900" cy="364" r="4"/><circle class="dot" cx="2020" cy="345" r="4"/></g>
+<path class="wire o52" pathLength="1" d="M2220 180C2220 130 2130 94 2130 44"/><g class="o53"><circle class="dot" cx="2220" cy="180" r="4"/><circle class="dot" cx="2130" cy="44" r="4"/></g>
+<path class="wire o54" pathLength="1" d="M2220 510C2220 560 2220 580 2220 630"/><g class="o55"><circle class="dot" cx="2220" cy="510" r="4"/><circle class="dot" cx="2220" cy="630" r="4"/></g>
+<g class="o1"><g transform="translate(440 180)">
 <clipPath id="c0"><rect width="400" height="330" rx="8"/></clipPath>
 <rect class="sf" width="400" height="330" rx="8"/>
 <g clip-path="url(#c0)">
@@ -136,65 +142,109 @@ use.f{color:var(--fg)}use.m{color:var(--mut)}
 <text class="ui f" x="36" y="23">claude</text><text class="ui m" x="87.2" y="23">web-app</text>
 <g class="spin"><use href="#i-spinner" transform="translate(374 11) scale(0.5833333333333334)" class="m"/></g>
 <rect class="bdf" y="35" width="400" height="1"/>
-<rect class="b" x="0" y="156" width="400" height="16" opacity=".16"/><rect class="g" x="0" y="172" width="400" height="16" opacity=".16"/><rect class="g" x="0" y="188" width="400" height="16" opacity=".16"/><text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">&gt; </tspan>add a Hand tool to the canvas toolbar</text>
+<rect class="b" x="0" y="156" width="400" height="16" opacity=".16"/><rect class="g" x="0" y="172" width="400" height="16" opacity=".16"/><rect class="g" x="0" y="188" width="400" height="16" opacity=".16"/><text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">&gt; </tspan>add a revenue chart to the overview page</text>
 
-<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="f">● </tspan>I'll wire a Hand button to canvas.hand.</text>
-<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="g">● </tspan>Read<tspan class="d">(defaults/mods/toolbar/main.js)</tspan></text>
-<text class="mono" x="12" y="120" xml:space="preserve"><tspan class="d">  └ Read 58 lines</tspan></text>
-<text class="mono" x="12" y="136" xml:space="preserve"><tspan class="g">● </tspan>Edit<tspan class="d">(defaults/mods/toolbar/main.js)</tspan></text>
-<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="d">  └ Added 3 lines, removed 1 line</tspan></text>
-<text class="mono" x="12" y="168" xml:space="preserve"><tspan class="d">    53 </tspan><tspan class="b">-   run("canvas.hand", { on: false });</tspan></text>
-<text class="mono" x="12" y="184" xml:space="preserve"><tspan class="d">    53 </tspan><tspan class="g">+   run("canvas.hand", { on: name === "hand" });</tspan></text>
-<text class="mono" x="12" y="200" xml:space="preserve"><tspan class="d">    54 </tspan><tspan class="g">+   cx.notify();</tspan></text>
-<text class="mono" x="12" y="216" xml:space="preserve"><tspan class="w">● </tspan>Bash<tspan class="d">(cargo test --locked)</tspan></text>
-<text class="mono" x="12" y="232" xml:space="preserve"><tspan class="d">  └ test result: </tspan><tspan class="g">ok</tspan><tspan class="d">. 214 passed; 0 failed</tspan></text>
+<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="f">● </tspan>I'll add a Chart and use it in Overview.</text>
+<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="g">● </tspan>Read<tspan class="d">(src/Overview.tsx)</tspan></text>
+<text class="mono" x="12" y="120" xml:space="preserve"><tspan class="d">  └ Read 64 lines</tspan></text>
+<text class="mono" x="12" y="136" xml:space="preserve"><tspan class="g">● </tspan>Edit<tspan class="d">(src/Overview.tsx)</tspan></text>
+<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="d">  └ Added 5 lines, removed 1 line</tspan></text>
+<text class="mono" x="12" y="168" xml:space="preserve"><tspan class="d">    41 </tspan><tspan class="b">-   &lt;Stat label="Revenue" value={rev} /&gt;</tspan></text>
+<text class="mono" x="12" y="184" xml:space="preserve"><tspan class="d">    41 </tspan><tspan class="g">+   &lt;Chart data={revenue} /&gt;</tspan></text>
+<text class="mono" x="12" y="200" xml:space="preserve"><tspan class="d">    42 </tspan><tspan class="g">+   &lt;Stat label="Revenue" value={rev} /&gt;</tspan></text>
+<text class="mono" x="12" y="216" xml:space="preserve"><tspan class="w">● </tspan>Bash<tspan class="d">(bun test)</tspan></text>
+<text class="mono" x="12" y="232" xml:space="preserve"><tspan class="d">  └ 12 pass, 0 fail</tspan></text>
 
-<text class="mono" x="12" y="264" xml:space="preserve"><tspan class="f">● </tspan>Hand pans the canvas. Space + drag too.</text><rect class="bd" x="10.5" y="291.5" width="379" height="28" rx="8"/><text class="mono" x="20" y="310" xml:space="preserve"><tspan class="m">&gt;</tspan> </text><rect class="f blink" x="35" y="299" width="6.6" height="13"/>
+<text class="mono" x="12" y="264" xml:space="preserve"><tspan class="f">● </tspan>Chart is live. Look at the browser pane.</text><rect class="bd" x="10.5" y="291.5" width="379" height="28" rx="8"/><text class="mono" x="20" y="310" xml:space="preserve"><tspan class="m">&gt;</tspan> </text><rect class="f blink" x="35" y="299" width="6.6" height="13"/>
 </g>
 <rect class="bd" x=".5" y=".5" width="399" height="329" rx="7.5"/>
 <g class="o2"><rect class="selring" x=".5" y=".5" width="399" height="329" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="108" height="28" rx="8"/></g><use href="#i-enter" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-expand" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/></g>
 </g></g>
-<g class="o4"><g transform="translate(508 84)">
-<clipPath id="c3"><rect width="340" height="170" rx="8"/></clipPath>
-<rect class="sf" width="340" height="170" rx="8"/>
+<g class="o4"><g transform="translate(20 220)">
+<clipPath id="c3"><rect width="300" height="124" rx="8"/></clipPath>
+<rect class="sf" width="300" height="124" rx="8"/>
 <g clip-path="url(#c3)">
-<use href="#i-terminal" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
-<text class="ui f" x="36" y="23">cargo test</text>
-
-<rect class="bdf" y="35" width="340" height="1"/>
-<text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">$ </tspan>cargo test --locked</text>
-<text class="mono" x="12" y="72" xml:space="preserve"><tspan class="g">   Compiling</tspan> canopy v0.1.0</text>
-<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="g">    Finished</tspan> test profile in 14.21s</text>
-<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="g">     Running</tspan> unittests src/main.rs</text>
-<text class="mono" x="12" y="120" xml:space="preserve">running 214 tests</text>
-<text class="mono" x="12" y="136" xml:space="preserve">test canvas::pan::hand_drags ... <tspan class="g">ok</tspan></text>
-<text class="mono" x="12" y="152" xml:space="preserve">test result: <tspan class="g">ok</tspan>. 214 passed; 0 failed</text>
-</g>
-<rect class="bd" x=".5" y=".5" width="339" height="169" rx="7.5"/>
-<g class="o5"><rect class="selring" x=".5" y=".5" width="339" height="169" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="108" height="28" rx="8"/></g><use href="#i-enter" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-expand" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/></g>
-</g></g>
-<g class="o7"><g transform="translate(508 314)">
-<clipPath id="c6"><rect width="340" height="124" rx="8"/></clipPath>
-<rect class="sf" width="340" height="124" rx="8"/>
-<g clip-path="url(#c6)">
 <use href="#i-note" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
 <text class="ui f" x="36" y="23">Note</text>
 
-<rect class="bdf" y="35" width="340" height="1"/>
-<text class="ui f" x="12" y="58">ship the hand tool</text>
-<text class="ui m" x="12" y="76">[x] toolbar button</text>
-<text class="ui m" x="12" y="94">[x] space + drag pans</text>
-<text class="ui m" x="12" y="112">[ ] tooltip keys</text>
+<rect class="bdf" y="35" width="300" height="1"/>
+<text class="ui f" x="12" y="58">ship the dashboard</text>
+<text class="ui m" x="12" y="76">[x] stat cards</text>
+<text class="ui m" x="12" y="94">[x] revenue chart</text>
+<text class="ui m" x="12" y="112">[ ] mobile layout</text>
 </g>
-<rect class="bd" x=".5" y=".5" width="339" height="123" rx="7.5"/>
-<g class="o8"><rect class="selring" x=".5" y=".5" width="339" height="123" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="56" height="28" rx="8"/></g><use href="#i-link" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/></g>
+<rect class="bd" x=".5" y=".5" width="299" height="123" rx="7.5"/>
+<g class="o5"><rect class="selring" x=".5" y=".5" width="299" height="123" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="56" height="28" rx="8"/></g><use href="#i-link" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/></g>
 </g></g>
-<g class="o30"><g transform="translate(908 84)">
+<g class="o7"><g transform="translate(440 -190)">
+<clipPath id="c6"><rect width="400" height="250" rx="8"/></clipPath>
+<rect class="sf" width="400" height="250" rx="8"/>
+<g clip-path="url(#c6)">
+<use href="#i-file" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
+<text class="ui f" x="36" y="23">Chart.tsx</text><text class="ui m" x="108.8" y="23">src</text>
+
+<rect class="bdf" y="35" width="400" height="1"/>
+<rect class="sel" x="0" y="124" width="400" height="16" opacity="1"/><text class="mono" x="12" y="56" xml:space="preserve"><tspan class="d"> 1 </tspan><tspan class="p">import</tspan> { Line } <tspan class="p">from</tspan> <tspan class="g">"./lib/plot"</tspan>;</text>
+<text class="mono" x="12" y="72" xml:space="preserve"><tspan class="d"> 2 </tspan></text>
+<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="d"> 3 </tspan><tspan class="p">type</tspan> <tspan class="c">Point</tspan> = { day: <tspan class="c">string</tspan>; value: <tspan class="c">number</tspan> };</text>
+<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="d"> 4 </tspan></text>
+<text class="mono" x="12" y="120" xml:space="preserve"><tspan class="d"> 5 </tspan><tspan class="p">export function</tspan> <tspan class="a">Chart</tspan>({ data }: { data: <tspan class="c">Point</tspan>[] }) {</text>
+<text class="mono" x="12" y="136" xml:space="preserve"><tspan class="d"> 6 </tspan>  <tspan class="p">const</tspan> max = Math.max(...data.map((d) =&gt; d.value));</text>
+<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="d"> 7 </tspan>  <tspan class="p">return</tspan> (</text>
+<text class="mono" x="12" y="168" xml:space="preserve"><tspan class="d"> 8 </tspan>    &lt;<tspan class="a">svg</tspan> viewBox=<tspan class="g">"0 0 360 96"</tspan> className=<tspan class="g">"chart"</tspan>&gt;</text>
+<text class="mono" x="12" y="184" xml:space="preserve"><tspan class="d"> 9 </tspan>      &lt;<tspan class="a">Line</tspan> points={data} max={max} /&gt;</text>
+<text class="mono" x="12" y="200" xml:space="preserve"><tspan class="d">10 </tspan>    &lt;/<tspan class="a">svg</tspan>&gt;</text>
+<text class="mono" x="12" y="216" xml:space="preserve"><tspan class="d">11 </tspan>  );</text>
+<text class="mono" x="12" y="232" xml:space="preserve"><tspan class="d">12 </tspan>}</text>
+</g>
+<rect class="bd" x=".5" y=".5" width="399" height="249" rx="7.5"/>
+<g class="o8"><rect class="selring" x=".5" y=".5" width="399" height="249" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="82" height="28" rx="8"/></g><use href="#i-expand" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/></g>
+</g></g>
+<g class="o10"><g transform="translate(440 630)">
+<clipPath id="c9"><rect width="400" height="220" rx="8"/></clipPath>
+<rect class="sf" width="400" height="220" rx="8"/>
+<g clip-path="url(#c9)">
+<use href="#i-terminal" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
+<text class="ui f" x="36" y="23">bun dev</text>
+
+<rect class="bdf" y="35" width="400" height="1"/>
+<text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">$ </tspan>bun run dev</text>
+
+<text class="mono" x="12" y="88" xml:space="preserve">  <tspan class="g">VITE</tspan> ready in 312 ms</text>
+<text class="mono" x="12" y="104" xml:space="preserve">  <tspan class="g">-&gt;</tspan>  Local:   <tspan class="a">http://localhost:5173/</tspan></text>
+
+<text class="mono" x="12" y="136" xml:space="preserve"><tspan class="d">12:04:11 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Overview.tsx</text>
+<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="d">12:04:12 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Chart.tsx</text>
+<text class="mono" x="12" y="168" xml:space="preserve"><tspan class="d">12:04:19 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Overview.tsx</text>
+</g>
+<rect class="bd" x=".5" y=".5" width="399" height="219" rx="7.5"/>
+<g class="o11"><rect class="selring" x=".5" y=".5" width="399" height="219" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="108" height="28" rx="8"/></g><use href="#i-enter" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-expand" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/></g>
+</g></g>
+<g class="o13"><g transform="translate(20 464)">
+<clipPath id="c12"><rect width="300" height="170" rx="8"/></clipPath>
+<rect class="sf" width="300" height="170" rx="8"/>
+<g clip-path="url(#c12)">
+<use href="#i-terminal" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
+<text class="ui f" x="36" y="23">bun test</text>
+
+<rect class="bdf" y="35" width="300" height="1"/>
+<text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">$ </tspan>bun test</text>
+<text class="mono" x="12" y="72" xml:space="preserve"><tspan class="g">(pass)</tspan> Overview &gt; renders stats [1.2ms]</text>
+<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="g">(pass)</tspan> Overview &gt; renders chart [0.9ms]</text>
+<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="g">(pass)</tspan> Chart &gt; scales to data [0.4ms]</text>
+
+<text class="mono" x="12" y="136" xml:space="preserve"><tspan class="g"> 12 pass</tspan></text>
+<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="m"> 0 fail</tspan></text>
+</g>
+<rect class="bd" x=".5" y=".5" width="299" height="169" rx="7.5"/>
+<g class="o14"><rect class="selring" x=".5" y=".5" width="299" height="169" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="108" height="28" rx="8"/></g><use href="#i-enter" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-expand" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/></g>
+</g></g>
+<g class="o30"><g transform="translate(960 130)">
 <clipPath id="c29"><rect width="560" height="428" rx="8"/></clipPath>
 <rect class="sf" width="560" height="428" rx="8"/>
 <g clip-path="url(#c29)">
 <use href="#i-globe" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
-<text class="ui f" x="36" y="23">localhost:5173</text><text class="ui m" x="144.8" y="23">browser</text>
+<text class="ui f" x="36" y="23">Overview - Acme</text>
 
 <rect class="bdf" y="35" width="560" height="1"/>
 <g transform="translate(0 8)"><rect y="29" width="560" height="32" class="pop"/><rect class="bdf" y="60" width="560" height="1"/>
@@ -226,7 +276,7 @@ use.f{color:var(--fg)}use.m{color:var(--mut)}
 <rect class="bd" x=".5" y=".5" width="559" height="427" rx="7.5"/>
 <g class="o31"><rect class="selring" x=".5" y=".5" width="559" height="427" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="195" height="28" rx="8"/></g><use href="#i-house" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-reload" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-camera" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-rec" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/><use href="#i-pencil" transform="translate(112 -29) scale(0.5833333333333334)" class="m"/><rect class="bdf" x="137" y="-32" width="1" height="16"/><use href="#i-link" transform="translate(147 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(173 -29) scale(0.5833333333333334)" class="m"/></g>
 </g></g>
-<g class="o34"><g transform="translate(1528 150)">
+<g class="o34"><g transform="translate(1640 100)">
 <clipPath id="c33"><rect width="260" height="528" rx="8"/></clipPath>
 <rect class="sf" width="260" height="528" rx="8"/>
 <g clip-path="url(#c33)">
@@ -252,7 +302,33 @@ use.f{color:var(--fg)}use.m{color:var(--mut)}
 <rect class="bd" x=".5" y=".5" width="259" height="527" rx="7.5"/>
 <g class="o35"><rect class="selring" x=".5" y=".5" width="259" height="527" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="117" height="28" rx="8"/></g><use href="#i-camera" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-rec" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><rect class="bdf" x="59" y="-32" width="1" height="16"/><use href="#i-link" transform="translate(69 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(95 -29) scale(0.5833333333333334)" class="m"/></g>
 </g></g>
-<g class="o22"><g transform="translate(1848 84)">
+<g class="o16"><g transform="translate(960 678)">
+<clipPath id="c15"><rect width="560" height="260" rx="8"/></clipPath>
+<rect class="sf" width="560" height="260" rx="8"/>
+<g clip-path="url(#c15)">
+<use href="#b-codex" x="12" y="10" width="16" height="16"/>
+<text class="ui f" x="36" y="23">codex</text><text class="ui m" x="80" y="23">review</text>
+<g class=""><use href="#i-bell" transform="translate(534 11) scale(0.5833333333333334)" class="m"/></g>
+<rect class="bdf" y="35" width="560" height="1"/>
+<rect class="sel" x="0" y="156" width="560" height="16" opacity="1"/><text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">&gt; </tspan>review the new chart against the page</text>
+<text class="mono" x="12" y="72" xml:space="preserve"><tspan class="g">● </tspan>Read<tspan class="d">(src/Chart.tsx)</tspan></text>
+<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="d">  └ Read 12 lines</tspan></text>
+<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="f">● </tspan>Looks right. One nit: the y-axis does not start</text>
+<text class="mono" x="12" y="120" xml:space="preserve">  at zero, so small changes look large. I want to</text>
+<text class="mono" x="12" y="136" xml:space="preserve">  compare it with the browser pane.</text>
+<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="b">● </tspan>Wants to run: <tspan class="f">canopy pane shot p3</tspan></text>
+<text class="mono" x="12" y="168" xml:space="preserve"><tspan class="f">  1  Yes, run it</tspan></text>
+<text class="mono" x="12" y="184" xml:space="preserve"><tspan class="m">  2  Always allow in this space</tspan></text>
+<text class="mono" x="12" y="200" xml:space="preserve"><tspan class="m">  3  No, and tell codex what to do</tspan></text>
+</g>
+<rect class="bd" x=".5" y=".5" width="559" height="259" rx="7.5"/>
+<g class="o17"><rect class="selring" x=".5" y=".5" width="559" height="259" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="108" height="28" rx="8"/></g><use href="#i-enter" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-expand" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/></g>
+</g></g>
+<g class="o27"><g transform="translate(1640 748)"><rect class="sf" width="104" height="50" rx="8"/><rect class="bd" x=".5" y=".5" width="103" height="49" rx="7.5"/>
+<use href="#b-claude" x="12" y="10" width="16" height="16"/><text class="ui f" x="36" y="23">claude</text><g class="spin"><use href="#i-spinner" transform="translate(78 10) scale(0.5833333333333334)" class="m"/></g></g></g>
+<g class="o28"><g transform="translate(1760 748)"><rect class="sf" width="104" height="50" rx="8"/><rect class="bd" x=".5" y=".5" width="103" height="49" rx="7.5"/>
+<use href="#b-codex" x="12" y="10" width="16" height="16"/><text class="ui f" x="36" y="23">codex</text><g class=""><use href="#i-bell" transform="translate(78 10) scale(0.5833333333333334)" class="m"/></g></g></g>
+<g class="o22"><g transform="translate(2020 180)">
 <clipPath id="c21"><rect width="400" height="330" rx="8"/></clipPath>
 <rect class="sf" width="400" height="330" rx="8"/>
 <g clip-path="url(#c21)">
@@ -260,21 +336,35 @@ use.f{color:var(--fg)}use.m{color:var(--mut)}
 <text class="ui f" x="36" y="23">claude</text><text class="ui m" x="87.2" y="23">docs</text>
 
 <rect class="bdf" y="35" width="400" height="1"/>
-<text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">&gt; </tspan>write tests for the wire curves</text>
+<text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">&gt; </tspan>document the Chart component</text>
 
-<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="g">● </tspan>Added 3 tests to src/canvas/wire.rs</text>
-<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="d">  └ curve_ends, curve_is_smooth, at_midpoint</tspan></text>
+<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="g">● </tspan>Added a Chart section to docs/charts.md</text>
+<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="d">  └ props, the data shape and one example</tspan></text>
 
-<text class="mono" x="12" y="136" xml:space="preserve"><tspan class="g">● </tspan>Bash<tspan class="d">(cargo test wire)</tspan></text>
-<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="d">  └ test result: </tspan><tspan class="g">ok</tspan><tspan class="d">. 3 passed; 0 failed</tspan></text>
+<text class="mono" x="12" y="136" xml:space="preserve"><tspan class="g">● </tspan>Bash<tspan class="d">(bun run docs)</tspan></text>
+<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="d">  └ built 4 pages, no broken links</tspan></text>
 
-<text class="mono" x="12" y="184" xml:space="preserve"><tspan class="f">● </tspan>Done. Wires now have tests. Run cargo test</text>
-<text class="mono" x="12" y="200" xml:space="preserve">  to check the whole suite.</text><rect class="bd" x="10.5" y="291.5" width="379" height="28" rx="8"/><text class="mono" x="20" y="310" xml:space="preserve"><tspan class="m">&gt;</tspan> </text><rect class="f blink" x="35" y="299" width="6.6" height="13"/>
+<text class="mono" x="12" y="184" xml:space="preserve"><tspan class="f">● </tspan>Done. The docs build is clean.</text><rect class="bd" x="10.5" y="291.5" width="379" height="28" rx="8"/><text class="mono" x="20" y="310" xml:space="preserve"><tspan class="m">&gt;</tspan> </text><rect class="f blink" x="35" y="299" width="6.6" height="13"/>
 </g>
 <rect class="bd" x=".5" y=".5" width="399" height="329" rx="7.5"/>
 <g class="o23"><rect class="selring" x=".5" y=".5" width="399" height="329" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="108" height="28" rx="8"/></g><use href="#i-enter" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-expand" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/></g>
 </g></g>
-<g class="o19"><g transform="translate(1848 474)">
+<g class="o25"><g transform="translate(2020 -80)">
+<clipPath id="c24"><rect width="220" height="124" rx="8"/></clipPath>
+<rect class="sf" width="220" height="124" rx="8"/>
+<g clip-path="url(#c24)">
+<use href="#i-note" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
+<text class="ui f" x="36" y="23">Ideas</text>
+
+<rect class="bdf" y="35" width="220" height="1"/>
+<text class="ui f" x="12" y="58">dark mode</text>
+<text class="ui m" x="12" y="76">export to csv</text>
+<text class="ui m" x="12" y="94">a date range picker</text>
+</g>
+<rect class="bd" x=".5" y=".5" width="219" height="123" rx="7.5"/>
+<g class="o26"><rect class="selring" x=".5" y=".5" width="219" height="123" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="56" height="28" rx="8"/></g><use href="#i-link" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/></g>
+</g></g>
+<g class="o19"><g transform="translate(2020 630)">
 <clipPath id="c18"><rect width="400" height="140" rx="8"/></clipPath>
 <rect class="sf" width="400" height="140" rx="8"/>
 <g clip-path="url(#c18)">
@@ -283,106 +373,16 @@ use.f{color:var(--fg)}use.m{color:var(--mut)}
 
 <rect class="bdf" y="35" width="400" height="1"/>
 <text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">$ </tspan>git log --oneline -3</text>
-<text class="mono" x="12" y="72" xml:space="preserve"><tspan class="w">7299bae</tspan> feat(canvas): draw wires as curves</text>
-<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="w">1cb63de</tspan> feat(canvas): add the canvas toolbar</text>
-<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="w">935f688</tspan> docs(canopy): make terminals panes</text>
+<text class="mono" x="12" y="72" xml:space="preserve"><tspan class="w">a3f9c2e</tspan> feat(overview): add a revenue chart</text>
+<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="w">91b04d7</tspan> feat(ui): add the stat card</text>
+<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="w">5c2e8f1</tspan> chore: scaffold the dashboard</text>
 </g>
 <rect class="bd" x=".5" y=".5" width="399" height="139" rx="7.5"/>
 <g class="o20"><rect class="selring" x=".5" y=".5" width="399" height="139" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="108" height="28" rx="8"/></g><use href="#i-enter" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-expand" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/></g>
 </g></g>
-<g class="o10"><g transform="translate(48 474)">
-<clipPath id="c9"><rect width="400" height="330" rx="8"/></clipPath>
-<rect class="sf" width="400" height="330" rx="8"/>
-<g clip-path="url(#c9)">
-<use href="#i-terminal" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
-<text class="ui f" x="36" y="23">bun dev</text>
-
-<rect class="bdf" y="35" width="400" height="1"/>
-<text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">$ </tspan>bun run dev</text>
-
-<text class="mono" x="12" y="88" xml:space="preserve">  <tspan class="g">VITE</tspan> ready in 312 ms</text>
-
-<text class="mono" x="12" y="120" xml:space="preserve">  <tspan class="g">-&gt;</tspan>  Local:   <tspan class="a">http://localhost:5173/</tspan></text>
-<text class="mono" x="12" y="136" xml:space="preserve">  <tspan class="d">-&gt;</tspan>  Network: use --host to expose</text>
-
-<text class="mono" x="12" y="168" xml:space="preserve"><tspan class="d">12:04:11 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Overview.tsx</text>
-<text class="mono" x="12" y="184" xml:space="preserve"><tspan class="d">12:04:12 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Chart.tsx</text>
-<text class="mono" x="12" y="200" xml:space="preserve"><tspan class="d">12:04:19 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Overview.tsx</text>
-<text class="mono" x="12" y="216" xml:space="preserve"><tspan class="d">12:04:26 </tspan><tspan class="c">[vite]</tspan> hmr update /src/Stat.tsx</text>
-</g>
-<rect class="bd" x=".5" y=".5" width="399" height="329" rx="7.5"/>
-<g class="o11"><rect class="selring" x=".5" y=".5" width="399" height="329" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="108" height="28" rx="8"/></g><use href="#i-enter" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-expand" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/></g>
-</g></g>
-<g class="o13"><g transform="translate(508 498)">
-<clipPath id="c12"><rect width="340" height="330" rx="8"/></clipPath>
-<rect class="sf" width="340" height="330" rx="8"/>
-<g clip-path="url(#c12)">
-<use href="#i-file" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
-<text class="ui f" x="36" y="23">wire.rs</text><text class="ui m" x="94.4" y="23">src/canvas</text>
-
-<rect class="bdf" y="35" width="340" height="1"/>
-<rect class="sel" x="0" y="108" width="340" height="16" opacity="1"/><text class="mono" x="12" y="56" xml:space="preserve"><tspan class="d">21 </tspan><tspan class="d">/// A wire joins two pane edges.</tspan></text>
-<text class="mono" x="12" y="72" xml:space="preserve"><tspan class="d">22 </tspan><tspan class="p">pub fn </tspan><tspan class="a">curve</tspan>(a: <tspan class="c">P</tspan>, b: <tspan class="c">P</tspan>) -&gt; [<tspan class="c">P</tspan>; <tspan class="w">4</tspan>] {</text>
-<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="d">23 </tspan>    <tspan class="p">let</tspan> dx = (b.x - a.x).abs() * <tspan class="w">0.5</tspan>;</text>
-<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="d">24 </tspan>    <tspan class="p">let</tspan> dx = dx.max(<tspan class="w">48.0</tspan>);</text>
-<text class="mono" x="12" y="120" xml:space="preserve"><tspan class="d">25 </tspan>    [a, a + v(dx, <tspan class="w">0.</tspan>), b - v(dx, <tspan class="w">0.</tspan>), b]</text>
-<text class="mono" x="12" y="136" xml:space="preserve"><tspan class="d">26 </tspan>}</text>
-<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="d">27 </tspan></text>
-<text class="mono" x="12" y="168" xml:space="preserve"><tspan class="d">28 </tspan><tspan class="d">/// Flow dots ride the curve in flight.</tspan></text>
-<text class="mono" x="12" y="184" xml:space="preserve"><tspan class="d">29 </tspan><tspan class="p">pub fn </tspan><tspan class="a">at</tspan>(c: &amp;[<tspan class="c">P</tspan>; <tspan class="w">4</tspan>], t: <tspan class="c">f32</tspan>) -&gt; <tspan class="c">P</tspan> {</text>
-<text class="mono" x="12" y="200" xml:space="preserve"><tspan class="d">30 </tspan>    <tspan class="p">let</tspan> u = <tspan class="w">1.0</tspan> - t;</text>
-<text class="mono" x="12" y="216" xml:space="preserve"><tspan class="d">31 </tspan>    <tspan class="p">let</tspan> (u2, t2) = (u * u, t * t);</text>
-<text class="mono" x="12" y="232" xml:space="preserve"><tspan class="d">32 </tspan>    c[<tspan class="w">0</tspan>] * u2 * u + c[<tspan class="w">1</tspan>] * <tspan class="w">3.</tspan> * u2 * t</text>
-<text class="mono" x="12" y="248" xml:space="preserve"><tspan class="d">33 </tspan>        + c[<tspan class="w">2</tspan>] * <tspan class="w">3.</tspan> * u * t2 + c[<tspan class="w">3</tspan>] * t2 * t</text>
-<text class="mono" x="12" y="264" xml:space="preserve"><tspan class="d">34 </tspan>}</text>
-</g>
-<rect class="bd" x=".5" y=".5" width="339" height="329" rx="7.5"/>
-<g class="o14"><rect class="selring" x=".5" y=".5" width="339" height="329" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="82" height="28" rx="8"/></g><use href="#i-expand" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/></g>
-</g></g>
-<g class="o16"><g transform="translate(908 564)">
-<clipPath id="c15"><rect width="560" height="300" rx="8"/></clipPath>
-<rect class="sf" width="560" height="300" rx="8"/>
-<g clip-path="url(#c15)">
-<use href="#b-codex" x="12" y="10" width="16" height="16"/>
-<text class="ui f" x="36" y="23">codex</text><text class="ui m" x="80" y="23">api</text>
-<g class=""><use href="#i-bell" transform="translate(534 11) scale(0.5833333333333334)" class="m"/></g>
-<rect class="bdf" y="35" width="560" height="1"/>
-<rect class="sel" x="0" y="156" width="560" height="16" opacity="1"/><text class="mono" x="12" y="56" xml:space="preserve"><tspan class="m">&gt; </tspan>review the wire curves</text>
-<text class="mono" x="12" y="72" xml:space="preserve"><tspan class="g">● </tspan>Read<tspan class="d">(src/canvas/wire.rs)</tspan></text>
-<text class="mono" x="12" y="88" xml:space="preserve"><tspan class="d">  └ Read 41 lines</tspan></text>
-<text class="mono" x="12" y="104" xml:space="preserve"><tspan class="f">● </tspan>The control points look right. One question:</text>
-<text class="mono" x="12" y="120" xml:space="preserve">  curve() clamps dx to 48px, so a very short wire</text>
-<text class="mono" x="12" y="136" xml:space="preserve">  will overshoot. Checking the diff against main.</text>
-<text class="mono" x="12" y="152" xml:space="preserve"><tspan class="b">● </tspan>Wants to run: <tspan class="f">git diff main</tspan></text>
-<text class="mono" x="12" y="168" xml:space="preserve"><tspan class="f">  1  Yes, run it</tspan></text>
-<text class="mono" x="12" y="184" xml:space="preserve"><tspan class="m">  2  Always allow in this space</tspan></text>
-<text class="mono" x="12" y="200" xml:space="preserve"><tspan class="m">  3  No, and tell codex what to do</tspan></text>
-</g>
-<rect class="bd" x=".5" y=".5" width="559" height="299" rx="7.5"/>
-<g class="o17"><rect class="selring" x=".5" y=".5" width="559" height="299" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="108" height="28" rx="8"/></g><use href="#i-enter" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-expand" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/><use href="#i-link" transform="translate(60 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(86 -29) scale(0.5833333333333334)" class="m"/></g>
-</g></g>
-<g class="o25"><g transform="translate(1848 674)">
-<clipPath id="c24"><rect width="220" height="124" rx="8"/></clipPath>
-<rect class="sf" width="220" height="124" rx="8"/>
-<g clip-path="url(#c24)">
-<use href="#i-note" transform="translate(12 10) scale(0.6666666666666666)" class="f"/>
-<text class="ui f" x="36" y="23">Ideas</text>
-
-<rect class="bdf" y="35" width="220" height="1"/>
-<text class="ui f" x="12" y="58">pan inertia</text>
-<text class="ui m" x="12" y="76">a minimap</text>
-<text class="ui m" x="12" y="94">pin a pane to the glass</text>
-</g>
-<rect class="bd" x=".5" y=".5" width="219" height="123" rx="7.5"/>
-<g class="o26"><rect class="selring" x=".5" y=".5" width="219" height="123" rx="7.5"/><g filter="url(#sh)"><rect class="pop bd2" x="0" y="-38" width="56" height="28" rx="8"/></g><use href="#i-link" transform="translate(8 -29) scale(0.5833333333333334)" class="m"/><use href="#i-x" transform="translate(34 -29) scale(0.5833333333333334)" class="m"/></g>
-</g></g>
-<g class="o27"><g transform="translate(1528 730)"><rect class="sf" width="104" height="50" rx="8"/><rect class="bd" x=".5" y=".5" width="103" height="49" rx="7.5"/>
-<use href="#b-claude" x="12" y="10" width="16" height="16"/><text class="ui f" x="36" y="23">claude</text><g class="spin"><use href="#i-spinner" transform="translate(78 10) scale(0.5833333333333334)" class="m"/></g></g></g>
-<g class="o28"><g transform="translate(1648 730)"><rect class="sf" width="104" height="50" rx="8"/><rect class="bd" x=".5" y=".5" width="103" height="49" rx="7.5"/>
-<use href="#b-codex" x="12" y="10" width="16" height="16"/><text class="ui f" x="36" y="23">codex</text><g class=""><use href="#i-bell" transform="translate(78 10) scale(0.5833333333333334)" class="m"/></g></g></g>
 </g>
 <g class="hints" id="hints"><g transform="translate(640 0)">
-<g transform="translate(0 330)"><rect class="sel o53" x="-150" y="-17" width="300" height="24" rx="7"/><text class="ui m" x="-140" y="-1" style="font-size:11.5px">New terminal</text><rect class="bd" x="122.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="131" y="-1" text-anchor="middle" style="font-size:10.5px">T</text><rect class="bd" x="101.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="110" y="-1" text-anchor="middle" style="font-size:10.5px">⌘</text></g>
+<g transform="translate(0 330)"><rect class="sel o57" x="-150" y="-17" width="300" height="24" rx="7"/><text class="ui m" x="-140" y="-1" style="font-size:11.5px">New terminal</text><rect class="bd" x="122.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="131" y="-1" text-anchor="middle" style="font-size:10.5px">T</text><rect class="bd" x="101.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="110" y="-1" text-anchor="middle" style="font-size:10.5px">⌘</text></g>
 <g transform="translate(0 356)"><text class="ui m" x="-140" y="-1" style="font-size:11.5px">Go to pane</text><rect class="bd" x="122.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="131" y="-1" text-anchor="middle" style="font-size:10.5px">P</text><rect class="bd" x="101.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="110" y="-1" text-anchor="middle" style="font-size:10.5px">⌘</text></g>
 <g transform="translate(0 382)"><text class="ui m" x="-140" y="-1" style="font-size:11.5px">Command palette</text><rect class="bd" x="122.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="131" y="-1" text-anchor="middle" style="font-size:10.5px">P</text><rect class="bd" x="101.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="110" y="-1" text-anchor="middle" style="font-size:10.5px">⌘</text><rect class="bd" x="80.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="89" y="-1" text-anchor="middle" style="font-size:10.5px">⇧</text></g>
 <g transform="translate(0 408)"><text class="ui m" x="-140" y="-1" style="font-size:11.5px">Fit all panes</text><rect class="bd" x="122.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="131" y="-1" text-anchor="middle" style="font-size:10.5px">F</text><rect class="bd" x="101.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="110" y="-1" text-anchor="middle" style="font-size:10.5px">⌘</text><rect class="bd" x="80.5" y="-13.5" width="17" height="17" rx="4.5"/><text class="ui m" x="89" y="-1" text-anchor="middle" style="font-size:10.5px">⇧</text></g>
@@ -406,7 +406,7 @@ use.f{color:var(--fg)}use.m{color:var(--mut)}
 <use href="#i-filePlus" transform="translate(662.5 684.5) scale(0.625)" class="m"/>
 <use href="#i-note" transform="translate(692.5 684.5) scale(0.625)" class="m"/>
 <rect class="bdf" x="720" y="683" width="1" height="18"/>
-<rect class="sel o52" x="725" y="678" width="28" height="28" rx="8"/><use href="#i-link" transform="translate(731.5 684.5) scale(0.625)" class="m"/>
+<rect class="sel o56" x="725" y="678" width="28" height="28" rx="8"/><use href="#i-link" transform="translate(731.5 684.5) scale(0.625)" class="m"/>
 </g>
 <rect class="bd" x=".5" y=".5" width="1279" height="719" rx="11.5"/>
 </svg>
