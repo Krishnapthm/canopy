@@ -1,5 +1,5 @@
 //! Wire on the canvas: drawing, selecting and removing edges. The edge model is
-//! `crate::wire`; docs/wire.md describes both.
+//! `crate::wire`; docs/wiki/Wiring.md describes both.
 use super::*;
 use crate::wire;
 

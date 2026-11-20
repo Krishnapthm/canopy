@@ -813,7 +813,7 @@ has 120 programs (agents, editors, runtimes, tools, databases, infra);
   `props().pane` set to its id. Save props with `canvas.pane_set`; a string
   `props.text` is returned by `canopy pane read`. Actions declare
   `{icon, label, command, args}` and run with the pane selected, before Connect
-  and Close in the shared helper bar. See docs/mods.md.
+  and Close in the shared helper bar. See https://github.com/Krishnapthm/canopy/wiki/Layouts-and-Mods.
 - `"focusable": true` in `mod.json` lets `pane.go` give a shown copy the keyboard.
   It gets `"focus"` from `nextCommand()`: focus your own handle then
   (`this.handle.focus()`) and handle keys with `on_key_down`. The copy gets `"focus"`
@@ -1341,7 +1341,7 @@ expanding; `canvas.space` goes into another space and `canvas.home` back to Home
 creates a terminal here and `canvas.agents` lists installed agents here.
 `canvas.fit` toggles between fitting the selection (else everything in the current place) in the visible canvas
 (excluding the file panel) and the previous camera. The focus icon beside the
-folder icon does the same. See docs/keys.md for keys and preserved collisions.
+folder icon does the same. See https://github.com/Krishnapthm/canopy/wiki/Keys-and-Mouse for keys and preserved collisions.
 
 `canopy pane new file <png|jpg|gif|webp|pdf>` opens an image or PDF pane; `canopy pane read` on a PDF returns its page text.
 

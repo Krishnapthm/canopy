@@ -328,7 +328,7 @@ pub struct Hint {
     pub focusable: bool,
 }
 
-/// mod.json "pane": the mod draws canvas panes of kind mod:<name>. docs/mods.md.
+/// mod.json "pane": the mod draws canvas panes of kind mod:<name>. docs/wiki/Layouts-and-Mods.md.
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 pub struct PaneHint {
     pub label: String,

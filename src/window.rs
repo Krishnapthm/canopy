@@ -1524,7 +1524,7 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// Shares what the person looks at as `herdr.seen` (docs/labels.md): an
+    /// Shares what the person looks at as `herdr.seen` (docs/wiki/Labels.md): an
     /// agent on screen in the active window, once per turn while it stays
     /// there, so a phone marking it unread isn't undone by a screen nobody
     /// watches. Only ever raises it. True when a status changed.

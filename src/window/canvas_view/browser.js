@@ -1,4 +1,4 @@
-// Canopy's page script for browser panes (docs/panes.md "Browser"), injected at document
+// Canopy's page script for browser panes (docs/wiki/Browser-Pane.md), injected at document
 // start after the bundled react-grab, whose own start is turned off. Pick starts react-grab
 // with telemetry off; the picked element goes to Canopy as {pick: {...}} over wry's IPC.
 // Agent-facing data only: no source or HTML leaves the page beyond what Canopy cuts.

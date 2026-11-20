@@ -32,9 +32,11 @@ Read AGENTS.local.md too when present.
   The generated .d.ts files describe the full mod API.
 - Do not edit CHANGELOG.md. Preserve LICENSE and THIRD-PARTY-NOTICES.
 - Docs travel with the change. Whoever touches a feature updates its page in
-  docs/ (or adds one) and the doc comments in the same change: what it is,
-  how to use it, how it works, in that order. Short and exact, no filler, no
-  restating code. The orchestrator reviews docs for accuracy and brevity
+  docs/wiki/ (or adds one, and lists it in docs/wiki/_Sidebar.md) and the doc
+  comments in the same change: what it is, how to use it, how it works, in
+  that order. Follow docs/canopy/doc-style.md and put each fact on the page
+  docs/canopy/doc-owners.md names. Short and exact, no filler, no
+  restating code. docs/wiki/ is published to the GitHub Wiki on merge. The orchestrator reviews docs for accuracy and brevity
   before a phase is done and fixes what falls short. Document what you
   touch, not the whole app.
 

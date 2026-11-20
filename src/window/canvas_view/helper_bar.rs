@@ -1,4 +1,4 @@
-//! Shared pane helper bars. See docs/panes.md.
+//! Shared pane helper bars. See docs/wiki/Toolbar-and-Helper-Bar.md.
 use super::*;
 
 /// One button of a pane's helper bar: an icon running an app command.

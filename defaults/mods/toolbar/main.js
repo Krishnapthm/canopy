@@ -1,4 +1,4 @@
-// The canvas's floating bottom toolbar: tools and new panes. Mouse first; docs/panes.md.
+// The canvas's floating bottom toolbar: tools and new panes. Mouse first; docs/wiki/Toolbar-and-Helper-Bar.md.
 import { View, div } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { run, theme, ui, paneKinds, openOverlay, spaces, shared, setShared, readTextFile, home, window, keys } from "herdr";
@@ -21,7 +21,7 @@ export default class Toolbar extends View {
     this.sim = kinds.some(p => p.kind === "sim");
   }
   // Offers project setup once per local folder: the dialog appears when neither AGENTS.md nor
-  // CLAUDE.md holds Canopy's block, and any answer (Esc included) counts. docs/agent-setup.md.
+  // CLAUDE.md holds Canopy's block, and any answer (Esc included) counts. docs/wiki/Agent-Setup.md.
   // shortcut: local spaces only; remote folders need writeTextFile on another machine.
   offerSetup(cx) {
     const space = spaces().find(s => s.active);

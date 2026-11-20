@@ -1,4 +1,4 @@
-// Offers to add Canopy's marked block to a project's AGENTS.md or CLAUDE.md, and copies the same block for global files, which Canopy never writes. Props: folder? (default: the active space's). docs/agent-setup.md.
+// Offers to add Canopy's marked block to a project's AGENTS.md or CLAUDE.md, and copies the same block for global files, which Canopy never writes. Props: folder? (default: the active space's). docs/wiki/Agent-Setup.md.
 import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import { notify, readTextFile, writeTextFile, spaces, props, closeOverlay, theme, ui } from "herdr";

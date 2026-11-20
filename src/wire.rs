@@ -3,7 +3,7 @@
 //! talked to. Agents message each other with the core's own `hc send`, `hc wait` and `hc read`;
 //! nothing here carries a message. This file holds the edge model (`neighbors`, `born`, `all`),
 //! `canopy wire` (who you are and your wired peers), `canopy spawn` and the peer-change hook.
-//! Wired peers include file panes, which agents read with `canopy pane`; docs/wire.md explains it.
+//! Wired peers include file panes, which agents read with `canopy pane`; docs/wiki/Wiring.md explains it.
 
 use crate::canvas::{Document, Wire};
 use serde_json::Value;
@@ -55,7 +55,7 @@ fn hc_message(err: &str) -> String {
     serde_json::from_str::<Value>(err.trim()).ok().and_then(|v| v["error"]["message"].as_str().map(str::to_owned)).unwrap_or_else(|| err.trim().to_owned())
 }
 
-/// A terminal as `hc get --json` reports it (shape not checked against a live core, see docs/wire.md).
+/// A terminal as `hc get --json` reports it (shape not checked against a live core, see docs/wiki/Wiring.md).
 pub struct Rec {
     pub addr: String,
     pub name: String,

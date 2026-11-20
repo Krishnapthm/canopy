@@ -1,4 +1,4 @@
-//! PDF pane rendering, highlights and page text. See docs/panes.md.
+//! PDF pane rendering, highlights and page text. See docs/wiki/Images-and-PDFs.md.
 use super::*;
 use gpui_pdf::{Highlight, PdfEvent, PdfStyle, PdfView};
 use std::{io::Read, path::Path, rc::Rc};

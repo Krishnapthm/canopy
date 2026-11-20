@@ -1,6 +1,6 @@
 //! iOS Simulator access for sim panes through Xcode's public `xcrun simctl`:
 //! the device list, boot and screenshots. Blocking calls; run them off the UI
-//! thread. See docs/panes.md and docs/canopy/harness-notes/xcode-simctl.md.
+//! thread. See docs/wiki/Simulator-Devices.md and docs/canopy/harness-notes/xcode-simctl.md.
 use std::process::{Command, Stdio};
 
 /// One simulator from `simctl list -j devices available`.
