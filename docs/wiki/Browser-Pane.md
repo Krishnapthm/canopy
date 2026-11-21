@@ -4,9 +4,11 @@ A browser pane shows a web page on the canvas, right next to the agent working o
 
 ## Open a page
 
-1. Click **Browser** on the toolbar.
+1. Click **Browser** at the top right of the window.
 2. Type an address in **Address**, such as `localhost:3000`.
 3. Click **Open**.
+
+The page opens pinned to the top right corner of the window, where it stays while you pan and zoom the canvas. Click **Move to canvas** on its helper bar to put it on the canvas with your other panes, or **Pin to screen** to pin it again.
 
 Only `http` and `https` pages open. A bare local address like `localhost:3000` gets `http://`, and other bare hosts get `https://`.
 

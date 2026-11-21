@@ -3231,7 +3231,15 @@ impl AppWindow {
                     }
                 })),
         );
-        tabs = control().child(panel_button("canvas-tile", "icons/layout-grid.svg", c("muted-foreground"), c("hover"))
+        // Browser (the macOS web view) and simulator (a Mac with Xcode) open pinned at the top
+        // right, beside this bar; their helper bar moves them onto the canvas.
+        let pinned_new = |id: &'static str, icon: &'static str, label: &'static str, kind: &'static str| panel_button(id, icon, c("muted-foreground"), c("hover"))
+            .aria_label(label).tooltip(strip_tooltip(label.into(), None))
+            .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.pane_new", json!({"kind":kind,"pinned":true}), window, cx)));
+        tabs = control()
+            .when(cfg!(target_os = "macos"), |d| d.child(pinned_new("canvas-browser", "icons/globe.svg", "Browser", "browser")))
+            .when(crate::sim::available(), |d| d.child(pinned_new("canvas-sim", "icons/smartphone.svg", "Simulator", "sim")))
+            .child(panel_button("canvas-tile", "icons/layout-grid.svg", c("muted-foreground"), c("hover"))
             .aria_label("Tile view").tooltip(strip_tooltip("Tile view".into(), Some("canvas.tile")))
             .on_click(cx.listener(|this, _, window, cx| this.tile_canvas(true, window, cx))))
             .child(tabs);
@@ -3535,6 +3543,9 @@ const ZOOM_REST: Duration = Duration::from_millis(160);
 const WHEEL_GESTURE: Duration = Duration::from_millis(150);
 
 /// Whether the wheel with these modifiers zooms the canvas (Cmd on macOS, Ctrl elsewhere).
+/// Panes paint by z, with pinned panes over every canvas pane.
+pub(super) fn paint_order(p: &canvas::Pane) -> (bool, u64) { (p.pinned.is_some(), p.z) }
+
 fn wheel_zooms(m: Modifiers) -> bool {
     if cfg!(target_os = "macos") { m.platform } else { m.control }
 }
@@ -3543,9 +3554,6 @@ fn wheel_zooms(m: Modifiers) -> bool {
 /// for a plain wheel while a pan that began on the canvas last moved less than `WHEEL_GESTURE` ago.
 fn wheel_claimed(zoom: bool, last_pan: Option<std::time::Instant>, now: std::time::Instant) -> bool {
     zoom || last_pan.is_some_and(|t| now.saturating_duration_since(t) < WHEEL_GESTURE)
-/// Panes paint by z, with pinned panes over every canvas pane.
-pub(super) fn paint_order(p: &canvas::Pane) -> (bool, u64) { (p.pinned.is_some(), p.z) }
-
 }
 
 impl AppWindow {

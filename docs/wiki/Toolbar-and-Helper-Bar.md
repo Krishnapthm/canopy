@@ -15,10 +15,10 @@ The toolbar sits at the bottom center of the canvas layout. From left to right:
 | **Terminal** | Opens a [terminal](Terminals) in the current space. |
 | **Agent** | Opens a menu of the agent CLIs installed on your computer. Pick one to start it. See [Agents](Agents). |
 | **Open file** | Opens a [file](File-and-Note-Panes), [image or PDF](Images-and-PDFs) as a pane. |
-| **Browser** | Opens a [browser pane](Browser-Pane). Shown on macOS only. |
-| **Simulator** | Opens an [iOS simulator](Simulator-Devices). Shown only on a Mac where Xcode's `xcrun simctl` is installed. |
 | Mod pane kinds, such as **Note** | Opens that kind of pane. Each installed [mod pane kind](Layouts-and-Mods#mod-panes) gets a button. |
 | **Connect (select a pane first)** | Starts a wire from the selected pane. Select a pane before you click it. |
+
+**Browser** and **Simulator** sit in the bar at the top right of the window, beside **Tile view** and **Files**. They open the pane pinned: it stays in the top right corner while you pan and zoom the canvas. Click **Move to canvas** on its helper bar to place it on the canvas like any pane, and **Pin to screen** to pin it again. **Browser** shows on macOS only, and **Simulator** only on a Mac where Xcode's `xcrun simctl` is installed.
 
 To wire from the toolbar: select a pane, click **Connect**, use the arrow keys to choose the other pane, and press `Enter` (or `Esc` to cancel). Dragging a pane's **+** handle does the same with the mouse. See [Wiring](Wiring).
 
