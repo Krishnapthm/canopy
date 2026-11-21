@@ -64,7 +64,7 @@ Review the prompt, then press `Enter` in the agent to send it.
 
 Annotations from a browser or simulator pane go straight to its sole wired agent. When you need to choose a target, **Send** opens the quote menu and keeps the same choices, including **New agent with this**.
 
-Canopy pastes the annotated screenshot and any area crops as separate image paths, then pastes the numbered comments and submits the prompt. If the agent runs on another machine, Canopy copies the images there first. [Browser Pane](Browser-Pane#annotate) and [Simulator Devices](Simulator-Devices#annotate) describe the annotation tools.
+Canopy pastes the annotated screenshot and any area crops as separate image paths, then pastes the numbered comments and submits the prompt. If the agent runs on another machine, Canopy copies the images there first. It presses `Enter` only once the pasted text shows in the agent's prompt, and never while the agent is waiting for an approval: answer that first, then send again. If the agent stops accepting input after the paste, the text stays in its prompt unsubmitted and the annotation closes, so it is never sent twice. [Browser Pane](Browser-Pane#annotate) and [Simulator Devices](Simulator-Devices#annotate) describe the annotation tools.
 
 ## See also
 
