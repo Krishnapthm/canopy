@@ -173,3 +173,16 @@ stdout and the write boundaries.
    frame with keys sent afterward. Paste around 1000 characters and then
    increase the size without submitting, recording any truncation or
    lost input.
+
+## Live check, 2026-11-21 (Codex CLI 0.171.0)
+
+Driven in a PTY (120x40) with Canopy's bytes, one prompt submitted.
+
+- A bracketed paste of a bare absolute PNG path attaches: the draft shows `[Image #1]`.
+- Image paste, settle, text paste, settle, `\r`: submitted once, the image arrived (the model
+  named its colour).
+- Codex redraws its status line continuously, so "unchanged for 300 ms" never holds: each wait
+  reached Canopy's 3 s cap. Sending still works; it is 3 s slower per step than it needs to be.
+- At start Codex may show an update prompt whose default is "Update now". Anything that types
+  into a fresh Codex must not press Enter on it (Esc skips). Canopy only types into an agent
+  the person already uses, past that prompt.

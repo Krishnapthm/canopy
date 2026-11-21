@@ -159,3 +159,15 @@ Capture stdout and the write boundaries.
    for over 2 s, and send texts containing LF, CRLF, literal ESC, and
    `0x03`. Compare draft contents and interrupts. Increase paste size
    without submitting and record the first truncation or failure.
+
+## Live check, 2026-11-21 (Claude Code 2.1.322)
+
+Driven in a PTY (120x40) with Canopy's bytes, one prompt submitted.
+
+- A bracketed paste of a bare absolute PNG path attaches at once: the draft shows
+  `[Image #1]` and "Pasting…" while the file loads.
+- Image paste, text paste and `\r` in the same instant submit the message without the image:
+  Enter wins the race with the image load.
+- Image paste, wait until the screen is unchanged for 300 ms (about 0.4 s), text paste, wait
+  again (about 0.4 s): the draft holds `[Image #1]` and the text, nothing still pasting. Enter
+  then submits with the image. Canopy's send waits for the screen to settle before each step.
