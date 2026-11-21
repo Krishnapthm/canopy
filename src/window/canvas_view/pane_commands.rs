@@ -6,6 +6,13 @@ impl AppWindow {
     pub(in crate::window) fn pane_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
         let r = match name {
             "canvas.pane_new" => self.pane_new(a, window, cx),
+            "canvas.pane_pin" => {
+                let id = a["pane"].as_str().map(str::to_owned).or_else(|| self.canvas_state.selected.last().cloned());
+                match id {
+                    Some(id) => self.pin_pane(&id, a["pinned"].as_bool(), false, window, cx).map(|pinned| json!({"pane":id,"pinned":pinned})),
+                    None => Err("canvas.pane_pin needs pane".into()),
+                }
+            }
             "canvas.pane_read" | "canvas.pane_shot" if self.is_browser(a) => {
                 let shot = (name == "canvas.pane_shot").then(|| self.shot_path(a));
                 match shot.transpose().and_then(|shot| self.browser_reply(a["pane"].as_str().unwrap(), shot, window, cx)) {
@@ -17,7 +24,7 @@ impl AppWindow {
             "canvas.pane_read" => self.pane_read(a, cx),
             "canvas.pane_set" => self.pane_set(a, cx),
             "canvas.pane_shot" => self.pane_shot(a, window),
-            _ if self.is_browser(a) => self.browser_open(a["pane"].as_str().unwrap(), a["target"].as_str().unwrap_or_default(), window, cx),
+            _ if self.is_browser(a) => self.browser_open(a["pane"].as_str().unwrap(), a["target"].as_str().unwrap_or_default(), &a["tab"], window, cx),
             _ => self.pane_open(a, window, cx),
         };
         self.answer(r);
@@ -53,9 +60,19 @@ impl AppWindow {
             };
             (point, doc.room.clone())
         };
-        let url = if kind == "browser" { Some(super::browser::web_url(a["url"].as_str().ok_or("canvas.pane_new: a browser pane needs url")?)?) } else { None };
+        let url = if kind == "browser" {
+            Some(match &a["url"] {
+                Value::Null => String::new(),
+                Value::String(url) => super::browser::web_url(url)?,
+                _ => return Err("canvas.pane_new: url must be a string".into()),
+            })
+        } else { None };
         // A named simulator must exist before a pane points at it.
         let udid = match a["udid"].as_str() { Some(target) if kind == "sim" => super::sim::resolve(target)?, _ => String::new() };
+        // A pane opened pinned never lands on the canvas, so nothing should make room for it:
+        // the layout solve that adding runs is undone once it is pinned.
+        let pinned = a["pinned"].as_bool() == Some(true);
+        let before: Option<HashMap<String, canvas::Rect>> = pinned.then(|| self.canvas_state.doc.panes.iter().map(|p| (p.id.clone(), p.rect)).collect());
         let (id, path, kind) = if let Some(url) = url.clone() {
             (self.add_browser_pane(url, point, space, cx), None, kind.to_owned())
         } else if kind == "file" {
@@ -67,15 +84,53 @@ impl AppWindow {
         } else {
             (self.add_mod_pane(kind.to_owned(), point, space, cx), None, kind.to_owned())
         };
+        if let Some(before) = before {
+            for p in &mut self.canvas_state.doc.panes {
+                if let Some(r) = before.get(&p.id) { p.rect = *r; }
+            }
+            self.pin_pane(&id, Some(true), true, window, cx)?;
+        }
         if let Some(t) = a["wire"].as_str() {
             self.canvas_state.doc.connect(&id, t);
             self.canvas_changed(cx);
         }
         let mut reply = json!({"pane":id,"kind":kind,"wired":a["wire"].is_string()});
+        if pinned { reply["pinned"] = json!(true); }
         if let Some(path) = path { reply["path"] = json!(path); }
         if let Some(url) = url { reply["url"] = json!(url); }
         if kind == "sim" { reply["udid"] = json!(udid); }
         Ok(reply)
+    }
+
+    /// Pins a pane (`pin` None toggles) where it shows on screen, or with `corner` at the canvas's
+    /// top right, stepped in from panes already pinned there. Unpinning leaves it on the canvas
+    /// where it was showing, and the panes around it make room. Returns whether it is pinned.
+    pub(super) fn pin_pane(&mut self, id: &str, pin: Option<bool>, corner: bool, window: &Window, cx: &mut Context<Self>) -> Result<bool, String> {
+        const MARGIN: f32 = 16.;
+        let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
+        let size = [f32::from(size.width), f32::from(size.height)];
+        let doc = &mut self.canvas_state.doc;
+        let camera = doc.camera;
+        let stacked = doc.panes.iter().filter(|p| p.pinned.is_some() && p.id != id && doc.shows(p.space.as_ref())).count() as f32 * 24.;
+        let pane = doc.panes.iter_mut().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
+        let pin = pin.unwrap_or(pane.pinned.is_none());
+        if !pin {
+            pane.pinned = None;
+        } else if pane.pinned.is_none() {
+            let [x, y] = camera.to_screen([pane.rect[0], pane.rect[1]]);
+            let [w, h] = [pane.rect[2] * camera.zoom, pane.rect[3] * camera.zoom];
+            // It keeps its shape, at most the window's height and (in the corner) 60% of its width.
+            let room = if corner { size[0] * 0.6 } else { size[0] - 2. * MARGIN };
+            let k = (room / w).min((size[1] - 2. * MARGIN) / h).min(1.);
+            let [w, h] = [(w * k).max(240.), (h * k).max(120.)];
+            pane.pinned = Some(if corner { [size[0] - w - MARGIN - stacked, MARGIN + stacked, w, h] } else { [x, y, w, h] });
+        }
+        self.raise_pane(id, cx);
+        self.pin_panes();
+        if !pin { self.solve_layout(Some(id), None, cx); }
+        self.canvas_changed(cx);
+        cx.notify();
+        Ok(pin)
     }
 
     /// Shallow-merges mod state only after validating the complete saved props.
@@ -162,7 +217,7 @@ impl AppWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{canvas, json, Bounds, point, px, size, TestAppContext};
+    use super::{canvas, json, Bounds, point, px, size, TestAppContext, Value};
     use crate::window::tests::{in_own_process, open_window, running_alone};
     const TEST: &str = "window::canvas_view::pane_commands::tests::pane_commands_headless";
 
@@ -207,7 +262,7 @@ mod tests {
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == blank["pane"]), "a blank note closes without asking");
             assert!(this.canvas_state.doc.wires.is_empty());
             // A sim pane before simctl answers: read says what it knows; open needs a target.
-            this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.], z: 9, space: None });
+            this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.], z: 9, space: None, pinned: None });
             assert_eq!(this.pane_read(&json!({"pane":"p9"}), cx).unwrap()["text"], canvas::envelope("p9", "sim", &[("udid", "")], "No simulator picked yet."));
             assert_eq!(this.pane_open(&json!({"pane":"p9"}), window, cx).unwrap_err(), "canvas.pane_open needs target");
         });
@@ -221,16 +276,73 @@ mod tests {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
             assert_eq!(this.pane_new(&json!({"kind":"video","path":path}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, browser, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
-            assert_eq!(this.pane_new(&json!({"kind":"browser"}), window, cx).unwrap_err(), "canvas.pane_new: a browser pane needs url");
+            let overlay_count = this.overlays.len();
+            assert_eq!(this.run_as("canvas.pane_new", json!({"kind":"browser"}), true, window, cx), json!({"pane":"p1","kind":"browser","wired":false,"url":""}));
+            assert_eq!(this.run_as("canvas.pane_open", json!({"pane":"p1"}), true, window, cx), json!({"asked":"url"}));
+            this.canvas_state.selected = vec!["p1".into()];
+            assert_eq!(this.run_as("canvas.pane_open", Value::Null, true, window, cx), json!({"asked":"url"}));
+            assert_eq!(this.overlays.len(), overlay_count);
+            this.canvas_state.selected.clear();
+            let active = |this: &crate::window::AppWindow, id: &str| {
+                this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap().active_tab().unwrap().clone()
+            };
+            assert_eq!(active(this, "p1").url, "");
+            let (new, select, close) = ("canvas.browser_tab_new", "canvas.browser_tab_select", "canvas.browser_tab_close");
+            assert_eq!(this.run_as(new, json!({"pane":"p1"}), false, window, cx), json!({"pane":"p1","tab":"t2"}));
+            assert_eq!(active(this, "p1").id, "t2");
+            assert_eq!(this.run_as(select, json!({"pane":"p1","tab":"t1"}), false, window, cx), json!({"ok":true}));
+            assert_eq!(active(this, "p1").id, "t1");
+            assert_eq!(this.run_as(select, json!({"pane":"p1","tab":"missing"}), false, window, cx)["error"], "no tab missing in browser pane p1");
+            assert!(this.run_as(new, json!({"pane":"p1","url":"file:///tmp/page.html"}), false, window, cx)["error"].is_string());
+            assert_eq!(active(this, "p1").id, "t1");
+            assert_eq!(this.run_as(close, json!({"pane":"p1","tab":"t1"}), false, window, cx), json!({"ok":true}));
+            assert_eq!(active(this, "p1").id, "t2");
+            assert_eq!(this.run_as(close, json!({"pane":"p1"}), false, window, cx), json!({"ok":true}));
+            assert_eq!(active(this, "p1").url, "");
+            let pane = this.canvas_state.doc.panes.iter().find(|p| p.id == "p1").unwrap();
+            assert!(matches!(&pane.kind, canvas::Kind::Browser { tabs, active: 0, .. } if tabs.len() == 1));
+            let (tx, rx) = std::sync::mpsc::channel();
+            this.held_reply = Some(tx);
+            this.browser_reply("p1", None, window, cx).unwrap();
+            assert_eq!(rx.try_recv().unwrap()["text"], canvas::envelope("p1", "browser", &[("url", "")], "New tab"));
+            assert_eq!(this.run_as("canvas.pane_new", json!({"kind":"browser","url":null}), false, window, cx)["url"], "");
             assert_eq!(this.pane_new(&json!({"kind":"browser","url":"file:///etc/passwd"}), window, cx).unwrap_err(), "only http and https pages open in a browser pane, not file:");
+            // Dispatch above resyncs the canvas, which drops this test's stand-in terminal.
+            this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
             let web = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","wire":"t1"}), window, cx).unwrap();
-            assert_eq!(web, json!({"pane":"p1","kind":"browser","wired":true,"url":"http://localhost:3000"}));
-            assert_eq!(this.canvas_state.doc.panes.iter().find(|p| p.id == "p1").unwrap().kind, canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into() });
+            assert_eq!(web, json!({"pane":"p3","kind":"browser","wired":true,"url":"http://localhost:3000"}));
+            assert_eq!(active(this, "p3").url, "http://localhost:3000");
+            let url = "http://localhost:3000/pricing";
+            assert_eq!(this.run_as("canvas.pane_open", json!({"pane":"p3","target":url,"tab":"new"}), false, window, cx), json!({"pane":"p3","url":url,"tab":"t2"}));
+            assert_eq!(active(this, "p3").url, url);
+            assert_eq!(this.run_as(new, json!({"pane":"p3"}), false, window, cx)["tab"], "t3");
+            let (tx, rx) = std::sync::mpsc::channel();
+            this.held_reply = Some(tx);
+            this.pane_command("canvas.pane_read", &json!({"pane":"p3"}), window, cx);
+            assert_eq!(rx.try_recv().unwrap()["text"], canvas::envelope("p3", "browser", &[("url", "")], "New tab"));
+            // Pinned: it opens in the top right corner, and nothing on the canvas moves for it.
+            let rects = |this: &crate::window::AppWindow| this.canvas_state.doc.panes.iter().filter(|p| p.pinned.is_none()).map(|p| (p.id.clone(), p.rect)).collect::<Vec<_>>();
+            let before = rects(this);
+            let pinned = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","pinned":true}), window, cx).unwrap();
+            let id = pinned["pane"].as_str().unwrap().to_owned();
+            assert_eq!(pinned["pinned"], json!(true));
+            assert_eq!(rects(this), before);
+            let view = this.bounds.borrow()["canopy-canvas"].size;
+            let s = this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap().pinned.unwrap();
+            assert_eq!((s[0] + s[2], s[1]), (f32::from(view.width) - 16., 16.), "flush with the top right margin");
+            // Toggling moves it onto the canvas right where it showed, then pins it again there.
+            let shown = this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap().rect;
+            assert_eq!(this.pin_pane(&id, None, false, window, cx), Ok(false));
+            let pane = this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap();
+            assert_eq!((pane.pinned, &pane.rect[..2]), (None, &shown[..2]));
+            assert_eq!(this.pin_pane(&id, None, false, window, cx), Ok(true));
+            this.canvas_state.doc.panes.retain(|p| p.id != id);
             assert!(this.browser_reply("p1", None, window, cx).unwrap_err().contains("canopy pane"), "a read with no caller to answer refuses");
-            this.close_canvas_cell(&json!({"pane":"p1"}), window, cx);
+            this.close_canvas_cell(&json!({"pane":"p3"}), window, cx);
             assert_eq!(this.pane_new(&json!({"kind":"file","path":"README.md"}), window, cx).unwrap_err(), "canvas.pane_new: path must be absolute");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"point":null}), window, cx).unwrap_err(), "invalid canvas point");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"wire":"missing"}), window, cx).unwrap_err(), "missing is not a terminal pane on the canvas");
+            this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
             let reply = this.pane_new(&json!({"kind":"file","path":path,"wire":"t1"}), window, cx).unwrap();
             let id = reply["pane"].as_str().unwrap();
             assert_eq!(reply["wired"], true);

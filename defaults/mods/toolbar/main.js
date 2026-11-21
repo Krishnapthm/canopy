@@ -16,9 +16,8 @@ export default class Toolbar extends View {
   init() {
     // paneKinds() scans the mods folder: read it once, not every render.
     const kinds = paneKinds();
+    // Browser and simulator panes open from the canvas bar's top right, pinned.
     this.kinds = kinds.filter(p => p.kind.startsWith("mod:"));
-    // Listed only on a Mac with Xcode.
-    this.sim = kinds.some(p => p.kind === "sim");
   }
   // Offers project setup once per local folder: the dialog appears when neither AGENTS.md nor
   // CLAUDE.md holds Canopy's block, and any answer (Esc included) counts. docs/wiki/Agent-Setup.md.
@@ -50,17 +49,14 @@ export default class Toolbar extends View {
       () => run("canvas.hand", { on: name === "hand" }),
       name === "hand" ? "Space" : key("canvas.hand", { on: false }))
       .when(win.hand === (name === "hand"), el => el.bg(t.selected).text_color(t.foreground));
-    const divider = () => div().w(1).h(18).mx(4).bg(t.border);
-    return h_flex().gap(2).items_center().p(2)
+    const divider = () => div().w(1).h(18).mx(2).bg(t.border);
+    return h_flex().gap(2).items_center()
       .child(tool("select", "mods/toolbar/pointer.svg", "Select"))
       .child(tool("hand", "mods/toolbar/hand.svg", "Hand (pan)"))
       .child(divider())
       .child(button("terminal", "icons/square-terminal.svg", "Terminal", () => run("canvas.new"), key("canvas.new")))
       .child(button("agent", "icons/bot.svg", "Agent", () => openOverlay({ mod: "menu", kind: "popup", at: "above", width: 220, props: { tab: "canvas-agents", target: { ...(space ? { space: space.id } : {}), ...(space?.machine ? { machine: space.machine } : {}) } } }), key("canvas.agents")))
       .child(button("file", "mods/toolbar/file-plus.svg", "Open file", () => run("preview.open", { place: "canvas" }), key("preview.open", { place: "canvas" })))
-      // Browser panes need the macOS web view; the click asks for the address.
-      .when(win.platform === "macos", el => el.child(button("browser", "icons/globe.svg", "Browser", () => run("canvas.pane_new", { kind: "browser" }), key("canvas.pane_new", { kind: "browser" }))))
-      .when(this.sim, el => el.child(button("sim", "icons/smartphone.svg", "Simulator", () => run("canvas.pane_new", { kind: "sim" }), key("canvas.pane_new", { kind: "sim" }))))
       .children(this.kinds.map(p => button(p.kind, p.icon, p.label, () => run("canvas.pane_new", { kind: p.kind }), key("canvas.pane_new", { kind: p.kind }))))
       .child(divider())
       .child(button("wire", "icons/link.svg", "Connect (select a pane first)", () => run("canvas.connect", {}), key("canvas.connect")));

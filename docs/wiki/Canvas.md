@@ -6,11 +6,14 @@ The canvas is the open surface that holds a space's panes. Unlike a terminal mul
 
 This page covers moving around, selecting and arranging panes, and the views that help you focus. If "canvas mode" is new to you, read [Concepts](Concepts#typing-into-a-pane-and-canvas-mode) first.
 
+An empty space (or Home with no spaces) shows shortcut hints for new terminal, new agent, go to pane, command palette and fit; a hint shows only when its action has a key.
+
 ## Move around
 
 - **Pan:** scroll over the canvas (two fingers on a trackpad), drag with the middle mouse button, or hold `Space` and drag. You can also turn on the **Hand** tool on the toolbar and drag with the left button.
 - **Zoom:** hold `Cmd` (`Ctrl` on Linux and Windows) and scroll, or pinch. Zoom follows the pointer.
-- **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, and `Shift+0` to return to 100% zoom.
+- **Zoom limits:** zooming in stops while the biggest pane still fits the window with a margin, so no pane ever runs off screen. Zooming out stops once everything fits (or at 100% if everything already fits). Past either limit the zoom gives a little, then springs back.
+- **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
 
 Scrolling over a terminal you have not entered pans the canvas. Scrolling inside the terminal you have entered scrolls its output.
 
@@ -99,6 +102,10 @@ Edit these in `settings.json` (see [Settings and Themes](Settings-and-Themes)).
 | `space_fill` | `0.04` | How strongly space cards on Home are tinted with their color, from 0 to 1. |
 | `tile_gap` | `0` | Space between panes in tile view, in canvas pixels. |
 | `tile_focus_grows` | `false` | Lets the selected pane take more room in tile view. |
+
+## The status strip
+
+A 24px strip under the canvas shows the branch of the open space (when it has one) and one chip per agent: a status dot and the agent's name, agents that need you first. Click a chip to go to that agent's space and type into it right away. With more than six agents, a final **+N** chip opens the picker. The palette key sits at the right.
 
 ## How it works
 

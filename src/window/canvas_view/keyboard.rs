@@ -17,6 +17,7 @@ impl AppWindow {
         // Something else on the canvas has the keyboard (a rename, the thread input, the files panel).
         if !self.focus.is_focused(window) { return false; }
         if key.key == "escape" && self.wire_cancel(window, cx) { return true; }
+        if key.key == "escape" && self.canvas_state.browser_tab.is_some() { self.collapse_browser(window, cx); return true; }
         // A lone modifier tap (GPUI sends releasing Option as an "alt" key) is never swallowed:
         // its release must still reach the modifier listeners.
         if matches!(key.key.as_str(), "shift" | "control" | "alt" | "platform" | "function") { return false; }

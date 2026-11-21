@@ -203,7 +203,8 @@ fn main() {
                     }
                 }
                 mods::finish_shared();
-                async {}
+                // GPUI drops the windows before polling this future, so WebKit can remove the store.
+                async { drop(window::forget_browser_data_if_until_quit()); }
             })
             .detach();
             #[cfg(target_os = "macos")]
@@ -228,6 +229,12 @@ fn main() {
 
 /// The main window, on a connected core.
 pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiver<mods::Request>, cx: &mut App) {
+    // Never waits on WebKit: a page opened before the removal ends keeps its cookies for one more run.
+    if let Some(removal) = window::forget_browser_data_if_until_quit() {
+        cx.background_executor().spawn(async move {
+            if let Err(e) = removal.await { tracing::warn!("cannot remove the browser data store at startup: {e}"); }
+        }).detach();
+    }
             let (window_bounds, display_id) = place::initial(cx);
             let options = WindowOptions {
                 window_bounds: Some(window_bounds),

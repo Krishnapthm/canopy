@@ -74,7 +74,8 @@
   },
   "layout:main": {
     "cmd-a": "canvas.select_all",
-    "cmd-t": "canvas.new",
+    "cmd-t": "canvas.browser_tab_new",
+    "cmd-w": "canvas.browser_tab_close",
     "cmd-shift-t": {"command": "canvas.new", "args": {"like": true}},
     "ctrl-=": "canvas.zoom_in",
     "ctrl-+": "canvas.zoom_in",
@@ -91,6 +92,8 @@
     "cmd-shift-3": "view.terminals",
     "backspace": "canvas.close",
     "delete": "canvas.close",
+    "cmd-alt-i": "canvas.browser_inspect",
+    "ctrl-shift-i": "canvas.browser_inspect",
     "cmd-z": "canvas.undo",
     "cmd-j": "canvas.mode",
     "cmd-enter": "canvas.expand",

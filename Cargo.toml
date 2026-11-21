@@ -40,6 +40,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 fancy-regex = "0.19"
 notify = "7"
 sha2 = "0.10"
+tiny-skia = { version = "=0.11.4", default-features = false, features = ["std", "simd"] }
 # PDF pane: renders, selects and searches PDFs in GPUI (MIT, pulls hayro), vendored 0.7.0 with a header switch.
 gpui-pdf = { path = "vendor/gpui-pdf", features = ["search"] }
 
@@ -57,21 +58,23 @@ gpui-shell = { path = "vendor/gpui-kit/crates/shell", features = ["render-test-s
 gpui_wgpu = { package = "gpui-pre-wgpu", path = "vendor/gpui-pre-wgpu", features = ["test-support"] }
 skrifa = "=0.44.0"
 swash = "=0.2.10"
-tiny-skia = { version = "=0.11.4", default-features = false, features = ["std", "simd"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_linux = { package = "gpui-pre-linux", version = "=0.3.8", features = ["render-to-image"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-gpui-wry = { path = "vendor/gpui-kit/crates/webview" }
+gpui-wry = { path = "vendor/gpui-kit/crates/webview", features = ["inspector"] }
 # Browser panes (src/window/canvas_view/browser.rs): wry builds the WKWebView; objc2 takes its snapshot.
 # All already come in through gpui-wry's lb-wry, so they add no crates.
 wry = { package = "lb-wry", version = "0.53.3" }
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSError", "NSString", "NSURL"] }
-objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSEvent", "NSImage", "NSView", "NSWorkspace", "objc2-quartz-core"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSError", "NSProcessInfo", "NSString", "NSURL"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKContentWorld", "WKFrameInfo", "WKWebView", "WKWebViewConfiguration", "WKSnapshotConfiguration"] }
+# Core Animation mask and path bindings already come in through lb-wry.
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAShapeLayer", "objc2-core-foundation", "objc2-core-graphics"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGPath"] }
 gpui_macos = { package = "gpui-pre-macos", version = "=0.3.8", features = ["render-to-image"] }
 libc = "0.2"
 # The CVPixelBuffer type gpui's surface() takes, for live simulator panes.

@@ -49,7 +49,7 @@ Read AGENTS.local.md too when present.
   happens. A timer may exist only while work is pending.
 - Agent output is untrusted. Render it as text, never as markup or commands.
 - Every error a user causes or can see reaches them as a toast
-  (defaults/mods/toast), never only in a log.
+  (defaults/mods/toast), never only in a log. See Toasts below.
 - UIs list only installed agent CLIs and never name a missing one.
 - Write each verified harness fact, with the CLI version, into
   docs/canopy/harness-notes/.
@@ -95,6 +95,34 @@ without skill support.
   component, never hand-built per feature.
 - Mods and community panes declare their actions through the pane API; the
   app draws the bar. A feature without its helpers is not done.
+
+## Types
+
+Lauren Tan's type-system discipline, applied only to code a change touches.
+No sweeping rewrites.
+
+- Make illegal states unrepresentable: one enum, not two booleans that must
+  stay in sync.
+- Ids and other semantic strings that cross files get their own newtype.
+- Parse untyped input (JSON, args, socket, hook payloads) into domain types
+  once, at the boundary. A bad input becomes a toast.
+- Match domain enums exhaustively, with no `_ =>` catch-all.
+- Derive types from the authoritative schema; never hand-copy one.
+- Don't force it. Keep boring code when the shape is local and won't grow.
+
+## Toasts
+
+Toast:
+
+- every error the user caused or can see;
+- something that keeps happening out of sight (a page playing in the
+  background, an agent needing you or finishing while you are elsewhere);
+- the result of an action that lands outside where the user is looking (a
+  screenshot saved, a link copied, a file written elsewhere).
+
+Don't toast what is already visible in place, the routine success of a
+visible action, progress, or anything that repeats. Every toast that refers
+to something gets a jump action. One toast per event.
 
 ## Core vs mods
 

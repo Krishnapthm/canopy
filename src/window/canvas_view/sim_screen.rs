@@ -1,6 +1,6 @@
 //! The live device inside a sim pane (macOS): Xcode's bezel and hardware buttons around the
 //! simulator's framebuffer, drawn with gpui's `surface()` straight from its IOSurface, plus
-//! touch, keys, screenshots, recordings and annotations. It is its own entity so a frame redraws
+//! touch, keys, screenshots and recordings. It is its own entity so a frame redraws
 //! only this view, and so a pop-out window can show it. src/sim_live.rs runs the helper.
 //! See docs/wiki/Simulator-Devices.md.
 use super::*;
@@ -11,6 +11,8 @@ use std::collections::VecDeque;
 
 /// Space around the bezel inside the pane, in pixels.
 pub(super) const MARGIN: f32 = 12.;
+/// How long a hidden pane's helper keeps running before it stops.
+const LINGER: Duration = Duration::from_secs(5);
 /// Activity lines kept for `canopy pane read`.
 const LOG: usize = 12;
 
@@ -19,9 +21,7 @@ pub(super) enum SimEvent {
     Toast(String),
     /// A toast that runs a command when clicked.
     Saved { title: String, path: PathBuf },
-    /// Open the quote menu with this quote.
-    Quote(Value),
-    /// The header (status, recording time) changed.
+    /// The header or device bar changed.
     Changed,
     /// Live failed: show a fresh screenshot instead.
     Fallback,
@@ -50,15 +50,6 @@ pub(super) struct Recording {
     _tick: Task<()>,
 }
 
-/// An annotation in progress: a still of the screen and the marks drawn on it.
-pub(super) struct Annotation {
-    still: image::RgbaImage,
-    image: Arc<RenderImage>,
-    /// Strokes in 0..1 screen coordinates.
-    strokes: Vec<Vec<[f32; 2]>>,
-    drawing: bool,
-}
-
 pub(super) struct SimScreen {
     pub pane: String,
     pub device: Device,
@@ -79,7 +70,6 @@ pub(super) struct SimScreen {
     pub log: VecDeque<String>,
     typed: Option<(Instant, String)>,
     pub recording: Option<Recording>,
-    pub annotation: Option<Annotation>,
     pub popped: bool,
     /// The running helper's events; dropping it drops a stopped helper's late events.
     _pump: Option<Task<()>>,
@@ -87,6 +77,8 @@ pub(super) struct SimScreen {
     _agent: Option<Task<()>>,
     /// Stops a helper an agent started, once agents go quiet.
     _agent_idle: Option<Task<()>>,
+    /// Stops a helper whose pane left view, unless it comes back first.
+    _linger: Option<Task<()>>,
     _tasks: Vec<Task<()>>,
 }
 
@@ -105,7 +97,7 @@ impl SimScreen {
         Self {
             pane, device, info: None, shot: None, surface: None, helper: None, live: Live::Off, shown: false, agent_until: None,
             bounds: Rc::default(), touching: false, scrolling: None, focus: cx.focus_handle(), log: VecDeque::new(), typed: None,
-            recording: None, annotation: None, popped: false, _pump: None, _agent: None, _agent_idle: None, _tasks: vec![info],
+            recording: None, popped: false, _pump: None, _agent: None, _agent_idle: None, _linger: None, _tasks: vec![info],
         }
     }
 
@@ -116,14 +108,31 @@ impl SimScreen {
     }
 
     /// Starts or stops the helper to match `shown` (and recent agent input). A failed helper
-    /// stays down until `retry`.
+    /// stays down until `retry`. A helper that is no longer wanted lingers for `LINGER`, so
+    /// panning a pane out of view and back does not restart it.
     pub fn sync(&mut self, cx: &mut Context<Self>) {
-        let want = (self.shown || self.agent_until.is_some_and(|t| t > Instant::now())) && self.device.booted;
+        let want = self.wanted();
         match (&self.live, want) {
             (Live::Off, true) => self.start(cx),
-            (Live::Starting | Live::On { .. }, false) => self.stop(cx),
+            (Live::Starting | Live::On { .. }, false) => {
+                if self._linger.is_none() {
+                    self._linger = Some(cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(LINGER).await;
+                        let _ = this.update(cx, |this, cx| {
+                            this._linger = None;
+                            if !this.wanted() && !matches!(this.live, Live::Off | Live::Failed(_)) { this.stop(cx); }
+                        });
+                    }));
+                }
+                return;
+            }
             _ => {}
         }
+        self._linger = None;
+    }
+
+    fn wanted(&self) -> bool {
+        (self.shown || self.agent_until.is_some_and(|t| t > Instant::now())) && self.device.booted
     }
 
     /// Tries live again after a failure.
@@ -176,7 +185,8 @@ impl SimScreen {
 
     fn event(&mut self, event: Event, cx: &mut Context<Self>) {
         match event {
-            Event::Frame => cx.notify(),
+            // A frame nobody sees (a lingering helper) redraws nothing.
+            Event::Frame => if self.shown { cx.notify() },
             Event::Surface(surface) => {
                 self.surface = Some(surface.take());
                 if self.live == Live::Starting { self.live = Live::On { input: false }; cx.emit(SimEvent::Changed); }
@@ -263,11 +273,6 @@ impl SimScreen {
         cx.stop_propagation();
         self.focus.focus(window, cx);
         let Some(at) = self.to_screen(e.position) else { return };
-        if let Some(a) = &mut self.annotation {
-            a.strokes.push(vec![[at[0] as f32, at[1] as f32]]);
-            a.drawing = true;
-            return cx.notify();
-        }
         if !self.input_ready() { return self.retry(cx); }
         self.touching = true;
         self.send(Input::Touch { phase: Phase::Start, x: at[0], y: at[1] });
@@ -275,21 +280,12 @@ impl SimScreen {
         self.note(By::You, what);
     }
 
-    fn touch_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
-        if let Some(a) = &mut self.annotation {
-            if a.drawing && let Some(at) = self.to_screen_clamped(e.position) {
-                let a = self.annotation.as_mut().unwrap();
-                a.strokes.last_mut().unwrap().push([at[0] as f32, at[1] as f32]);
-                cx.notify();
-            }
-            return;
-        }
+    fn touch_move(&mut self, e: &MouseMoveEvent) {
         if !self.touching || e.pressed_button != Some(MouseButton::Left) { return; }
         if let Some(at) = self.to_screen_clamped(e.position) { self.send(Input::Touch { phase: Phase::Move, x: at[0], y: at[1] }); }
     }
 
-    fn touch_up(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        if let Some(a) = &mut self.annotation { a.drawing = false; return cx.notify(); }
+    pub(super) fn touch_up(&mut self, at: Point<Pixels>) {
         if !self.touching { return; }
         self.touching = false;
         if let Some(to) = self.to_screen_clamped(at) {
@@ -304,8 +300,9 @@ impl SimScreen {
 
     /// Two-finger scrolling on a trackpad drags the screen, as a finger would.
     fn scroll(&mut self, e: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        // A screen that takes no touch leaves the wheel to the canvas, which pans.
+        if !self.input_ready() { return; }
         cx.stop_propagation();
-        if !self.input_ready() || self.annotation.is_some() { return; }
         let ScrollDelta::Pixels(delta) = e.delta else { return };
         let Some(fit) = self.bounds.get().and_then(|b| self.fit([f32::from(b.size.width), f32::from(b.size.height)])) else { return };
         let [_, _, w, h] = fit.screen;
@@ -334,8 +331,6 @@ impl SimScreen {
     fn key_down(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         if k.key == "escape" && !k.modifiers.modified() {
-            // Escape hands the keyboard back to the canvas; an annotation ends first.
-            if self.annotation.take().is_some() { return cx.notify(); }
             window.blur(cx);
             return cx.stop_propagation();
         }
@@ -427,7 +422,7 @@ impl SimScreen {
         }));
     }
 
-    // ---- Screenshot, recording, annotation ----
+    // ---- Screenshot and recording ----
 
     /// Saves the screen to the Desktop as Simulator does, from the live framebuffer.
     pub fn screenshot(&mut self, by: By, cx: &mut Context<Self>) -> Result<PathBuf, String> {
@@ -483,35 +478,9 @@ impl SimScreen {
         Ok(Some(path))
     }
 
-    /// Starts annotating a still of the screen, or cancels the annotation.
-    pub fn annotate(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
-        if self.annotation.take().is_some() { cx.notify(); return Ok(()); }
-        let still = self.surface.as_ref().filter(|_| matches!(self.live, Live::On { .. })).and_then(sim_live::rgba)
-            .ok_or("The simulator is not live: nothing to annotate")?;
-        let mut bgra = still.clone();
-        for p in bgra.pixels_mut() { p.0.swap(0, 2); }
-        let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(bgra)]));
-        self.annotation = Some(Annotation { still, image, strokes: vec![], drawing: false });
-        cx.notify();
-        Ok(())
-    }
-
-    /// Burns the marks into the still, saves it and offers it to an agent as a quote.
-    fn send_annotation(&mut self, cx: &mut Context<Self>) {
-        let Some(mut a) = self.annotation.take() else { return };
-        let (w, h) = (a.still.width() as f32, a.still.height() as f32);
-        // The marks are as thick on the image as on screen.
-        let radius = (STROKE / 2. / self.scale().unwrap_or(1.) * self.info.as_ref().map_or(3., |i| i.scale)).max(2.);
-        for stroke in &a.strokes { burn(&mut a.still, stroke.iter().map(|p| [p[0] * w, p[1] * h]).collect(), radius); }
-        let path = std::env::temp_dir().join("canopy").join(format!("sim-{}-annotated-{}.png", self.pane, stamp().replace(' ', "-")));
-        let saved = std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string()).and_then(|_| a.still.save(&path).map_err(|e| e.to_string()));
-        cx.defer(move |cx| cx.drop_image(a.image, None));
-        if let Err(e) = saved { return cx.emit(SimEvent::Toast(format!("Can't save the annotation: {e}"))); }
-        let [pw, ph] = self.points().unwrap_or_default();
-        self.note(By::You, format!("annotated the screen ({} marks): {}", a.strokes.len(), path.display()));
-        let text = format!("Annotated screenshot of {} ({}), {}x{} points. The red marks show what to look at.", self.device.name, self.device.runtime, pw, ph);
-        cx.emit(SimEvent::Quote(json!({"path": path, "text": text, "pane": self.pane})));
-        cx.notify();
+    /// Copies the live framebuffer in RGBA for the shared annotation layer.
+    pub(super) fn annotation_still(&self) -> Option<image::RgbaImage> {
+        self.surface.as_ref().filter(|_| matches!(self.live, Live::On { .. })).and_then(sim_live::rgba)
     }
 
     /// The header's status after the runtime: Live, Recording 0:12, Screenshot...
@@ -535,35 +504,6 @@ pub(super) enum AgentStep {
     Note(String),
     Type(String),
     Press(String),
-}
-
-/// Annotation marks: this wide on screen, in pixels.
-const STROKE: f32 = 4.;
-const MARK: Rgba = Rgba { r: 1., g: 0.23, b: 0.19, a: 1. };
-
-/// Draws a polyline into an image as round dots along each segment.
-fn burn(image: &mut image::RgbaImage, points: Vec<[f32; 2]>, radius: f32) {
-    if points.is_empty() { return; }
-    let mark = image::Rgba([255, 59, 48, 255]);
-    let (w, h) = (image.width() as i32, image.height() as i32);
-    let mut dot = |c: [f32; 2]| {
-        let r = radius.ceil() as i32;
-        for dy in -r..=r {
-            for dx in -r..=r {
-                if (dx * dx + dy * dy) as f32 > radius * radius { continue; }
-                let (x, y) = (c[0] as i32 + dx, c[1] as i32 + dy);
-                if (0..w).contains(&x) && (0..h).contains(&y) { image.put_pixel(x as u32, y as u32, mark); }
-            }
-        }
-    };
-    for pair in points.windows(2).chain(std::iter::once(&points[points.len().saturating_sub(1)..])) {
-        let (a, b) = (pair[0], *pair.last().unwrap());
-        let steps = ((b[0] - a[0]).hypot(b[1] - a[1]) / (radius / 2.).max(1.)).ceil().max(1.) as usize;
-        for i in 0..=steps {
-            let t = i as f32 / steps as f32;
-            dot([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
-        }
-    }
 }
 
 fn desktop() -> PathBuf {
@@ -635,66 +575,24 @@ impl Render for SimScreen {
                     .on_mouse_up_out(MouseButton::Left, cx.listener(move |this, _: &MouseUpEvent, _, _| this.send(Input::Button { page, usage, down: false }))));
             }
         }
-        // The screen: an annotation still, the live framebuffer, else the last screenshot.
+        // The live framebuffer, or the last screenshot while it is unavailable.
         let screen = at(fit.screen).bg(gpui::black());
-        root = root.child(match (&self.annotation, &self.surface, &self.shot) {
-            (Some(a), ..) => screen.child(img(a.image.clone()).size_full()),
-            (None, Some(surface), _) if matches!(self.live, Live::On { .. }) => screen.child(gpui::surface(surface.clone()).size_full()),
-            (None, _, Some(shot)) => screen.child(img(shot.clone()).size_full()),
+        root = root.child(match (&self.surface, &self.shot) {
+            (Some(surface), _) if matches!(self.live, Live::On { .. }) => screen.child(gpui::surface(surface.clone()).size_full()),
+            (_, Some(shot)) => screen.child(img(shot.clone()).size_full()),
             _ => screen,
         });
         if let Some(chrome) = chrome { root = root.child(img(chrome.body.clone()).absolute().left(px(fit.body[0])).top(px(fit.body[1])).w(px(fit.body[2])).h(px(fit.body[3]))); }
-        if let Some(a) = &self.annotation {
-            let strokes = a.strokes.clone();
-            let [sx, sy, sw, sh] = fit.screen;
-            root = root.child(canvas(|_, _, _| {}, move |b, _, window, _| {
-                for stroke in &strokes {
-                    let mut path = gpui::PathBuilder::stroke(px(STROKE));
-                    let p = |q: &[f32; 2]| point(b.origin.x + px(sx + q[0] * sw), b.origin.y + px(sy + q[1] * sh));
-                    path.move_to(p(&stroke[0]));
-                    if stroke.len() == 1 { path.line_to(p(&stroke[0]) + point(px(0.5), px(0.5))); }
-                    for q in &stroke[1..] { path.line_to(p(q)); }
-                    if let Ok(path) = path.build() { window.paint_path(path, MARK); }
-                }
-            }).absolute().size_full());
-        }
         // Touch lands on the screen only; a drag keeps going outside it.
         let pane = self.pane.clone();
         root = root.child(at(fit.screen).id(SharedString::from(format!("sim-{pane}-touch")))
-            .cursor(if self.annotation.is_some() { CursorStyle::Crosshair } else { CursorStyle::Arrow })
+            .cursor(CursorStyle::Arrow)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::touch_down))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| this.scroll(e, cx))))
-            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| this.touch_move(e, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, cx| this.touch_up(e.position, cx)))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, cx| this.touch_up(e.position, cx)));
-        if let Some(a) = &self.annotation {
-            let marks = a.strokes.len();
-            let button = |id: &'static str, label: &'static str, primary: bool| div().id(id).px(px(10.)).py(px(4.)).rounded(px(ui::RADIUS_SM)).cursor_pointer()
-                .when(primary, |d| d.bg(c("foreground")).text_color(c("background"))).when(!primary, |d| d.hover(|d| d.bg(c("hover"))))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(label);
-            root = root.child(div().absolute().bottom(px(MARGIN)).left_0().right_0().flex().justify_center()
-                .child(div().flex().items_center().gap(px(4.)).p(px(4.)).rounded(px(ui::RADIUS)).bg(c("popover")).border_1().border_color(c("border")).shadow_md().text_size(px(12.))
-                    .child(div().px(px(6.)).text_color(c("muted-foreground")).child(if marks == 0 { "Draw on the screen".to_owned() } else { format!("{marks} mark{}", if marks == 1 { "" } else { "s" }) }))
-                    .child(button("sim-annotate-clear", "Clear", false).on_click(cx.listener(|this, _, _, cx| { if let Some(a) = &mut this.annotation { a.strokes.clear(); } cx.notify(); })))
-                    .child(button("sim-annotate-cancel", "Cancel", false).on_click(cx.listener(|this, _, _, cx| { let _ = this.annotate(cx); })))
-                    .child(button("sim-annotate-send", "Send to agent", true).on_click(cx.listener(|this, _, _, cx| this.send_annotation(cx))))));
-        }
-        root
-    }
-}
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, _| this.touch_move(e)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, _| this.touch_up(e.position)))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, _| this.touch_up(e.position)));
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn burn_draws_a_thick_line() {
-        let mut image = image::RgbaImage::new(20, 10);
-        super::burn(&mut image, vec![[2., 5.], [17., 5.]], 1.5);
-        assert_eq!(image.get_pixel(10, 5).0, [255, 59, 48, 255]);
-        assert_eq!(image.get_pixel(10, 6).0, [255, 59, 48, 255]);
-        assert_eq!(image.get_pixel(10, 9).0, [0, 0, 0, 0]);
-        // A single dot is still a mark.
-        let mut image = image::RgbaImage::new(5, 5);
-        super::burn(&mut image, vec![[2., 2.]], 1.);
-        assert_eq!(image.get_pixel(2, 2).0, [255, 59, 48, 255]);
+        root
     }
 }

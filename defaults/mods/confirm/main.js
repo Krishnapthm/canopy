@@ -1,6 +1,6 @@
 // Modified for Canopy.
 // Asks before something destructive, e.g. "Delete space?". Opened as a dialog.
-// Props: title, detail, panes? (icon, tint, name), command?, accept?, destructive?, dontAsk?.
+// Props: title, detail, panes? (icon, tint, name), command?, accept?, cancel?, destructive?, dontAsk?.
 // Enter confirms (runs the command), Esc cancels.
 
 import { View, div, svg, image } from "gpui-kit";
@@ -38,7 +38,7 @@ export default class Confirm extends View {
           .child(div().flex_1().min_w(0).child(pane.name))))))
       .when(p.dontAsk, (el) => el.child(ui.checkbox("dont-ask", this.dontAsk, "Don't ask again", (checked, cx) => { this.dontAsk = checked; cx.notify(); })))
       .child(ui.footer(
-        ui.button("no", p.command ? "Cancel" : "Close").on_click(close),
+        ui.button("no", p.cancel ?? (p.command ? "Cancel" : "Close")).on_click(close),
         ...(p.command ? [ui.button("yes", p.accept ?? "Confirm", p.destructive ? "destructive" : "primary").on_click(() => this.yes())] : []),
       ));
   }

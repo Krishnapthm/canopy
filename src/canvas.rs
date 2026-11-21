@@ -25,6 +25,12 @@ pub const PILL_WIDTH: f32 = 220.;
 pub const SPACE_CARD: Point = [260., 120.];
 /// The header strip of an expanded cell at zoom 1: the pill's one-line height.
 pub const HEADER: f32 = 36.;
+/// The header's height in world px at `zoom`: headers keep their screen size.
+pub fn header_world(zoom: f32) -> f32 { HEADER / zoom }
+/// A browser pane's header: a row of tabs over a row of navigation and the address field.
+pub const BROWSER_HEADER: f32 = 66.;
+/// The header height of a pane of this kind, in screen px at every zoom.
+pub fn header_height(kind: &Kind) -> f32 { if matches!(kind, Kind::Browser { .. }) { BROWSER_HEADER } else { HEADER } }
 /// Below this camera zoom an expanded cell shows a flat stand-in instead of live text.
 pub const EXPANDED_MIN_ZOOM: f32 = 0.5;
 
@@ -66,29 +72,40 @@ impl Camera {
         self.x = p[0] - anchor[0] / self.zoom;
         self.y = p[1] - anchor[1] / self.zoom;
     }
-    pub fn step(&mut self, direction: i32, anchor: Point) {
-        let i = ZOOMS
-            .iter()
-            .position(|z| *z == snap(self.zoom))
-            .unwrap_or(6);
-        self.zoom_at(
-            ZOOMS[(i as i32 + direction.signum()).clamp(0, 11) as usize],
-            anchor,
-        );
+    /// Zooms to the next `ZOOMS` step in `direction`, kept inside `range` (see `zoom_range`).
+    pub fn step(&mut self, direction: i32, anchor: Point, range: [f32; 2]) {
+        let next = if direction > 0 {
+            ZOOMS.into_iter().find(|z| *z > self.zoom * 1.01).unwrap_or(ZOOMS[11])
+        } else {
+            ZOOMS.into_iter().rev().find(|z| *z < self.zoom * 0.99).unwrap_or(ZOOMS[0])
+        };
+        self.zoom_at(next.clamp(range[0], range[1]), anchor);
     }
     pub fn fit(&mut self, rects: &[Rect], viewport: Point) {
         let Some(bounds) = union(rects) else { return };
-        let z = ((viewport[0] - 48.).max(1.) / bounds[2].max(1.))
-            .min((viewport[1] - 48.).max(1.) / bounds[3].max(1.));
-        self.zoom = ZOOMS
-            .into_iter()
-            .rev()
-            .find(|v| *v <= z)
-            .unwrap_or(ZOOMS[0]);
+        self.zoom = step_down(fit_zoom(bounds, viewport));
         self.x = bounds[0] + bounds[2] / 2. - viewport[0] / self.zoom / 2.;
         self.y = bounds[1] + bounds[3] / 2. - viewport[1] / self.zoom / 2.;
     }
 }
+/// Screen px kept clear around panes (both sides together) when fitting or zooming to a limit.
+pub const FIT_PAD: f32 = 80.;
+/// The zoom at which `rect` just fits `viewport` with `FIT_PAD` around it.
+fn fit_zoom(rect: Rect, viewport: Point) -> f32 {
+    ((viewport[0] - FIT_PAD).max(1.) / rect[2].max(1.)).min((viewport[1] - FIT_PAD).max(1.) / rect[3].max(1.))
+}
+/// The largest `ZOOMS` step at or below `z`.
+fn step_down(z: f32) -> f32 { ZOOMS.into_iter().rev().find(|v| *v <= z).unwrap_or(ZOOMS[0]) }
+/// The [min, max] zoom for a place whose panes are `rects`: zooming in stops while the biggest
+/// pane still fits the viewport with padding, zooming out once everything fits (the fit-all
+/// zoom, though never forced above 100%). Both stay inside `ZOOMS`.
+pub fn zoom_range(rects: &[Rect], viewport: Point) -> [f32; 2] {
+    let max = rects.iter().map(|r| fit_zoom(*r, viewport)).fold(ZOOMS[11], f32::min).max(ZOOMS[0]);
+    let min = union(rects).map_or(ZOOMS[0], |b| step_down(fit_zoom(b, viewport))).min(1.).min(max);
+    [min, max]
+}
+/// `range` stretched to hold `zoom`, so a zoom already past a limit is not pulled back mid-gesture.
+pub fn widen(range: [f32; 2], zoom: f32) -> [f32; 2] { [range[0].min(zoom), range[1].max(zoom)] }
 /// Screen px a pressed cell must move before the press is a drag; less is a click.
 pub const DRAG_THRESHOLD: f32 = 3.;
 /// A tile smaller than this (world px) shows its icon and name instead of terminal text.
@@ -158,6 +175,16 @@ pub fn tile(area: Rect, tiles: usize, active: Option<usize>, pills: &[Rect], gap
     (out, placed)
 }
 
+/// The camera that centers `rect` at the same zoom when it is not wholly inside `visible`
+/// (screen px); None when it already is.
+pub fn reveal(camera: Camera, rect: Rect, visible: Point) -> Option<Camera> {
+    let [x, y] = camera.to_screen([rect[0], rect[1]]);
+    let (w, h) = (rect[2] * camera.zoom, rect[3] * camera.zoom);
+    if x >= 0. && y >= 0. && x + w <= visible[0] && y + h <= visible[1] { return None; }
+    let z = camera.zoom;
+    Some(Camera { x: rect[0] + rect[2] / 2. - visible[0] / 2. / z, y: rect[1] + rect[3] / 2. - visible[1] / 2. / z, zoom: z })
+}
+
 /// Toggle a space fit in the visible canvas: a second press restores the camera from before
 /// the fit, unless the camera moved since, in which case it fits again.
 pub fn focus_fit(camera: &mut Camera, previous: &mut Option<(Camera, Camera)>, rects: &[Rect], visible: Point) {
@@ -184,8 +211,9 @@ pub fn nearest(rects: &[Rect], from: Rect, direction: Point) -> Option<usize> {
 pub fn zoom_factor(delta: f32) -> f32 { delta.clamp(-10., 10.).exp() }
 pub fn ease_out(t: f32) -> f32 { 1. - (1. - t.clamp(0., 1.)).powi(3) }
 pub fn friction(dt: f32) -> f32 { 0.92_f32.powf(dt / 0.016) }
-pub fn rubber_band(z: f32) -> f32 {
-    let limit = z.clamp(ZOOMS[0], ZOOMS[11]);
+/// Past `range`, a zoom gesture meets growing resistance instead of a hard stop.
+pub fn rubber_band(z: f32, range: [f32; 2]) -> f32 {
+    let limit = z.clamp(range[0], range[1]);
     let d = z - limit;
     limit + d / (1. + d.abs() / (limit * 0.08))
 }
@@ -196,12 +224,6 @@ pub fn remember_folder(recent: &mut Vec<String>, folder: &str) {
     recent.truncate(10);
 }
 
-pub fn snap(z: f32) -> f32 {
-    ZOOMS
-        .into_iter()
-        .min_by(|a, b| (a - z).abs().total_cmp(&(b - z).abs()))
-        .unwrap()
-}
 pub fn intersects(a: Rect, b: Rect) -> bool {
     a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
 }
@@ -585,6 +607,10 @@ pub struct Pane {
     /// The space (room) it lives in; None for Home.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space: Option<String>,
+    /// Pinned: its screen rect in the canvas area (px). It stays there while the camera moves;
+    /// `rect` follows it each frame (see `Document::pin`), so hit tests and wires need nothing special.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<Rect>,
 }
 
 /// What a pane shows, with its kind-specific fields saved under `props`.
@@ -604,11 +630,33 @@ pub enum Kind {
     Pdf { path: String, highlights: Vec<PdfMark> },
     /// A pane drawn by a mod. kind: "mod:<mod name>"; props: what the mod saved with canvas.pane_set.
     Mod { kind: String, props: serde_json::Map<String, serde_json::Value> },
-    /// A web page. url: the page shown, kept as the person navigates; home: the URL it
-    /// was last opened with (`canvas.pane_new`, `canvas.pane_open`), where Home returns.
-    Browser { url: String, home: String },
+    /// Web pages in one pane. Home and the optional fixed CSS viewport belong to the pane.
+    Browser { tabs: Vec<Tab>, active: usize, home: String, viewport: Option<[f32; 2]> },
     /// An iOS Simulator's screen. udid: the simulator; empty until the person picks one.
     Sim { udid: String },
+}
+
+/// One tab of a browser pane. Its id is unique within that pane.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Tab {
+    pub id: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub title: String,
+}
+
+/// The next local browser tab id, after the highest numeric suffix.
+pub fn next_tab_id(tabs: &[Tab]) -> String {
+    let max = tabs.iter().filter_map(|tab| tab_number(&tab.id)).max().unwrap_or(0);
+    if let Some(next) = max.checked_add(1) { return format!("t{next}"); }
+    // An imported id can exhaust the counter. One of the first len+1 ids must be free.
+    (1..=tabs.len() + 1).map(|n| format!("t{n}")).find(|id| tabs.iter().all(|tab| &tab.id != id)).unwrap()
+}
+
+fn tab_number(id: &str) -> Option<u64> {
+    let n = id.strip_prefix('t')?;
+    if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) { return None; }
+    n.parse().ok()
 }
 
 /// A highlight kept in canvas.json, never written into the PDF.
@@ -627,7 +675,17 @@ enum Builtin {
     Terminal { #[serde(default, skip_serializing_if = "Option::is_none")] size: Option<Point> },
     Sub { parent: String, sub: String },
     File { path: String },
-    Browser { url: String, home: String },
+    Browser {
+        #[serde(default)]
+        url: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tabs: Vec<Tab>,
+        #[serde(default)]
+        active: usize,
+        home: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        viewport: Option<[f32; 2]>,
+    },
     Image { path: String },
     Pdf {
         path: String,
@@ -661,7 +719,18 @@ impl TryFrom<RawKind> for Kind {
             Builtin::Terminal { size } => Self::Terminal { size },
             Builtin::Sub { parent, sub } => Self::Sub { parent, sub },
             Builtin::File { path } => Self::File { path },
-            Builtin::Browser { url, home } => Self::Browser { url, home },
+            Builtin::Browser { url, mut tabs, active, home, viewport } => {
+                if tabs.is_empty() {
+                    tabs.push(Tab { id: "t1".into(), url, title: String::new() });
+                }
+                let mut ids = std::collections::HashSet::new();
+                if tabs.iter().any(|tab| {
+                    tab_number(&tab.id).is_none() || !ids.insert(&tab.id)
+                }) {
+                    return Err("browser tabs need unique numeric tab ids".into());
+                }
+                Self::Browser { active: active.min(tabs.len() - 1), tabs, home, viewport }
+            }
             Builtin::Image { path } => Self::Image { path },
             Builtin::Pdf { path, highlights } => Self::Pdf { path, highlights },
             Builtin::Sim { udid } => Self::Sim { udid },
@@ -676,7 +745,11 @@ impl From<Kind> for RawKind {
             Kind::Terminal { size } => Builtin::Terminal { size },
             Kind::Sub { parent, sub } => Builtin::Sub { parent, sub },
             Kind::File { path } => Builtin::File { path },
-            Kind::Browser { url, home } => Builtin::Browser { url, home },
+            Kind::Browser { tabs, active, home, viewport } => {
+                let active = active.min(tabs.len() - 1);
+                let url = tabs[active].url.clone();
+                Builtin::Browser { url, tabs, active, home, viewport }
+            }
             Kind::Image { path } => Builtin::Image { path },
             Kind::Pdf { path, highlights } => Builtin::Pdf { path, highlights },
             Kind::Sim { udid } => Builtin::Sim { udid },
@@ -773,9 +846,23 @@ impl Pane {
     pub fn file(&self) -> Option<&str> {
         if let Kind::File { path } = &self.kind { Some(path) } else { None }
     }
-    /// The page a browser pane shows.
+    /// The tab a browser pane shows.
+    pub fn active_tab(&self) -> Option<&Tab> {
+        let Kind::Browser { tabs, active, .. } = &self.kind else { return None };
+        Some(&tabs[(*active).min(tabs.len() - 1)])
+    }
+
+    /// The address a browser pane shows.
     pub fn url(&self) -> Option<&str> {
-        if let Kind::Browser { url, .. } = &self.kind { Some(url) } else { None }
+        self.active_tab().map(|tab| tab.url.as_str())
+    }
+
+    /// Saves the active browser tab's address.
+    pub fn set_url(&mut self, url: String) {
+        if let Kind::Browser { tabs, active, .. } = &mut self.kind {
+            let index = (*active).min(tabs.len() - 1);
+            tabs[index].url = url;
+        }
     }
     /// The simulator udid for a sim pane (empty: none picked yet).
     pub fn sim(&self) -> Option<&str> {
@@ -962,6 +1049,19 @@ impl Document {
         changed
     }
 
+    /// Keeps pinned panes where they sit on screen: each one's world rect follows `camera`.
+    /// A pinned rect is drawn inside `viewport`, so a smaller window never hides it; its saved
+    /// spot comes back when the window grows again.
+    pub fn pin(&mut self, camera: Camera, viewport: Point) {
+        for p in &mut self.panes {
+            let Some(s) = p.pinned else { continue };
+            let x = s[0].min(viewport[0] - s[2]).max(0.);
+            let y = s[1].min(viewport[1] - s[3]).max(0.);
+            let [wx, wy] = camera.to_world([x, y]);
+            p.rect = [wx, wy, s[2] / camera.zoom, s[3] / camera.zoom];
+        }
+    }
+
     pub fn place(&mut self, terminal: &str, point: Point, size: Point) {
         let z = self
             .panes
@@ -980,6 +1080,7 @@ impl Document {
                 rect: [point[0], point[1], size[0], size[1]],
                 z,
                 space: self.room.clone(),
+                pinned: None,
             });
         }
     }
@@ -1003,7 +1104,7 @@ impl Document {
                 let z = self.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
                 let child = child_position(rect, &siblings, [PILL_WIDTH, 36.]);
                 // The cell belongs to its parent's space.
-                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child, z, space: space.clone() });
+                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child, z, space: space.clone(), pinned: None });
                 changed = true;
             }
         }
@@ -1064,12 +1165,12 @@ impl Document {
                 (None, _) => (terminal, Kind::Terminal { size }),
                 _ => continue,
             };
-            self.panes.push(Pane { id, kind, rect, z, space });
+            self.panes.push(Pane { id, kind, rect, z, space, pinned: None });
         }
         let max_z = self.panes.iter().map(|p| p.z).max().unwrap_or(0);
         self.file_ids = self.old_previews.len() as u64;
         for (i, Preview { path, rect, space }) in self.old_previews.drain(..).enumerate() {
-            self.panes.push(Pane { id: format!("p{}", i + 1), kind: Kind::File { path }, rect, z: max_z + 1 + i as u64, space });
+            self.panes.push(Pane { id: format!("p{}", i + 1), kind: Kind::File { path }, rect, z: max_z + 1 + i as u64, space, pinned: None });
         }
         self.version = 3;
     }
@@ -1122,11 +1223,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn browser_panes_have_the_taller_header() {
+        let browser = Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None };
+        assert_eq!(header_height(&browser), BROWSER_HEADER);
+        assert_eq!(header_height(&Kind::File { path: "/a.md".into() }), HEADER);
+    }
+
+    #[test]
     fn browser_panes_round_trip() {
-        let saved = serde_json::json!({"id":"p2","kind":"browser","props":{"url":"http://localhost:3000/a","home":"http://localhost:3000/"},"rect":[0.,0.,960.,640.],"z":1});
+        let legacy = serde_json::json!({"id":"p2","kind":"browser","props":{"url":"http://a","home":"http://a"},"rect":[0.,0.,960.,640.],"z":1});
+        let pane: Pane = serde_json::from_value(legacy).unwrap();
+        assert_eq!((pane.url(), pane.kind_name(), pane.boxed(), pane.verbs()), (Some("http://a"), "browser", true, &["read", "shot", "open", "close"][..]));
+        assert!(matches!(&pane.kind, Kind::Browser { tabs, active: 0, viewport: None, .. } if tabs.len() == 1));
+        assert_eq!(pane.active_tab().unwrap().id, "t1");
+
+        let mut saved = serde_json::to_value(pane).unwrap();
+        saved["props"]["tabs"].as_array_mut().unwrap().push(serde_json::json!({"id":"t2","url":"http://b","title":"Second"}));
+        saved["props"]["active"] = 99.into();
+        saved["props"]["viewport"] = serde_json::json!([1280., 800.]);
         let pane: Pane = serde_json::from_value(saved.clone()).unwrap();
-        assert_eq!((pane.url(), pane.kind_name(), pane.boxed(), pane.verbs()), (Some("http://localhost:3000/a"), "browser", true, &["read", "shot", "open", "close"][..]));
-        assert_eq!(serde_json::to_value(pane).unwrap(), saved);
+        assert!(matches!(&pane.kind, Kind::Browser { active: 1, viewport: Some([1280., 800.]), .. }));
+        assert_eq!((pane.url(), pane.active_tab().unwrap().title.as_str()), (Some("http://b"), "Second"));
+        saved["props"]["active"] = 1.into();
+        saved["props"]["url"] = "http://b".into();
+        assert_eq!(serde_json::to_value(&pane).unwrap(), saved);
+        assert_eq!(serde_json::from_value::<Pane>(saved).unwrap().kind, pane.kind);
     }
 
     #[test]
@@ -1142,9 +1263,28 @@ mod tests {
     }
 
     #[test]
+    fn reveal_centers_a_pane_only_when_it_is_off_screen() {
+        let camera = Camera { x: 0., y: 0., zoom: 1. };
+        assert_eq!(reveal(camera, [10., 10., 100., 100.], [800., 600.]), None);
+        let to = reveal(camera, [1000., 0., 200., 100.], [800., 600.]).unwrap();
+        assert_eq!(to.to_screen([1100., 50.]), [400., 300.]);
+    }
+
+    #[test]
+    fn stack_raises_one_pane_to_the_front() {
+        let mut doc = Document::default();
+        for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
+            doc.panes.push(Pane { id: id.into(), kind: Kind::Terminal { size: None }, rect: [0.; 4], z: i as u64, space: None, pinned: None });
+        }
+        assert!(doc.stack(&["a".into()], true));
+        assert_eq!(doc.panes.iter().find(|p| p.id == "a").unwrap().z, 2);
+        assert!(!doc.stack(&["a".into()], true));
+    }
+
+    #[test]
     fn next_file_id_counts_mod_panes() {
         let mut doc = Document::default();
-        doc.panes.push(Pane { id: "p5".into(), kind: Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None });
+        doc.panes.push(Pane { id: "p5".into(), kind: Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None, pinned: None });
         assert_eq!(doc.next_file_id(), "p6");
     }
 
@@ -1160,7 +1300,7 @@ mod tests {
 
     #[test]
     fn pane_kinds_and_verbs() {
-        let mut pane = Pane { id: "p1".into(), kind: Kind::File { path: "/a.md".into() }, rect: [0.; 4], z: 0, space: None };
+        let mut pane = Pane { id: "p1".into(), kind: Kind::File { path: "/a.md".into() }, rect: [0.; 4], z: 0, space: None, pinned: None };
         assert_eq!(pane.kind_name(), "file");
         assert_eq!(pane.verbs(), ["read", "shot", "close"]);
         pane.kind = Kind::Terminal { size: None };
@@ -1247,12 +1387,12 @@ mod tests {
         let mut doc = Document::default();
         let id = doc.next_file_id();
         assert_eq!(id, "p1");
-        doc.panes.push(Pane { id, kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None });
+        doc.panes.push(Pane { id, kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, pinned: None });
         doc.panes.remove(0);
         assert_eq!(doc.next_file_id(), "p2");
         let mut doc = Document::default();
         for id in ["p1", "p3"] {
-            doc.panes.push(Pane { id: id.into(), kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None });
+            doc.panes.push(Pane { id: id.into(), kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, pinned: None });
         }
         assert_eq!(doc.next_file_id(), "p4");
     }
@@ -1333,7 +1473,7 @@ mod tests {
         let mut doc = Document::default();
         doc.place("a",[0.,0.],[100.,50.]);
         doc.spaces.push(Space { space:"s".into(),rect:[0.,0.,200.,200.],color:"blue".into(),frame:true });
-        doc.panes.push(Pane { id: "p1".into(), kind: Kind::File { path: "/tmp/plan.md".into() }, rect: [24.,24.,100.,80.], z: 2, space: None });
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::File { path: "/tmp/plan.md".into() }, rect: [24.,24.,100.,80.], z: 2, space: None, pinned: None });
         let rest = Rest::capture(&doc);
         doc.spaces[0].rect = [500.,500.,900.,900.];
         doc.panes[1].rect[0] = 600.;
@@ -1392,7 +1532,7 @@ mod tests {
 
     #[test]
     fn undo_keeps_each_sub_agent_cell_apart() {
-        let sub = |id: &str, x| Pane { id: format!("sub:t1:{id}"), kind: Kind::Sub { parent: "t1".into(), sub: id.into() }, rect: [x, 0., 100., 36.], z: 0, space: None };
+        let sub = |id: &str, x| Pane { id: format!("sub:t1:{id}"), kind: Kind::Sub { parent: "t1".into(), sub: id.into() }, rect: [x, 0., 100., 36.], z: 0, space: None, pinned: None };
         let mut doc = Document { panes: vec![sub("a", 0.), sub("b", 200.)], ..Document::default() };
         let rest = Rest::capture(&doc);
         doc.panes[0].rect[0] = 50.;
@@ -1512,8 +1652,46 @@ mod tests {
             zoom: 0.52,
             ..Camera::default()
         };
-        c.step(1, [0., 0.]);
+        c.step(1, [0., 0.], [ZOOMS[0], ZOOMS[11]]);
         assert_eq!(c.zoom, 0.67);
+        c.step(1, [0., 0.], [0.25, 0.7]);
+        assert_eq!(c.zoom, 0.7);
+        c.step(-1, [0., 0.], [0.25, 0.7]);
+        assert_eq!(c.zoom, 0.67);
+    }
+    #[test]
+    fn pinned_panes_follow_the_camera_and_stay_in_view() {
+        let mut doc = Document::default();
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [0.; 4], z: 0, space: None, pinned: Some([600., 16., 340., 700.]) });
+        let camera = Camera { x: 100., y: -50., zoom: 2. };
+        doc.pin(camera, [1000., 800.]);
+        assert_eq!(doc.panes[0].rect, [400., -42., 170., 350.]);
+        assert_eq!(camera.to_screen([doc.panes[0].rect[0], doc.panes[0].rect[1]]), [600., 16.]);
+        // A narrower window keeps it whole on screen; its saved spot is untouched.
+        doc.pin(Camera::default(), [800., 800.]);
+        assert_eq!(doc.panes[0].rect[0], 460.);
+        assert_eq!(doc.panes[0].pinned, Some([600., 16., 340., 700.]));
+    }
+    #[test]
+    fn zoom_range_keeps_the_biggest_pane_on_screen() {
+        let view = [1080., 880.];
+        // Nothing on the canvas: the whole ZOOMS range.
+        assert_eq!(zoom_range(&[], view), [ZOOMS[0], ZOOMS[11]]);
+        // A 1000 px wide pane fits at 1.0 with padding, not beyond; a small one allows 2.
+        assert_eq!(zoom_range(&[[0., 0., 1000., 400.]], view)[1], 1.);
+        assert_eq!(zoom_range(&[[0., 0., 100., 100.]], view)[1], 2.);
+        // Two panes far apart: zooming out stops at the fit-all step, in at the bigger pane.
+        let r = zoom_range(&[[0., 0., 500., 400.], [3000., 0., 200., 200.]], view);
+        assert_eq!(r, [0.25, 2.]);
+        let r = zoom_range(&[[0., 0., 500., 400.], [1500., 0., 200., 200.]], view);
+        assert_eq!(r, [0.5, 2.]);
+        // A pane bigger than the window at any zoom: both ends pin to the smallest zoom.
+        assert_eq!(zoom_range(&[[0., 0., 99999., 100.]], view), [ZOOMS[0], ZOOMS[0]]);
+        // Left at 2 after the limit fell to 1: zooming out moves freely, not straight to 1.
+        assert_eq!(rubber_band(1.8, widen([0.25, 1.], 2.)), 1.8);
+        let mut c = Camera { zoom: 2., ..Camera::default() };
+        c.step(1, [0., 0.], widen([0.25, 1.], 2.));
+        assert_eq!(c.zoom, 2., "zoom in never zooms out");
     }
     
     
@@ -1771,9 +1949,10 @@ mod motion_tests {
         assert!((zoom_factor(2_f32.ln()) - 2.).abs() < 0.0001);
         assert_eq!(ease_out(0.), 0.); assert_eq!(ease_out(1.), 1.);
         assert!((friction(0.032) - friction(0.016).powi(2)).abs() < 0.0001);
-        assert_eq!(rubber_band(1.), 1.);
-        assert!(rubber_band(100.) > 2. && rubber_band(100.) < 2.16);
-        assert!(rubber_band(0.01) > 0.23);
+        let range = [ZOOMS[0], ZOOMS[11]];
+        assert_eq!(rubber_band(1., range), 1.);
+        assert!(rubber_band(100., range) > 2. && rubber_band(100., range) < 2.16);
+        assert!(rubber_band(0.01, range) > 0.23);
         let mut c = Camera::default(); let anchor = [142., 91.];
         let world = c.to_world(anchor); c.zoom_at(1.037, anchor);
         assert_eq!(c.to_world(anchor), world);

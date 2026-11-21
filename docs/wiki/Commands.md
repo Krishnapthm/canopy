@@ -179,7 +179,7 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 
 ## `canvas.pane_new`
 
-Open a pane of a kind ("file" with path, "browser" with url, "sim" on a Mac with Xcode, or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. A browser click without url asks for it. A sim pane shows udid (a simulator, or "booted"), else lists simulators to pick. Replies with pane, kind, path (files), url (browsers), udid (sim) and wired.
+Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. The pane opens at point (the middle of the view by default) or at the top right when pinned is true. Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
 
 | Argument | Required |
 |---|---|
@@ -189,6 +189,16 @@ Open a pane of a kind ("file" with path, "browser" with url, "sim" on a Mac with
 | `udid` | no |
 | `wire` | no |
 | `point` | no |
+| `pinned` | no |
+
+## `canvas.pane_pin`
+
+Pin a pane where it shows on screen, so it stays there while the canvas pans and zooms, or with pinned false move it back onto the canvas. Without pinned it toggles. Acts on pane, else the selected pane. Replies with pane and pinned.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `pinned` | no |
 
 ## `canvas.pane_set`
 
@@ -226,16 +236,52 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a pane at a target: a browser pane loads the URL (http or https; a bare localhost:3000 gets http://) and makes it its Home, and a click without target asks for it; a sim pane takes a udid or "booted" (it boots, and its current udid refreshes the screenshot). Kinds without open refuse.
+Point a browser or simulator pane at a target. A browser loads the URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
 
 | Argument | Required |
 |---|---|
 | `pane` | yes |
 | `target` | yes |
+| `tab` | no |
+
+## `canvas.browser_tab_new`
+
+Open a new tab in a browser pane. Pass a URL to load it, or omit url for an empty tab. Replies with pane and tab. With no pane and no single browser pane selected, runs canvas.new.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `url` | no |
+
+## `canvas.browser_tab_close`
+
+Close a tab in a browser pane. Without tab, closes the active tab. Closing the last tab leaves an empty tab. With no pane and no single browser pane selected, runs tab.close if bound.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `tab` | no |
+
+## `canvas.browser_tab_select`
+
+Switch to a browser tab by id. Pass pane or use the selected browser pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `tab` | yes |
 
 ## `canvas.browser_back`
 
 Go back in a browser pane's history (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_forward`
+
+Go forward in a browser pane's history (pane, else the selected pane).
 
 | Argument | Required |
 |---|---|
@@ -265,6 +311,14 @@ Make a browser pane live and pick an element on its page; the pick opens the quo
 |---|---|
 | `pane` | no |
 
+## `canvas.browser_annotate`
+
+Start or stop annotating a still of a browser page. Acts on pane, else the selected browser pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
 ## `canvas.browser_shot`
 
 Save a browser pane's page to <temp>/canopy/<pane>.png and toast the path (pane, else the selected pane).
@@ -275,7 +329,82 @@ Save a browser pane's page to <temp>/canopy/<pane>.png and toast the path (pane,
 
 ## `canvas.browser_external`
 
-Open a browser pane's page in the system browser (pane, else the selected pane).
+Open a browser pane's page, or the tab named by tab, in the system browser (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `tab` | no |
+
+## `canvas.browser_copy`
+
+Copy a browser pane's page URL to the clipboard and toast it (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_viewport`
+
+Set a browser viewport to responsive, 1280x800, 1024x768, mobile (375x812) or tablet (768x1024). The desktop alias selects 1280x800. Fixed CSS sizes scale to fit and center inside the pane. Responsive pages reflow as the pane resizes. Pass pane or use the selected browser pane.
+
+| Argument | Required |
+|---|---|
+| `size` | yes |
+| `pane` | no |
+
+## `canvas.browser_expand`
+
+Expand a browser pane's live page into a tab of the top strip that fills the canvas area, or collapse it again (pane, else the selected pane). Escape, any space tab or Home, and closing the pane collapse it.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_pop`
+
+Pop a browser pane out into its own window with the same header, every tab moving with it, or bring it back (pane, else the selected pane). The pane shows "Popped out" meanwhile.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_cookies`
+
+Set how long browser panes keep cookies and site data: until_quit or forever.
+
+| Argument | Required |
+|---|---|
+| `keep` | yes |
+
+## `canvas.browser_links`
+
+Set where HTTP and HTTPS links clicked in terminals open: built_in (a browser tab) or default (the system browser).
+
+| Argument | Required |
+|---|---|
+| `open` | yes |
+
+## `canvas.browser_open_file`
+
+Pick an .html or .htm file and open it in a new tab of a browser pane (pane, else the selected pane). The only way a file: page loads: the address field and agents are refused file: URLs.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_clear`
+
+Delete the cookies, storage and cache of every browser pane (asks first unless confirmed).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `confirmed` | no |
+
+## `canvas.browser_inspect`
+
+Open the Web Inspector for a browser pane in its own window, after snapping the pane to a usable size at 100% zoom.
 
 | Argument | Required |
 |---|---|
@@ -329,15 +458,32 @@ Start recording a simulator pane's screen to a movie on the Desktop, or stop and
 
 ## `canvas.sim_annotate`
 
-Draw on a still of a simulator pane's screen, then send it to an agent as a quote; again cancels. Acts on pane, else the selected simulator pane.
+Start or stop annotating a still of a simulator screen. Acts on pane, else the selected simulator pane.
 
 | Argument | Required |
 |---|---|
 | `pane` | no |
 
+## `canvas.annotate_send`
+
+Submit the annotated screenshot and comments to the wired agent, or open the agent picker. Acts on pane, else the selected annotation.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.annotate_action`
+
+Run a drawing tool or toolbar action in an active annotation. Used by its menus.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+| `action` | yes |
+
 ## `canvas.sim_zoom`
 
-Resize a simulator pane: step actual (1 point per pixel, the default), in or out. Acts on pane, else the selected simulator pane.
+Resize a simulator pane: step actual (1 point per screen pixel at the current zoom, the default), in or out. Acts on pane, else the selected simulator pane.
 
 | Argument | Required |
 |---|---|
@@ -435,7 +581,7 @@ Remove a drawn Wire edge between two cells.
 
 ## `quote.send`
 
-Expand an agent's cell and paste a quote and optional message without Enter, waiting up to 30 seconds for bracketed paste.
+Paste a quote and optional message, waiting up to 30 seconds for bracketed paste. Annotations also submit the prompt.
 
 | Argument | Required |
 |---|---|
@@ -452,6 +598,7 @@ Expand an agent's cell and paste a quote and optional message without Enter, wai
 | `region` | no |
 | `crop` | no |
 | `source` | no |
+| `images` | no |
 
 ## `canvas.expand`
 
@@ -766,7 +913,7 @@ Show only this pane of its tab, or all again.
 
 ## `pane.focus`
 
-Focus a pane (or the pane showing a terminal).
+Focus a pane (or the pane showing a terminal); a file, browser or other canvas pane is selected and brought into view.
 
 | Argument | Required |
 |---|---|
@@ -853,7 +1000,7 @@ No arguments.
 
 ## `agent.focus`
 
-Show an agent (sub-agents too).
+Show an agent (sub-agents too). On the canvas it also enters its pane.
 
 | Argument | Required |
 |---|---|

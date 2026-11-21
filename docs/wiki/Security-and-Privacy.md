@@ -15,6 +15,8 @@ Check the mods a layout loads too.
 
 The app home holds settings and mod data without encryption. See [Files and Folders](Files-and-Folders) for the file list.
 
+Browser panes keep cookies and site data on disk in a WebKit store tied to this Canopy home on macOS 14 and later. Canopy deletes the store at quit by default. See [Cookies and site data](Browser-Pane#cookies-and-site-data).
+
 Canopy exposes a local control socket in the app home so agents can inspect and drive the window.
 Treat access to that socket as access to the window and its commands.
 
@@ -25,6 +27,7 @@ A checksum from the same release detects a damaged download. It is not an indepe
 
 Unsigned macOS builds carry an ad hoc signature.
 The release installer preserves Developer ID signatures and verifies signed bundles.
+Canopy uses a private WebKit API to open and detach the [Web Inspector](Browser-Pane#web-inspector).
 
 See [Install](https://github.com/Krishnapthm/canopy#install) for installation and updates.
 

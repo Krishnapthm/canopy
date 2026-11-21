@@ -8,6 +8,7 @@
 use crate::hc::Core;
 mod floats;
 mod canvas_view;
+pub(crate) use canvas_view::browser::forget_browser_data_if_until_quit;
 mod ui;
 mod movable;
 mod pane_drag;
@@ -291,6 +292,26 @@ struct Copy {
     error: Option<String>,
 }
 
+/// A notification (defaults/mods/toast): see AGENTS.md "Toasts" for when to raise one.
+pub(crate) struct Toast { pub title: String, pub body: Option<String>, pub level: Level, pub action: Option<(String, Value)> }
+
+#[derive(Clone, Copy)]
+pub(crate) enum Level { Info, Success, Error }
+
+impl Level {
+    fn name(self) -> &'static str {
+        match self { Level::Info => "info", Level::Success => "success", Level::Error => "error" }
+    }
+}
+
+/// The overlay spec `open_overlay` takes for a toast; absent fields are left out.
+fn toast_json(t: &Toast) -> Value {
+    let mut note = json!({"title": t.title, "level": t.level.name()});
+    if let Some(body) = &t.body { note["body"] = json!(body); }
+    if let Some((name, args)) = &t.action { note["action"] = json!({"name": name, "args": args}); }
+    json!({"kind": "toast", "notification": note})
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum OverlayKind {
     Dialog,
@@ -559,7 +580,10 @@ impl AppWindow {
         w._canvas_keys = Some(cx.intercept_keystrokes(move |event, window, cx| {
             if window.window_handle() != owner_window { return; }
             let swallowed = owner.update(cx, |this, cx| {
-                this.record_shortcut(&event.keystroke) || this.canvas_key(&event.keystroke, window, cx)
+                if this.record_shortcut(&event.keystroke) { return true; }
+                #[cfg(target_os = "macos")]
+                if this.annotation_escape(&event.keystroke, window, cx) { return true; }
+                this.canvas_key(&event.keystroke, window, cx)
             }).unwrap_or(false);
             if swallowed { cx.stop_propagation(); }
         }));
@@ -1368,6 +1392,17 @@ impl AppWindow {
         self.agent = Some(addr.to_owned());
     }
 
+    /// On the canvas: goes to the agent's space, brings its pane into view and
+    /// enters it, so the next keystroke goes to that agent.
+    fn enter_canvas_agent(&mut self, addr: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(space) = self.canvas_state.doc.panes.iter().find(|c| c.id == addr).map(|c| c.space.clone()) else { return };
+        self.go_room(space, window, cx);
+        self.canvas_state.selected = vec![addr.clone()];
+        self.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+        // After entering: the expanded cell is what must be on screen.
+        self.reveal_pane(&addr, window, cx);
+    }
+
     /// The parent chain's top: the agent a sub-agent belongs to in the agent order.
     fn root_agent(&self, addr: &str) -> String {
         let mut cur = addr.to_owned();
@@ -1574,7 +1609,11 @@ impl AppWindow {
             return self.hand_keyboard();
         }
         let shown = if self.has_canvas() {
-            self.focused_cell().filter(|_| !self.canvas_state.mode).map(|t| t.focus.clone())
+            #[cfg(target_os = "macos")]
+            let annotation = self.annotation_focus(cx);
+            #[cfg(not(target_os = "macos"))]
+            let annotation = None;
+            annotation.or_else(|| self.focused_cell().filter(|_| !self.canvas_state.mode).map(|t| t.focus.clone()))
         } else if terminal_block(&self.chrome, self.focused_pane.as_deref()).is_some() {
             self.focused_pane.as_deref().and_then(|p| self.pane_focus(p, cx))
         } else if let Some(block) = self.agent_block() {
@@ -1872,6 +1911,11 @@ impl AppWindow {
         }
     }
 
+    /// Opens a notification toast.
+    pub(crate) fn toast(&mut self, t: Toast, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_overlay(mods::new_overlay_id(), toast_json(&t), window, cx);
+    }
+
     fn layout_notice(&mut self, title: &str, body: &str, window: &mut Window, cx: &mut Context<Self>) {
         let spec = json!({"kind":"toast", "notification":{"title":title,"body":body,"level":"info"}});
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
@@ -2025,6 +2069,7 @@ impl AppWindow {
                 if this.has_canvas() { this.open_preview(json!({"path":path}), window, cx); }
                 else { crate::links::open(&crate::links::Target::File(path.clone())); }
             }
+            TerminalEvent::OpenUrl(url) => this.open_link(&addr, url.clone(), window, cx),
             TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
             TerminalEvent::TitleChanged => this.publish(cx),
             TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
@@ -2776,6 +2821,7 @@ impl AppWindow {
         // Close the dialog holding the keyboard, not the terminal behind it.
         let implicit_close = match crate::keys::current(name).as_str() {
             "tab.close" => Self::arg(&args, "id").is_none(),
+            "canvas.browser_tab_close" => args["pane"].is_null() && self.selected_browser().is_none(),
             "pane.close" => Self::arg(&args, "pane").is_none(),
             _ => false,
         };
@@ -2879,10 +2925,13 @@ impl AppWindow {
             self.create_canvas(args, window, cx);
             return json!({"asked":"space"});
         }
-        // A browser pane opened or pointed by a click asks for its URL.
-        if person && ((name == "canvas.pane_new" && args["kind"] == "browser" && args["url"].is_null()) || (name == "canvas.pane_open" && args["target"].is_null())) {
-            self.ask_url(name, args, window, cx);
-            return json!({ "asked": "url" });
+        if person && name == "canvas.pane_open" && args["target"].is_null() {
+            if let Some(id) = Self::owned(&args, "pane").or_else(|| self.selected_browser()) {
+                if let Err(error) = self.focus_browser_url(&id, cx) { return json!({"error":error}); }
+            } else {
+                self.ask_url(args, window, cx);
+            }
+            return json!({"asked":"url"});
         }
         if person && name.ends_with(".rename") && args.get("name").is_none_or(Value::is_null) {
             self.ask_name(name, args, window, cx);
@@ -2946,16 +2995,11 @@ impl AppWindow {
         self.open_overlay("rename".into(), spec, window, cx);
     }
 
-    /// Asks the person for a web address, then runs `name` with it (url for pane_new,
-    /// target for pane_open), starting from the pane's current page.
-    fn ask_url(&mut self, name: &str, mut args: Value, window: &mut Window, cx: &mut Context<Self>) {
-        if !args.is_object() { args = json!({}); }
-        let pane = Self::arg(&args, "pane").and_then(|id| self.canvas_state.doc.panes.iter().find(|p| p.id == id));
-        let current = pane.and_then(|p| p.url()).unwrap_or("").to_owned();
-        let field = if name == "canvas.pane_open" { "target" } else { "url" };
+    /// Asks the person for a web address when Open URL has no pane target.
+    fn ask_url(&mut self, args: Value, window: &mut Window, cx: &mut Context<Self>) {
         let spec = json!({ "mod": "prompt", "kind": "dialog", "width": 420, "props": {
-            "title": "open a page", "label": "Address", "field": field, "value": current, "submit": "Open",
-            "hint": "localhost:3000 opens over http; other bare names over https", "command": { "name": name, "args": args } } });
+            "title": "open a page", "label": "Address", "field": "target", "value": "", "submit": "Open",
+            "hint": "localhost:3000 opens over http; other bare names over https", "command": { "name": "canvas.pane_open", "args": args } } });
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
     }
 
@@ -2973,8 +3017,12 @@ impl AppWindow {
             "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
-            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
-            "canvas.browser_back" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external" => self.browser_command(name, a, window, cx),
+            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" => self.pane_command(name, a, window, cx),
+            "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" => self.annotation_command(name, a, window, cx),
+            "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
+            | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
+            | "canvas.browser_cookies" | "canvas.browser_links" | "canvas.browser_clear" | "canvas.browser_inspect" | "canvas.browser_open_file"
+            | "canvas.browser_tab_new" | "canvas.browser_tab_select" | "canvas.browser_tab_close" => self.browser_command(name, a, person, window, cx),
             name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
             "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
@@ -3040,6 +3088,9 @@ impl AppWindow {
                 }
                 let addrs = self.model.remove_space(&id);
                 self.kill(&addrs, cx);
+                // Terminals went with the space; its file, browser and other boxed panes stay on the canvas document, so close them too (this tears down browser pages).
+                let boxed: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.boxed() && p.space.as_deref() == Some(id.as_str())).map(|p| p.id.clone()).collect();
+                if !boxed.is_empty() { self.close_boxed_panes(&boxed, cx); }
             }
             "space.rename" => {
                 let Some(id) = Self::owned(a, "id").or_else(|| self.model.active.clone()) else { return self.fail("no space to rename") };
@@ -3174,6 +3225,14 @@ impl AppWindow {
                 }
             }
             "pane.focus" => {
+                // A boxed canvas pane (file, browser, mod...): go to its place, select it, bring it into view.
+                if let Some(id) = Self::owned(a, "pane") && let Some(space) = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.boxed()).map(|p| p.space.clone()) {
+                    self.go_room(space, window, cx);
+                    self.canvas_state.selected = vec![id.clone()];
+                    self.reveal_pane(&id, window, cx);
+                    cx.notify();
+                    return;
+                }
                 if Self::arg(a, "pane").is_none()
                     && let Some(terminal) = Self::arg(a, "terminal")
                     && let Some(block) = self.chrome.visible_blocks().into_iter().find(|n| n.terminal() == Some(terminal))
@@ -3334,6 +3393,9 @@ impl AppWindow {
                     return self.fail(format!("no running terminal {t:?}"));
                 }
                 self.focus_agent(&t);
+                if self.has_canvas() {
+                    self.enter_canvas_agent(t, window, cx);
+                }
             }
             "agent.next" | "agent.prev" => {
                 let order = self.agent_order();
@@ -3823,6 +3885,7 @@ impl AppWindow {
                 self.win_drag = None;
             }
             self.bounds.borrow_mut().remove(&o.slot);
+            self.bounds.borrow_mut().remove(&format!("cover:overlay:{}", o.id));
             self.remove_copy(&o.slot, window, cx);
             if o.layout.is_some() {
                 self.sync(window, cx);
@@ -4458,8 +4521,14 @@ impl AppWindow {
                 Some(l) => self.render_node(l, &HashSet::new(), None, cx),
                 None => self.render_slot(&o.slot, cx),
             };
+            let bounds = self.bounds.clone();
+            let cover = format!("cover:overlay:{}", o.id);
+            let mut measure = Some(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
+                .absolute().size_full());
             let body = div()
                 .id(SharedString::from(format!("ov-{}", o.id)))
+                .relative()
+                .children(if o.kind == OverlayKind::Dialog { None } else { measure.take() })
                 .track_focus(&o.focus)
                 // Esc stays with terminals (agents use it to interrupt) and windows.
                 .when(o.layout.is_none() && o.kind.modal_keys(), |d| d.key_context("Overlay"))
@@ -4479,6 +4548,7 @@ impl AppWindow {
                         .absolute()
                         .inset_0()
                         .bg(hsla(0.0, 0.0, 0.0, 0.35))
+                        .children(measure)
                         .occlude()
                         .flex()
                         .items_center()
@@ -4896,7 +4966,9 @@ fn shadow(el: Div, s: Option<&str>) -> Div {
 
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_browser_inputs(window, cx);
         self.release_pdf_drops(window, cx);
+        self.pin_panes();
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
         crate::bench::frame_start();
@@ -5052,6 +5124,7 @@ impl Render for AppWindow {
             .children(self.image_region_tracker(cx))
             .child(pane_drag)
             .child(crate::bench::frame_end())
+            .children(self.browser_masks(cx))
     }
 }
 
@@ -5102,6 +5175,16 @@ fn changed_asset_paths(home: &std::path::Path, changed: &[std::path::PathBuf]) -
 mod tests {
     use gpui::{div, point, px, size, Context, IntoElement, Render, TestAppContext, Window};
     use gpui::prelude::*;
+
+    #[test]
+    fn toasts_become_overlay_specs() {
+        let full = super::Toast { title: "T".into(), body: Some("B".into()), level: super::Level::Error, action: Some(("pane.focus".into(), serde_json::json!({"pane": "p2"}))) };
+        assert_eq!(super::toast_json(&full), serde_json::json!({"kind":"toast","notification":{"title":"T","body":"B","level":"error","action":{"name":"pane.focus","args":{"pane":"p2"}}}}));
+        let bare = super::Toast { title: "T".into(), body: None, level: super::Level::Info, action: None };
+        assert_eq!(super::toast_json(&bare), serde_json::json!({"kind":"toast","notification":{"title":"T","level":"info"}}));
+        let levels = [super::Level::Info, super::Level::Success, super::Level::Error].map(super::Level::name);
+        assert_eq!(levels, ["info", "success", "error"]);
+    }
 
     #[test]
     fn going_back_into_a_split_column_takes_its_top_pane_whatever_the_fractions() {
@@ -6659,7 +6742,8 @@ export default class SystemToast extends View {
     #[test]
     fn shipped_layouts_parse_and_show_what_they_promise() {
         let main = super::default_layout("main");
-        assert!(matches!(main.kind, super::Kind::Canvas));
+        assert!(main.walk().iter().any(|n| matches!(n.kind, super::Kind::Canvas)));
+        assert!(main.find("status").is_some());
         assert!(main.find("sidebar").is_none());
         let classic=super::default_layout("classic");
         assert!(classic.find("sidebar").is_some());

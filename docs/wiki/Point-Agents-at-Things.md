@@ -62,7 +62,9 @@ Your highlights stay on the PDF pane, so you can click one later to quote it aga
 
 ## An element on a web page
 
-This one is the most useful when you build web apps. Open your dev server in a browser pane (macOS only), click **Pick an element to quote** in the helper bar, then click the element on the page.
+Open your dev server in a browser pane on macOS. Click **Annotate**, then click an element and save a comment such as “This card overflows on mobile.” Click **Send** to submit the screenshot and the element details to the wired agent. Drag from text to comment on a range, or drag elsewhere to comment on an area. [Browser Pane](Browser-Pane#annotate) describes the controls.
+
+To paste a single source reference for review, run `canvas.browser_pick` on the selected browser pane and click the element.
 
 For a React development build, Canopy finds the component and its source file, so the agent gets a direct pointer to the code:
 
@@ -80,14 +82,17 @@ For other pages, it describes the element by a CSS selector and its visible text
 
 ## A spot on the simulator
 
-For iOS apps on a simulator pane (macOS with Xcode), click **Annotate** in the helper bar. The screen freezes and you can draw on it. Circle the problem, then click **Send to agent**. The agent receives the marked-up screenshot and a line describing it:
+In an iOS simulator pane, click **Annotate** in the bottom bar. Click the button with the problem and save a comment like “Increase the tap target.” Click **Send**. The agent receives the screenshot and a message such as:
 
 ```text
-@/tmp/canopy/sim-p3-annotated-2026-11-20-14-02-11.png
-Annotated screenshot of iPhone 17 (iOS 26.1), 402x874 points. The red marks show what to look at.
+Annotated iPhone 17 (iOS 26.1), 402x874 points
+Image 1 is the annotated screenshot; numbered blue dots mark the comments.
+
+1. Increase the tap target
+   Point: x 120, y 300
 ```
 
-**When to use it:** layout bugs, wrong copy, anything that is faster to circle than to describe.
+For problems that span several controls, drag an area or draw an arrow. [Simulator Devices](Simulator-Devices#annotate) explains how to add a crop or use the live simulator while annotating.
 
 ## Terminals are different
 
@@ -98,10 +103,9 @@ Selecting text in a terminal pane copies it to the clipboard, like any terminal.
 Here is how the pieces combine when you work on a web app:
 
 1. An agent runs your dev server and opens it next to itself: `canopy pane new browser localhost:3000 --wire`. (See [Let Agents Show You](Let-Agents-Show-You).)
-2. You click around and find a broken layout. Click **Pick an element to quote**, click the broken element.
-3. In the quote menu, the agent wired to the browser pane is listed first. Type `This overflows on narrow screens` and click it.
-4. Read the prompt, press `Enter`. The agent already knows the component, file and line.
-5. When it says it is done, it can take a screenshot of the browser pane with `canopy pane shot` to check its own work, or you click **Reload** and look.
+2. Click **Annotate** and click the broken element. Save a comment such as `This overflows on narrow screens`.
+3. Click **Send**. The wired agent receives the screenshot and the element details, including the React component and source location when available.
+4. When it says it is done, it can take a screenshot of the browser pane with `canopy pane shot` to check its own work, or you click **Reload** and look.
 
 ## See also
 

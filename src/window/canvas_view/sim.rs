@@ -5,7 +5,17 @@
 use super::*;
 use crate::sim::{self, Device};
 #[cfg(target_os = "macos")]
+use super::helper_bar::{pane_actions, sim_device_actions};
+#[cfg(target_os = "macos")]
 use super::sim_screen::{AgentStep, By, Live, SimEvent, SimScreen};
+
+#[cfg(target_os = "macos")]
+fn bottom_bar_scale(zoom: f32, body_w: f32, buttons: usize) -> Option<f32> {
+    // The pill's buttons, gaps and padding scale. Its two borders and side margins stay fixed.
+    let scaled_width = 24. * buttons as f32 + 2. * buttons.saturating_sub(1) as f32 + 4.;
+    let max_scale = (body_w - 16. - 2.) / scaled_width;
+    (max_scale >= 0.5).then(|| zoom.clamp(0.75, 1.).min(max_scale))
+}
 
 /// What a sim pane's body shows.
 pub(super) enum Screen {
@@ -102,8 +112,10 @@ impl AppWindow {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-        // A phone in its bezel (about 1:2) under the 36 px header.
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], 340., 700.], z, space });
+        // A phone in its bezel (about 1:2) under the 36 px header, that size on screen at this zoom.
+        let size = [340., 700.];
+        let zoom = doc.camera.zoom;
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], size[0] / zoom, size[1] / zoom], z, space, pinned: None });
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         self.refresh_sim(&id, true, window, cx);
@@ -211,11 +223,6 @@ impl AppWindow {
             SimEvent::Saved { title, path } => self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{
                 "title":title, "body":path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                 "action":{"name":"canvas.sim_reveal","args":{"path":path}}}}), window, cx),
-            SimEvent::Quote(quote) => {
-                let mut quote = quote.clone();
-                quote["point"] = json!({"x": f32::from(self.pointer.x), "y": f32::from(self.pointer.y)});
-                self.quote_menu(&quote, window, cx);
-            }
             SimEvent::Changed => cx.notify(),
             SimEvent::Fallback => self.refresh_sim(pane, false, window, cx),
         }
@@ -287,7 +294,6 @@ impl AppWindow {
                     "canvas.sim_home" => { screen.update(cx, |s, _| s.press("home", By::You)); Ok(json!({})) }
                     "canvas.sim_screenshot" => screen.update(cx, |s, cx| s.screenshot(By::You, cx)).map(|p| json!({"path":p})),
                     "canvas.sim_record" => screen.update(cx, |s, cx| s.record(By::You, cx)).map(|p| json!({"path":p})),
-                    "canvas.sim_annotate" => screen.update(cx, |s, cx| s.annotate(cx)).map(|_| json!({})),
                     "canvas.sim_zoom" => self.zoom_sim(&id, a["step"].as_str().unwrap_or("actual"), &screen, cx),
                     "canvas.sim_pop" => { self.pop_sim(&id, &screen, window, cx); Ok(json!({})) }
                     _ => Err(format!("unknown command {name}")),
@@ -317,8 +323,9 @@ impl AppWindow {
         self.answer(Ok(json!({})));
     }
 
-    /// Resizes a sim pane so its device draws at 1 point per pixel ("actual"), or one step
-    /// larger ("in") or smaller ("out"). The top left stays put.
+    /// Resizes a sim pane so its device draws at 1 point per screen pixel at the current zoom
+    /// ("actual"), or one step larger ("in") or smaller ("out"). The top left stays put. After
+    /// that it scales with the canvas like any pane.
     #[cfg(target_os = "macos")]
     fn zoom_sim(&mut self, id: &str, step: &str, screen: &Entity<SimScreen>, cx: &mut Context<Self>) -> Result<Value, String> {
         let s = screen.read(cx);
@@ -328,10 +335,12 @@ impl AppWindow {
         let chrome = s.info.as_ref().and_then(|i| i.chrome.as_ref());
         let outer = chrome.map_or(points, |c| [c.size[0] + 2. * c.pad, c.size[1]]);
         let margin = 2. * super::sim_screen::MARGIN;
+        // On-screen pixels: the body is the pane minus its 36 px header and 1 px borders.
+        let size = [outer[0] * scale + margin + 2., outer[1] * scale + margin + canvas::HEADER + 2.];
+        let zoom = self.canvas_state.doc.camera.zoom;
         let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return Err(format!("no pane {id}")) };
-        // The body is the pane minus its 36 px header and 1 px borders.
-        pane.rect[2] = outer[0] * scale + margin + 2.;
-        pane.rect[3] = outer[1] * scale + margin + canvas::HEADER + 2.;
+        pane.rect[2] = size[0] / zoom;
+        pane.rect[3] = size[1] / zoom;
         self.solve_layout(Some(id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
@@ -392,7 +401,7 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// A sim pane's helper bar labels for its state: stop a recording, end an annotation,
+    /// A simulator bar's labels for its state: stop a recording, end an annotation,
     /// bring a popped-out device back.
     #[cfg(target_os = "macos")]
     pub(super) fn sim_relabel(&self, id: &str, mut actions: Vec<super::helper_bar::BarAction>, cx: &App) -> Vec<super::helper_bar::BarAction> {
@@ -401,7 +410,7 @@ impl AppWindow {
         for a in &mut actions {
             match a.command.as_str() {
                 "canvas.sim_record" if s.recording.is_some() => { a.icon = "icons/square.svg".into(); a.label = "Stop recording".into(); }
-                "canvas.sim_annotate" if s.annotation.is_some() => a.label = "Cancel annotation".into(),
+                "canvas.sim_annotate" if self.canvas_state.annotations.contains_key(id) => a.label = "Stop annotating".into(),
                 "canvas.sim_pop" if s.popped => a.label = "Bring back".into(),
                 _ => {}
             }
@@ -409,12 +418,37 @@ impl AppWindow {
         actions
     }
 
-    /// The helper bar of a popped-out sim pane's window: the device's own actions.
+    /// The device bar over a live simulator on the canvas.
+    #[cfg(target_os = "macos")]
+    pub(super) fn sim_bottom_bar(&self, pane: &canvas::Pane, zoom: f32, cx: &mut Context<Self>) -> Option<Div> {
+        let state = &self.canvas_state;
+        let id = &pane.id;
+        let udid = pane.sim().filter(|udid| !udid.is_empty())?;
+        if state.annotations.contains_key(id) || self.bars_hidden() || (state.bar_hover.as_ref() != Some(id) && !state.selected.contains(id)) {
+            return None;
+        }
+        let view = state.sims.get(id)?;
+        if view.popped.is_some() || !matches!(view.screen, Screen::Shot(_) | Screen::Loading) {
+            return None;
+        }
+        // Shown on a fallback screenshot too: Refresh is how the live view comes back.
+        if view.live.as_ref().is_some_and(|s| s.read(cx).device.udid != udid) {
+            return None;
+        }
+        let actions = sim_device_actions();
+        // A pinned pane keeps its screen size, so its bar does too.
+        let s = bottom_bar_scale(if pane.pinned.is_some() { 1. } else { zoom }, pane.rect[2] * zoom - 2., actions.len())?;
+        let actions = self.sim_relabel(id, actions, cx);
+        Some(self.bar(id, actions, s, false, cx).occlude())
+    }
+
+    /// The pop-out's device bar also offers Bring back.
     #[cfg(target_os = "macos")]
     pub(super) fn sim_bar(&self, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
-        const KEEP: [&str; 6] = ["canvas.sim_home", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate", "canvas.sim_device", "canvas.sim_pop"];
+        self.canvas_state.sims.get(id)?.live.as_ref()?;
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
-        let actions = super::helper_bar::pane_actions(pane, None).into_iter().filter(|a| KEEP.contains(&a.command.as_str())).collect();
+        let mut actions = sim_device_actions();
+        actions.push(pane_actions(pane, None).into_iter().find(|a| a.command == "canvas.sim_pop")?);
         let actions = self.sim_relabel(id, actions, cx);
         Some(self.bar(id, actions, 1., false, cx).into_any_element())
     }
@@ -595,12 +629,23 @@ impl Render for SimWindow {
 #[cfg(test)]
 #[cfg(target_os = "macos")]
 mod tests {
-    use super::{AgentStep, agent_steps};
+    use super::{AgentStep, agent_steps, bottom_bar_scale};
     use crate::sim_live::Input;
     use serde_json::json;
 
     fn inputs(steps: &[AgentStep]) -> Vec<Input> {
         steps.iter().filter_map(|s| if let AgentStep::Input(i) = s { Some(*i) } else { None }).collect()
+    }
+
+    #[test]
+    fn bottom_bar_scale_fits_available_width() {
+        assert_eq!(bottom_bar_scale(1., 400., 5), Some(1.));
+        assert_eq!(bottom_bar_scale(2., 400., 5), Some(1.));
+        let s = bottom_bar_scale(1., 100., 5).unwrap();
+        assert!(s >= 0.5 && (5. * 24. + 4. * 2. + 2. * 2.) * s + 2. <= 84.);
+        assert_eq!(bottom_bar_scale(1., 84., 5), Some(0.5));
+        assert_eq!(bottom_bar_scale(1., 83., 5), None);
+        assert_eq!(bottom_bar_scale(1., 50., 5), None);
     }
 
     #[test]

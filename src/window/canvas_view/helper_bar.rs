@@ -9,8 +9,19 @@ pub(super) struct BarAction {
     pub args: Value,
 }
 
-/// The helper bar buttons for a pane, left to right. Sub-agent cells have none.
+/// The helper bar buttons for a pane, left to right. Sub-agent cells have none. Browser and
+/// sim panes also pin to the screen, or move back onto the canvas, before Connect.
 pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAction> {
+    let mut actions = kind_actions(pane, hint);
+    if matches!(pane.kind, canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. }) {
+        let at = actions.iter().position(|a| a.command == "canvas.connect").unwrap_or(actions.len());
+        let (icon, label, pinned) = if pane.pinned.is_some() { ("icons/pin-off.svg", "Move to canvas", false) } else { ("icons/pin.svg", "Pin to screen", true) };
+        actions.insert(at, BarAction { icon: icon.into(), label: label.into(), command: "canvas.pane_pin".into(), args: json!({"pinned":pinned}) });
+    }
+    actions
+}
+
+fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAction> {
     match &pane.kind {
         canvas::Kind::Terminal { size } => vec![
             BarAction { icon: "icons/square-terminal.svg".into(), label: "Enter".into(), command: "canvas.enter".into(), args: json!({}) },
@@ -55,19 +66,17 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ]).collect(),
         canvas::Kind::Browser { .. } => [
-            ("icons/arrow-left.svg", "Back", "canvas.browser_back"),
-            ("icons/rotate-cw.svg", "Reload", "canvas.browser_reload"),
-            ("icons/house.svg", "Home", "canvas.browser_home"),
-            ("icons/globe.svg", "Open URL", "canvas.pane_open"),
-            ("icons/crosshair.svg", "Pick an element to quote", "canvas.browser_pick"),
-            ("icons/camera.svg", "Screenshot", "canvas.browser_shot"),
-            ("icons/external-link.svg", "Open in browser", "canvas.browser_external"),
-            ("icons/link.svg", "Connect", "canvas.connect"),
-            ("icons/x.svg", "Close", "canvas.close"),
-        ].into_iter().map(|(icon, label, command)| BarAction {
-            icon: icon.into(), label: label.into(), command: command.into(),
-            args: if command == "canvas.pane_open" { json!({"pane":pane.id}) } else { json!({}) },
-        }).collect(),
+            ("icons/arrow-left.svg", "Back".to_owned(), "canvas.browser_back"),
+            ("icons/rotate-cw.svg", "Reload".to_owned(), "canvas.browser_reload"),
+            ("icons/house.svg", "Home".to_owned(), "canvas.browser_home"),
+            ("icons/pencil.svg", "Annotate".to_owned(), "canvas.browser_annotate"),
+            ("icons/camera.svg", "Screenshot".to_owned(), "canvas.browser_shot"),
+            ("icons/external-link.svg", super::browser::open_in_label(), "canvas.browser_external"),
+            ("icons/maximize-2.svg", "Expand".to_owned(), "canvas.browser_expand"),
+            ("icons/picture-in-picture-2.svg", "Pop out".to_owned(), "canvas.browser_pop"),
+            ("icons/link.svg", "Connect".to_owned(), "canvas.connect"),
+            ("icons/x.svg", "Close".to_owned(), "canvas.close"),
+        ].into_iter().map(|(icon, label, command)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args: json!({}) }).collect(),
         canvas::Kind::Sim { udid } if udid.is_empty() => vec![
             BarAction { icon: "icons/smartphone.svg".into(), label: "Choose simulator".into(), command: "canvas.sim_device".into(), args: json!({}) },
             BarAction { icon: "icons/external-link.svg".into(), label: "Open in Device Hub".into(), command: "canvas.sim_hub".into(), args: json!({}) },
@@ -75,16 +84,11 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ],
         canvas::Kind::Sim { .. } => [
-            ("icons/house.svg", "Home", "canvas.sim_home", json!({})),
-            ("icons/camera.svg", "Screenshot", "canvas.sim_screenshot", json!({})),
-            ("icons/video.svg", "Record", "canvas.sim_record", json!({})),
-            ("icons/pencil.svg", "Annotate", "canvas.sim_annotate", json!({})),
             ("icons/zoom-out.svg", "Zoom out", "canvas.sim_zoom", json!({"step":"out"})),
             ("icons/scan.svg", "Actual size", "canvas.sim_zoom", json!({"step":"actual"})),
             ("icons/zoom-in.svg", "Zoom in", "canvas.sim_zoom", json!({"step":"in"})),
             ("icons/picture-in-picture-2.svg", "Pop out", "canvas.sim_pop", json!({})),
             ("icons/smartphone.svg", "Choose simulator", "canvas.sim_device", json!({})),
-            ("icons/rotate-cw.svg", "Refresh", "canvas.sim_refresh", json!({})),
             ("icons/external-link.svg", "Open in Device Hub", "canvas.sim_hub", json!({})),
             ("icons/link.svg", "Connect", "canvas.connect", json!({})),
             ("icons/x.svg", "Close", "canvas.close", json!({})),
@@ -93,22 +97,45 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -
     }
 }
 
+/// Device actions shared by the simulator pane and its pop-out.
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn sim_device_actions() -> Vec<BarAction> {
+    [
+        ("icons/house.svg", "Home", "canvas.sim_home"),
+        ("icons/rotate-cw.svg", "Refresh", "canvas.sim_refresh"),
+        ("icons/camera.svg", "Screenshot", "canvas.sim_screenshot"),
+        ("icons/video.svg", "Record", "canvas.sim_record"),
+        ("icons/pencil.svg", "Annotate", "canvas.sim_annotate"),
+    ].into_iter().map(|(icon, label, command)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args: json!({}) }).collect()
+}
+
 /// Whether a pane's Connect button shows as active: its wire follows the pointer, or any edge
 /// (drawn or born) touches it.
 fn connect_active(id: &str, wiring: Option<&str>, edges: &[canvas::Wire]) -> bool {
     wiring == Some(id) || edges.iter().any(|w| w.a == id || w.b == id)
 }
 
+pub(super) fn bar_shell(s: f32) -> Div {
+    div().flex().p(px(2. * s)).gap(px(2. * s)).rounded(px(ui::RADIUS))
+        .bg(c("popover")).border_1().border_color(c("border")).shadow_md()
+}
+
 impl AppWindow {
+    /// Keep floating bars out of the way during canvas gestures.
+    pub(super) fn bars_hidden(&self) -> bool {
+        let state = &self.canvas_state;
+        state.drag.is_some() || state.cell_resize.is_some() || state.preview_drag.is_some()
+            || state.space_drag.is_some() || state.marquee.is_some() || state.rest.is_some() || (state.wire.drag.is_some() && !state.wire.sticky)
+            || state.region.is_some()
+    }
+
     /// Helper bars for the hovered pane and every selected pane of the shown
     /// place: a pill of icon buttons above each pane's top-left corner.
     pub(super) fn helper_bars(&self, doc: &Document, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        #[cfg(target_os = "macos")]
+        self.bounds.borrow_mut().retain(|k, _| !k.starts_with("cover:bar:") && !k.starts_with("cover:annotate"));
+        if self.bars_hidden() { return vec![]; }
         let state = &self.canvas_state;
-        if state.drag.is_some() || state.cell_resize.is_some() || state.preview_drag.is_some()
-            || state.space_drag.is_some() || state.marquee.is_some() || state.rest.is_some() || (state.wire.drag.is_some() && !state.wire.sticky)
-            || state.region.is_some() {
-            return vec![];
-        }
         // A wire following the pointer keeps its pane's bar up, to show Connect as active.
         let wiring = state.wire.drag.as_ref().filter(|_| state.wire.sticky).map(|d| d.0.as_str());
         let edges = crate::wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
@@ -134,19 +161,26 @@ impl AppWindow {
             };
             #[cfg(target_os = "macos")]
             let actions = self.sim_relabel(&id, actions, cx);
+            let actions = self.browser_relabel(&id, actions);
             let [x, y] = doc.camera.to_screen([rect[0], rect[1]]);
-            out.push(self.bar(&id, actions, s, connect_active(&id, wiring, &edges), cx).absolute().left(px(x)).top(px(y - 8. - bar_height)).into_any_element());
+            let bar = self.bar(&id, actions, s, connect_active(&id, wiring, &edges), cx)
+                .absolute().left(px(x)).top(px(y - 8. - bar_height));
+            #[cfg(target_os = "macos")]
+            let bar = {
+                let bounds = self.bounds.clone();
+                let cover = format!("cover:bar:{id}");
+                bar.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
+                    .absolute().size_full())
+            };
+            out.push(bar.into_any_element());
         }
         out
     }
 
-    /// One helper bar: a pill of icon buttons for pane `id`, at scale `s`. The canvas places
-    /// it above the pane; a sim pane's pop-out window draws it too.
-    /// One helper bar pill. `connected`: draw Connect as active (see `connect_active`).
+    /// One helper bar pill at scale `s`, positioned by its caller. `connected` highlights Connect.
     pub(super) fn bar(&self, id: &str, actions: Vec<BarAction>, s: f32, connected: bool, cx: &mut Context<Self>) -> Div {
         let state = &self.canvas_state;
-        let mut bar = div().flex().p(px(2. * s)).gap(px(2. * s)).rounded(px(ui::RADIUS))
-            .bg(c("popover")).border_1().border_color(c("border")).shadow_md();
+        let mut bar = bar_shell(s);
         for BarAction { icon, label, command, args } in actions {
             let active = connected && command == "canvas.connect";
             let target = id.to_owned();
@@ -177,13 +211,13 @@ impl AppWindow {
 
 #[cfg(test)]
 mod helper_bar_tests {
-    use super::{connect_active, pane_actions};
+    use super::{connect_active, pane_actions, sim_device_actions};
     use crate::canvas::{self, Wire};
     use serde_json::json;
 
     #[test]
     fn actions_follow_the_pane_kind() {
-        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.], z: 1, space: None };
+        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.], z: 1, space: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.enter", "canvas.expand", "canvas.connect", "canvas.close"]);
         *pane.size_mut().unwrap() = Some([800., 500.]);
@@ -195,19 +229,26 @@ mod helper_bar_tests {
         let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }] };
         assert_eq!(pane_actions(&pane, Some(&hint)).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
-        pane.kind = canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into() };
-        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.pane_open", "canvas.browser_pick", "canvas.browser_shot", "canvas.browser_external", "canvas.connect", "canvas.close"]);
+        pane.kind = serde_json::from_value(json!({"kind":"browser","props":{"url":"http://localhost:3000","home":"http://localhost:3000"}})).unwrap();
+        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.browser_annotate", "canvas.browser_shot", "canvas.browser_external", "canvas.browser_expand", "canvas.browser_pop", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Sim { udid: String::new() };
-        assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.connect", "canvas.close"]);
+        assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
+        // Pinned, the same button moves it back onto the canvas.
+        let pin = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().find(|a| a.command == "canvas.pane_pin").map(|a| (a.label, a.args)).unwrap();
+        assert_eq!(pin(&pane), ("Pin to screen".into(), json!({"pinned":true})));
+        pane.pinned = Some([0., 0., 340., 700.]);
+        assert_eq!(pin(&pane), ("Move to canvas".into(), json!({"pinned":false})));
+        pane.pinned = None;
         pane.kind = canvas::Kind::Sim { udid: "U1".into() };
-        assert_eq!(commands(&pane)[..4], ["canvas.sim_home", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate"]);
-        assert_eq!(commands(&pane).last().unwrap(), "canvas.close");
+        assert_eq!(commands(&pane), ["canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_pop", "canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
+        assert_eq!(sim_device_actions().into_iter().map(|a| a.command).collect::<Vec<_>>(),
+            ["canvas.sim_home", "canvas.sim_refresh", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate"]);
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
         assert!(pane_actions(&pane, None).is_empty());
     }
     #[test]
     fn viewer_actions_include_clear_only_when_there_are_marks() {
-        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None };
+        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.pane_quote", "canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Pdf { path: "/a.pdf".into(), highlights: vec![] };

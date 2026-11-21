@@ -59,7 +59,7 @@ export function playSound(sound: string): null;
  *   pane.focus {pane | terminal}, pane.go {direction}, pane.swap {pane?, direction | target}.
  *   Pane menus get target { pane, terminal }.
  * Canvas panes: canvas.pane_new {kind: "file", path, wire?, point?}, canvas.pane_read {pane},
- *   canvas.pane_shot {pane, path?}, canvas.pane_open {pane, target}, canvas.close {pane}.
+ *   canvas.pane_shot {pane, path?}, canvas.pane_open {pane, target, tab?}, canvas.close {pane}.
  * Terminals: terminal.open {argv?, folder?, place?: "tab" | "right" | "down"}, terminal.kill {terminal},
  *   terminal.keep {terminal, place?} (a running one without a pane, e.g. a sub-agent, gets one),
  *   terminal.park {terminal} (its pane goes, it keeps running; the menu's "Send back"),
@@ -214,14 +214,28 @@ export interface CanvasPane {
   /** A terminal's core address (`t3`), `sub:<parent>:<id>` for a sub-agent cell, or `p<N>`
    *  for any other pane. Wire keys use the same ids. */
   id: string;
-  kind: "terminal" | "sub" | "file" | "image" | "pdf" | `mod:${string}`;
-  /** Kind fields: terminal { size? }, sub { parent, sub }, file/image { path }, pdf { path, highlights? }, mod:<name> { what the mod saved }. */
+  kind: "terminal" | "sub" | "file" | "image" | "pdf" | "browser" | `mod:${string}`;
+  /** Kind fields: terminal { size? }, sub { parent, sub }, file/image { path }, pdf { path, highlights? }, browser (see CanvasBrowserPane), mod:<name> { what the mod saved }. */
   props: any;
   /** World pixels: [x, y, width, height]. */
   rect: [number, number, number, number];
   z: number;
   /** The space it lives in; absent on Home. */
   space?: string;
+}
+
+export interface CanvasBrowserPane extends CanvasPane {
+  kind: "browser";
+  props: {
+    /** The active tab's address. */
+    url: string;
+    tabs: { id: string; url: string; title?: string }[];
+    /** Zero-based index in tabs. */
+    active: number;
+    home: string;
+    /** Fixed CSS page size; absent: responsive */
+    viewport?: [number, number];
+  };
 }
 
 /** Every pane on the canvas, as canvas.json saves it. Live. Not panes(), which lists

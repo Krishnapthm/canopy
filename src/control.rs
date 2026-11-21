@@ -159,7 +159,10 @@ pub fn save_png(image: &image::RgbaImage, path: &std::path::Path) -> anyhow::Res
         encoder.write_header()?.write_image_data(image.as_raw())?;
     }
     // A sibling temporary file keeps publication on the same filesystem.
-    let temporary = path.with_file_name(format!(".canopy-shot-{}.png", std::process::id()));
+    // Unique per save: two saves into one folder at once must not share a temporary file.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temporary = path.with_file_name(format!(".canopy-shot-{}-{n}.png", std::process::id()));
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
     let result = (|| -> anyhow::Result<()> {
         file.write_all(&bytes)?;

@@ -37,6 +37,7 @@ These keys apply when the canvas has the keyboard and no input has focus. See [C
 | `n` / `Shift+N` | Open a terminal / the installed agent list. |
 | `v` / `t` | Select tool / new note pane. |
 | `Cmd+O` (`Ctrl+O` on Linux and Windows) | Open a file on the canvas. |
+| `Cmd+W` (macOS) | Close the selected browser pane's active tab. Without a single browser pane selected, close the app tab as usual. |
 | `Backspace` / `Delete` | Close the selection. |
 | `?` | Show the full key list. |
 | `q` | Quote the selected image. |
@@ -57,6 +58,7 @@ These shortcuts apply while the canvas layout is shown, including with a termina
 | New terminal / terminal like the selection | `Cmd+T` / `Cmd+Shift+T` | `Ctrl+Shift+T` / `Ctrl+Alt+T` |
 | Focus fit / tile view | `Cmd+Shift+F` / `Cmd+Shift+G` | `Ctrl+Shift+F` (canvas focus) / `Ctrl+Shift+G` |
 | Expand or collapse | `Cmd+Enter` | `Ctrl+Shift+Enter` |
+| Open Web Inspector for the selected browser pane (macOS only) | `Cmd+Option+I` or `Ctrl+Shift+I` | `Ctrl+Shift+I` |
 | Arrange / undo layout | `Cmd+Shift+A` / `Cmd+Z` | `Ctrl+Alt+Shift+A` / `Ctrl+Shift+U` |
 | Zoom in / out / 100% | `Cmd+=` / `Cmd+-` / `Cmd+0` | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 | Agents / all / terminals view | `Cmd+Shift+1` / `Cmd+Shift+2` / `Cmd+Shift+3` | `Ctrl+Shift+1` / `Ctrl+Shift+2` / `Ctrl+Shift+3` |
