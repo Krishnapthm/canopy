@@ -3029,7 +3029,7 @@ impl AppWindow {
                     drawn_sims.push(card.id.clone());
                     let (title, detail) = self.sim_title(card, cx);
                     let body = self.sim_body(card, cx);
-                    let body = self.annotate_body(card, body, camera.zoom, cx);
+                    let body = self.annotate_body(card, body, annotate::card_body(card, camera.zoom), cx);
                     #[cfg(target_os = "macos")]
                     let body = div().relative().size_full().child(body)
                         .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(

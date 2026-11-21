@@ -516,7 +516,7 @@ impl AppWindow {
         tabs.iter().find(|t| t.id == tab)
     }
 
-    fn browser_popped(&self, id: &str) -> bool {
+    pub(super) fn browser_popped(&self, id: &str) -> bool {
         self.canvas_state.browsers.panes.get(id).is_some_and(|ui| ui.popped.is_some())
     }
 
@@ -581,7 +581,7 @@ impl AppWindow {
             } else {
                 div().size_full().bg(gpui::white()).child(view.clone())
             };
-            return self.annotate_body(pane, body.into_any_element(), camera.zoom, cx);
+            return self.annotate_body(pane, body.into_any_element(), super::annotate::card_body(pane, camera.zoom), cx);
         }
         #[cfg(not(target_os = "macos"))]
         let _ = camera;
@@ -595,7 +595,7 @@ impl AppWindow {
                 cx.stop_propagation();
                 this.wake_browser(&id, window, cx);
             })).into_any_element();
-        self.annotate_body(pane, body, camera.zoom, cx)
+        self.annotate_body(pane, body, super::annotate::card_body(pane, camera.zoom), cx)
     }
 
     /// The active tab's title, falling back to its address or New tab.
@@ -1509,7 +1509,7 @@ impl Render for BrowserWindow {
                 input.update(cx, |i, cx| i.focus(window, cx));
             }
             let title = app.canvas_state.doc.panes.iter().find(|p| p.id == self.pane).map(|p| app.browser_title(p).0);
-            (title, app.browser_chrome(&self.pane, Host::Window, cx), app.popped_body(&self.pane, cx), app.pop_menu(&self.pane, view, cx))
+            (title, app.browser_chrome(&self.pane, Host::Window, cx), app.popped_body(&self.pane, view, cx), app.pop_menu(&self.pane, view, cx))
         }).ok();
         let Some((title, chrome, body, menu)) = parts else { return div().into_any_element() };
         if let Some(title) = title.filter(|t| *t != self.title) {
@@ -1547,7 +1547,7 @@ impl AppWindow {
     /// Makes the tab's web view (hidden, loading the saved URL) unless it has one. A popped pane's
     /// views are built in its pop-out window, whichever window asked.
     // shortcut: hidden views stay allocated until their tab closes, drop views on rest if memory matters.
-    fn ensure_view(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+    pub(super) fn ensure_view(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         self.require_browser_url(id)?;
         let key = self.page_key(id).unwrap();
         if self.canvas_state.browsers.pages.get(&key).is_some_and(Page::has_view) { return Ok(()); }
@@ -1736,10 +1736,12 @@ impl AppWindow {
         }
     }
 
-    /// The pop-out's page area: the active tab's view (shown, the others hidden, and all hidden
-    /// while the menu is open, since a native view draws over GPUI), or a note for an empty tab.
-    fn popped_body(&self, id: &str, cx: &mut Context<Self>) -> AnyElement {
-        let menu = self.canvas_state.browsers.panes.get(id).is_some_and(|ui| ui.pop_menu.is_some());
+    /// The pop-out's page area at window size `view`: the active tab's view (shown, the others
+    /// hidden, and all hidden while the menu is open or an annotation shows its still, since a
+    /// native view draws over GPUI), or a note for an empty tab.
+    fn popped_body(&self, id: &str, view: Size<Pixels>, cx: &mut Context<Self>) -> AnyElement {
+        let menu = self.canvas_state.browsers.panes.get(id).is_some_and(|ui| ui.pop_menu.is_some())
+            || self.canvas_state.annotations.get(id).is_some_and(|a| !a.live);
         let active = self.page_key(id);
         for key in self.pane_page_keys(id) {
             let Some(native) = self.canvas_state.browsers.pages.get(&key).and_then(|p| p.native.as_ref()) else { continue };
@@ -1747,7 +1749,12 @@ impl AppWindow {
             native.view.update(cx, |v, _| { if show && !v.visible() { v.show(); } else if !show && v.visible() { v.hide(); } });
         }
         match active.and_then(|key| self.canvas_state.browsers.pages.get(&key)).and_then(|p| p.native.as_ref()) {
-            Some(native) => div().size_full().bg(gpui::white()).child(native.view.clone()).into_any_element(),
+            Some(native) => {
+                let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return div().into_any_element() };
+                let body = div().size_full().bg(gpui::white()).child(native.view.clone()).into_any_element();
+                let size = [f32::from(view.width), (f32::from(view.height) - canvas::BROWSER_HEADER).max(1.)];
+                self.annotate_body(pane, body, size, cx)
+            }
             None => div().size_full().flex().flex_col().items_center().justify_center().gap(px(8.)).bg(c("canvas"))
                 .child(svg().path("icons/globe.svg").size(px(32.)).text_color(c("muted-foreground")))
                 .child(div().text_size(px(15.)).text_color(c("foreground")).child("Browse the web"))

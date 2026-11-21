@@ -488,7 +488,13 @@ impl AppWindow {
     }
 
     #[cfg(not(target_os = "macos"))]
-    pub(super) fn annotate_body(&self, _: &canvas::Pane, body: AnyElement, _: f32, _: &mut Context<Self>) -> AnyElement { body }
+    pub(super) fn annotate_body(&self, _: &canvas::Pane, body: AnyElement, _: Pos, _: &mut Context<Self>) -> AnyElement { body }
+}
+
+/// A canvas card's body size on screen at `zoom`: the pane minus its frame and header.
+pub(super) fn card_body(pane: &canvas::Pane, zoom: f32) -> Pos {
+    let [w, h] = pane.pinned.map_or([pane.rect[2] * zoom, pane.rect[3] * zoom], |p| [p[2], p[3]]);
+    [(w - 2.).max(1.), (h - canvas::header_height(&pane.kind) - 2.).max(1.)]
 }
 
 #[cfg(target_os = "macos")]
@@ -513,7 +519,9 @@ impl AppWindow {
         }
         if self.canvas_state.annotation_starts.contains_key(id) { return Ok(()); }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).cloned().ok_or("The pane closed")?;
-        if !self.canvas_state.doc.shows(pane.space.as_ref()) { return Err("Go to the pane's space to annotate it".into()); }
+        // A popped-out page is annotated in its own window, whatever space the canvas shows.
+        let popped = self.browser_popped(id);
+        if !popped && !self.canvas_state.doc.shows(pane.space.as_ref()) { return Err("Go to the pane's space to annotate it".into()); }
         let zoom = self.canvas_state.doc.camera.zoom;
         let width = pane.pinned.map_or(pane.rect[2] * zoom, |p| p[2]) - 2.;
         let needs_room = width < 520. || zoom < 0.75;
@@ -523,14 +531,18 @@ impl AppWindow {
                 use wry::WebViewExtMacOS as _;
                 let was_live = self.raw_browser(id).is_some_and(|raw| !raw.raw().webview().isHidden());
                 let opened = self.raw_browser(id).is_none();
-                // A popped-out pane fails before changing the current canvas.
-                if opened && let Err(error) = self.wake_for_annotation(id, window, cx) { return Err(error); }
-                let expanded = self.canvas_state.browser_tab.clone();
-                if let Some(expanded) = &expanded {
-                    self.run_key("canvas.browser_expand", json!({"pane": expanded}), window, cx);
+                if popped {
+                    // The window shows the page at full size: nothing on the canvas to wake or snap.
+                    if opened { self.ensure_view(id, window, cx)?; }
+                } else {
+                    if opened { self.wake_for_annotation(id, window, cx)?; }
+                    let expanded = self.canvas_state.browser_tab.clone();
+                    if let Some(expanded) = &expanded {
+                        self.run_key("canvas.browser_expand", json!({"pane": expanded}), window, cx);
+                    }
+                    if needs_room { self.snap_usable(id, cx); }
+                    if needs_room || expanded.as_deref() == Some(id) { self.wake_for_annotation(id, window, cx)?; }
                 }
-                if needs_room { self.snap_usable(id, cx); }
-                if needs_room || expanded.as_deref() == Some(id) { self.wake_for_annotation(id, window, cx)?; }
                 let session = Rc::new(());
                 self.canvas_state.annotation_starts.insert(id.to_owned(), session.clone());
                 let id = id.to_owned();
@@ -643,6 +655,7 @@ impl AppWindow {
         if a.outgoing.as_ref().is_some_and(|o| o.sending) { return Err("The annotation is being sent".into()); }
         if a.items().is_empty() { return self.end_annotation(id, false, window, cx); }
         if a.confirming.as_ref().is_some_and(|id| self.overlays.iter().any(|o| o.id == *id)) { return Ok(()); }
+        // shortcut: the dialog opens in the main window even for a popped-out page, draw it in the pop-out if that confuses.
         let overlay = mods::new_overlay_id();
         a.confirming = Some(overlay.clone());
         self.open_overlay(overlay, json!({
@@ -665,7 +678,8 @@ impl AppWindow {
         cx.defer(move |cx| cx.drop_image(image, None));
         self.focus.focus(window, cx);
         cx.notify();
-        if browser {
+        // A popped page shows again when its window redraws (`popped_body`).
+        if browser && !self.browser_popped(id) {
             if wake { self.wake_for_annotation(id, window, cx)?; }
             else if live { self.rest_browser(id, cx); }
         }
@@ -699,7 +713,8 @@ impl AppWindow {
         });
         let held = Held { monitor: Some(monitor), release, _activation: activation };
         if browser {
-            self.wake_for_annotation(id, window, cx)?;
+            // shortcut: in the pop-out the live page covers the bar while Space is held (no mask there), mask it if that bothers.
+            if !self.browser_popped(id) { self.wake_for_annotation(id, window, cx)?; }
             if let Some(raw) = self.raw_browser(id) { let _ = raw.raw().focus_parent(); }
         }
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return Ok(()) };
@@ -915,13 +930,12 @@ fn paint_mark(mark: &Mark, origin: Point<Pixels>, scale: f32, window: &mut Windo
 #[cfg(target_os = "macos")]
 impl AppWindow {
     /// Draws the still over the host body, or the native content while Space is held.
-    pub(super) fn annotate_body(&self, pane: &canvas::Pane, native: AnyElement, zoom: f32, cx: &mut Context<Self>) -> AnyElement {
+    /// `[w, h]` is the body's screen size: a card's (`card_body`) or the pop-out window's.
+    pub(super) fn annotate_body(&self, pane: &canvas::Pane, native: AnyElement, [w, h]: Pos, cx: &mut Context<Self>) -> AnyElement {
         let id = &pane.id;
         let Some(a) = self.canvas_state.annotations.get(id) else { return native };
         let mark_key = format!("annotate-body:{id}");
         let bounds = self.bounds.clone();
-        let [w, h] = pane.pinned.map_or([pane.rect[2] * zoom, pane.rect[3] * zoom], |p| [p[2], p[3]]);
-        let (w, h) = ((w - 2.).max(1.), (h - canvas::header_height(&pane.kind) - 2.).max(1.));
         let target = id.clone();
         let mut root = div().id(SharedString::from(format!("annotate-{id}"))).relative().size_full()
             .track_focus(&a.focus)
@@ -932,6 +946,8 @@ impl AppWindow {
                     "space" if !this.canvas_state.annotations.get(&target).is_some_and(|a| a.draft.is_some()) => {
                         if e.is_held { Ok(()) } else { this.annotation_hold(&target, window, cx) }
                     }
+                    // The main window catches Esc first (`annotation_escape`); this serves the pop-out.
+                    "escape" => this.annotation_close(&target, window, cx),
                     _ => return,
                 };
                 if let Err(error) = result { this.annotation_error(error, window, cx); }
@@ -1452,6 +1468,8 @@ impl AppWindow {
     pub(in crate::window) fn annotation_focus(&self, cx: &App) -> Option<FocusHandle> {
         let id = self.canvas_state.selected.last()?;
         let a = self.canvas_state.annotations.get(id)?;
+        // A popped page's annotation takes the keyboard in its own window.
+        if self.browser_popped(id) { return None; }
         if a.live || a.outgoing.as_ref().is_some_and(|o| o.sending) || !self.canvas_state.doc.panes.iter().any(|p| &p.id == id && self.canvas_state.doc.shows(p.space.as_ref())) { return None; }
         Some(a.draft.as_ref().map_or_else(|| a.focus.clone(), |d| d.input.read(cx).focus_handle(cx)))
     }

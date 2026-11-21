@@ -121,7 +121,7 @@ A page you rested keeps running out of sight, so a video can keep playing. When 
 
 ## Annotate
 
-When a layout bug is easier to point at than describe, click **Annotate** in the browser pane's helper bar. The page holds on a still while you work. If the page is in its own window, click **Bring back** first.
+When a layout bug is easier to point at than describe, click **Annotate** in the header or the helper bar. The page holds on a still while you work. A popped-out page is annotated the same way in its own window.
 
 - With **Select**, click an element and save a comment to place a numbered pin. Drag to comment on an area. Start the drag on text to highlight a range. Click a pin to edit or delete its comment.
 - Use **Pen**, **Arrow**, **Box**, or **Text** to mark the picture. Click to place a text label, type it, then press `Enter`. The bar has five colours, three widths, **Undo**, and **Redo**. On narrow panes, open **Drawing tools** for these controls.
