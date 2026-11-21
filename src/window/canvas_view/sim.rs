@@ -223,11 +223,6 @@ impl AppWindow {
             SimEvent::Saved { title, path } => self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{
                 "title":title, "body":path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                 "action":{"name":"canvas.sim_reveal","args":{"path":path}}}}), window, cx),
-            SimEvent::Quote(quote) => {
-                let mut quote = quote.clone();
-                quote["point"] = json!({"x": f32::from(self.pointer.x), "y": f32::from(self.pointer.y)});
-                self.quote_menu(&quote, window, cx);
-            }
             SimEvent::Changed => cx.notify(),
             SimEvent::Fallback => self.refresh_sim(pane, false, window, cx),
         }
@@ -299,7 +294,6 @@ impl AppWindow {
                     "canvas.sim_home" => { screen.update(cx, |s, _| s.press("home", By::You)); Ok(json!({})) }
                     "canvas.sim_screenshot" => screen.update(cx, |s, cx| s.screenshot(By::You, cx)).map(|p| json!({"path":p})),
                     "canvas.sim_record" => screen.update(cx, |s, cx| s.record(By::You, cx)).map(|p| json!({"path":p})),
-                    "canvas.sim_annotate" => screen.update(cx, |s, cx| s.annotate(cx)).map(|_| json!({})),
                     "canvas.sim_zoom" => self.zoom_sim(&id, a["step"].as_str().unwrap_or("actual"), &screen, cx),
                     "canvas.sim_pop" => { self.pop_sim(&id, &screen, window, cx); Ok(json!({})) }
                     _ => Err(format!("unknown command {name}")),
@@ -416,7 +410,7 @@ impl AppWindow {
         for a in &mut actions {
             match a.command.as_str() {
                 "canvas.sim_record" if s.recording.is_some() => { a.icon = "icons/square.svg".into(); a.label = "Stop recording".into(); }
-                "canvas.sim_annotate" if s.annotation.is_some() => a.label = "Cancel annotation".into(),
+                "canvas.sim_annotate" if self.canvas_state.annotations.contains_key(id) => a.label = "Stop annotating".into(),
                 "canvas.sim_pop" if s.popped => a.label = "Bring back".into(),
                 _ => {}
             }
@@ -430,7 +424,7 @@ impl AppWindow {
         let state = &self.canvas_state;
         let id = &pane.id;
         let udid = pane.sim().filter(|udid| !udid.is_empty())?;
-        if self.bars_hidden() || (state.bar_hover.as_ref() != Some(id) && !state.selected.contains(id)) {
+        if state.annotations.contains_key(id) || self.bars_hidden() || (state.bar_hover.as_ref() != Some(id) && !state.selected.contains(id)) {
             return None;
         }
         let view = state.sims.get(id)?;
@@ -438,7 +432,7 @@ impl AppWindow {
             return None;
         }
         // Shown on a fallback screenshot too: Refresh is how the live view comes back.
-        if view.live.as_ref().is_some_and(|s| { let s = s.read(cx); s.device.udid != udid || s.annotation.is_some() }) {
+        if view.live.as_ref().is_some_and(|s| s.read(cx).device.udid != udid) {
             return None;
         }
         let actions = sim_device_actions();
@@ -451,8 +445,7 @@ impl AppWindow {
     /// The pop-out's device bar also offers Bring back.
     #[cfg(target_os = "macos")]
     pub(super) fn sim_bar(&self, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let screen = self.canvas_state.sims.get(id)?.live.as_ref()?.read(cx);
-        if screen.annotation.is_some() { return None; }
+        self.canvas_state.sims.get(id)?.live.as_ref()?;
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
         let mut actions = sim_device_actions();
         actions.push(pane_actions(pane, None).into_iter().find(|a| a.command == "canvas.sim_pop")?);

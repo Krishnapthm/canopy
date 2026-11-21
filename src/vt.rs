@@ -1056,6 +1056,34 @@ impl Vt {
         (unsafe { ghostty_terminal_grid_ref(self.term, p, &mut r) } == GHOSTTY_SUCCESS).then_some(r)
     }
 
+    /// Reads the visible rows without marking them painted or changing the selection.
+    pub(crate) fn screen_text(&self) -> String {
+        let mut text = String::new();
+        let mut graphemes = vec![0u32; 8];
+        for y in 0..u32::from(self.rows) {
+            if y > 0 { text.push('\n'); }
+            let Some(mut cell) = self.grid_ref(GHOSTTY_POINT_TAG_VIEWPORT, 0, y) else { continue };
+            let row_start = text.len();
+            for x in 0..self.cols {
+                cell.x = x;
+                let mut len = 0;
+                // The row reference stays valid while this read leaves the grid untouched.
+                let mut result = unsafe { ghostty_grid_ref_graphemes(&cell, graphemes.as_mut_ptr(), graphemes.len(), &mut len) };
+                if result == GHOSTTY_OUT_OF_SPACE {
+                    graphemes.resize(len, 0);
+                    result = unsafe { ghostty_grid_ref_graphemes(&cell, graphemes.as_mut_ptr(), graphemes.len(), &mut len) };
+                }
+                if result != GHOSTTY_SUCCESS || len == 0 || graphemes[0] == 0x10eeee {
+                    text.push(' ');
+                } else {
+                    text.extend(graphemes[..len].iter().filter_map(|&c| char::from_u32(c)));
+                }
+            }
+            text.truncate(row_start + text[row_start..].trim_end().len());
+        }
+        text
+    }
+
     /// The link at a viewport cell: a link the program marked (OSC 8), or a
     /// URL or path in the text. Follows lines the terminal wrapped, also into
     /// rows scrolled out of view. Then tries the lines around joined, their

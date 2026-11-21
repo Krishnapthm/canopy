@@ -29,35 +29,88 @@
   };
 
   let api = null;
+  function grab() {
+    if (!api) {
+      api = globalThis.__REACT_GRAB_MODULE__.init({ telemetry: false });
+      // Returning true keeps react-grab from copying the element to the clipboard.
+      api.registerPlugin({ name: "canopy", hooks: { onElementSelect: (el) => { picked(el); return true; } } });
+    }
+    return api;
+  }
+
+  async function source(el) {
+    try {
+      const where = await grab().getSource(el);
+      if (where) return { component: where.componentName, file: where.filePath, line: where.lineNumber, column: where.columnNumber };
+    } catch {}
+    return {};
+  }
+
+  const cut = (value, limit) => [...value.slice(0, limit * 2)].slice(0, limit).join("");
+  const text = (el, limit) => cut((el.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim(), limit);
+  const rect = ({ x, y, width, height }) => [x, y, width, height];
+  const caret = (x, y) => document.caretRangeFromPoint(x, y);
+  const styleNames = ["display", "position", "width", "height", "margin", "padding", "font-size", "font-weight", "color", "background-color"];
+  const useful = "img, svg, picture, video, canvas, a, button, input, select, textarea, label, [role=button]";
+
   async function picked(el) {
-    let source = null;
-    try { source = await api.getSource(el); } catch {}
+    const where = await source(el);
     api.deactivate();
-    const text = (el.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 400);
-    post({ pick: {
-      url: location.href,
-      component: source?.componentName ?? null,
-      file: source?.filePath ?? null,
-      line: source?.lineNumber ?? null,
-      column: source?.columnNumber ?? null,
-      tag: openTag(el),
-      selector: selector(el),
-      text,
-    } });
+    post({ pick: { url: location.href, ...where, tag: openTag(el), selector: selector(el), text: text(el, 400) } });
   }
 
   window.__canopy = {
     pick() {
       try {
-        if (!api) {
-          api = globalThis.__REACT_GRAB_MODULE__.init({ telemetry: false });
-          // Returning true keeps react-grab from copying the element to the clipboard.
-          api.registerPlugin({ name: "canopy", hooks: { onElementSelect: (el) => { picked(el); return true; } } });
-        }
-        api.activate();
+        grab().activate();
       } catch (error) {
         post({ error: `The picker did not start: ${error}` });
       }
     },
+    async at(x, y) {
+      let el = document.elementFromPoint(x, y);
+      if (!el) return null;
+      el = el.closest("svg") ?? el;
+      while (el.parentElement && el.matches("div, span") && !el.matches(useful)
+        && el.childElementCount === 1
+        && ![...el.childNodes].some(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim())) {
+        el = el.parentElement;
+      }
+      const style = getComputedStyle(el);
+      return {
+        selector: selector(el), tag: cut(openTag(el), 80), text: text(el, 120),
+        html: cut(el.outerHTML, 300), rect: rect(el.getBoundingClientRect()),
+        styles: Object.fromEntries(styleNames.map(name => [name, style.getPropertyValue(name)])),
+        ...await source(el),
+      };
+    },
+    isText(x, y) {
+      const range = caret(x, y);
+      if (!range || range.startContainer.nodeType !== Node.TEXT_NODE) return false;
+      range.selectNodeContents(range.startContainer);
+      return [...range.getClientRects()].some(r => x >= r.left && x < r.right && y >= r.top && y < r.bottom);
+    },
+    textAt(x1, y1, x2, y2) {
+      const a = caret(x1, y1);
+      const b = caret(x2, y2);
+      if (!a || !b) return null;
+      const [start, end] = a.compareBoundaryPoints(Range.START_TO_START, b) <= 0 ? [a, b] : [b, a];
+      const range = document.createRange();
+      range.setStart(start.startContainer, start.startOffset);
+      range.setEnd(end.startContainer, end.startOffset);
+      const common = range.commonAncestorContainer;
+      const el = common.nodeType === Node.ELEMENT_NODE ? common : common.parentElement;
+      const selected = cut(range.toString(), 300);
+      return selected && el ? { text: selected, selector: selector(el), rects: [...range.getClientRects()].map(rect) } : null;
+    },
+    rects(selectors) {
+      return selectors.map(path => {
+        try {
+          const el = document.querySelector(path);
+          return el ? rect(el.getBoundingClientRect()) : null;
+        } catch { return null; }
+      });
+    },
+    size: () => [innerWidth, innerHeight],
   };
 })();

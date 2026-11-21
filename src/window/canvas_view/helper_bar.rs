@@ -70,7 +70,7 @@ fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAc
             ("icons/rotate-cw.svg", "Reload", "canvas.browser_reload"),
             ("icons/house.svg", "Home", "canvas.browser_home"),
             ("icons/globe.svg", "Open URL", "canvas.pane_open"),
-            ("icons/crosshair.svg", "Pick an element to quote", "canvas.browser_pick"),
+            ("icons/pencil.svg", "Annotate", "canvas.browser_annotate"),
             ("icons/camera.svg", "Screenshot", "canvas.browser_shot"),
             ("icons/external-link.svg", "Open in browser", "canvas.browser_external"),
             ("icons/maximize-2.svg", "Expand", "canvas.browser_expand"),
@@ -119,6 +119,11 @@ fn connect_active(id: &str, wiring: Option<&str>, edges: &[canvas::Wire]) -> boo
     wiring == Some(id) || edges.iter().any(|w| w.a == id || w.b == id)
 }
 
+pub(super) fn bar_shell(s: f32) -> Div {
+    div().flex().p(px(2. * s)).gap(px(2. * s)).rounded(px(ui::RADIUS))
+        .bg(c("popover")).border_1().border_color(c("border")).shadow_md()
+}
+
 impl AppWindow {
     /// Keep floating bars out of the way during canvas gestures.
     pub(super) fn bars_hidden(&self) -> bool {
@@ -132,7 +137,7 @@ impl AppWindow {
     /// place: a pill of icon buttons above each pane's top-left corner.
     pub(super) fn helper_bars(&self, doc: &Document, cx: &mut Context<Self>) -> Vec<AnyElement> {
         #[cfg(target_os = "macos")]
-        self.bounds.borrow_mut().retain(|k, _| !k.starts_with("cover:bar:"));
+        self.bounds.borrow_mut().retain(|k, _| !k.starts_with("cover:bar:") && !k.starts_with("cover:annotate"));
         if self.bars_hidden() { return vec![]; }
         let state = &self.canvas_state;
         // A wire following the pointer keeps its pane's bar up, to show Connect as active.
@@ -179,8 +184,7 @@ impl AppWindow {
     /// One helper bar pill at scale `s`, positioned by its caller. `connected` highlights Connect.
     pub(super) fn bar(&self, id: &str, actions: Vec<BarAction>, s: f32, connected: bool, cx: &mut Context<Self>) -> Div {
         let state = &self.canvas_state;
-        let mut bar = div().flex().p(px(2. * s)).gap(px(2. * s)).rounded(px(ui::RADIUS))
-            .bg(c("popover")).border_1().border_color(c("border")).shadow_md();
+        let mut bar = bar_shell(s);
         for BarAction { icon, label, command, args } in actions {
             let active = connected && command == "canvas.connect";
             let target = id.to_owned();
@@ -230,7 +234,7 @@ mod helper_bar_tests {
         assert_eq!(pane_actions(&pane, Some(&hint)).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = serde_json::from_value(json!({"kind":"browser","props":{"url":"http://localhost:3000","home":"http://localhost:3000"}})).unwrap();
-        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.pane_open", "canvas.browser_pick", "canvas.browser_shot", "canvas.browser_external", "canvas.browser_expand", "canvas.browser_pop", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
+        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.pane_open", "canvas.browser_annotate", "canvas.browser_shot", "canvas.browser_external", "canvas.browser_expand", "canvas.browser_pop", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Sim { udid: String::new() };
         assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
         // Pinned, the same button moves it back onto the canvas.

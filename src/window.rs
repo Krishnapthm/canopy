@@ -580,7 +580,10 @@ impl AppWindow {
         w._canvas_keys = Some(cx.intercept_keystrokes(move |event, window, cx| {
             if window.window_handle() != owner_window { return; }
             let swallowed = owner.update(cx, |this, cx| {
-                this.record_shortcut(&event.keystroke) || this.canvas_key(&event.keystroke, window, cx)
+                if this.record_shortcut(&event.keystroke) { return true; }
+                #[cfg(target_os = "macos")]
+                if this.annotation_escape(&event.keystroke, window, cx) { return true; }
+                this.canvas_key(&event.keystroke, window, cx)
             }).unwrap_or(false);
             if swallowed { cx.stop_propagation(); }
         }));
@@ -1606,7 +1609,11 @@ impl AppWindow {
             return self.hand_keyboard();
         }
         let shown = if self.has_canvas() {
-            self.focused_cell().filter(|_| !self.canvas_state.mode).map(|t| t.focus.clone())
+            #[cfg(target_os = "macos")]
+            let annotation = self.annotation_focus(cx);
+            #[cfg(not(target_os = "macos"))]
+            let annotation = None;
+            annotation.or_else(|| self.focused_cell().filter(|_| !self.canvas_state.mode).map(|t| t.focus.clone()))
         } else if terminal_block(&self.chrome, self.focused_pane.as_deref()).is_some() {
             self.focused_pane.as_deref().and_then(|p| self.pane_focus(p, cx))
         } else if let Some(block) = self.agent_block() {
@@ -3011,6 +3018,7 @@ impl AppWindow {
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" => self.pane_command(name, a, window, cx),
+            "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" => self.annotation_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
             | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
             | "canvas.browser_cookies" | "canvas.browser_clear" | "canvas.browser_inspect"

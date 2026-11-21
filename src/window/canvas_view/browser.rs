@@ -497,7 +497,7 @@ impl AppWindow {
             } else {
                 div().size_full().bg(gpui::white()).child(view.clone())
             };
-            return body.into_any_element();
+            return self.annotate_body(pane, body.into_any_element(), camera.zoom, cx);
         }
         #[cfg(not(target_os = "macos"))]
         let _ = camera;
@@ -506,11 +506,12 @@ impl AppWindow {
             None => div().size_full().flex().items_center().justify_center().p(px(16.)).text_color(c("muted-foreground"))
                 .child(if page.is_some_and(|p| p.loading) { "Loading…".to_owned() } else { "Click to load the page".to_owned() }),
         };
-        body.id(SharedString::from(format!("browser-{id}"))).cursor_pointer()
+        let body = body.id(SharedString::from(format!("browser-{id}"))).cursor_pointer()
             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
                 this.wake_browser(&id, window, cx);
-            })).into_any_element()
+            })).into_any_element();
+        self.annotate_body(pane, body, camera.zoom, cx)
     }
 
     /// The active tab's title, falling back to its address or New tab.
@@ -1112,7 +1113,11 @@ impl AppWindow {
     /// page hides its pane and bar, so no Collapse label is needed.)
     pub(super) fn browser_relabel(&self, id: &str, mut actions: Vec<super::helper_bar::BarAction>) -> Vec<super::helper_bar::BarAction> {
         let popped = self.browser_popped(id);
-        for a in actions.iter_mut().filter(|a| popped && a.command == "canvas.browser_pop") { a.label = "Bring back".into(); }
+        let annotating = self.canvas_state.annotations.contains_key(id);
+        for a in &mut actions {
+            if popped && a.command == "canvas.browser_pop" { a.label = "Bring back".into(); }
+            if annotating && a.command == "canvas.browser_annotate" { a.label = "Stop annotating".into(); }
+        }
         actions
     }
 
@@ -1564,6 +1569,7 @@ impl AppWindow {
     /// Steps a live page aside: snapshot, then hide (in `Event::Rested`), so the pane never
     /// shows blank. A resting page with a view only refreshes its snapshot.
     pub(super) fn rest_browser(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.annotation_host_rested(id);
         if let Some(key) = self.page_key(id) { self.rest_page(&key, cx); }
     }
 
@@ -1618,6 +1624,61 @@ impl AppWindow {
 
     fn raw_page(&self, key: &str) -> Option<gpui_wry::WebViewHandle> {
         self.canvas_state.browsers.pages.get(key)?.native.as_ref().map(|n| n.raw.clone())
+    }
+
+    /// Runs a page-world function body and lets WebKit await its result.
+    pub(super) fn eval_browser_json(&self, pane: &str, script: &str, done: impl FnOnce(Option<Value>) + 'static) {
+        use objc2::{MainThreadMarker, runtime::AnyObject};
+        use objc2_foundation::{NSError, NSString};
+        use objc2_web_kit::WKContentWorld;
+        use wry::WebViewExtMacOS as _;
+        let Some(raw) = self.raw_browser(pane) else { return done(None) };
+        let Some(mtm) = MainThreadMarker::new() else { return done(None) };
+        let done = std::cell::Cell::new(Some(done));
+        let callback = block2::RcBlock::new(move |value: *mut AnyObject, error: *mut NSError| {
+            let Some(done) = done.take() else { return };
+            // WebKit returns an NSString because the function body stringifies its result.
+            let json = unsafe { value.as_ref() }
+                .filter(|_| error.is_null())
+                .and_then(|v| v.downcast_ref::<NSString>())
+                .filter(|v| v.len_utf16() <= 1_000_000)
+                .and_then(|v| serde_json::from_str(&v.to_string()).ok());
+            done(json);
+        });
+        let body = NSString::from_str(&format!("return JSON.stringify(await (async () => {{ {script} }})())"));
+        // Both the web view and page content world belong to the main thread.
+        unsafe {
+            raw.raw().webview().callAsyncJavaScript_arguments_inFrame_inContentWorld_completionHandler(
+                &body, None, None, &WKContentWorld::pageWorld(mtm), Some(&callback),
+            );
+        }
+    }
+
+    /// Captures the same still used when a browser rests, with an RGBA copy for annotations.
+    pub(super) fn freeze_browser(&mut self, pane: &str, done: impl FnOnce(&mut Self, Option<image::RgbaImage>, &mut Context<Self>) + 'static, cx: &mut Context<Self>) {
+        let Some(key) = self.page_key(pane) else { return done(self, None, cx) };
+        let Some(page) = self.canvas_state.browsers.pages.get_mut(&key) else { return done(self, None, cx) };
+        let Some(view) = page.native.as_ref().map(|n| n.view.clone()) else { return done(self, None, cx) };
+        let view_id = page.view_id;
+        page.live = None;
+        page.pick = false;
+        page.picking = false;
+        page.watch = true;
+        self.canvas_state.browsers.last_masks.borrow_mut().remove(&key);
+        let events = self.canvas_state.browsers.events.clone();
+        let id = key.clone();
+        let (tx, rx) = async_channel::bounded(1);
+        view.update(cx, |v, _| {
+            let _ = v.focus_parent();
+            snapshot(v.raw(), move |shot| { let _ = tx.try_send(shot); });
+        });
+        self.note_browser_url(&key, cx);
+        cx.spawn(async move |this, cx| {
+            let shot = rx.recv().with_timeout(Duration::from_secs(2), cx.background_executor()).await.ok().and_then(Result::ok).flatten();
+            if let Some(events) = events { let _ = events.try_send((id, view_id, Event::Rested(shot.clone()))); }
+            let _ = this.update(cx, |this, cx| done(this, shot, cx));
+        }).detach();
+        cx.notify();
     }
 
     fn navigate_browser(&mut self, key: &str, url: &str, cx: &mut Context<Self>) {

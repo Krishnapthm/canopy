@@ -520,9 +520,12 @@ impl Core {
     }
 
     pub fn input(&self, channel: u32, bytes: &[u8]) {
-        if !bytes.is_empty() {
-            self.send(channel, DATA, bytes);
-        }
+        self.try_input(channel, bytes);
+    }
+
+    /// Reports whether input reached the writer queue, which closes when the core disconnects.
+    pub fn try_input(&self, channel: u32, bytes: &[u8]) -> bool {
+        !bytes.is_empty() && self.writer.send(encode(channel, DATA, bytes)).is_ok()
     }
 
     /// Terminal-engine replies are not typing. Older paths require legacy DATA.

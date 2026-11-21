@@ -9,6 +9,7 @@ mod helper_bar;
 mod pane_commands;
 pub(super) mod browser;
 mod browser_mask;
+mod annotate;
 mod image_pane;
 mod pdf;
 mod sim;
@@ -115,6 +116,10 @@ pub(super) struct State {
     pub(super) browsers: browser::Browsers,
     /// Most recently used browser pane, for routing terminal links.
     last_browser: Option<String>,
+    annotations: HashMap<String, annotate::Annotate>,
+    annotation_starts: HashMap<String, Rc<()>>,
+    #[cfg(target_os = "macos")]
+    annotation_targets: HashSet<String>,
     /// The browser pane expanded into a tab of the top strip, filling the canvas area (not saved).
     pub(super) browser_tab: Option<String>,
     /// An image region drag: pane id, start and current window points.
@@ -225,6 +230,10 @@ impl State {
             drag_live: false,
             browsers: Default::default(),
             last_browser: None,
+            annotations: HashMap::new(),
+            annotation_starts: HashMap::new(),
+            #[cfg(target_os = "macos")]
+            annotation_targets: HashSet::new(),
             browser_tab: None,
             region: None,
             image_sizes: HashMap::new(),
@@ -819,6 +828,7 @@ impl AppWindow {
 
     /// Removes file and mod panes, their selection and previews no longer in use.
     pub(super) fn close_boxed_panes(&mut self, ids: &[String], cx: &mut Context<Self>) {
+        self.forget_annotations(ids, cx);
         let state = &mut self.canvas_state;
         let paths: Vec<_> = state.doc.panes.iter().filter(|p| ids.contains(&p.id)).filter_map(|p| p.file().map(str::to_owned)).collect();
         state.doc.panes.retain(|p| !ids.contains(&p.id));
@@ -2136,6 +2146,15 @@ impl AppWindow {
             return;
         }
         let Some(addr) = a["terminal"].as_str().map(str::to_owned) else { return self.fail("quote.send needs terminal or argv"); };
+        if a["kind"] == "annotation" {
+            #[cfg(target_os = "macos")]
+            {
+                let result = self.route_annotation(addr, a, window, cx);
+                return self.answer(result.map(|()| json!({})));
+            }
+            #[cfg(not(target_os = "macos"))]
+            return self.fail("Browser and simulator annotations need macOS");
+        }
         self.paste_agent(addr, a.clone(), window, cx);
     }
 
@@ -2154,9 +2173,7 @@ impl AppWindow {
                     // Open once: the person may collapse the cell or pick another pill while the agent starts.
                     if !opened {
                         opened = true;
-                        if this.canvas_state.popped.contains_key(&addr) { this.pop_canvas(addr.clone(), true, window, cx); }
-                        this.dispatch("panel.open", &json!({"terminal":addr}), true, window, cx);
-                        this.sync(window, cx);
+                        this.open_agent_for_quote(&addr, window, cx);
                     }
                     // Paste only into the target's own view.
                     let Some(term) = this.terms.get(&cell_slot(&addr)) else { return false };
@@ -2167,6 +2184,93 @@ impl AppWindow {
                 if !matches!(done, Ok(false)) { break; }
                 cx.background_executor().timer(Duration::from_millis(100)).await;
             }
+        }).detach();
+    }
+
+    fn open_agent_for_quote(&mut self, addr: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.canvas_state.popped.contains_key(addr) { self.pop_canvas(addr.to_owned(), true, window, cx); }
+        self.dispatch("panel.open", &json!({"terminal":addr}), true, window, cx);
+        self.sync(window, cx);
+    }
+
+    /// Pastes each image separately, then submits after the target's visible prompt settles.
+    #[cfg(target_os = "macos")]
+    fn paste_annotation(&mut self, addr: String, pane: String, session: Rc<()>, outgoing: annotate::Outgoing, window: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(window, async move |this, cx| {
+            let result = async {
+                let mut paths = outgoing.images;
+                if addr.contains('/') {
+                    let addr = addr.clone();
+                    paths = cx.background_executor().spawn(async move {
+                        paths.into_iter().map(|path| {
+                            let out = crate::spawn::command(crate::core_bin::path()).args(["put", "--json", &addr, &path])
+                                .output().map_err(|e| format!("Cannot copy the annotation to {addr}: {e}"))?;
+                            if !out.status.success() {
+                                return Err(format!("Cannot copy the annotation to {addr}: {}", String::from_utf8_lossy(&out.stderr).trim()));
+                            }
+                            serde_json::from_slice::<Value>(&out.stdout).ok()
+                                .and_then(|v| v["path"].as_str().map(str::to_owned))
+                                .filter(|p| std::path::Path::new(p).is_absolute() && !p.chars().any(char::is_control))
+                                .ok_or_else(|| format!("The annotation copy to {addr} returned no absolute path"))
+                        }).collect::<Result<Vec<_>, _>>()
+                    }).await?;
+                }
+                let paths: Vec<_> = paths.into_iter().map(|p| {
+                    if p.contains(' ') { crate::terminal::quote_paths([p]).trim_end().to_owned() } else { p }
+                }).collect();
+                let started = Instant::now();
+                let mut opened = false;
+                let agent = |app: &Self| app.live.get(&addr).is_some_and(|rec| canvas_agent(rec) || crate::programs::agent_program(&rec["program"]));
+                let (view, paste_at, mut screen) = loop {
+                    if started.elapsed() >= Duration::from_secs(30) { return Err("The agent did not get ready for a paste".into()); }
+                    let ready = this.update_in(cx, |this, window, cx| {
+                        if !this.annotation_sending(&pane, &session) { return Err("The annotation closed".to_owned()); }
+                        if !agent(this) { return Ok(None); }
+                        if !opened {
+                            opened = true;
+                            this.open_agent_for_quote(&addr, window, cx);
+                        }
+                        let Some(term) = this.terms.get(&cell_slot(&addr)) else { return Ok(None) };
+                        let view = term.view.read(cx);
+                        // Once the first paste succeeds, all pastes run in this same window update.
+                        if !view.paste_own(&paths[0]) { return Ok(None); }
+                        if !paths[1..].iter().all(|p| view.paste_own(p)) || !view.paste_own(&outgoing.text) {
+                            return Err("The agent stopped accepting the annotation".into());
+                        }
+                        let stamped = view.annotation_input().ok_or("The agent stopped accepting the annotation")?;
+                        let screen = view.screen_text();
+                        term.focus.focus(window, cx);
+                        Ok(Some((term.view.clone(), stamped, screen)))
+                    }).map_err(|_| "The window closed".to_owned())??;
+                    if let Some(ready) = ready { break ready; }
+                    cx.background_executor().timer(Duration::from_millis(100)).await;
+                };
+                let start = Instant::now();
+                let mut changed = start;
+                loop {
+                    cx.background_executor().timer(Duration::from_millis(50)).await;
+                    let submitted = this.update_in(cx, |this, _, cx| {
+                        let current = this.terms.get(&cell_slot(&addr)).is_some_and(|term| term.view == view);
+                        let target = view.read(cx);
+                        if !this.annotation_sending(&pane, &session) || !current || !agent(this)
+                            || target.annotation_input() != Some(paste_at)
+                        {
+                            return Err("The agent's prompt changed before the annotation could be submitted".to_owned());
+                        }
+                        let next = target.screen_text();
+                        if next != screen {
+                            screen = next;
+                            changed = Instant::now();
+                        }
+                        if changed.elapsed() >= Duration::from_millis(300) || start.elapsed() >= Duration::from_secs(3) {
+                            return target.press_enter().then_some(true).ok_or_else(|| "The agent disconnected before submit".into());
+                        }
+                        Ok(false)
+                    }).map_err(|_| "The window closed".to_owned())??;
+                    if submitted { return Ok(()); }
+                }
+            }.await;
+            let _ = this.update_in(cx, |this, window, cx| this.annotation_delivered(&addr, &pane, &session, result, window, cx));
         }).detach();
     }
 
@@ -2925,6 +3029,7 @@ impl AppWindow {
                     drawn_sims.push(card.id.clone());
                     let (title, detail) = self.sim_title(card, cx);
                     let body = self.sim_body(card, cx);
+                    let body = self.annotate_body(card, body, camera.zoom, cx);
                     #[cfg(target_os = "macos")]
                     let body = div().relative().size_full().child(body)
                         .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(
