@@ -112,8 +112,11 @@ impl AppWindow {
             pane.pinned = None;
         } else if pane.pinned.is_none() {
             let [x, y] = camera.to_screen([pane.rect[0], pane.rect[1]]);
-            let w = (pane.rect[2] * camera.zoom).min(size[0] - 2. * MARGIN).max(240.);
-            let h = (pane.rect[3] * camera.zoom).min(size[1] - 2. * MARGIN).max(120.);
+            let [w, h] = [pane.rect[2] * camera.zoom, pane.rect[3] * camera.zoom];
+            // It keeps its shape, at most the window's height and (in the corner) 60% of its width.
+            let room = if corner { size[0] * 0.6 } else { size[0] - 2. * MARGIN };
+            let k = (room / w).min((size[1] - 2. * MARGIN) / h).min(1.);
+            let [w, h] = [(w * k).max(240.), (h * k).max(120.)];
             pane.pinned = Some(if corner { [size[0] - w - MARGIN - stacked, MARGIN + stacked, w, h] } else { [x, y, w, h] });
         }
         self.raise_pane(id, cx);
