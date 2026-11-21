@@ -895,6 +895,8 @@ impl AppWindow {
             // A navigation inside the page (a link) committed.
             Event::Started => return self.begin_load(&key, cx),
             Event::Title(title) => {
+                // Pages can set any title, as often as they like: keep a short one line.
+                let title: String = title.chars().filter(|c| !c.is_control()).take(300).collect();
                 page.title = title.clone();
                 if let Some(saved) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id)
                     && let canvas::Kind::Browser { tabs, .. } = &mut saved.kind
@@ -920,9 +922,13 @@ impl AppWindow {
             Event::Rested(shot) => {
                 if let Some(rgba) = shot {
                     let file = shot_file(&key);
-                    if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
-                    let _ = crate::control::save_png(&rgba, &file);
-                    page.shot = Some(render_image(rgba));
+                    let saved = rgba.clone();
+                    cx.background_executor().spawn(async move {
+                        if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
+                        let _ = crate::control::save_png(&saved, &file);
+                    }).detach();
+                    // The old still's texture is freed after this frame, as GPUI wants.
+                    if let Some(old) = page.shot.replace(render_image(rgba)) { cx.defer(move |cx| cx.drop_image(old, None)); }
                 }
                 #[cfg(target_os = "macos")]
                 if page.live.is_none() && let Some(native) = &page.native {
@@ -939,8 +945,10 @@ impl AppWindow {
                 self.toast(Toast { title: format!("{title} is still playing"), body: None, level: Level::Info, action: Some(("pane.focus".into(), json!({"pane": id}))) }, window, cx);
             }
             Event::Message(body) => {
-                if !std::mem::take(&mut page.picking) || !active { return; }
+                if !page.picking || !active { return; }
+                // Only a pick or its error ends the pick: other page messages leave it waiting.
                 let Ok(message) = serde_json::from_str::<Value>(&body) else { return };
+                if message["error"].is_string() || message["pick"].is_object() { page.picking = false; } else { return; }
                 if let Some(error) = message["error"].as_str() {
                     tracing::warn!("browser pane {id}: {error}");
                     self.toast(Toast { title: "Pick failed".into(), body: Some(error.into()), level: Level::Error, action: None }, window, cx);
@@ -1010,6 +1018,13 @@ impl AppWindow {
     /// A picked element becomes a quote. The page rests and the quote popover opens.
     fn browser_picked(&mut self, id: &str, pick: &Value, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id).cloned() else { return };
+        // The page wrote this: keep each field one bounded line, so it cannot add lines to an agent's prompt.
+        let field = |key: &str, max: usize| pick[key].as_str()
+            .map(|v| Value::String(v.chars().filter(|c| !c.is_control()).take(max).collect()));
+        let pick = &json!({
+            "url": field("url", 2048), "selector": field("selector", 1024), "tag": field("tag", 300), "text": field("text", 400),
+            "component": field("component", 200), "file": field("file", 1024), "line": pick["line"].as_u64(), "column": pick["column"].as_u64(),
+        });
         // Where the source may live: the folders of agents wired to this pane, its space's
         // folder, then every space's folder.
         let wires = crate::wire::all(&self.canvas_state.doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
