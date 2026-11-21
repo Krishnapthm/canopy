@@ -965,7 +965,8 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
             "frame/palette",
             true,
             props(),
-            Some(&format!("this.query = {query:?};")),
+            // Set the field too: a change event landing late would reset the query to it.
+            Some(&format!("this.input.set_value({query:?}); this.query = {query:?};")),
         )
         .unwrap();
         // The query sits in a native text field; what the list shows tells it apart.
