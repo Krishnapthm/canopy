@@ -7,7 +7,7 @@ mod wire_view;
 mod keyboard;
 mod helper_bar;
 mod pane_commands;
-mod browser;
+pub(super) mod browser;
 mod image_pane;
 mod pdf;
 mod sim;

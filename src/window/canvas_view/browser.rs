@@ -7,8 +7,8 @@
 //! A browser pane's header is its controls: back, forward, reload, an address field and a
 //! "⋯" menu (viewport, expand into a top-strip tab, pop out into a window, clear data).
 //!
-//! The page loads only what the person or an agent opens: no homepage, an in-memory
-//! (incognito) website store, no downloads, and the bundled react-grab with its
+//! The page loads only what the person or an agent opens: no homepage, a persistent
+//! website store per Canopy home (see `store_id`), no downloads, and bundled react-grab with its
 //! update check and font import removed.
 use super::*;
 
@@ -492,8 +492,15 @@ impl AppWindow {
             // An expanded page hides its pane, menu included: its strip tab collapses it.
             json!(["Expand", "canvas.browser_expand", at]),
             json!([if popped { "Bring back" } else { "Pop out" }, "canvas.browser_pop", at]),
-            json!(["Clear browsing data", "canvas.browser_clear", at]),
         ]);
+        for (keep, value, label) in [
+            (settings::KeepCookies::UntilQuit, "until_quit", "Until quit"),
+            (settings::KeepCookies::Forever, "forever", "Forever"),
+        ] {
+            let mark = if self.person.browser_keep_cookies == keep { "✓ " } else { "" };
+            items.push(json!([format!("{mark}Keep cookies: {label}"), "canvas.browser_cookies", {"keep": value}]));
+        }
+        items.push(json!(["Clear browsing data", "canvas.browser_clear", at]));
         self.open_menu("primary", json!({"items": items}), Some(window.mouse_position()), window, cx);
     }
 
@@ -680,8 +687,14 @@ impl AppWindow {
     }
 
     /// canvas.browser_back | forward | reload | home | pick | shot | external | copy | viewport
-    /// | expand | pop | clear.
+    /// | expand | pop | cookies | clear | inspect.
     pub(in crate::window) fn browser_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        if name == "canvas.browser_cookies" {
+            let Ok(keep) = serde_json::from_value::<settings::KeepCookies>(a["keep"].clone()) else {
+                return self.fail("keep must be until_quit or forever");
+            };
+            return self.write_person(|person| person.browser_keep_cookies = keep, window, cx);
+        }
         let id = match self.browser_target(a) { Ok(id) => id, Err(e) => return self.fail(e) };
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap();
         let canvas::Kind::Browser { url, home } = pane.kind.clone() else { return };
@@ -707,14 +720,17 @@ impl AppWindow {
             "canvas.browser_pop" => {
                 if let Err(e) = self.pop_browser(&id, window, cx) { self.fail(e); }
             }
+            "canvas.browser_inspect" => {
+                #[cfg(target_os = "macos")]
+                if let Err(e) = self.inspect_browser(&id, window, cx) { self.fail(e); }
+                #[cfg(not(target_os = "macos"))]
+                self.fail("browser panes run on macOS only for now");
+            }
             "canvas.browser_clear" => {
                 if a["confirmed"].as_bool() != Some(true) {
-                    return self.confirm("Clear browsing data?", "Cookies, storage and cache for every browser pane are deleted.", "Clear", name, json!({"pane": id, "confirmed": true}), window, cx);
+                    return self.confirm("Clear browsing data?", "Cookies, storage and cache for every browser pane are deleted. Sites will ask you to sign in again.", "Clear", name, json!({"pane": id, "confirmed": true}), window, cx);
                 }
-                match self.clear_browsing_data() {
-                    Ok(()) => self.toast(Toast { title: "Browsing data cleared".into(), body: None, level: Level::Success, action: None }, window, cx),
-                    Err(e) => self.fail(e),
-                }
+                if let Err(e) = self.clear_browsing_data(window, cx) { self.fail(e); }
             }
             "canvas.browser_pick" => {
                 // Another page expanded gives way; the expanded page itself is already live.
@@ -912,9 +928,9 @@ impl AppWindow {
         let (load_tx, load_id) = (tx.clone(), id.to_owned());
         let (open_tx, open_id) = (tx.clone(), id.to_owned());
         let ipc = send(Event::Message);
-        let webview = wry::WebViewBuilder::new()
+        let webview = browser_store(wry::WebViewBuilder::new())
             .with_url(url)
-            .with_incognito(true)
+            .with_devtools(true)
             .with_accept_first_mouse(true)
             .with_initialization_script_for_main_only(page_script(), true)
             .with_ipc_handler(move |request| ipc(request.body().clone()))
@@ -1021,9 +1037,9 @@ impl AppWindow {
                     });
                     true
                 });
-                let built = wry::WebViewBuilder::new()
+                let built = browser_store(wry::WebViewBuilder::new())
                     .with_url(url)
-                    .with_incognito(true)
+                    .with_devtools(true)
                     .with_accept_first_mouse(true)
                     .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
                     .with_download_started_handler(|_, _| false)
@@ -1057,12 +1073,43 @@ impl AppWindow {
         Ok(())
     }
 
-    /// Deletes the cookies, storage and cache of every page that has a view. (Each pane's store
-    /// is private and in memory, so a pane with no view holds none.)
-    // shortcut: no completion wait, WebKit finishes the delete in the background; add one if a toast must follow it.
-    fn clear_browsing_data(&mut self) -> Result<(), String> {
-        for native in self.canvas_state.browsers.pages.values().filter_map(|p| p.native.as_ref()) {
-            native.raw.raw().clear_all_browsing_data().map_err(|e| format!("cannot clear browsing data: {e}"))?;
+    /// Clears data in open views, including pop-outs, and asks WebKit to remove the named store.
+    fn clear_browsing_data(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let mut views = Vec::new();
+        for page in self.canvas_state.browsers.pages.values() {
+            if let Some(native) = &page.native {
+                views.push(native.raw.clone());
+            }
+            if let Some(popped) = page.popped.and_then(|window| window.downcast::<BrowserWindow>())
+                && let Ok(Some(view)) = popped.update(cx, |page, _, _| page.native.as_ref().map(|native| native.raw.clone()))
+            {
+                views.push(view);
+            }
+        }
+        // shortcut: lb-wry does not expose completion for clearing live views, wait for it if the API adds a callback.
+        let mut failure = None;
+        for view in &views {
+            if let Err(e) = view.raw().clear_all_browsing_data() { failure = Some(e); }
+        }
+        let result = persistent_browser_store().then(remove_browser_store);
+        let has_views = !views.is_empty();
+        let cleared = Toast { title: "Browsing data cleared".into(), body: None, level: Level::Success, action: None };
+        if let Some(e) = failure { return Err(format!("cannot clear browsing data: {e}")); }
+        if let Some(result) = result {
+            cx.spawn_in(window, async move |this, cx| {
+                let error = match result.recv().await {
+                    Ok(Ok(())) => None,
+                    Ok(Err(wry::Error::DataStoreInUse)) if has_views => None,
+                    Ok(Err(e)) => Some(e.to_string()),
+                    Err(e) => Some(e.to_string()),
+                };
+                let _ = this.update_in(cx, |this, window, cx| match error {
+                    Some(e) => this.command_error("canvas.browser_clear", &e, window, cx),
+                    None => this.toast(cleared, window, cx),
+                });
+            }).detach();
+        } else {
+            self.toast(cleared, window, cx);
         }
         Ok(())
     }
@@ -1206,6 +1253,146 @@ impl AppWindow {
             }
         }
     }
+
+    /// Give an unpinned browser room to work at 100%, or fit it with a margin.
+    pub(super) fn snap_usable(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(bounds) = self.bounds.borrow().get("canopy-canvas").copied() else { return };
+        let [w, h] = [f32::from(bounds.size.width), f32::from(bounds.size.height)];
+        if w <= 0. || h <= 0. { return; }
+        let doc = &mut self.canvas_state.doc;
+        let Some(pane) = doc.panes.iter_mut().find(|p| p.id == id && p.pinned.is_none()) else { return };
+        let [x, y, pw, ph] = pane.rect;
+        let (pw, ph) = (pw.max(SIZE[0]), ph.max(SIZE[1]));
+        pane.rect = [x, y, pw, ph];
+        let zoom = if pw <= w && ph <= h { 1. } else { ((w - 48.).max(1.) / pw).min((h - 48.).max(1.) / ph) };
+        doc.camera = canvas::Camera { x: x + (pw - w / zoom) / 2., y: y + (ph - h / zoom) / 2., zoom };
+        self.canvas_changed(cx);
+        cx.notify();
+    }
+
+    /// Move the pane before making its native view live, since movement rests a live view.
+    fn inspect_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        if self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some()) {
+            return Err("the page is popped out: bring it back first".into());
+        }
+        let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
+        if !self.canvas_state.doc.shows(pane.space.as_ref()) {
+            return Err(format!("pane {id} is in another space: go there first"));
+        }
+        self.ensure_view(id, window, cx)?;
+        let raw = self.raw_browser(id).ok_or("the browser view went away")?;
+        {
+            use objc2::{runtime::NSObjectProtocol as _, sel};
+            use wry::WebViewExtMacOS as _;
+            if !raw.raw().webview().respondsToSelector(sel!(_inspector)) {
+                return Err("The Web Inspector is not available in this version of macOS".into());
+            }
+        }
+        self.collapse_browser(window, cx);
+        let from = self.canvas_state.doc.camera;
+        self.snap_usable(id, cx);
+        let to = self.canvas_state.doc.camera;
+        if from == to { return self.open_browser_inspector(id, window, cx); }
+        let bounds = self.bounds.borrow().get("canopy-canvas").copied().ok_or("the canvas is not shown")?;
+        let anchor = [f32::from(bounds.size.width) / 2., f32::from(bounds.size.height) / 2.];
+        self.canvas_state.doc.camera = from;
+        let motion = (from, to, std::time::Instant::now(), anchor);
+        self.canvas_state.motion.target = Some(motion);
+        self.animate_camera(window, cx);
+        self.inspect_after_camera(id.to_owned(), motion.2, to, window, cx);
+        Ok(())
+    }
+
+    fn inspect_after_camera(&self, id: String, started: std::time::Instant, target: canvas::Camera, window: &Window, cx: &Context<Self>) {
+        let entity = cx.entity().downgrade();
+        window.on_next_frame(move |window, cx| {
+            let _ = entity.update(cx, |this, cx| match this.canvas_state.motion.target {
+                Some((_, _, time, _)) if time == started => this.inspect_after_camera(id, started, target, window, cx),
+                None if this.canvas_state.doc.camera == target => {
+                    if let Err(e) = this.open_browser_inspector(&id, window, cx) {
+                        this.command_error("canvas.browser_inspect", &e, window, cx);
+                    }
+                }
+                _ => {}
+            });
+        });
+    }
+
+    fn open_browser_inspector(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let camera = self.canvas_state.doc.camera;
+        let pinned = self.canvas_state.doc.panes.iter().any(|p| p.id == id && p.pinned.is_some());
+        let wake = self.wake_browser_result(id, window, cx);
+        if pinned { self.canvas_state.doc.camera = camera; }
+        wake?;
+        let raw = self.raw_browser(id).ok_or("the browser view went away")?;
+        raw.raw().open_devtools();
+        detach_inspector(raw.raw());
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn detach_inspector(view: &wry::WebView) {
+    use objc2::{msg_send, runtime::{AnyObject, Bool}, sel};
+    use wry::WebViewExtMacOS as _;
+    let wkwebview = view.webview();
+    // Private WebKit API used by lb-wry too, for builds outside the App Store.
+    // SAFETY: runs on the main thread with a live WKWebView checked in inspect_browser.
+    unsafe {
+        let inspector: *mut AnyObject = msg_send![&*wkwebview, _inspector];
+        let detaches = !inspector.is_null() && { let r: Bool = msg_send![&*inspector, respondsToSelector: sel!(detach)]; r.as_bool() };
+        if detaches && let Some(inspector) = inspector.as_ref() {
+            let _: () = msg_send![inspector, detach];
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn persistent_browser_store() -> bool {
+    static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUPPORTED.get_or_init(|| objc2_foundation::NSProcessInfo::processInfo().operatingSystemVersion().majorVersion >= 14)
+}
+
+#[cfg(target_os = "macos")]
+fn browser_store(builder: wry::WebViewBuilder<'_>) -> wry::WebViewBuilder<'_> {
+    use wry::WebViewBuilderExtDarwin as _;
+    if persistent_browser_store() { builder.with_data_store_identifier(store_id()) }
+    else { builder.with_incognito(true) }
+}
+
+#[cfg(target_os = "macos")]
+fn store_id() -> [u8; 16] {
+    store_id_for(&crate::mods::app_dir())
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn store_id_for(path: &std::path::Path) -> [u8; 16] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(format!("canopy-browser-store:{}", path.display()))[..16].try_into().unwrap()
+}
+
+#[cfg(target_os = "macos")]
+fn remove_browser_store() -> async_channel::Receiver<wry::Result<()>> {
+    use wry::WebViewExtDarwin as _;
+    let (send, receive) = async_channel::bounded(1);
+    wry::WebView::remove_data_store(&store_id(), move |result| { let _ = send.try_send(result); });
+    receive
+}
+
+/// Starts removing the named store and returns a future for WebKit's result.
+pub(crate) fn forget_browser_data_if_until_quit() -> Option<impl std::future::Future<Output = Result<(), String>>> {
+    #[cfg(target_os = "macos")]
+    {
+        let until_quit = || settings::load_person().is_ok_and(|person| person.browser_keep_cookies == settings::KeepCookies::UntilQuit);
+        if !persistent_browser_store() || !until_quit() { return None; }
+        let removal = remove_browser_store();
+        return Some(async move {
+            removal.recv().await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())?;
+            Ok(())
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    None::<std::future::Ready<Result<(), String>>>
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1224,7 +1411,9 @@ impl AppWindow {
     fn pop_browser(&mut self, _: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
         Err("browser panes run on macOS only for now".into())
     }
-    fn clear_browsing_data(&mut self) -> Result<(), String> { Err("browser panes run on macOS only for now".into()) }
+    fn clear_browsing_data(&mut self, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
+        Err("browser panes run on macOS only for now".into())
+    }
     pub(super) fn watch_pages(&self, _: &[String], _: &mut Context<Self>) {}
     fn eval_browser(&mut self, _: &str, _: &str) -> bool { false }
     fn navigate_browser(&mut self, _: &str, _: &str, _: &mut Context<Self>) {}
@@ -1236,6 +1425,14 @@ mod tests {
     // Explicit: a glob would bring gpui's own `test` attribute in.
     use super::{GRAB_REQUESTS, REACT_GRAB, SIZE, Viewport, format_quote, jsx_lines, page_script, resolve_source, viewport_size, web_url};
     use serde_json::json;
+
+    #[test]
+    fn browser_store_id_is_stable_and_scoped_to_the_home() {
+        use std::path::Path;
+        let daily = Path::new("/canopy");
+        assert_eq!(super::store_id_for(daily), super::store_id_for(daily));
+        assert_ne!(super::store_id_for(daily), super::store_id_for(Path::new("/canopy-dev")));
+    }
 
     #[test]
     fn page_script_drops_react_grab_requests() {
