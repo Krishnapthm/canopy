@@ -38,8 +38,6 @@ pub(super) struct State {
     sub_watches: HashMap<String, Task<()>>,
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
     sims: HashMap<String, sim::SimView>,
-    /// Each sim pane's on-screen size in pixels, kept at any zoom (see `pin_sims`; not saved).
-    sim_sizes: HashMap<String, canvas::Point>,
     bar_hover: Option<String>,
     preview_drag: Option<(String, bool, Point<Pixels>)>,
     pub file: Option<String>,
@@ -173,7 +171,6 @@ impl State {
             sub_watches: HashMap::new(),
             previews: HashMap::new(),
             sims: HashMap::new(),
-            sim_sizes: HashMap::new(),
             bar_hover: None,
             preview_drag: None,
             file: None,
@@ -1208,6 +1205,9 @@ impl AppWindow {
         let room = self.canvas_state.doc.room.clone();
         if let Err(e) = self.add_file_pane(std::path::Path::new(path), point, room, window, cx) {
             self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx);
+        }
+    }
+
     /// The rects of the panes (and, on Home, space cards) in the current place that `pick` keeps.
     fn place_rects(&self, pick: impl Fn(&String) -> bool, cx: &App) -> Vec<canvas::Rect> {
         let doc = &self.canvas_state.doc;
@@ -1220,9 +1220,6 @@ impl AppWindow {
     fn zoom_range(&self, window: &Window, cx: &App) -> [f32; 2] {
         let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
         canvas::zoom_range(&self.place_rects(|_| true, cx), [f32::from(size.width), f32::from(size.height)])
-    }
-
-        }
     }
 
     /// The viewport centre in world pixels.
@@ -1611,10 +1608,10 @@ impl AppWindow {
             });
         });
         // Not window.request_animation_frame(): that is paint-only and this runs from events.
-        let range = self.zoom_range(window, cx);
         cx.notify();
     }
     fn settle_zoom(&mut self, anchor: canvas::Point, window: &mut Window, cx: &mut Context<Self>) {
+        let range = self.zoom_range(window, cx);
         let from = self.canvas_state.doc.camera;
         let mut to = from;
         to.zoom_at(from.zoom.clamp(range[0], range[1]), anchor);
@@ -2239,10 +2236,10 @@ impl AppWindow {
         ];
         // Fit the selection, else everything in the current place.
         let fit_rects = if name.starts_with("canvas.fit") {
-        let range = self.zoom_range(window, cx);
             let all = name == "canvas.fit_all" || self.canvas_state.selected.is_empty();
             self.place_rects(|key| all || self.canvas_state.selected.contains(key), cx)
         } else { vec![] };
+        let range = self.zoom_range(window, cx);
         let from = self.canvas_state.doc.camera;
         let state = &mut self.canvas_state;
         if let Some((_, target, ..)) = state.motion.target { state.doc.camera = target; }
@@ -2319,8 +2316,6 @@ impl AppWindow {
     /// the panes beneath it and raises itself on a click.
     fn pane_card(&self, card: &canvas::Pane, icon: SharedString, title: String, detail: String, body: AnyElement, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
         let p = camera.to_screen([card.rect[0], card.rect[1]]);
-        // A sim pane keeps its on-screen size (see `pin_sims`), so its chrome does not scale.
-        let ui = if card.sim().is_some() { 1. } else { camera.zoom };
         let drag = card.id.clone();
         let resize = drag.clone();
         let raise = drag.clone();
@@ -2342,7 +2337,7 @@ impl AppWindow {
                     .child(div().min_w_0().truncate().child(title))
                     .child(div().flex_1().min_w_0().truncate().text_color(c("muted-foreground")).child(detail)))
                 .child(div().flex_1().min_h_0().overflow_hidden().child(body))
-                .child(div().absolute().bottom_0().right_0().size(px(12. * ui)).rounded_br(px(ui::RADIUS))
+                .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(ui::RADIUS))
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
                     .hover(|d| d.border_color(c("foreground")))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -2564,8 +2559,6 @@ impl AppWindow {
                         if resize {
                             card.rect[2] = (card.rect[2] + d[0]).max(240.);
                             card.rect[3] = (card.rect[3] + d[1]).max(120.);
-                            // A resized sim takes its new on-screen size from the rect.
-                            this.canvas_state.sim_sizes.remove(&id);
                         } else {
                             card.rect[0] += d[0];
                             card.rect[1] += d[1];

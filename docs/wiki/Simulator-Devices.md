@@ -28,7 +28,7 @@ canopy pane new sim <udid>           # a specific simulator
 - Press `Esc` to give the keyboard back to the canvas.
 - Click the bezel's side buttons to press them.
 
-A simulator pane keeps its size on screen when you zoom the canvas, so the device stays readable and its taps land where you expect. Panning moves it with the canvas like any pane. Resize it with its corner handle or the zoom buttons below.
+A simulator pane scales with the canvas like every pane. Zooming in stops before the biggest pane would leave the window, so the device always stays whole on screen. Resize it with its corner handle or the zoom buttons below.
 
 The pane header shows the iOS version and the state: **Live**, **Connecting**, **Screenshot** or **Recording**.
 

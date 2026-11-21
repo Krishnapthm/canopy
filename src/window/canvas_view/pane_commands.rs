@@ -210,19 +210,6 @@ mod tests {
             this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.], z: 9, space: None });
             assert_eq!(this.pane_read(&json!({"pane":"p9"}), cx).unwrap()["text"], canvas::envelope("p9", "sim", &[("udid", "")], "No simulator picked yet."));
             assert_eq!(this.pane_open(&json!({"pane":"p9"}), window, cx).unwrap_err(), "canvas.pane_open needs target");
-            // A sim pane keeps its on-screen size at any zoom: its world rect follows the camera.
-            let size = |this: &crate::window::AppWindow| { let r = this.canvas_state.doc.panes.iter().find(|p| p.id == "p9").unwrap().rect; [r[2], r[3]] };
-            this.canvas_state.doc.camera.zoom = 1.;
-            this.pin_sims();
-            this.canvas_state.doc.camera.zoom = 0.5;
-            this.pin_sims();
-            assert_eq!(size(this), [640., 1440.]);
-            // Forgetting the size (as a resize does) takes the rect as the new on-screen size.
-            this.canvas_state.sim_sizes.remove("p9");
-            this.pin_sims();
-            this.canvas_state.doc.camera.zoom = 2.;
-            this.pin_sims();
-            assert_eq!(size(this), [160., 360.]);
         });
     }
 
