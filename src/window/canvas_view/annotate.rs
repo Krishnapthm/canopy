@@ -13,7 +13,12 @@ const COLORS: [(&str, Color); 5] = [
     ("Blue", [59, 130, 246, 255]),
 ];
 const PIN: Color = [37, 99, 235, 255];
-const STYLES: [&str; 10] = ["display", "position", "width", "height", "margin", "padding", "font-size", "font-weight", "color", "background-color"];
+const STYLES: [&str; 11] = ["display", "position", "width", "height", "margin", "padding", "font-size", "font-weight", "text-align", "color", "background-color"];
+/// The styles the Adjust form edits, as (CSS property, label); browser.js applies only these.
+const ADJUST: [(&str, &str); 7] = [
+    ("font-size", "Font size"), ("font-weight", "Weight"), ("text-align", "Align"), ("color", "Text colour"),
+    ("background-color", "Background"), ("padding", "Padding"), ("margin", "Margin"),
+];
 
 pub(super) enum Host {
     Browser { url: String, viewport: Option<Pos> },
@@ -39,11 +44,20 @@ pub(super) enum Anchor {
     Point(Pos),
 }
 
+/// One proposed style change on an element comment, sent to the agent as `property old -> new`.
+#[derive(Clone)]
+pub(super) struct Adjust {
+    property: &'static str,
+    old: String,
+    new: String,
+}
+
 #[derive(Clone)]
 pub(super) struct Comment {
     pub anchor: Anchor,
     pub text: String,
     crop: Option<Arc<image::RgbaImage>>,
+    adjust: Vec<Adjust>,
 }
 
 pub(super) enum Action {
@@ -66,6 +80,10 @@ pub(super) struct Annotate {
     pub width: f32,
     pub hidden: bool,
     pub live: bool,
+    /// Compare: show the page without the adjustments.
+    original: bool,
+    /// The JSON last sent to the page's `restyle`, so unchanged styles are not resent.
+    styled: String,
     drag: Option<Gesture>,
     pub editing: Option<usize>,
     draft: Option<Draft>,
@@ -99,7 +117,15 @@ struct Draft {
     at: Pos,
     kind: DraftKind,
     input: Entity<gpui_base::input::InputState>,
+    adjust: Option<AdjustForm>,
     _enter: Subscription,
+}
+
+/// The open Adjust section: one input per `ADJUST` entry, the page's values, and what Preview applied.
+struct AdjustForm {
+    fields: Vec<Entity<gpui_base::input::InputState>>,
+    olds: Vec<String>,
+    preview: Option<Vec<Adjust>>,
 }
 
 #[derive(Clone)]
@@ -153,6 +179,11 @@ impl Annotate {
         }
     }
 
+    /// Whether a saved comment has adjustments (shows Compare).
+    fn adjusted(&self) -> bool {
+        self.items().iter().any(|item| matches!(item, Item::Comment(_, c) if !c.adjust.is_empty()))
+    }
+
     fn anchor_rects(&self, anchor: &Anchor) -> Vec<Rect> {
         match anchor {
             Anchor::Element(el) => self.measured.get(el["selector"].as_str().unwrap_or_default())
@@ -177,6 +208,35 @@ fn numbers<const N: usize>(value: &Value) -> Option<[f32; N]> {
 
 fn page_string(v: &Value, limit: usize) -> String {
     v.as_str().unwrap_or_default().chars().filter(|c| !c.is_control()).take(limit).collect()
+}
+
+/// The fields that differ from the page's values, with control characters removed.
+fn adjustments(olds: &[String], news: impl Iterator<Item = String>) -> Vec<Adjust> {
+    ADJUST.iter().zip(olds).zip(news).filter_map(|(((property, _), old), new)| {
+        let new: String = new.chars().filter(|c| !c.is_control()).take(100).collect();
+        let new = new.trim();
+        (!new.is_empty() && new != old).then(|| Adjust { property, old: old.clone(), new: new.to_owned() })
+    }).collect()
+}
+
+/// The `restyle` list for the page: saved adjustments plus the open draft's previewed ones, or nothing while comparing.
+fn styled(a: &Annotate) -> Value {
+    if a.original { return json!([]); }
+    let draft = a.draft.as_ref().and_then(|d| match (&d.kind, d.adjust.as_ref()?.preview.as_ref()) {
+        (DraftKind::Comment { anchor: Anchor::Element(el), .. }, Some(preview)) => Some((el, preview.as_slice())),
+        _ => None,
+    });
+    // A previewed draft replaces the saved version of the comment being edited.
+    let editing = if draft.is_some() { a.editing } else { None };
+    let mut sets: Vec<_> = a.items().into_iter().filter_map(|item| match item {
+        Item::Comment(id, Comment { anchor: Anchor::Element(el), adjust, .. }) if Some(id) != editing => Some((el, adjust.as_slice())),
+        _ => None,
+    }).collect();
+    sets.extend(draft);
+    Value::Array(sets.into_iter().filter(|(_, adjust)| !adjust.is_empty()).map(|(el, adjust)| {
+        let styles: serde_json::Map<_, _> = adjust.iter().map(|x| (x.property.to_owned(), json!(x.new))).collect();
+        json!({"selector": el["selector"], "styles": styles})
+    }).collect())
 }
 
 fn tidy_element(value: &Value) -> Option<Anchor> {
@@ -252,10 +312,14 @@ fn message(a: &Annotate, images: &[String]) -> String {
                         }
                         let styles: Vec<_> = STYLES.iter().filter_map(|&key| {
                             let value = page_string(&el["styles"][key], 100);
-                            (!matches!(value.as_str(), "" | "auto" | "normal" | "0px" | "none"))
+                            (!matches!(value.as_str(), "" | "auto" | "normal" | "0px" | "none" | "start"))
                                 .then(|| format!("{key}: {value}"))
                         }).collect();
                         if !styles.is_empty() { let _ = writeln!(comments, "   Styles: {}", styles.join("; ")); }
+                        if !comment.adjust.is_empty() {
+                            let adjust: Vec<_> = comment.adjust.iter().map(|x| format!("{} {} -> {}", x.property, x.old, x.new)).collect();
+                            let _ = writeln!(comments, "   Adjust: {}", adjust.join("; "));
+                        }
                         let _ = writeln!(comments, "   HTML: {}", field("html", 300));
                     }
                     Anchor::Area([x, y, w, h]) => { let _ = writeln!(comments, "   Area: x {x:.0}, y {y:.0}, {w:.0} x {h:.0}"); }
@@ -562,7 +626,7 @@ impl AppWindow {
         let a = Annotate {
             pane: pane.clone(), host, image: render_image(still.clone()), still, page_size,
             done: vec![], undone: vec![], tool: Tool::Select, color: COLORS[0].1, width: 4.,
-            hidden: false, live: false, drag: None, editing: None, draft: None, measured: HashMap::new(),
+            hidden: false, live: false, original: false, styled: "[]".into(), drag: None, editing: None, draft: None, measured: HashMap::new(),
             focus, session: Rc::new(()), was_live, refreshing: false, hint: !annotation_hint_file().exists(),
             palette: false, crop: false, bar_offset: 0., bar_drag: None, confirming: None, outgoing: None, held: None,
         };
@@ -594,6 +658,8 @@ impl AppWindow {
         let Some(a) = self.canvas_state.annotations.remove(id) else { return Ok(()) };
         self.clear_annotation_bounds(id);
         let (browser, wake, live) = (matches!(a.host, Host::Browser { .. }), sent || a.was_live, a.live);
+        // Adjustments are page-only previews: put the page's own styles back before it wakes.
+        if browser && a.styled != "[]" { self.eval_browser_json(id, "return window.__canopy.restyle([])", |_| {}); }
         let image = a.image.clone();
         drop(a);
         cx.defer(move |cx| cx.drop_image(image, None));
@@ -658,9 +724,9 @@ impl AppWindow {
         a.live = false;
         a.refreshing = true;
         a.focus.focus(window, cx);
-        let session = a.session.clone();
+        let sim = matches!(a.host, Host::Sim { .. });
         cx.notify();
-        if matches!(a.host, Host::Sim { .. }) {
+        if sim {
             if let Some(screen) = self.canvas_state.sims.get(id).and_then(|v| v.live.as_ref()) {
                 screen.update(cx, |s, _| s.touch_up(window.mouse_position()));
             }
@@ -668,6 +734,15 @@ impl AppWindow {
             self.replace_annotation_still(id, result, window, cx);
             return;
         }
+        self.annotation_refreeze(id, window, cx);
+    }
+
+    /// Takes a fresh browser still and re-measures the commented elements, which may have moved.
+    fn annotation_refreeze(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(a) = self.canvas_state.annotations.get_mut(id) else { return };
+        a.refreshing = true;
+        let session = a.session.clone();
+        cx.notify();
         let id = id.to_owned();
         self.capture_browser(&id.clone(), session.clone(), window, cx, move |this, result, window, cx| {
             if !this.annotation_is(&id, &session) { return; }
@@ -695,6 +770,21 @@ impl AppWindow {
                     a.refreshing = false;
                     cx.notify();
                 });
+        });
+    }
+
+    /// Sends the styles to apply to the page, then refreshes the still. Skipped when nothing changed.
+    fn restyle(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(a) = self.canvas_state.annotations.get_mut(id).filter(|a| matches!(a.host, Host::Browser { .. })) else { return };
+        if a.original && !a.adjusted() { a.original = false; }
+        let list = styled(a).to_string();
+        if list == a.styled { return; }
+        a.styled = list.clone();
+        let target = id.to_owned();
+        self.annotation_query(id, format!("return window.__canopy.restyle({list})"), window, cx, move |this, value, window, cx| {
+            if value.is_some() { return this.annotation_refreeze(&target, window, cx); }
+            // Resend on the next change instead of assuming the page has these styles.
+            if let Some(a) = this.canvas_state.annotations.get_mut(&target) { a.styled.clear(); }
         });
     }
 
@@ -1041,8 +1131,40 @@ impl AppWindow {
             Item::Comment(i, comment) if i == index => Some(comment.clone()), _ => None,
         }) else { return };
         let Some(&[x, y, ..]) = a.anchor_rects(&comment.anchor).first() else { return };
-        let Comment { anchor, text, crop } = comment;
+        let Comment { anchor, text, crop, adjust } = comment;
         self.annotation_draft(id, [x, y], DraftKind::Comment { anchor, crop }, Some(index), &text, window, cx);
+        if !adjust.is_empty() { self.annotation_adjust(id, &adjust, window, cx); }
+    }
+
+    /// Opens the Adjust section, prefilled with the page's values and any saved ones, or closes it when open.
+    fn annotation_adjust(&mut self, id: &str, saved: &[Adjust], window: &mut Window, cx: &mut Context<Self>) {
+        let Some(a) = self.canvas_state.annotations.get_mut(id) else { return };
+        let Some(draft) = a.draft.as_mut() else { return };
+        let DraftKind::Comment { anchor: Anchor::Element(el), .. } = &draft.kind else { return };
+        if draft.adjust.take().is_some() {
+            self.restyle(id, window, cx);
+            return cx.notify();
+        }
+        let olds: Vec<_> = ADJUST.iter().map(|(css, _)| page_string(&el["styles"][*css], 100)).collect();
+        let fields = ADJUST.iter().zip(&olds).map(|((css, _), old)| {
+            let value = saved.iter().find(|x| x.property == *css).map_or(old.clone(), |x| x.new.clone());
+            cx.new(|cx| {
+                let mut input = gpui_base::input::InputState::new(window, cx);
+                input.set_value(value, window, cx);
+                input
+            })
+        }).collect();
+        draft.adjust = Some(AdjustForm { fields, olds, preview: None });
+        cx.notify();
+    }
+
+    /// Applies the form's values to the live page and refreshes the still.
+    fn annotation_preview(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(a) = self.canvas_state.annotations.get_mut(id).filter(|a| !a.refreshing) else { return };
+        let Some(form) = a.draft.as_mut().and_then(|d| d.adjust.as_mut()) else { return };
+        form.preview = Some(adjustments(&form.olds, form.fields.iter().map(|f| f.read(cx).value().to_string())));
+        a.original = false;
+        self.restyle(id, window, cx);
     }
 
     fn annotation_draft(&mut self, id: &str, at: Pos, kind: DraftKind, editing: Option<usize>, value: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -1061,7 +1183,7 @@ impl AppWindow {
             }
         });
         a.editing = editing;
-        a.draft = Some(Draft { at, kind, input, _enter: enter });
+        a.draft = Some(Draft { at, kind, input, adjust: None, _enter: enter });
         cx.notify();
     }
 
@@ -1069,7 +1191,8 @@ impl AppWindow {
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return };
         let Some(draft) = a.draft.as_ref() else { return };
         let text: String = draft.input.read(cx).value().trim().chars().filter(|c| !c.is_control()).collect();
-        if !delete && text.is_empty() {
+        let adjust = draft.adjust.as_ref().map_or_else(Vec::new, |f| adjustments(&f.olds, f.fields.iter().map(|f| f.read(cx).value().to_string())));
+        if !delete && text.is_empty() && adjust.is_empty() {
             self.annotation_error("Enter some text first", window, cx);
             return;
         }
@@ -1078,22 +1201,26 @@ impl AppWindow {
         let action = match (draft.kind, editing) {
             (DraftKind::Label { color }, _) => Action::Mark(Mark::Text { at: draft.at, text, color }),
             (DraftKind::Comment { anchor, crop }, Some(original)) => Action::Edit {
-                original, comment: (!delete).then_some(Comment { anchor, text, crop }),
+                original, comment: (!delete).then_some(Comment { anchor, text, crop, adjust }),
             },
-            (DraftKind::Comment { anchor, crop }, None) => Action::Comment(Comment { anchor, text, crop }),
+            (DraftKind::Comment { anchor, crop }, None) => Action::Comment(Comment { anchor, text, crop, adjust }),
         };
         a.push(action);
         a.focus.focus(window, cx);
         cx.notify();
+        self.restyle(id, window, cx);
     }
 
     fn annotation_editor(&self, id: &str, a: &Annotate, draft: &Draft, [x, y]: Pos, [w, h]: Pos, cx: &mut Context<Self>) -> Div {
         let comment = matches!(draft.kind, DraftKind::Comment { .. });
-        let width = w.min(if comment { 238. } else { 180. });
-        let height = if comment { 78. } else { 42. };
+        let adjustable = matches!(&draft.kind, DraftKind::Comment { anchor: Anchor::Element(_), .. }) && matches!(a.host, Host::Browser { .. });
+        let width = w.min(if draft.adjust.is_some() { 260. } else if comment { 238. } else { 180. });
+        let height = if draft.adjust.is_some() { 290. } else if comment { 78. } else { 42. };
         let target = id.to_owned();
         let delete = id.to_owned();
         let cancel = id.to_owned();
+        let adjust = id.to_owned();
+        let preview = id.to_owned();
         let button = |id, label| div().id(id).role(gpui::Role::Button).aria_label(label).px(px(6.)).h(px(24.))
             .flex().items_center().rounded(px(ui::RADIUS_SM)).hover(|d| d.bg(c("hover"))).cursor_pointer().child(label);
         div().absolute().left(px((x + 10.).clamp(0., (w - width).max(0.)))).top(px((y + 10.).clamp(0., (h - height - 46.).max(0.))))
@@ -1101,7 +1228,17 @@ impl AppWindow {
             .rounded(px(ui::RADIUS)).shadow_md().text_size(px(12.)).occlude()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(gpui_base::Input::new(&draft.input))
+            .when_some(draft.adjust.as_ref(), |d, form| d.child(div().flex().flex_col().gap(px(3.))
+                .children(ADJUST.iter().zip(&form.fields).map(|((_, label), field)| {
+                    div().flex().items_center().gap(px(6.))
+                        .child(div().w(px(72.)).flex_none().text_color(c("muted-foreground")).child(*label))
+                        .child(div().flex_1().min_w_0().child(gpui_base::Input::new(field)))
+                }))
+                .child(div().flex().justify_end().child(button("adjust-preview", "Preview")
+                    .on_click(cx.listener(move |this, _, window, cx| this.annotation_preview(&preview, window, cx)))))))
             .when(comment, |d| d.child(div().flex().justify_end().gap(px(4.))
+                .when(adjustable, |d| d.child(button("comment-adjust", "Adjust")
+                    .on_click(cx.listener(move |this, _, window, cx| this.annotation_adjust(&adjust, &[], window, cx)))))
                 .when(a.editing.is_some(), |d| d.child(button("comment-delete", "Delete")
                     .on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&delete, true, window, cx)))))
                 .child(button("comment-cancel", "Cancel").on_click(cx.listener(move |this, _, window, cx| {
@@ -1110,6 +1247,8 @@ impl AppWindow {
                         a.draft = None;
                         a.focus.focus(window, cx);
                         cx.notify();
+                        // Drop a previewed change that was never saved.
+                        this.restyle(&cancel, window, cx);
                     }
                 })))
                 .child(button("comment-save", "Save").bg(swatch(PIN)).text_color(gpui::white())
@@ -1152,6 +1291,7 @@ impl AppWindow {
             }
             "hide" => a.hidden = !a.hidden,
             _ if a.refreshing || a.live || a.draft.is_some() => return Ok(()),
+            "compare" => a.original = !a.original,
             "undo" => a.undo(),
             "redo" => a.redo(),
             "clear" if !a.items().is_empty() => a.push(Action::Clear),
@@ -1173,6 +1313,7 @@ impl AppWindow {
         }
         if !a.live && a.draft.is_none() { a.focus.focus(window, cx); }
         cx.notify();
+        if matches!(action, "undo" | "redo" | "clear" | "compare") { self.restyle(id, window, cx); }
         Ok(())
     }
 
@@ -1241,6 +1382,8 @@ impl AppWindow {
             .child(button("crop", "icons/crop.svg", "Area screenshot", a.crop, true, cx))
             .child(button("hide", if a.hidden { "icons/eye-off.svg" } else { "icons/eye.svg" },
                 if a.hidden { "Show marks" } else { "Hide marks" }, a.hidden, true, cx))
+            .when(a.adjusted(), |bar| bar.child(button("compare", "icons/columns-2.svg",
+                if a.original { "Show adjusted" } else { "Show original" }, a.original, true, cx)))
             .child(button("clear", "icons/trash-2.svg", "Trash", false, !items.is_empty(), cx))
             .child(div().id("annotation-send").role(gpui::Role::Button).aria_label("Send")
                 .flex().items_center().flex_none().gap(px(4.)).h(px(24.)).px(px(7.))
@@ -1453,7 +1596,7 @@ impl AppWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Anchor, Annotate, COLORS, Comment, Host, Item, Mark, Tool, burn, fit, message, tidy_element};
+    use super::{Action, Adjust, Anchor, Annotate, COLORS, Comment, Host, Item, Mark, Tool, burn, fit, message, styled, tidy_element};
     use gpui::{RenderImage, TestAppContext};
     use serde_json::json;
     use std::{collections::HashMap, rc::Rc, sync::Arc};
@@ -1464,7 +1607,7 @@ mod tests {
         Annotate {
             pane: "p1".into(), host, still, image, page_size: [1280., 800.],
             done: vec![], undone: vec![], tool: Tool::Select, color: COLORS[0].1, width: 4.,
-            hidden: false, live: false, drag: None, editing: None, draft: None, measured: HashMap::new(),
+            hidden: false, live: false, original: false, styled: "[]".into(), drag: None, editing: None, draft: None, measured: HashMap::new(),
             focus: cx.update(|cx| cx.focus_handle()), session: Rc::new(()), was_live: false, refreshing: false,
             hint: false, palette: false, crop: false, bar_offset: 0., bar_drag: None, confirming: None, outgoing: None,
             #[cfg(target_os = "macos")]
@@ -1473,19 +1616,26 @@ mod tests {
     }
 
     fn comment(text: &str, anchor: Anchor) -> Action {
-        Action::Comment(Comment { anchor, text: text.into(), crop: None })
+        Action::Comment(Comment { anchor, text: text.into(), crop: None, adjust: vec![] })
     }
 
     #[gpui::test]
     fn message_describes_element_area_and_text(cx: &mut TestAppContext) {
         let mut a = example(Host::Browser { url: "http://localhost:3000/".into(), viewport: Some([1280., 800.]) }, cx);
-        a.push(comment("Align the button", tidy_element(&json!({
-            "selector": "#buy", "tag": "<button>", "text": "Buy now", "html": "<button>Buy now</button>",
-            "rect": [12, 20, 100, 32], "component": "Pricing > Buy", "file": "Pricing.tsx", "line": 42,
-            "styles": {"font-size":"14px","color":"rgb(10, 20, 30)","margin":"0px","padding":"auto","position":"normal","background-color":"none"}
-        })).unwrap()));
         a.push(Action::Comment(Comment {
-            anchor: Anchor::Area([12.2, 40.3, 300., 120.]), text: "Check this area".into(), crop: Some(Arc::new(a.still.clone())),
+            anchor: tidy_element(&json!({
+                "selector": "#buy", "tag": "<button>", "text": "Buy now", "html": "<button>Buy now</button>",
+                "rect": [12, 20, 100, 32], "component": "Pricing > Buy", "file": "Pricing.tsx", "line": 42,
+                "styles": {"font-size":"14px","color":"rgb(10, 20, 30)","margin":"0px","padding":"auto","position":"normal","background-color":"none"}
+            })).unwrap(),
+            text: "Align the button".into(), crop: None,
+            adjust: vec![
+                Adjust { property: "font-size", old: "14px".into(), new: "16px".into() },
+                Adjust { property: "color", old: "rgb(10, 20, 30)".into(), new: "#333".into() },
+            ],
+        }));
+        a.push(Action::Comment(Comment {
+            anchor: Anchor::Area([12.2, 40.3, 300., 120.]), text: "Check this area".into(), crop: Some(Arc::new(a.still.clone())), adjust: vec![],
         }));
         a.push(comment("Use sentence case", Anchor::Text { text: "BUY NOW".into(), selector: "#buy".into(), rects: vec![[12., 20., 100., 32.]] }));
         a.push(Action::Mark(Mark::Text { at: [11.2, 60.], text: "baseline".into(), color: COLORS[0].1 }));
@@ -1495,11 +1645,26 @@ mod tests {
             "Image 1 is the annotated screenshot; numbered blue dots mark the comments. Image 2 is the area for comment 2.\n\n",
             "1. Align the button\n   Element: #buy <button> \"Buy now\"\n",
             "   Component: Pricing > Buy (Pricing.tsx:42)\n   Styles: font-size: 14px; color: rgb(10, 20, 30)\n",
+            "   Adjust: font-size 14px -> 16px; color rgb(10, 20, 30) -> #333\n",
             "   HTML: <button>Buy now</button>\n",
             "2. Check this area\n   Area: x 12, y 40, 300 x 120\n",
             "3. Use sentence case\n   Text: \"BUY NOW\" in #buy\n",
             "Notes on the screenshot: \"baseline\" at 11, 60",
         ));
+    }
+
+    #[gpui::test]
+    fn styled_lists_saved_adjustments_and_nothing_while_comparing(cx: &mut TestAppContext) {
+        let mut a = example(Host::Browser { url: "http://localhost/".into(), viewport: None }, cx);
+        let anchor = tidy_element(&json!({"selector": "#buy", "rect": [0, 0, 10, 10]})).unwrap();
+        a.push(Action::Comment(Comment {
+            anchor, text: "Darker".into(), crop: None,
+            adjust: vec![Adjust { property: "color", old: "red".into(), new: "#333".into() }],
+        }));
+        a.push(comment("Plain", Anchor::Point([1., 1.])));
+        assert_eq!(styled(&a), json!([{"selector": "#buy", "styles": {"color": "#333"}}]));
+        a.original = true;
+        assert_eq!(styled(&a), json!([]));
     }
 
     #[gpui::test]

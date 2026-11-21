@@ -50,7 +50,10 @@
   const text = (el, limit) => cut((el.innerText ?? el.textContent ?? "").replace(/\s+/g, " ").trim(), limit);
   const rect = ({ x, y, width, height }) => [x, y, width, height];
   const caret = (x, y) => document.caretRangeFromPoint(x, y);
-  const styleNames = ["display", "position", "width", "height", "margin", "padding", "font-size", "font-weight", "color", "background-color"];
+  const styleNames = ["display", "position", "width", "height", "margin", "padding", "font-size", "font-weight", "text-align", "color", "background-color"];
+  // The only properties restyle() applies, whatever the list says.
+  const adjustable = new Set(["font-size", "font-weight", "text-align", "color", "background-color", "padding", "margin"]);
+  const originals = new Map();
   const useful = "img, svg, picture, video, canvas, a, button, input, select, textarea, label, [role=button]";
 
   async function picked(el) {
@@ -110,6 +113,25 @@
           return el ? rect(el.getBoundingClientRect()) : null;
         } catch { return null; }
       });
+    },
+    // Applies [{selector, styles}] as inline styles, first undoing the previous call. Returns the elements styled.
+    restyle(list) {
+      for (const [el, style] of originals) {
+        if (style === null) el.removeAttribute("style"); else el.setAttribute("style", style);
+      }
+      originals.clear();
+      let count = 0;
+      for (const { selector, styles } of list) {
+        let el = null;
+        try { el = document.querySelector(selector); } catch {}
+        if (!el) continue;
+        if (!originals.has(el)) originals.set(el, el.getAttribute("style"));
+        for (const [name, value] of Object.entries(styles)) {
+          if (adjustable.has(name)) el.style.setProperty(name, value, "important");
+        }
+        count++;
+      }
+      return count;
     },
     size: () => [innerWidth, innerHeight],
   };
