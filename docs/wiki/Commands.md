@@ -337,7 +337,7 @@ Draw on a still of a simulator pane's screen, then send it to an agent as a quot
 
 ## `canvas.sim_zoom`
 
-Resize a simulator pane: step actual (1 point per screen pixel, the default), in or out. Acts on pane, else the selected simulator pane.
+Resize a simulator pane: step actual (1 point per screen pixel at the current zoom, the default), in or out. Acts on pane, else the selected simulator pane.
 
 | Argument | Required |
 |---|---|

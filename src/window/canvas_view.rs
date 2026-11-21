@@ -1222,6 +1222,13 @@ impl AppWindow {
         canvas::zoom_range(&self.place_rects(|_| true, cx), [f32::from(size.width), f32::from(size.height)])
     }
 
+    /// `zoom_range` widened to hold the current zoom, for gestures and zoom steps: a zoom left
+    /// past a limit (a pane grew, or a sim went to actual size) moves back freely instead of
+    /// being yanked to the limit on the next event; `settle_zoom` then eases it inside.
+    fn gesture_range(&self, window: &Window, cx: &App) -> [f32; 2] {
+        canvas::widen(self.zoom_range(window, cx), self.canvas_state.doc.camera.zoom)
+    }
+
     /// The viewport centre in world pixels.
     pub(super) fn view_center(&self, window: &Window) -> canvas::Point {
         let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
@@ -1521,7 +1528,7 @@ impl AppWindow {
         let origin = b.map(|b| b.origin).unwrap_or_default();
         if wheel_zooms(e.modifiers) {
             self.canvas_state.doc.camera.zoom_at(
-                canvas::rubber_band(self.canvas_state.doc.camera.zoom * canvas::zoom_factor(f32::from(d.y)*0.005), self.zoom_range(window, cx)),
+                canvas::rubber_band(self.canvas_state.doc.camera.zoom * canvas::zoom_factor(f32::from(d.y)*0.005), self.gesture_range(window, cx)),
                 [f32::from(e.position.x - origin.x), f32::from(e.position.y - origin.y)],
             );
             self.zoom_moved(window, cx);
@@ -2272,7 +2279,7 @@ impl AppWindow {
             _ => state
                 .doc
                 .camera
-                .step(if name == "canvas.zoom_in" { 1 } else { -1 }, anchor, range),
+                .step(if name == "canvas.zoom_in" { 1 } else { -1 }, anchor, canvas::widen(range, from.zoom)),
         }
         if name.starts_with("canvas.") {
             let to = state.doc.camera;
@@ -2451,7 +2458,7 @@ impl AppWindow {
                     .map(|b| b.origin)
                     .unwrap_or_default();
                 this.canvas_state.doc.camera.zoom_at(
-                    canvas::rubber_band(this.canvas_state.doc.camera.zoom * canvas::zoom_factor(e.delta), this.zoom_range(window, cx)),
+                    canvas::rubber_band(this.canvas_state.doc.camera.zoom * canvas::zoom_factor(e.delta), this.gesture_range(window, cx)),
                     [
                         (e.position.x - origin.x).into(),
                         (e.position.y - origin.y).into(),

@@ -100,6 +100,8 @@ pub fn zoom_range(rects: &[Rect], viewport: Point) -> [f32; 2] {
     let min = union(rects).map_or(ZOOMS[0], |b| step_down(fit_zoom(b, viewport))).min(1.).min(max);
     [min, max]
 }
+/// `range` stretched to hold `zoom`, so a zoom already past a limit is not pulled back mid-gesture.
+pub fn widen(range: [f32; 2], zoom: f32) -> [f32; 2] { [range[0].min(zoom), range[1].max(zoom)] }
 /// Screen px a pressed cell must move before the press is a drag; less is a click.
 pub const DRAG_THRESHOLD: f32 = 3.;
 /// A tile smaller than this (world px) shows its icon and name instead of terminal text.
@@ -1551,6 +1553,11 @@ mod tests {
         assert_eq!(r, [0.5, 2.]);
         // A pane bigger than the window at any zoom: both ends pin to the smallest zoom.
         assert_eq!(zoom_range(&[[0., 0., 99999., 100.]], view), [ZOOMS[0], ZOOMS[0]]);
+        // Left at 2 after the limit fell to 1: zooming out moves freely, not straight to 1.
+        assert_eq!(rubber_band(1.8, widen([0.25, 1.], 2.)), 1.8);
+        let mut c = Camera { zoom: 2., ..Camera::default() };
+        c.step(1, [0., 0.], widen([0.25, 1.], 2.));
+        assert_eq!(c.zoom, 2., "zoom in never zooms out");
     }
     
     
