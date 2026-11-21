@@ -687,6 +687,8 @@ when there is one); the rest of the file still applies. The corresponding `.erro
 - `tile_gap`: gap between cells in tile view in world pixels (default 0, 0..1024).
 - `tile_focus_grows`: false (default) keeps every tile the same size; true lets the selected tile take more room.
 - `canvas_push`: "live" (default) pushes neighbours while dragging; "drop" waits for release; "off" never pushes, so cells may overlap (Home still keeps spaces apart).
+- `browser_keep_cookies`: "until_quit" (default) clears browser pane cookies and site data at quit and on the next start; "forever" keeps them on macOS 14 or later.
+- `browser_open_links`: "built_in" (default) selects a browser pane; "default" selects the system browser. This setting is saved for later link routing.
 - `canvas_resize_terminals`: true (default) refits a canvas terminal's grid to the cell as it resizes; false keeps the grid and scales it to fit. Settings.json only.
 - `space_fill`: space background opacity (default 0.04, 0..1).
 - `terminal_size`: new expanded cell [columns, rows] (default [100, 30], ranges 20..500 and 5..200).
@@ -1271,10 +1273,11 @@ selector> "<visible text>"`. Read the file at that range before you edit it.
 Commands: `canvas.browser_back`, `canvas.browser_forward`, `canvas.browser_reload`,
 `canvas.browser_home`, `canvas.browser_pick`, `canvas.browser_shot`,
 `canvas.browser_external`, `canvas.browser_copy`, `canvas.browser_expand` (a tab filling
-the canvas, or back), `canvas.browser_pop` (its own window, or back) and
+the canvas, or back), `canvas.browser_pop` (its own window, or back),
+`canvas.browser_inspect` (open Web Inspector) and
 `canvas.browser_clear` (`{confirmed: true}` skips the dialog), each `{pane?}`, act on the
 pane, else the selected one; `canvas.browser_viewport` is `{size: responsive|mobile|desktop,
-pane?}`.
+pane?}`. `canvas.browser_cookies` takes `{keep: until_quit|forever}` and needs no pane.
 
 ## Agent flags and note in `programs.json`
 

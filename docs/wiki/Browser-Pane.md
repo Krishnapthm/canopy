@@ -49,6 +49,7 @@ Drag the pane by the header's edges, or by the [helper bar](Toolbar-and-Helper-B
 | **Viewport: Responsive / Mobile / Desktop** | Resizes the pane to a new pane's size, a 390 x 844 page or a 1280 x 800 page, exact at 100% zoom (the width at any zoom, since the header keeps its screen size). The top left stays put, and a check marks the current size. |
 | **Expand** | See below. |
 | **Pop out** / **Bring back** | See below. |
+| **Keep cookies** | Choose **Until quit** or **Forever**. A check marks the current choice. |
 | **Clear browsing data** | After a confirmation, deletes the cookies, storage and cache of every browser pane. |
 
 ### Expand
@@ -57,7 +58,23 @@ Drag the pane by the header's edges, or by the [helper bar](Toolbar-and-Helper-B
 
 ### Pop out
 
-**Pop out** moves the page into its own window, loading the pane's current address in a fresh private web view. The pane shows "Popped out" and a **Bring back** button. The window has no element picker, and what you do in it is not tracked: bringing it back, or closing the window, leaves the pane at the address it had when you popped it, and the page loads again when you click it. Closing the pane closes its window.
+**Pop out** moves the page into its own window and loads the pane's current address. The pane shows "Popped out" and a **Bring back** button. The window has no element picker, and what you do in it is not tracked: bringing it back, or closing the window, leaves the pane at the address it had when you popped it, and the page loads again when you click it. Closing the pane closes its window.
+
+## Cookies and site data
+
+Browser panes and pop-outs share a website data store on disk for this Canopy home. Persistent cookies need macOS 14 or later.
+
+- **Keep cookies: Until quit** (default) deletes the store when Canopy quits and again on the next start, including after a crash.
+- **Keep cookies: Forever** keeps the store across restarts.
+- **Clear browsing data** clears cookies, site storage and cache now, including for pop-outs. Sites will ask you to sign in again.
+
+Change **Keep cookies** from a browser pane's **⋯** menu or under **Browser** in **Settings** > **Look**.
+
+## Web Inspector
+
+Select a browser pane and press `Ctrl+Shift+I` or `Cmd+Option+I` to open Web Inspector in its own window. Canopy grows the pane to a usable size and centers it at 100% zoom, or zooms out enough to fit a smaller canvas. Pinned panes stay where they are. Bring a popped-out page back before inspecting it.
+
+If this version of WebKit cannot detach the inspector, it stays docked.
 
 ## Closing a page
 
@@ -125,7 +142,7 @@ Both wait for the page to finish loading, time out after 30 seconds, and work ev
 Browser panes are built for local development, and they keep to themselves:
 
 - Canopy loads only pages you or an agent open. There is no start page.
-- Cookies and logins are kept in a private store in memory and forgotten when Canopy quits. Downloads are blocked.
+- Downloads are blocked.
 - Links that ask for a new window open in the same pane.
 - The element picker is a bundled copy of an open-source tool. It loads only when you pick, with its telemetry turned off and its version check, open-file link and web font import removed.
 - Canopy keeps the last snapshot of each pane in `<app home>/browser/<pane>.png` so the canvas can draw it after a restart, and deletes it when you close the pane.
