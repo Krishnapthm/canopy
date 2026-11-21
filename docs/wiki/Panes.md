@@ -49,7 +49,7 @@ Terminal actions, such as closing or expanding, use the selected terminal, agent
 
 ## Stacking
 
-Panes can overlap when `canvas_push` is `"off"`. Click a pane to bring it to the front. Right-click a terminal for **Bring to front** or **Send to back**. Canopy saves the stacking order.
+Panes can overlap when `canvas_push` is `"off"`. Click a pane to bring it to the front. Where panes overlap, the frontmost pane takes the clicks. Right-click a terminal for **Bring to front** or **Send to back**. Canopy saves the stacking order.
 
 ## What Canopy saves
 
@@ -62,6 +62,8 @@ Commands and wires name panes by ID. You see these in `canopy wire`, `canopy pan
 - Terminals and agents use their herdr-core address, such as `t3` (or `mac/t7` on a machine called `mac`).
 - Sub-agents use `sub:<parent>:<id>`.
 - Every other pane uses `p<N>`, such as `p1`. Canopy never reuses a number, so an old ID cannot point at a new pane.
+
+Pane headers keep their screen size at any zoom. Resize a pane by dragging its edges or corners; there are no visible handles.
 
 ## See also
 
