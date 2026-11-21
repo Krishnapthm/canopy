@@ -342,6 +342,7 @@ mod tests {
             assert_eq!(this.pane_new(&json!({"kind":"file","path":"README.md"}), window, cx).unwrap_err(), "canvas.pane_new: path must be absolute");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"point":null}), window, cx).unwrap_err(), "invalid canvas point");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"wire":"missing"}), window, cx).unwrap_err(), "missing is not a terminal pane on the canvas");
+            this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
             let reply = this.pane_new(&json!({"kind":"file","path":path,"wire":"t1"}), window, cx).unwrap();
             let id = reply["pane"].as_str().unwrap();
             assert_eq!(reply["wired"], true);
