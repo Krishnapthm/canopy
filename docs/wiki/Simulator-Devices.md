@@ -34,19 +34,30 @@ A simulator pane scales with the canvas like every pane. Zooming in stops before
 
 The pane header shows the iOS version and the state: **Live**, **Connecting**, **Screenshot** or **Recording**.
 
-## Helper bar
+## Bottom bar
+
+Hover over or select a pane with a live device to show its device actions inside the pane.
+The bar hides while annotating. In the device's own window, the bottom bar also offers **Bring back**.
 
 | Button | What it does |
 |---|---|
 | **Home** | Goes to the Home screen. |
+| **Refresh** | Tries the live view again. |
 | **Screenshot** | Saves a PNG to the Desktop. The toast shows the file. |
 | **Record** | Records a video to the Desktop. Click **Stop recording** to stop. |
 | **Annotate** | Freezes the screen so you can draw on it. **Send to agent** quotes the marked picture. See [Point Agents at Things](Point-Agents-at-Things#a-spot-on-the-simulator). |
+
+## Helper bar
+
+| Button | What it does |
+|---|---|
 | **Zoom out**, **Actual size**, **Zoom in** | Changes the device size. **Actual size** is 1 point per screen pixel at the current zoom. |
 | **Pop out** | Moves the device to its own window. **Bring back** returns it. |
 | **Choose simulator** | Shows every simulator. Xcode's version is at the top. |
-| **Refresh** | Tries the live view again. |
 | **Open in Device Hub** | Opens Xcode's Device Hub. |
+| **Pin to screen** or **Move to canvas** | Switches between a fixed screen position and moving with the canvas. |
+| **Connect** | Starts a wire from the pane. |
+| **Close** | Closes the pane. |
 
 ## Agents drive the device
 
@@ -72,7 +83,7 @@ The helper stops 5 seconds after the pane leaves the screen (so panning past it 
 
 - **The toolbar has no Simulator button.** Xcode's `simctl` is missing. Install Xcode and open it once.
 - **"No simulators."** No simulator exists. Add one in Xcode's Device Hub.
-- **The header says Screenshot, not Live.** The live view failed, and the toast says why. Click **Refresh** to try again.
+- **The header says Screenshot, not Live.** The live view failed, and the toast says why. Click **Refresh** in the bottom bar to try again.
 - **"This simulator no longer exists."** The simulator was deleted in Xcode. Click **Choose another**.
 - **The device does not rotate.** Rotation is not supported.
 
