@@ -68,28 +68,37 @@ impl Camera {
         self.x = p[0] - anchor[0] / self.zoom;
         self.y = p[1] - anchor[1] / self.zoom;
     }
-    pub fn step(&mut self, direction: i32, anchor: Point) {
-        let i = ZOOMS
-            .iter()
-            .position(|z| *z == snap(self.zoom))
-            .unwrap_or(6);
-        self.zoom_at(
-            ZOOMS[(i as i32 + direction.signum()).clamp(0, 11) as usize],
-            anchor,
-        );
+    /// Zooms to the next `ZOOMS` step in `direction`, kept inside `range` (see `zoom_range`).
+    pub fn step(&mut self, direction: i32, anchor: Point, range: [f32; 2]) {
+        let next = if direction > 0 {
+            ZOOMS.into_iter().find(|z| *z > self.zoom * 1.01).unwrap_or(ZOOMS[11])
+        } else {
+            ZOOMS.into_iter().rev().find(|z| *z < self.zoom * 0.99).unwrap_or(ZOOMS[0])
+        };
+        self.zoom_at(next.clamp(range[0], range[1]), anchor);
     }
     pub fn fit(&mut self, rects: &[Rect], viewport: Point) {
         let Some(bounds) = union(rects) else { return };
-        let z = ((viewport[0] - 48.).max(1.) / bounds[2].max(1.))
-            .min((viewport[1] - 48.).max(1.) / bounds[3].max(1.));
-        self.zoom = ZOOMS
-            .into_iter()
-            .rev()
-            .find(|v| *v <= z)
-            .unwrap_or(ZOOMS[0]);
+        self.zoom = step_down(fit_zoom(bounds, viewport));
         self.x = bounds[0] + bounds[2] / 2. - viewport[0] / self.zoom / 2.;
         self.y = bounds[1] + bounds[3] / 2. - viewport[1] / self.zoom / 2.;
     }
+}
+/// Screen px kept clear around panes (both sides together) when fitting or zooming to a limit.
+pub const FIT_PAD: f32 = 80.;
+/// The zoom at which `rect` just fits `viewport` with `FIT_PAD` around it.
+fn fit_zoom(rect: Rect, viewport: Point) -> f32 {
+    ((viewport[0] - FIT_PAD).max(1.) / rect[2].max(1.)).min((viewport[1] - FIT_PAD).max(1.) / rect[3].max(1.))
+}
+/// The largest `ZOOMS` step at or below `z`.
+fn step_down(z: f32) -> f32 { ZOOMS.into_iter().rev().find(|v| *v <= z).unwrap_or(ZOOMS[0]) }
+/// The [min, max] zoom for a place whose panes are `rects`: zooming in stops while the biggest
+/// pane still fits the viewport with padding, zooming out once everything fits (the fit-all
+/// zoom, though never forced above 100%). Both stay inside `ZOOMS`.
+pub fn zoom_range(rects: &[Rect], viewport: Point) -> [f32; 2] {
+    let max = rects.iter().map(|r| fit_zoom(*r, viewport)).fold(ZOOMS[11], f32::min).max(ZOOMS[0]);
+    let min = union(rects).map_or(ZOOMS[0], |b| step_down(fit_zoom(b, viewport))).min(1.).min(max);
+    [min, max]
 }
 /// Screen px a pressed cell must move before the press is a drag; less is a click.
 pub const DRAG_THRESHOLD: f32 = 3.;
@@ -186,8 +195,9 @@ pub fn nearest(rects: &[Rect], from: Rect, direction: Point) -> Option<usize> {
 pub fn zoom_factor(delta: f32) -> f32 { delta.clamp(-10., 10.).exp() }
 pub fn ease_out(t: f32) -> f32 { 1. - (1. - t.clamp(0., 1.)).powi(3) }
 pub fn friction(dt: f32) -> f32 { 0.92_f32.powf(dt / 0.016) }
-pub fn rubber_band(z: f32) -> f32 {
-    let limit = z.clamp(ZOOMS[0], ZOOMS[11]);
+/// Past `range`, a zoom gesture meets growing resistance instead of a hard stop.
+pub fn rubber_band(z: f32, range: [f32; 2]) -> f32 {
+    let limit = z.clamp(range[0], range[1]);
     let d = z - limit;
     limit + d / (1. + d.abs() / (limit * 0.08))
 }
@@ -198,12 +208,6 @@ pub fn remember_folder(recent: &mut Vec<String>, folder: &str) {
     recent.truncate(10);
 }
 
-pub fn snap(z: f32) -> f32 {
-    ZOOMS
-        .into_iter()
-        .min_by(|a, b| (a - z).abs().total_cmp(&(b - z).abs()))
-        .unwrap()
-}
 pub fn intersects(a: Rect, b: Rect) -> bool {
     a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
 }
@@ -1525,8 +1529,28 @@ mod tests {
             zoom: 0.52,
             ..Camera::default()
         };
-        c.step(1, [0., 0.]);
+        c.step(1, [0., 0.], [ZOOMS[0], ZOOMS[11]]);
         assert_eq!(c.zoom, 0.67);
+        c.step(1, [0., 0.], [0.25, 0.7]);
+        assert_eq!(c.zoom, 0.7);
+        c.step(-1, [0., 0.], [0.25, 0.7]);
+        assert_eq!(c.zoom, 0.67);
+    }
+    #[test]
+    fn zoom_range_keeps_the_biggest_pane_on_screen() {
+        let view = [1080., 880.];
+        // Nothing on the canvas: the whole ZOOMS range.
+        assert_eq!(zoom_range(&[], view), [ZOOMS[0], ZOOMS[11]]);
+        // A 1000 px wide pane fits at 1.0 with padding, not beyond; a small one allows 2.
+        assert_eq!(zoom_range(&[[0., 0., 1000., 400.]], view)[1], 1.);
+        assert_eq!(zoom_range(&[[0., 0., 100., 100.]], view)[1], 2.);
+        // Two panes far apart: zooming out stops at the fit-all step, in at the bigger pane.
+        let r = zoom_range(&[[0., 0., 500., 400.], [3000., 0., 200., 200.]], view);
+        assert_eq!(r, [0.25, 2.]);
+        let r = zoom_range(&[[0., 0., 500., 400.], [1500., 0., 200., 200.]], view);
+        assert_eq!(r, [0.5, 2.]);
+        // A pane bigger than the window at any zoom: both ends pin to the smallest zoom.
+        assert_eq!(zoom_range(&[[0., 0., 99999., 100.]], view), [ZOOMS[0], ZOOMS[0]]);
     }
     
     
@@ -1784,9 +1808,10 @@ mod motion_tests {
         assert!((zoom_factor(2_f32.ln()) - 2.).abs() < 0.0001);
         assert_eq!(ease_out(0.), 0.); assert_eq!(ease_out(1.), 1.);
         assert!((friction(0.032) - friction(0.016).powi(2)).abs() < 0.0001);
-        assert_eq!(rubber_band(1.), 1.);
-        assert!(rubber_band(100.) > 2. && rubber_band(100.) < 2.16);
-        assert!(rubber_band(0.01) > 0.23);
+        let range = [ZOOMS[0], ZOOMS[11]];
+        assert_eq!(rubber_band(1., range), 1.);
+        assert!(rubber_band(100., range) > 2. && rubber_band(100., range) < 2.16);
+        assert!(rubber_band(0.01, range) > 0.23);
         let mut c = Camera::default(); let anchor = [142., 91.];
         let world = c.to_world(anchor); c.zoom_at(1.037, anchor);
         assert_eq!(c.to_world(anchor), world);

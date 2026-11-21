@@ -1208,6 +1208,20 @@ impl AppWindow {
         let room = self.canvas_state.doc.room.clone();
         if let Err(e) = self.add_file_pane(std::path::Path::new(path), point, room, window, cx) {
             self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx);
+    /// The rects of the panes (and, on Home, space cards) in the current place that `pick` keeps.
+    fn place_rects(&self, pick: impl Fn(&String) -> bool, cx: &App) -> Vec<canvas::Rect> {
+        let doc = &self.canvas_state.doc;
+        doc.panes.iter().filter(|c| doc.shows(c.space.as_ref()) && pick(&c.id)).map(|c| self.pill_rect(c, cx))
+            .chain(doc.spaces.iter().filter(|s| doc.room.is_none() && pick(&s.space)).map(|s| s.rect))
+            .collect()
+    }
+
+    /// How far the camera may zoom in this place (see `canvas::zoom_range`).
+    fn zoom_range(&self, window: &Window, cx: &App) -> [f32; 2] {
+        let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
+        canvas::zoom_range(&self.place_rects(|_| true, cx), [f32::from(size.width), f32::from(size.height)])
+    }
+
         }
     }
 
@@ -1510,7 +1524,7 @@ impl AppWindow {
         let origin = b.map(|b| b.origin).unwrap_or_default();
         if wheel_zooms(e.modifiers) {
             self.canvas_state.doc.camera.zoom_at(
-                canvas::rubber_band(self.canvas_state.doc.camera.zoom * canvas::zoom_factor(f32::from(d.y)*0.005)),
+                canvas::rubber_band(self.canvas_state.doc.camera.zoom * canvas::zoom_factor(f32::from(d.y)*0.005), self.zoom_range(window, cx)),
                 [f32::from(e.position.x - origin.x), f32::from(e.position.y - origin.y)],
             );
             self.zoom_moved(window, cx);
@@ -1597,12 +1611,13 @@ impl AppWindow {
             });
         });
         // Not window.request_animation_frame(): that is paint-only and this runs from events.
+        let range = self.zoom_range(window, cx);
         cx.notify();
     }
     fn settle_zoom(&mut self, anchor: canvas::Point, window: &mut Window, cx: &mut Context<Self>) {
         let from = self.canvas_state.doc.camera;
         let mut to = from;
-        to.zoom_at(from.zoom.clamp(canvas::ZOOMS[0], canvas::ZOOMS[11]), anchor);
+        to.zoom_at(from.zoom.clamp(range[0], range[1]), anchor);
         self.canvas_state.motion.target = Some((from, to, std::time::Instant::now(), anchor));
         self.animate_camera(window, cx);
     }
@@ -2224,12 +2239,9 @@ impl AppWindow {
         ];
         // Fit the selection, else everything in the current place.
         let fit_rects = if name.starts_with("canvas.fit") {
-            let doc = &self.canvas_state.doc;
+        let range = self.zoom_range(window, cx);
             let all = name == "canvas.fit_all" || self.canvas_state.selected.is_empty();
-            let pick = |key: &String| all || self.canvas_state.selected.contains(key);
-            doc.panes.iter().filter(|c| doc.shows(c.space.as_ref()) && pick(&c.id)).map(|c| self.pill_rect(c, cx))
-                .chain(doc.spaces.iter().filter(|s| doc.room.is_none() && pick(&s.space)).map(|s| s.rect))
-                .collect()
+            self.place_rects(|key| all || self.canvas_state.selected.contains(key), cx)
         } else { vec![] };
         let from = self.canvas_state.doc.camera;
         let state = &mut self.canvas_state;
@@ -2255,7 +2267,7 @@ impl AppWindow {
                 state.panel_expanded = false;
                 self.focus.focus(window, cx);
             }
-            "canvas.zoom_reset" => state.doc.camera.zoom_at(1., anchor),
+            "canvas.zoom_reset" => state.doc.camera.zoom_at(1f32.clamp(range[0], range[1]), anchor),
             "canvas.fit" | "canvas.fit_all" => {
                 canvas::focus_fit(&mut state.doc.camera, &mut state.previous_camera,
                     &fit_rects, [anchor[0] * 2., anchor[1] * 2.]);
@@ -2263,7 +2275,7 @@ impl AppWindow {
             _ => state
                 .doc
                 .camera
-                .step(if name == "canvas.zoom_in" { 1 } else { -1 }, anchor),
+                .step(if name == "canvas.zoom_in" { 1 } else { -1 }, anchor, range),
         }
         if name.starts_with("canvas.") {
             let to = state.doc.camera;
@@ -2444,7 +2456,7 @@ impl AppWindow {
                     .map(|b| b.origin)
                     .unwrap_or_default();
                 this.canvas_state.doc.camera.zoom_at(
-                    canvas::rubber_band(this.canvas_state.doc.camera.zoom * canvas::zoom_factor(e.delta)),
+                    canvas::rubber_band(this.canvas_state.doc.camera.zoom * canvas::zoom_factor(e.delta), this.zoom_range(window, cx)),
                     [
                         (e.position.x - origin.x).into(),
                         (e.position.y - origin.y).into(),
