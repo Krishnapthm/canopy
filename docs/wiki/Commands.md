@@ -329,11 +329,12 @@ Save a browser pane's page to <temp>/canopy/<pane>.png and toast the path (pane,
 
 ## `canvas.browser_external`
 
-Open a browser pane's page in the system browser (pane, else the selected pane).
+Open a browser pane's page, or the tab named by tab, in the system browser (pane, else the selected pane).
 
 | Argument | Required |
 |---|---|
 | `pane` | no |
+| `tab` | no |
 
 ## `canvas.browser_copy`
 
@@ -362,7 +363,7 @@ Expand a browser pane's live page into a tab of the top strip that fills the can
 
 ## `canvas.browser_pop`
 
-Pop a browser pane's page out into its own window, or bring it back (pane, else the selected pane). The pane shows "Popped out" meanwhile.
+Pop a browser pane out into its own window with the same header, every tab moving with it, or bring it back (pane, else the selected pane). The pane shows "Popped out" meanwhile.
 
 | Argument | Required |
 |---|---|
@@ -375,6 +376,22 @@ Set how long browser panes keep cookies and site data: until_quit or forever.
 | Argument | Required |
 |---|---|
 | `keep` | yes |
+
+## `canvas.browser_links`
+
+Set where HTTP and HTTPS links clicked in terminals open: built_in (a browser tab) or default (the system browser).
+
+| Argument | Required |
+|---|---|
+| `open` | yes |
+
+## `canvas.browser_open_file`
+
+Pick an .html or .htm file and open it in a new tab of a browser pane (pane, else the selected pane). The only way a file: page loads: the address field and agents are refused file: URLs.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
 
 ## `canvas.browser_clear`
 

@@ -40,7 +40,7 @@ The other buttons depend on the kind. Each kind's page lists them:
 - [Terminals](Terminals): enter, expand or collapse.
 - [File and Note Panes](File-and-Note-Panes): open as a tab.
 - [Images and PDFs](Images-and-PDFs): quote, find, highlight, pages.
-- [Browser Pane](Browser-Pane): back, reload, home, pick an element, screenshot.
+- [Browser Pane](Browser-Pane): back, reload, home, annotate, screenshot, open in your browser.
 - [Simulator Devices](Simulator-Devices): zoom, pop out, choose simulator and open Device Hub. The device actions appear in a bottom bar inside the pane, hidden while annotating.
 - Mod panes show the actions their mod declares. See [Layouts and Mods](Layouts-and-Mods#mod-panes).
 

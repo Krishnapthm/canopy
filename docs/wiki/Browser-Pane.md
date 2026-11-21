@@ -23,9 +23,15 @@ canopy pane open p2 http://localhost:3000/pricing  # point an existing pane at a
 ## Tabs
 
 Click **New tab** (the plus button) in the browser pane's header to open an empty
-tab and focus its address field. Click a tab to switch to it, or click its
-**Close tab** button to close it. In [canvas mode](Canvas), `Cmd+W` also closes
+tab and focus its address field. Click a tab to switch to it, click its
+**Close tab** button (shown on the selected tab and when you hover another) or
+middle-click it to close it. Right-click a tab for **Open in** your browser and
+**Close tab**. In [canvas mode](Canvas), `Cmd+W` also closes
 the active tab of the selected browser pane.
+
+Tabs are up to 160 px wide and shrink evenly, to 72 px, as more open. Each shows a
+globe and its title: Canopy never loads a page's own icon, because that would be a
+request outside the page.
 
 Closing the active tab selects the tab to its left, or the next tab when the
 first tab closes. Closing the last tab leaves the pane open with an empty tab.
@@ -50,25 +56,32 @@ A browser pane is either resting or live:
 
 ## The header
 
-A browser pane's header holds its tabs and controls for the active page, left to right:
+A browser pane's header has two rows. The pop-out window draws the same header.
+
+**Row 1** holds the tabs and window controls, left to right:
 
 - The tab list and **New tab**.
+- **⋯**, the menu below.
+- **Pop out**, **Expand** and **Close** (see below). In the pop-out, **Close** brings the page back, and **Expand** is not shown.
+
+**Row 2** holds navigation:
+
 - **Back**, **Forward** and **Reload**.
 - The **address field**. Type an address and press Enter to open it (`localhost:3000` gets `http://`); this also sets the pane's **Home**. Press Escape to put the current address back. While you are not typing, the field follows the page.
-- **⋯**, the menu below.
+- **Annotate** (`canvas.browser_annotate`), a button with its label that starts annotating the page.
 
-Drag the pane by the header's edges, or by the [helper bar](Toolbar-and-Helper-Bar).
+Drag the pane by the empty part of row 1, or by the [helper bar](Toolbar-and-Helper-Bar).
 
 ### The ⋯ menu
 
 | Item | What it does |
 |---|---|
-| **Open in default browser** | Opens the current address in your usual browser. |
+| **Open in** *your browser* | Opens the current address in your system browser (the app that opens `https` links, or **Open in default browser** if Canopy cannot tell). |
 | **Copy link** | Copies the address and shows a toast. |
 | **Save screenshot** | Saves the page to `<temp>/canopy/<pane>.png` and shows the path in a toast. |
+| **Open HTML file…** | Asks you to pick an `.html` or `.htm` file and opens it in a new tab as a `file:` page. This is the only way a `file:` page opens: the address field and agents are refused `file:` addresses. |
 | **Viewport** | Choose **Responsive**, **1280 × 800**, **1024 × 768**, **Mobile 375 × 812**, or **Tablet 768 × 1024**. A check marks the saved choice. Responsive pages reflow as the pane resizes. Each fixed size sets the page's CSS viewport and scales it to fit, centered in the pane. |
-| **Expand** | See below. |
-| **Pop out** / **Bring back** | See below. |
+| **Links** | **Open links in built-in browser**: checked, links clicked in terminals open in a browser tab; unchecked, in your system browser. The same as the **Open links** setting. |
 | **Keep cookies** | Choose **Until quit** or **Forever**. A check marks the current choice. |
 | **Clear browsing data** | After a confirmation, deletes the cookies, storage and cache of every browser pane. |
 
@@ -78,7 +91,11 @@ Drag the pane by the header's edges, or by the [helper bar](Toolbar-and-Helper-B
 
 ### Pop out
 
-**Pop out** moves the page into its own window and loads the pane's current address. The pane shows "Popped out" and a **Bring back** button. The window has no element picker, and what you do in it is not tracked: bringing it back, or closing the window, leaves the pane at the address it had when you popped it, and the page loads again when you click it. Closing the pane closes its window.
+**Pop out** moves the whole pane into its own window: every tab, not just the active one. The window has the same header and a title bar drawn around the traffic lights; drag it by the empty part of row 1. Its size is the pane's size at 100% zoom, at least 640 × 480. The pane shows "Popped out" and a **Bring back** button.
+
+Tabs, Back, Forward, Reload, the address field, the ⋯ menu and the Web Inspector all work on the window's pages. Sign-ins carry over, because the pane and the window share one website data store. The window has no element picker or annotating.
+
+**Bring back** (the pane's button, the window's **Close**, or its red traffic light) destroys the window's pages and puts the pane back as it was: the same tabs and active tab at the addresses they last had. Pages load again when you click them. Closing the pane closes its window.
 
 ## Cookies and site data
 
@@ -86,13 +103,13 @@ Browser panes and pop-outs share a website data store on disk for this Canopy ho
 
 - **Keep cookies: Until quit** (default) deletes the store when Canopy quits and again on the next start, including after a crash.
 - **Keep cookies: Forever** keeps the store across restarts.
-- **Clear browsing data** clears cookies, site storage and cache now, including for pop-outs. Sites will ask you to sign in again.
+- **Clear browsing data** clears cookies, site storage and cache now, including in pop-outs. Sites will ask you to sign in again.
 
 Change **Keep cookies** from a browser pane's **⋯** menu or under **Browser** in **Settings** > **Look**.
 
 ## Web Inspector
 
-Select a browser pane and press `Ctrl+Shift+I` or `Cmd+Option+I` to open Web Inspector in its own window. Canopy grows the pane to a usable size and centers it at 100% zoom, or zooms out enough to fit a smaller canvas. Pinned panes stay where they are. Bring a popped-out page back before inspecting it.
+Select a browser pane and press `Ctrl+Shift+I` or `Cmd+Option+I` to open Web Inspector in its own window. Canopy grows the pane to a usable size and centers it at 100% zoom, or zooms out enough to fit a smaller canvas. Pinned panes stay where they are. On a popped-out pane it opens beside the window, which does not move.
 
 If this version of WebKit cannot detach the inspector, it stays docked.
 
@@ -162,12 +179,12 @@ Reading an empty pane returns `New tab`. When the pane has a URL, both commands 
 |---|---|
 | **Back** | Goes to the previous page. |
 | **Reload** | Reloads the page. |
-| **Home** | Goes to the pane's home address: the first address it opened, or the last one set with **Open URL** or `canopy pane open`. |
-| **Open URL** | Focuses the address field so you can enter another address. |
+| **Home** | Goes to the pane's home address: the first address it opened, or the last one set with `canopy pane open`. |
 | **Annotate** | Freezes the page for marks and comments. |
 | **Screenshot** | Saves the page to `<temp>/canopy/<pane>.png` and shows the path in a toast. |
-| **Open in browser** | Opens the current address in your usual browser. |
-| **Expand**, **Pop out** | The same as in the ⋯ menu; Pop out reads **Bring back** while the page is popped out. |
+| **Open in** *your browser* | Opens the current address in your system browser. |
+| **Expand**, **Pop out** | The same as in the header; Pop out reads **Bring back** while the pane is popped out. |
+| **Pin to screen** / **Move to canvas** | Pins the pane to the window, or puts it back on the canvas. |
 | **Connect**, **Close** | Draws a wire, or closes the pane. |
 
 ## Privacy
