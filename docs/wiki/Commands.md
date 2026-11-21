@@ -394,15 +394,6 @@ Resize a simulator pane: step actual (1 point per pixel, the default), in or out
 | `step` | no |
 | `pane` | no |
 
-## `canvas.sim_size`
-
-Set how a simulator pane sizes itself: size actual (the phone's physical size on this display) or fixed (the size you set, the default); omitted toggles. Acts on pane, else the selected simulator pane.
-
-| Argument | Required |
-|---|---|
-| `size` | no |
-| `pane` | no |
-
 ## `canvas.sim_pop`
 
 Pop a simulator pane's device out into its own window, or bring it back. Acts on pane, else the selected simulator pane.
