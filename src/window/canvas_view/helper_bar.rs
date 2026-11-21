@@ -70,7 +70,7 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -
             icon: icon.into(), label: label.into(), command: command.into(),
             args: if command == "canvas.pane_open" { json!({"pane":pane.id}) } else { json!({}) },
         }).collect(),
-        canvas::Kind::Sim { udid, .. } if udid.is_empty() => vec![
+        canvas::Kind::Sim { udid } if udid.is_empty() => vec![
             BarAction { icon: "icons/smartphone.svg".into(), label: "Choose simulator".into(), command: "canvas.sim_device".into(), args: json!({}) },
             BarAction { icon: "icons/external-link.svg".into(), label: "Open in Device Hub".into(), command: "canvas.sim_hub".into(), args: json!({}) },
             BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
@@ -82,7 +82,7 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -
             ("icons/video.svg", "Record", "canvas.sim_record", json!({})),
             ("icons/pencil.svg", "Annotate", "canvas.sim_annotate", json!({})),
             ("icons/zoom-out.svg", "Zoom out", "canvas.sim_zoom", json!({"step":"out"})),
-            ("icons/scan.svg", "Actual size", "canvas.sim_size", json!({})),
+            ("icons/scan.svg", "Actual size", "canvas.sim_zoom", json!({"step":"actual"})),
             ("icons/zoom-in.svg", "Zoom in", "canvas.sim_zoom", json!({"step":"in"})),
             ("icons/picture-in-picture-2.svg", "Pop out", "canvas.sim_pop", json!({})),
             ("icons/smartphone.svg", "Choose simulator", "canvas.sim_device", json!({})),
@@ -200,9 +200,9 @@ mod helper_bar_tests {
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into() };
         assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.pane_open", "canvas.browser_pick", "canvas.browser_shot", "canvas.browser_external", "canvas.browser_expand", "canvas.browser_pop", "canvas.connect", "canvas.close"]);
-        pane.kind = canvas::Kind::Sim { udid: String::new(), mode: canvas::SimMode::Fixed, screen: None };
+        pane.kind = canvas::Kind::Sim { udid: String::new() };
         assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.connect", "canvas.close"]);
-        pane.kind = canvas::Kind::Sim { udid: "U1".into(), mode: canvas::SimMode::Fixed, screen: None };
+        pane.kind = canvas::Kind::Sim { udid: "U1".into() };
         assert_eq!(commands(&pane)[..4], ["canvas.sim_home", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate"]);
         assert_eq!(commands(&pane).last().unwrap(), "canvas.close");
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };

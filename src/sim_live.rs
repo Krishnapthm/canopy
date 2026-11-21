@@ -263,8 +263,6 @@ pub struct DeviceInfo {
     pub points: [f32; 2],
     /// Framebuffer pixels per point.
     pub scale: f32,
-    /// The screen's physical pixels per inch (capabilities.plist main-screen-pitch), if listed.
-    pub pitch: Option<f32>,
     pub chrome: Option<Chrome>,
 }
 
@@ -284,7 +282,6 @@ struct ScreenDimensions {
     #[serde(rename = "main-screen-width")] width: f32,
     #[serde(rename = "main-screen-height")] height: f32,
     #[serde(rename = "main-screen-scale")] scale: f32,
-    #[serde(rename = "main-screen-pitch")] pitch: Option<f32>,
 }
 
 #[derive(serde::Deserialize)]
@@ -325,7 +322,7 @@ pub fn device_info(device_type: &str, scale: f64, background: u32) -> Option<Dev
     let points = [dims.width / dims.scale, dims.height / dims.scale];
     let chrome = serde_json::from_str::<Profile>(&plist_json(&resources.join("profile.plist"))?).ok()
         .and_then(|profile| chrome(&profile, &resources, &device_type.replace(['/', ' '], "-"), points, scale, background));
-    Some(DeviceInfo { points, scale: dims.scale, pitch: dims.pitch, chrome })
+    Some(DeviceInfo { points, scale: dims.scale, chrome })
 }
 
 fn chrome(profile: &Profile, resources: &std::path::Path, key: &str, points: [f32; 2], scale: f64, background: u32) -> Option<Chrome> {
@@ -470,18 +467,6 @@ pub fn type_text(text: &str) -> (Vec<(u32, bool)>, usize) {
         match char_usage(c) { Some(k) => keys.push(k), None => skipped += 1 }
     }
     (keys, skipped)
-}
-
-#[repr(C)]
-struct CGSizeRaw { width: f64, height: f64 }
-#[link(name = "CoreGraphics", kind = "framework")]
-unsafe extern "C" { fn CGDisplayScreenSize(display: u32) -> CGSizeRaw; }
-
-/// Display points per inch of a display (its CGDirectDisplayID) that is `width_points` wide,
-/// from the physical size macOS reports; None when it reports none.
-pub fn points_per_inch(display: u32, width_points: f32) -> Option<f32> {
-    let mm = unsafe { CGDisplayScreenSize(display) }.width as f32;
-    (mm > 0. && width_points > 0.).then(|| width_points / (mm / 25.4))
 }
 
 #[cfg(test)]

@@ -484,8 +484,6 @@ pub struct AppWindow {
     /// Remembers where the window is (`place.rs`); the write waiting to settle.
     _place: Option<Subscription>,
     place_write: Option<Task<()>>,
-    /// The display the window was last on, to resize sim panes at their actual size when it changes.
-    last_display: Option<u64>,
 }
 
 impl AppWindow {
@@ -575,7 +573,6 @@ impl AppWindow {
             _canvas_keys: None,
             _place: None,
             place_write: None,
-            last_display: None,
         };
         let owner = cx.weak_entity();
         let owner_window = window.window_handle();
@@ -588,8 +585,6 @@ impl AppWindow {
         }));
         w._focus_lost = Some(cx.on_focus_lost(window, |this, window, cx| this.restore_focus(window, cx)));
         w._place = Some(cx.observe_window_bounds(window, |this, window, cx| {
-            #[cfg(target_os = "macos")]
-            this.display_changed(window, cx);
             if let Some(t) = crate::place::changed(window, cx) {
                 this.place_write = Some(t);
             }
@@ -4952,8 +4947,6 @@ fn shadow(el: Div, s: Option<&str>) -> Div {
 
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Sim panes keep their screen size at any zoom; every geometry read below sees it.
-        self.canvas_state.fit_sims();
         self.sync_browser_inputs(window, cx);
         self.release_pdf_drops(window, cx);
         crate::bench::count(&crate::bench::WINDOW);

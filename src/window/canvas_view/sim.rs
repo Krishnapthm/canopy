@@ -102,9 +102,8 @@ impl AppWindow {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-        // A phone in its bezel (about 1:2) under the 36 px header, 340 x 700 screen points at any zoom.
-        let size = [340., 700.];
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid, mode: canvas::SimMode::Fixed, screen: Some(size) }, rect: [point[0], point[1], size[0] / doc.camera.zoom, size[1] / doc.camera.zoom], z, space });
+        // A phone in its bezel (about 1:2) under the 36 px header.
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], 340., 700.], z, space });
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         self.refresh_sim(&id, true, window, cx);
@@ -238,7 +237,7 @@ impl AppWindow {
     /// Points a sim pane at a simulator (empty: back to the list) and shows it, booting it if needed.
     pub(super) fn point_sim(&mut self, id: &str, udid: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return };
-        let canvas::Kind::Sim { udid: saved, .. } = &mut pane.kind else { return };
+        let canvas::Kind::Sim { udid: saved } = &mut pane.kind else { return };
         if *saved != udid {
             *saved = udid;
             self.canvas_changed(cx);
@@ -290,7 +289,6 @@ impl AppWindow {
                     "canvas.sim_record" => screen.update(cx, |s, cx| s.record(By::You, cx)).map(|p| json!({"path":p})),
                     "canvas.sim_annotate" => screen.update(cx, |s, cx| s.annotate(cx)).map(|_| json!({})),
                     "canvas.sim_zoom" => self.zoom_sim(&id, a["step"].as_str().unwrap_or("actual"), &screen, cx),
-                    "canvas.sim_size" => self.sim_size(&id, a["size"].as_str(), &screen, window, cx),
                     "canvas.sim_pop" => { self.pop_sim(&id, &screen, window, cx); Ok(json!({})) }
                     _ => Err(format!("unknown command {name}")),
                 };
@@ -320,94 +318,24 @@ impl AppWindow {
     }
 
     /// Resizes a sim pane so its device draws at 1 point per pixel ("actual"), or one step
-    /// larger ("in") or smaller ("out"). The top left stays put; the new size is the pane's
-    /// fixed screen size.
+    /// larger ("in") or smaller ("out"). The top left stays put.
     #[cfg(target_os = "macos")]
     fn zoom_sim(&mut self, id: &str, step: &str, screen: &Entity<SimScreen>, cx: &mut Context<Self>) -> Result<Value, String> {
-        let now = screen.read(cx).scale().unwrap_or(1.);
-        let scale = match step { "in" => now * 1.25, "out" => now * 0.8, _ => 1. }.clamp(0.2, 3.);
-        self.size_sim(id, scale, canvas::SimMode::Fixed, screen, cx)
-    }
-
-    /// Sets a sim pane's screen size so its device draws at `scale` display points per device
-    /// point, and its mode. The top left stays put.
-    #[cfg(target_os = "macos")]
-    fn size_sim(&mut self, id: &str, scale: f32, new_mode: canvas::SimMode, screen: &Entity<SimScreen>, cx: &mut Context<Self>) -> Result<Value, String> {
         let s = screen.read(cx);
         let Some(points) = s.points() else { return Err("The device size is not known yet".into()) };
+        let now = s.scale().unwrap_or(1.);
+        let scale = match step { "in" => now * 1.25, "out" => now * 0.8, _ => 1. }.clamp(0.2, 3.);
         let chrome = s.info.as_ref().and_then(|i| i.chrome.as_ref());
         let outer = chrome.map_or(points, |c| [c.size[0] + 2. * c.pad, c.size[1]]);
         let margin = 2. * super::sim_screen::MARGIN;
-        let zoom = self.canvas_state.doc.camera.zoom;
         let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return Err(format!("no pane {id}")) };
-        let canvas::Kind::Sim { mode, screen, .. } = &mut pane.kind else { return Err(format!("{id} is not a simulator pane")) };
         // The body is the pane minus its 36 px header and 1 px borders.
-        let size = [outer[0] * scale + margin + 2., outer[1] * scale + margin + canvas::HEADER + 2.];
-        (*mode, *screen) = (new_mode, Some(size));
-        (pane.rect[2], pane.rect[3]) = (size[0] / zoom, size[1] / zoom);
+        pane.rect[2] = outer[0] * scale + margin + 2.;
+        pane.rect[3] = outer[1] * scale + margin + canvas::HEADER + 2.;
         self.solve_layout(Some(id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
         Ok(json!({"scale":scale}))
-    }
-
-    /// `canvas.sim_size`: Fixed keeps the pane's screen size; Actual draws the phone at its
-    /// physical size on this window's display. No size toggles.
-    #[cfg(target_os = "macos")]
-    fn sim_size(&mut self, id: &str, want: Option<&str>, screen: &Entity<SimScreen>, window: &Window, cx: &mut Context<Self>) -> Result<Value, String> {
-        let want = match (want, self.sim_mode(id)) {
-            (Some("actual"), _) | (None, Some(canvas::SimMode::Fixed)) => canvas::SimMode::Actual,
-            (Some("fixed"), _) | (None, _) => canvas::SimMode::Fixed,
-            (Some(other), _) => return Err(format!("size is actual or fixed, not {other}")),
-        };
-        match want {
-            canvas::SimMode::Fixed => {
-                if let Some(canvas::Kind::Sim { mode, .. }) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id).map(|p| &mut p.kind) { *mode = want; }
-                self.canvas_changed(cx);
-                cx.notify();
-                Ok(json!({"size":"fixed"}))
-            }
-            canvas::SimMode::Actual => {
-                let scale = Self::actual_scale(window, screen, cx).map_err(|e| format!("Can't show this simulator at its real size: {e}"))?;
-                self.size_sim(id, scale, want, screen, cx)?;
-                Ok(json!({"size":"actual","scale":scale}))
-            }
-        }
-    }
-
-    /// Display points per device point that draw this device at its physical size on the
-    /// window's display, or why that is not known.
-    #[cfg(target_os = "macos")]
-    fn actual_scale(window: &Window, screen: &Entity<SimScreen>, cx: &App) -> Result<f32, String> {
-        let s = screen.read(cx);
-        let info = s.info.as_ref().ok_or("the device size is not known yet")?;
-        let pitch = info.pitch.filter(|p| *p > 0.).ok_or("Xcode lists no screen density for it")?;
-        let display = window.display(cx).ok_or("the display is unknown")?;
-        let id = u32::try_from(u64::from(display.id())).map_err(|_| "the display id is out of range")?;
-        let ppi = crate::sim_live::points_per_inch(id, f32::from(display.bounds().size.width)).ok_or("macOS reports no physical size for this display")?;
-        Ok(sim::actual_scale(ppi, info.scale, pitch))
-    }
-
-    /// A sim pane's size mode.
-    fn sim_mode(&self, id: &str) -> Option<canvas::SimMode> {
-        self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| match &p.kind { canvas::Kind::Sim { mode, .. } => Some(*mode), _ => None })
-    }
-
-    /// The window moved to another display: sim panes at their actual size are resized for it.
-    /// Errors toast once per pane.
-    #[cfg(target_os = "macos")]
-    pub(in crate::window) fn display_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let now = window.display(cx).map(|d| u64::from(d.id()));
-        let before = std::mem::replace(&mut self.last_display, now);
-        if before.is_none() || before == now { return; }
-        let ids: Vec<String> = self.canvas_state.doc.panes.iter().filter(|p| self.sim_mode(&p.id) == Some(canvas::SimMode::Actual)).map(|p| p.id.clone()).collect();
-        for id in ids {
-            let Some(screen) = self.canvas_state.sims.get(&id).and_then(|v| v.live.clone()) else { continue };
-            let result = Self::actual_scale(window, &screen, cx)
-                .map_err(|e| format!("Can't show this simulator at its real size: {e}"))
-                .and_then(|scale| self.size_sim(&id, scale, canvas::SimMode::Actual, &screen, cx));
-            if let Err(e) = result { self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx); }
-        }
     }
 
     /// Pops a sim pane's device out into its own window, or brings it back.
@@ -475,7 +403,6 @@ impl AppWindow {
                 "canvas.sim_record" if s.recording.is_some() => { a.icon = "icons/square.svg".into(); a.label = "Stop recording".into(); }
                 "canvas.sim_annotate" if s.annotation.is_some() => a.label = "Cancel annotation".into(),
                 "canvas.sim_pop" if s.popped => a.label = "Bring back".into(),
-                "canvas.sim_size" if self.sim_mode(id) == Some(canvas::SimMode::Actual) => a.label = "Fixed size".into(),
                 _ => {}
             }
         }
