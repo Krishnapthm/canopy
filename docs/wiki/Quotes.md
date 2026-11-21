@@ -1,6 +1,6 @@
 # Quotes
 
-A quote takes something you selected in a pane and puts a precise reference to it into an agent's prompt, so you can say "fix this" and point instead of describe. You can add a message, and Canopy never presses `Enter` for you: you see exactly what the agent will get before you send it.
+A quote takes something you selected in a pane and puts a precise reference to it into an agent's prompt, so you can say "fix this" and point instead of describe. You can add a message, and You can review the draft in the agent’s prompt before you send it.
 
 This page is the reference for the quote menu and quote formats. For examples of quoting from each kind of pane, read [Point Agents at Things](Point-Agents-at-Things).
 
@@ -18,8 +18,7 @@ What you can select depends on the pane:
 | File, or a preview in the Files panel | Select text. |
 | Image | Drag a region, or click **Quote image** for the whole image. See [Images and PDFs](Images-and-PDFs). |
 | PDF | Turn on **Highlight text**, then drag across text. See [Images and PDFs](Images-and-PDFs). |
-| Browser | Click **Pick an element to quote**, then an element. See [Browser Pane](Browser-Pane#pick-an-element-to-quote). |
-| Simulator | Click **Annotate**, draw, then **Send to agent**. See [Simulator Devices](Simulator-Devices). |
+| Browser | Run `canvas.browser_pick`, then click an element. See [Browser Pane](Browser-Pane#pick-an-element-to-quote). |
 | Terminal | Not supported. Selecting terminal text copies it. |
 
 ## Choose the agent
@@ -45,7 +44,6 @@ Every quote starts with `@` and the source: a file path (relative to the agent's
 | Whole image | `@path` |
 | PDF | `@path page N`, then the passage as `>` lines. |
 | Browser element | `@url`, then the component and source file and lines when known, else a CSS selector, then the element's opening tag or text. |
-| Simulator | `@path` of the annotated screenshot, then a line naming the device and its size. |
 
 For example, three lines of a Rust file with a message:
 
@@ -61,6 +59,12 @@ Use a constant-time comparison here.
 ````
 
 Review the prompt, then press `Enter` in the agent to send it.
+
+## Send an annotation
+
+Annotations from a browser or simulator pane go straight to its sole wired agent. When you need to choose a target, **Send** opens the quote menu and keeps the same choices, including **New agent with this**.
+
+Canopy pastes the annotated screenshot and any area crops as separate image paths, then pastes the numbered comments and submits the prompt. If the agent runs on another machine, Canopy copies the images there first. [Browser Pane](Browser-Pane#annotate) and [Simulator Devices](Simulator-Devices#annotate) describe the annotation tools.
 
 ## See also
 

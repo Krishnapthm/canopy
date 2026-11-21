@@ -102,11 +102,24 @@ Closing a pane, or the space it lives in, stops its page: media is paused and th
 
 A page you rested keeps running out of sight, so a video can keep playing. When a resting page that is off screen (panned away, or in another space) still has audio or video playing, Canopy shows a toast, "*page* is still playing", with a jump action that goes to the pane. It shows once, until you click the page again.
 
+## Annotate
+
+When a layout bug is easier to point at than describe, click **Annotate** in the browser pane's helper bar. The page holds on a still while you work. If the page is in its own window, click **Bring back** first.
+
+- With **Select**, click an element and save a comment to place a numbered pin. Drag to comment on an area. Start the drag on text to highlight a range. Click a pin to edit or delete its comment.
+- Use **Pen**, **Arrow**, **Box**, or **Text** to mark the picture. Click to place a text label, type it, then press `Enter`. The bar has five colours, three widths, **Undo**, and **Redo**. On narrow panes, open **Drawing tools** for these controls.
+- Use **Area screenshot** and drag to attach an extra crop to a comment. **Hide marks** lets you see the still underneath. **Trash** clears all marks and comments in one undoable step.
+- Hold `Space` to scroll or interact with the live page. Release it to take a fresh still. Element pins follow their elements. Area and text annotations keep their original page coordinates.
+
+Click **Send** to submit to the sole wired agent. With multiple wired agents or none, choose an agent from the quote menu. The agent receives the annotated screenshot first, then any crops, followed by the URL, viewport, and numbered comments. Element comments include the selector, visible text, a short HTML excerpt, styles, and React source details when available. Text labels are listed with their coordinates in the message.
+
+Click **Stop annotating** or press `Esc` to leave. With marks or comments on the still, choose **Keep editing** or **Discard**.
+
 ## Pick an element to quote
 
 ![A browser pane with the element picker on a button](images/browser-pane-1.png)
 
-1. Click **Pick an element to quote** in the helper bar. The page becomes live.
+1. Run `canvas.browser_pick` on the selected browser pane. The page becomes live.
 2. Click the element you mean.
 3. Pick an agent in the [quote menu](Quotes), optionally with a message.
 
@@ -151,7 +164,7 @@ Reading an empty pane returns `New tab`. When the pane has a URL, both commands 
 | **Reload** | Reloads the page. |
 | **Home** | Goes to the pane's home address: the first address it opened, or the last one set with **Open URL** or `canopy pane open`. |
 | **Open URL** | Focuses the address field so you can enter another address. |
-| **Pick an element to quote** | Starts the element picker. |
+| **Annotate** | Freezes the page for marks and comments. |
 | **Screenshot** | Saves the page to `<temp>/canopy/<pane>.png` and shows the path in a toast. |
 | **Open in browser** | Opens the current address in your usual browser. |
 | **Expand**, **Pop out** | The same as in the ⋯ menu; Pop out reads **Bring back** while the page is popped out. |

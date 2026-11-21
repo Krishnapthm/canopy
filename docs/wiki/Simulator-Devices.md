@@ -45,7 +45,20 @@ The bar hides while annotating. In the device's own window, the bottom bar also 
 | **Refresh** | Tries the live view again. |
 | **Screenshot** | Saves a PNG to the Desktop. The toast shows the file. |
 | **Record** | Records a video to the Desktop. Click **Stop recording** to stop. |
-| **Annotate** | Freezes the screen so you can draw on it. **Send to agent** quotes the marked picture. See [Point Agents at Things](Point-Agents-at-Things#a-spot-on-the-simulator). |
+| **Annotate** | Freezes the screen for marks and comments. |
+
+## Annotate
+
+To point out a problem on a booted simulator, click **Annotate** in the bottom bar. If the device is in its own window, click **Bring back** first.
+
+- With **Select**, click a point or drag over an area, add a comment, then click **Save**. Click its numbered pin to edit or delete it.
+- Draw with **Pen**, **Arrow**, or **Box**. To place a **Text** label, click, type the label, then press `Enter`. Choose a colour and width, or use **Undo** and **Redo**. On narrow panes, open **Drawing tools** for these controls.
+- Use **Area screenshot** to attach a crop to an area comment. Use **Hide marks** to see the still beneath them, or **Trash** to clear all marks and comments in one undoable step.
+- Hold `Space` to use the live simulator. Release it to capture a fresh still with your existing annotations in the same device coordinates.
+
+Click **Send** to submit to the sole wired agent. With multiple wired agents or none, choose an agent from the quote menu. The agent receives the annotated screenshot, any crops, then the device name, runtime, and numbered comments with their coordinates in device points. Text labels are listed in the message.
+
+Click **Stop annotating** or press `Esc` to leave. With marks or comments on the still, choose **Keep editing** or **Discard**.
 
 ## Helper bar
 
