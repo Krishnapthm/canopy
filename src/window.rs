@@ -296,11 +296,11 @@ struct Copy {
 pub(crate) struct Toast { pub title: String, pub body: Option<String>, pub level: Level, pub action: Option<(String, Value)> }
 
 #[derive(Clone, Copy)]
-pub(crate) enum Level { Info, Success, Warning, Error }
+pub(crate) enum Level { Info, Success, Error }
 
 impl Level {
     fn name(self) -> &'static str {
-        match self { Level::Info => "info", Level::Success => "success", Level::Warning => "warning", Level::Error => "error" }
+        match self { Level::Info => "info", Level::Success => "success", Level::Error => "error" }
     }
 }
 
@@ -5170,12 +5170,12 @@ mod tests {
 
     #[test]
     fn toasts_become_overlay_specs() {
-        let full = super::Toast { title: "T".into(), body: Some("B".into()), level: super::Level::Warning, action: Some(("pane.focus".into(), serde_json::json!({"pane": "p2"}))) };
-        assert_eq!(super::toast_json(&full), serde_json::json!({"kind":"toast","notification":{"title":"T","body":"B","level":"warning","action":{"name":"pane.focus","args":{"pane":"p2"}}}}));
+        let full = super::Toast { title: "T".into(), body: Some("B".into()), level: super::Level::Error, action: Some(("pane.focus".into(), serde_json::json!({"pane": "p2"}))) };
+        assert_eq!(super::toast_json(&full), serde_json::json!({"kind":"toast","notification":{"title":"T","body":"B","level":"error","action":{"name":"pane.focus","args":{"pane":"p2"}}}}));
         let bare = super::Toast { title: "T".into(), body: None, level: super::Level::Info, action: None };
         assert_eq!(super::toast_json(&bare), serde_json::json!({"kind":"toast","notification":{"title":"T","level":"info"}}));
-        let levels = [super::Level::Info, super::Level::Success, super::Level::Warning, super::Level::Error].map(super::Level::name);
-        assert_eq!(levels, ["info", "success", "warning", "error"]);
+        let levels = [super::Level::Info, super::Level::Success, super::Level::Error].map(super::Level::name);
+        assert_eq!(levels, ["info", "success", "error"]);
     }
 
     #[test]
