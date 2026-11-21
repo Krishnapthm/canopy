@@ -132,42 +132,55 @@ pub fn pretty(keys: &str) -> String {
 }
 
 fn pretty_for(keys: &str, mac: bool) -> String {
-    keys.split_whitespace().map(|stroke| {
-        let mut parts: Vec<_> = stroke.split('-').collect();
-        let mut key = parts.pop().unwrap_or_default();
-        if key.is_empty() { key = "-"; parts.pop(); }
-        let mut held = [false; 4];
-        for modifier in parts {
-            let index = match modifier.to_ascii_lowercase().as_str() {
-                "ctrl" | "control" => 0,
-                "alt" | "option" => 1,
-                "shift" => 2,
-                "secondary" if !mac => 0,
-                "cmd" | "super" | "win" | "secondary" => 3,
-                _ => continue,
-            };
-            held[index] = true;
-        }
-        let lower = key.to_lowercase();
-        let label = match lower.as_str() {
-            "space" => "Space".into(),
-            "enter" => if mac { "↵" } else { "Enter" }.into(),
-            "escape" => "Esc".into(),
-            "backspace" => if mac { "⌫" } else { "Backspace" }.into(),
-            "delete" => if mac { "⌦" } else { "Delete" }.into(),
-            "tab" => if mac { "⇥" } else { "Tab" }.into(),
-            "left" => "←".into(), "right" => "→".into(),
-            "up" => "↑".into(), "down" => "↓".into(),
-            _ => {
-                let mut chars = lower.chars();
-                chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
-            }
+    keys.split_whitespace()
+        .map(|stroke| stroke_caps(stroke, mac).join(if mac { "" } else { "+" }))
+        .collect::<Vec<_>>().join(" ")
+}
+
+/// One label per key to press, for drawing key caps.
+pub fn caps(keys: &str) -> Vec<String> {
+    caps_for(keys, cfg!(target_os = "macos"))
+}
+
+fn caps_for(keys: &str, mac: bool) -> Vec<String> {
+    keys.split_whitespace().flat_map(|stroke| stroke_caps(stroke, mac)).collect()
+}
+
+fn stroke_caps(stroke: &str, mac: bool) -> Vec<String> {
+    let mut parts: Vec<_> = stroke.split('-').collect();
+    let mut key = parts.pop().unwrap_or_default();
+    if key.is_empty() { key = "-"; parts.pop(); }
+    let mut held = [false; 4];
+    for modifier in parts {
+        let index = match modifier.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => 0,
+            "alt" | "option" => 1,
+            "shift" => 2,
+            "secondary" if !mac => 0,
+            "cmd" | "super" | "win" | "secondary" => 3,
+            _ => continue,
         };
-        let names = if mac { ["⌃", "⌥", "⇧", "⌘"] } else { ["Ctrl", "Alt", "Shift", "Super"] };
-        let mut labels: Vec<_> = names.into_iter().zip(held).filter_map(|(name, held)| held.then_some(name)).collect();
-        labels.push(&label);
-        labels.join(if mac { "" } else { "+" })
-    }).collect::<Vec<_>>().join(" ")
+        held[index] = true;
+    }
+    let lower = key.to_lowercase();
+    let label = match lower.as_str() {
+        "space" => "Space".into(),
+        "enter" => if mac { "↵" } else { "Enter" }.into(),
+        "escape" => "Esc".into(),
+        "backspace" => if mac { "⌫" } else { "Backspace" }.into(),
+        "delete" => if mac { "⌦" } else { "Delete" }.into(),
+        "tab" => if mac { "⇥" } else { "Tab" }.into(),
+        "left" => "←".into(), "right" => "→".into(),
+        "up" => "↑".into(), "down" => "↓".into(),
+        _ => {
+            let mut chars = lower.chars();
+            chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+        }
+    };
+    let names = if mac { ["⌃", "⌥", "⇧", "⌘"] } else { ["Ctrl", "Alt", "Shift", "Super"] };
+    let mut labels: Vec<_> = names.into_iter().zip(held).filter_map(|(name, held)| held.then(|| name.to_owned())).collect();
+    labels.push(label);
+    labels
 }
 
 pub fn path() -> std::path::PathBuf {
@@ -374,6 +387,13 @@ mod tests {
             assert_eq!(super::pretty_for(keys, true), mac);
             assert_eq!(super::pretty_for(keys, false), other);
         }
+    }
+
+    #[test]
+    fn binding_caps() {
+        assert_eq!(super::caps_for("cmd-shift-p", true), ["⇧", "⌘", "P"]);
+        assert_eq!(super::caps_for("ctrl-shift-p", false), ["Ctrl", "Shift", "P"]);
+        assert_eq!(super::caps_for("n", true), ["N"]);
     }
 
     #[test]

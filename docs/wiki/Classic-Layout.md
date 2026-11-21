@@ -51,7 +51,6 @@ Hover a pane header to show four icons: split right, split down, zoom and close.
 
 From left to right, the status bar shows:
 
-- The machine of the open space, or **This computer**.
 - The branch of the space, when it has one.
-- The number of agents, and **· N needs you** when agents are blocked.
+- One chip per agent, **needs you** first. Click a chip to jump to that agent. Past six, a **+N** chip opens the picker.
 - The palette key, with the word **commands**. Click it to open the command palette.

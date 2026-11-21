@@ -223,6 +223,7 @@ impl AppWindow {
             "icons/file-text.svg".into(),
             title,
             detail,
+            None,
             body.into_any_element(),
             camera,
             cx,

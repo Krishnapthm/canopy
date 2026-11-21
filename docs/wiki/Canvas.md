@@ -6,6 +6,8 @@ The canvas is the open surface that holds a space's panes. Unlike a terminal mul
 
 This page covers moving around, selecting and arranging panes, and the views that help you focus. If "canvas mode" is new to you, read [Concepts](Concepts#typing-into-a-pane-and-canvas-mode) first.
 
+An empty space (or Home with no spaces) shows shortcut hints for new terminal, new agent, go to pane, command palette and fit; a hint shows only when its action has a key.
+
 ## Move around
 
 - **Pan:** scroll over the canvas (two fingers on a trackpad), drag with the middle mouse button, or hold `Space` and drag. You can also turn on the **Hand** tool on the toolbar and drag with the left button.
@@ -100,6 +102,10 @@ Edit these in `settings.json` (see [Settings and Themes](Settings-and-Themes)).
 | `space_fill` | `0.04` | How strongly space cards on Home are tinted with their color, from 0 to 1. |
 | `tile_gap` | `0` | Space between panes in tile view, in canvas pixels. |
 | `tile_focus_grows` | `false` | Lets the selected pane take more room in tile view. |
+
+## The status strip
+
+A 24px strip under the canvas shows the branch of the open space (when it has one) and one chip per agent: a status dot and the agent's name, agents that need you first. Click a chip to go to that agent's space and type into it right away. With more than six agents, a final **+N** chip opens the picker. The palette key sits at the right.
 
 ## How it works
 

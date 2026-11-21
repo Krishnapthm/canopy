@@ -171,6 +171,16 @@ pub fn tile(area: Rect, tiles: usize, active: Option<usize>, pills: &[Rect], gap
     (out, placed)
 }
 
+/// The camera that centers `rect` at the same zoom when it is not wholly inside `visible`
+/// (screen px); None when it already is.
+pub fn reveal(camera: Camera, rect: Rect, visible: Point) -> Option<Camera> {
+    let [x, y] = camera.to_screen([rect[0], rect[1]]);
+    let (w, h) = (rect[2] * camera.zoom, rect[3] * camera.zoom);
+    if x >= 0. && y >= 0. && x + w <= visible[0] && y + h <= visible[1] { return None; }
+    let z = camera.zoom;
+    Some(Camera { x: rect[0] + rect[2] / 2. - visible[0] / 2. / z, y: rect[1] + rect[3] / 2. - visible[1] / 2. / z, zoom: z })
+}
+
 /// Toggle a space fit in the visible canvas: a second press restores the camera from before
 /// the fit, unless the camera moved since, in which case it fits again.
 pub fn focus_fit(camera: &mut Camera, previous: &mut Option<(Camera, Camera)>, rects: &[Rect], visible: Point) {
@@ -1165,6 +1175,14 @@ mod tests {
             assert!(serde_json::from_value::<Kind>(bad).is_err());
         }
         assert_eq!(serde_json::from_value::<Kind>(serde_json::json!({"kind":"mod:note"})).unwrap(), Kind::Mod { kind: "mod:note".into(), props: Default::default() });
+    }
+
+    #[test]
+    fn reveal_centers_a_pane_only_when_it_is_off_screen() {
+        let camera = Camera { x: 0., y: 0., zoom: 1. };
+        assert_eq!(reveal(camera, [10., 10., 100., 100.], [800., 600.]), None);
+        let to = reveal(camera, [1000., 0., 200., 100.], [800., 600.]).unwrap();
+        assert_eq!(to.to_screen([1100., 50.]), [400., 300.]);
     }
 
     #[test]

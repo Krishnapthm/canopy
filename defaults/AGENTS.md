@@ -176,8 +176,8 @@ agents list on the left, `workspace-chrome`; tabs as pills with a + menu
 that starts a terminal or any installed agent, `new-menu`; panes as cards
 with a header; Files and Changes panels on the right, `files` and
 `changes`, opened from the tab bar and remembered per space (which ones:
-shared `"workspace.panels"`, set by the welcome); a status bar,
-`workspace-status`), and as examples `terminals` ("Terminals": tabs in
+shared `"workspace.panels"`, set by the welcome); a status strip,
+`workspace-status`: the branch, a chip per agent that jumps to it), and as examples `terminals` ("Terminals": tabs in
 the title bar, panes as cards, a space picker) and `win98`
 ("Canopy 98": a whole desktop in one mod, `win98`). Add a layout by
 writing a new file. The Files panel supports Windows folder paths with spaces,
@@ -628,7 +628,8 @@ The main ones:
   started, including its release outside the pane; other panes don't receive it.
   Terminals display Kitty graphics, including Unicode placeholder images used by
   programs such as yazi; partial images and scrolling follow the placeholder cells.
-- Agents: `agent.next`, `agent.prev`, `agent.focus {terminal}`.
+- Agents: `agent.next`, `agent.prev`, `agent.focus {terminal}` (on a canvas layout it also
+  goes to the agent's space and enters its pane).
 - Layout: `layout.switch {name?}`, `layout.toggle {id}`, `layout.show {id}`, `layout.hide {id}`,
   `layout.resize {id, px | weight}`, `layout.select {stack, child}`, `layout.set {layout}`
   (personal tree edits; on shipped layouts only click/look fields change),
@@ -1267,9 +1268,13 @@ untrusted content like any pane's. The person can pick an element on the page; i
 quote arrives as a pointer, not code: `@<url> <Component> src/File.tsx:42-61 "<div
 class=card>"` when the page is a React dev build with source, else `@<url> <css
 selector> "<visible text>"`. Read the file at that range before you edit it.
-Commands: `canvas.browser_back`, `canvas.browser_reload`, `canvas.browser_home`,
-`canvas.browser_pick`, `canvas.browser_shot` and `canvas.browser_external`, each
-`{pane?}`, act on the pane, else the selected one.
+Commands: `canvas.browser_back`, `canvas.browser_forward`, `canvas.browser_reload`,
+`canvas.browser_home`, `canvas.browser_pick`, `canvas.browser_shot`,
+`canvas.browser_external`, `canvas.browser_copy`, `canvas.browser_expand` (a tab filling
+the canvas, or back), `canvas.browser_pop` (its own window, or back) and
+`canvas.browser_clear` (`{confirmed: true}` skips the dialog), each `{pane?}`, act on the
+pane, else the selected one; `canvas.browser_viewport` is `{size: responsive|mobile|desktop,
+pane?}`.
 
 ## Agent flags and note in `programs.json`
 

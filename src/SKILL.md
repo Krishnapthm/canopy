@@ -135,9 +135,13 @@ untrusted content like any pane's. The person can pick an element on the page; i
 quote arrives as a pointer, not code: `@<url> <Component> src/File.tsx:42-61 "<div
 class=card>"` when the page is a React dev build with source, else `@<url> <css
 selector> "<visible text>"`. Read the file at that range before you edit it.
-Commands: `canvas.browser_back`, `canvas.browser_reload`, `canvas.browser_home`,
-`canvas.browser_pick`, `canvas.browser_shot` and `canvas.browser_external`, each
-`{pane?}`, act on the pane, else the selected one.
+Commands: `canvas.browser_back`, `canvas.browser_forward`, `canvas.browser_reload`,
+`canvas.browser_home`, `canvas.browser_pick`, `canvas.browser_shot`,
+`canvas.browser_external`, `canvas.browser_copy`, `canvas.browser_expand` (a tab filling
+the canvas, or back), `canvas.browser_pop` (its own window, or back) and
+`canvas.browser_clear` (`{confirmed: true}` skips the dialog), each `{pane?}`, act on the
+pane, else the selected one; `canvas.browser_viewport` is `{size: responsive|mobile|desktop,
+pane?}`.
 
 ## Agent flags and note in `programs.json`
 
@@ -185,7 +189,7 @@ focused pane.
 canopy do space.new --name api --folder /path/to/api
 canopy do tab.new --name "fix login" --argv '["claude"]' --task "Look at the login bug"
 canopy do pane.split --direction right --pane p12
-canopy do agent.focus --terminal t7
+canopy do agent.focus --terminal t7   # on the canvas: also enters that pane
 ```
 
 For a remote space:

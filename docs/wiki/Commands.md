@@ -251,6 +251,14 @@ Go back in a browser pane's history (pane, else the selected pane).
 |---|---|
 | `pane` | no |
 
+## `canvas.browser_forward`
+
+Go forward in a browser pane's history (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
 ## `canvas.browser_reload`
 
 Reload a browser pane's page (pane, else the selected pane).
@@ -290,6 +298,48 @@ Open a browser pane's page in the system browser (pane, else the selected pane).
 | Argument | Required |
 |---|---|
 | `pane` | no |
+
+## `canvas.browser_copy`
+
+Copy a browser pane's page URL to the clipboard and toast it (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_viewport`
+
+Resize a browser pane to a preset page size: size responsive (a new pane's size), mobile (390x844) or desktop (1280x800), exact at 100% zoom (the width at any zoom); the top left stays put (pane, else the selected pane).
+
+| Argument | Required |
+|---|---|
+| `size` | yes |
+| `pane` | no |
+
+## `canvas.browser_expand`
+
+Expand a browser pane's live page into a tab of the top strip that fills the canvas area, or collapse it again (pane, else the selected pane). Escape, any space tab or Home, and closing the pane collapse it.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_pop`
+
+Pop a browser pane's page out into its own window, or bring it back (pane, else the selected pane). The pane shows "Popped out" meanwhile.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
+## `canvas.browser_clear`
+
+Delete the cookies, storage and cache of every browser pane (asks first unless confirmed).
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `confirmed` | no |
 
 ## `canvas.sim_refresh`
 
@@ -776,7 +826,7 @@ Show only this pane of its tab, or all again.
 
 ## `pane.focus`
 
-Focus a pane (or the pane showing a terminal).
+Focus a pane (or the pane showing a terminal); a file, browser or other canvas pane is selected and brought into view.
 
 | Argument | Required |
 |---|---|
@@ -863,7 +913,7 @@ No arguments.
 
 ## `agent.focus`
 
-Show an agent (sub-agents too).
+Show an agent (sub-agents too). On the canvas it also enters its pane.
 
 | Argument | Required |
 |---|---|
