@@ -13,6 +13,9 @@ const COLORS: [(&str, Color); 5] = [
     ("Blue", [59, 130, 246, 255]),
 ];
 const PIN: Color = [37, 99, 235, 255];
+/// Ends a delivery error once the text is in the agent's prompt: the annotation is then closed.
+#[cfg(target_os = "macos")]
+pub(super) const NOT_SUBMITTED: &str = "The annotation is in the agent's prompt, not submitted";
 const STYLES: [&str; 11] = ["display", "position", "width", "height", "margin", "padding", "font-size", "font-weight", "text-align", "color", "background-color"];
 /// The styles the Adjust form edits, as (CSS property, label); browser.js applies only these.
 const ADJUST: [(&str, &str); 7] = [
@@ -795,11 +798,13 @@ impl AppWindow {
         let list = styled(a).to_string();
         if list == a.styled { return; }
         a.styled = list.clone();
+        // Busy until the fresh still arrives: Send and edits wait for it.
+        a.refreshing = true;
         let target = id.to_owned();
         self.annotation_query(id, format!("return window.__canopy.restyle({list})"), window, cx, move |this, value, window, cx| {
             if value.is_some() { return this.annotation_refreeze(&target, window, cx); }
             // Resend on the next change instead of assuming the page has these styles.
-            if let Some(a) = this.canvas_state.annotations.get_mut(&target) { a.styled.clear(); }
+            if let Some(a) = this.canvas_state.annotations.get_mut(&target) { a.styled.clear(); a.refreshing = false; }
         });
     }
 
@@ -820,12 +825,20 @@ impl AppWindow {
                 let old = std::mem::replace(&mut a.image, render_image(still.clone()));
                 cx.defer(move |cx| cx.drop_image(old, None));
                 (a.still, a.page_size) = (still, size);
+                let mut moved = false;
                 if let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id)
                     && let canvas::Kind::Browser { viewport, .. } = &pane.kind
                 {
-                    a.host = Host::Browser { url: pane.url().unwrap_or_default().to_owned(), viewport: *viewport };
+                    let url = pane.url().unwrap_or_default().to_owned();
+                    moved = matches!(&a.host, Host::Browser { url: old, .. } if *old != url);
+                    a.host = Host::Browser { url, viewport: *viewport };
                 }
-                a.outgoing = None;
+                // A new page lost the previewed styles: send them again on the next change.
+                if moved { a.styled.clear(); }
+                if !a.outgoing.as_ref().is_some_and(|o| o.sending) { a.outgoing = None; }
+                if moved {
+                    self.annotation_error("The page changed while it was live: comments keep their places on the old page", window, cx);
+                }
             }
             Err(error) => self.annotation_error(error, window, cx),
         }
@@ -1337,7 +1350,7 @@ impl AppWindow {
         let compact = w < 560.;
         let items = a.items();
         let comments = items.iter().filter(|i| matches!(i, Item::Comment(..))).count();
-        let can_send = !items.is_empty() && !a.live && !a.refreshing && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending);
+        let can_send = !items.is_empty() && !a.live && !a.refreshing && !a.original && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending);
         let button = |action: &'static str, icon, label, active, enabled, cx: &mut Context<Self>| {
             let pane = id.to_owned();
             annotation_button(action, icon, label, active)
@@ -1480,6 +1493,8 @@ impl AppWindow {
     fn send_annotation(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         let a = self.canvas_state.annotations.get_mut(id).ok_or("There is no annotation to send")?;
         if a.live || a.refreshing || a.draft.is_some() { return Err("Finish the current annotation edit before sending".into()); }
+        // The still must show what the message describes.
+        if a.original { return Err("Show the adjusted page before sending".into()); }
         if let Some(outgoing) = &a.outgoing {
             if outgoing.sending { return Err("The annotation is being sent".into()); }
             self.offer_annotation(id, window, cx);
@@ -1603,7 +1618,10 @@ impl AppWindow {
         } else if let Err(error) = result
             && self.annotation_is(id, session)
         {
-            if let Some(outgoing) = self.canvas_state.annotations.get_mut(id).and_then(|a| a.outgoing.as_mut()) {
+            // Pasted but not submitted: ending here keeps a second Send from pasting it again.
+            if error.ends_with(NOT_SUBMITTED) {
+                if let Err(e) = self.end_annotation(id, true, window, cx) { self.annotation_error(e, window, cx); }
+            } else if let Some(outgoing) = self.canvas_state.annotations.get_mut(id).and_then(|a| a.outgoing.as_mut()) {
                 outgoing.sending = false;
             }
             self.annotation_error(error, window, cx);

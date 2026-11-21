@@ -2221,11 +2221,15 @@ impl AppWindow {
                 let started = Instant::now();
                 let mut opened = false;
                 let agent = |app: &Self| app.live.get(&addr).is_some_and(|rec| canvas_agent(rec) || crate::programs::agent_program(&rec["program"]));
+                // An agent asking for approval would take the Enter as its answer.
+                let asking = |app: &Self| app.live.get(&addr).is_some_and(|rec| rec["status"] == "blocked");
+                const ASKING: &str = "The agent is waiting for an approval: answer it, then send again";
                 let (view, paste_at, mut screen) = loop {
                     if started.elapsed() >= Duration::from_secs(30) { return Err("The agent did not get ready for a paste".into()); }
                     let ready = this.update_in(cx, |this, window, cx| {
                         if !this.annotation_sending(&pane, &session) { return Err("The annotation closed".to_owned()); }
                         if !agent(this) { return Ok(None); }
+                        if asking(this) { return Err(ASKING.to_owned()); }
                         if !opened {
                             opened = true;
                             this.open_agent_for_quote(&addr, window, cx);
@@ -2245,8 +2249,11 @@ impl AppWindow {
                     if let Some(ready) = ready { break ready; }
                     cx.background_executor().timer(Duration::from_millis(100)).await;
                 };
+                // From here the text sits in the agent's prompt: a failure must not invite a second paste.
+                let landed = |e: String| format!("{e}. {}", annotate::NOT_SUBMITTED);
                 let start = Instant::now();
-                let mut changed = start;
+                // The settle counts from the paste's first echo, so a slow echo cannot be mistaken for a settled screen.
+                let mut changed: Option<Instant> = None;
                 loop {
                     cx.background_executor().timer(Duration::from_millis(50)).await;
                     let submitted = this.update_in(cx, |this, _, cx| {
@@ -2255,15 +2262,16 @@ impl AppWindow {
                         if !this.annotation_sending(&pane, &session) || !current || !agent(this)
                             || target.annotation_input() != Some(paste_at)
                         {
-                            return Err("The agent's prompt changed before the annotation could be submitted".to_owned());
+                            return Err(landed("The agent's prompt changed before the annotation could be submitted".into()));
                         }
+                        if asking(this) { return Err(landed(ASKING.into())); }
                         let next = target.screen_text();
                         if next != screen {
                             screen = next;
-                            changed = Instant::now();
+                            changed = Some(Instant::now());
                         }
-                        if changed.elapsed() >= Duration::from_millis(300) || start.elapsed() >= Duration::from_secs(3) {
-                            return target.press_enter().then_some(true).ok_or_else(|| "The agent disconnected before submit".into());
+                        if changed.is_some_and(|c| c.elapsed() >= Duration::from_millis(300)) || start.elapsed() >= Duration::from_secs(3) {
+                            return target.press_enter().then_some(true).ok_or_else(|| landed("The agent disconnected before submit".into()));
                         }
                         Ok(false)
                     }).map_err(|_| "The window closed".to_owned())??;

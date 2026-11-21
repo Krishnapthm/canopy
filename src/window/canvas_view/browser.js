@@ -6,18 +6,18 @@
   if (window.__canopy) return;
   const post = (message) => window.ipc.postMessage(JSON.stringify(message));
 
-  // A CSS path from the nearest element with an id, at most five steps.
+  // The shortest CSS path, from the element up, that matches only this element.
   const selector = (el) => {
     const steps = [];
-    for (let node = el; node && node.nodeType === 1 && steps.length < 5; node = node.parentElement) {
-      if (node.id) { steps.unshift(`#${CSS.escape(node.id)}`); break; }
-      let step = node.localName;
+    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+      let step = node.id ? `#${CSS.escape(node.id)}` : node.localName;
       const parent = node.parentElement;
-      if (parent) {
+      if (!node.id && parent) {
         const same = [...parent.children].filter((c) => c.localName === node.localName);
         if (same.length > 1) step += `:nth-of-type(${same.indexOf(node) + 1})`;
       }
       steps.unshift(step);
+      if (document.querySelectorAll(steps.join(" > ")).length === 1) break;
     }
     return steps.join(" > ");
   };
