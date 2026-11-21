@@ -4129,6 +4129,51 @@ mod pane_action_tests {
         });
     }
 
+    const OVERLAP: &str = "window::canvas_view::pane_action_tests::overlap_headless";
+
+    #[test]
+    fn a_click_on_overlapping_panes_raises_only_the_front_one() { in_own_process(OVERLAP); }
+
+    /// Real pointer events through hit testing: an expanded terminal over a boxed pane (the
+    /// pane_card that sims, browsers and notes share) keeps the click where they overlap.
+    #[gpui::test]
+    fn overlap_headless(cx: &mut TestAppContext) {
+        use gpui::{point, px, Modifiers};
+        if !running_alone(OVERLAP) { return; }
+        let (view, cx) = open_window(cx, "pane-overlap", "", json!({"id":"root","type":"canvas"}));
+        cx.run_until_parked();
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.model.add_space("root", "Canvas", &super::super::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
+            this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"t1","kind":"terminal","props":{"size":[600,400]},"rect":[0,0,600,400],"z":2},
+                {"id":"p1","kind":"image","props":{"path":"/missing.png"},"rect":[300,100,400,400],"z":1}
+            ])).unwrap();
+            this.sync(window, cx);
+            cx.notify();
+        }));
+        cx.run_until_parked();
+        let origin = view.update(cx, |this, _| this.bounds.borrow()["canopy-canvas"].origin);
+        let at = |x: f32, y: f32| origin + point(px(x), px(y));
+        let front = |cx: &mut gpui::VisualTestContext| view.update(cx, |this, _| this.canvas_state.doc.panes.iter().max_by_key(|p| p.z).unwrap().id.clone());
+        let none = Modifiers::default();
+
+        cx.simulate_click(at(450., 250.), none);
+        cx.run_until_parked();
+        assert_eq!(front(cx), "t1", "a click where the terminal covers the pane must not raise the pane behind");
+
+        cx.simulate_click(at(650., 300.), none);
+        cx.run_until_parked();
+        assert_eq!(front(cx), "p1", "a click on the pane's own part raises it");
+
+        cx.simulate_click(at(450., 250.), none);
+        cx.run_until_parked();
+        assert_eq!(front(cx), "p1", "now in front, the pane keeps the overlap");
+
+        cx.simulate_click(at(100., 250.), none);
+        cx.run_until_parked();
+        assert_eq!(front(cx), "t1", "a click on the terminal's own part raises it again");
+    }
 }
 
 
