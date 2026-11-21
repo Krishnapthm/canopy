@@ -1482,6 +1482,12 @@ fn store_id_for(path: &std::path::Path) -> [u8; 16] {
 fn remove_browser_store() -> async_channel::Receiver<wry::Result<()>> {
     use wry::WebViewExtDarwin as _;
     let (send, receive) = async_channel::bounded(1);
+    // WebKit's store calls crash (WTF::RunLoop::dispatch, macOS 27.2) until something has set
+    // WebKit up in this process; a configuration is the lightest thing that does.
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        // SAFETY: made on the main thread and dropped at once.
+        let _ = unsafe { objc2_web_kit::WKWebViewConfiguration::new(mtm) };
+    }
     wry::WebView::remove_data_store(&store_id(), move |result| { let _ = send.try_send(result); });
     receive
 }
