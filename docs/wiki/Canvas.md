@@ -10,7 +10,8 @@ This page covers moving around, selecting and arranging panes, and the views tha
 
 - **Pan:** scroll over the canvas (two fingers on a trackpad), drag with the middle mouse button, or hold `Space` and drag. You can also turn on the **Hand** tool on the toolbar and drag with the left button.
 - **Zoom:** hold `Cmd` (`Ctrl` on Linux and Windows) and scroll, or pinch. Zoom follows the pointer.
-- **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, and `Shift+0` to return to 100% zoom.
+- **Zoom limits:** zooming in stops while the biggest pane still fits the window with a margin, so no pane ever runs off screen. Zooming out stops once everything fits (or at 100% if everything already fits). Past either limit the zoom gives a little, then springs back.
+- **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
 
 Scrolling over a terminal you have not entered pans the canvas. Scrolling inside the terminal you have entered scrolls its output.
 
