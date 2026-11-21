@@ -1,4 +1,5 @@
-//! Clips live browser views to the canvas and lets foreground GPUI elements receive input.
+//! Clips live browser views to the canvas and routes clicks through covered areas to GPUI.
+//! The container filters hit tests so WebKit keeps its original class and AppKit state.
 #[cfg(target_os = "macos")]
 use super::*;
 
@@ -239,82 +240,86 @@ impl super::AppWindow {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) use native::clear_mask;
+pub(super) use native::{clear_mask, wrap};
 #[cfg(target_os = "macos")]
 use native::{local_rects, set_mask};
 
 #[cfg(target_os = "macos")]
 mod native {
     use super::R;
-    use objc2::runtime::{AnyClass, AnyObject, ClassBuilder, Sel};
-    use objc2::{msg_send, sel};
-    use objc2_app_kit::NSView;
+    use objc2::rc::Retained;
+    use objc2::{DefinedClass, MainThreadMarker, define_class, msg_send};
+    use objc2_app_kit::{NSAutoresizingMaskOptions, NSView};
     use objc2_core_graphics::CGMutablePath;
     use objc2_foundation::{NSPoint, NSRect, NSSize};
     use objc2_quartz_core::CAShapeLayer;
-    use std::collections::HashMap;
-    use std::sync::{LazyLock, Mutex, OnceLock};
+    use std::cell::RefCell;
     use wry::WebViewExtMacOS;
 
-    static MASKED_CLASS: OnceLock<Option<&'static AnyClass>> = OnceLock::new();
-    static VISIBLE: LazyLock<Mutex<HashMap<usize, Vec<R>>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
+    define_class!(
+        /// Hosts a live WKWebView and passes clicks through its covered regions.
+        /// Keeping the web view's class intact preserves AppKit's property bookkeeping.
+        #[unsafe(super = NSView)]
+        #[thread_kind = objc2::MainThreadOnly]
+        #[ivars = RefCell<Option<Vec<R>>>]
+        struct CanopyBrowserClip;
 
-    extern "C-unwind" fn hit_test(view: &NSView, _: Sel, point: NSPoint) -> *mut NSView {
-        // SAFETY: AppKit calls hitTest on the main thread with a live NSView.
-        let parent = unsafe { view.superview() };
-        let point_in_view = view.convertPoint_fromView(point, parent.as_deref());
-        let key = view as *const NSView as usize;
-        let is_visible = VISIBLE.lock().unwrap().get(&key).is_none_or(|rects| {
-            rects.iter().any(|&[x, y, w, h]| {
-                let (x, y, w, h) = (f64::from(x), f64::from(y), f64::from(w), f64::from(h));
-                point_in_view.x >= x
-                    && point_in_view.x < x + w
-                    && point_in_view.y >= y
-                    && point_in_view.y < y + h
-            })
-        });
-        if !is_visible {
-            return std::ptr::null_mut();
+        impl CanopyBrowserClip {
+            #[unsafe(method(isFlipped))]
+            fn is_flipped(&self) -> bool {
+                true
+            }
+
+            #[unsafe(method(hitTest:))]
+            fn hit_test(&self, point: NSPoint) -> *mut NSView {
+                if let Some(rects) = self.ivars().borrow().as_ref() {
+                    let Some(webview) = self.subviews().firstObject() else {
+                        return std::ptr::null_mut();
+                    };
+                    // SAFETY: AppKit calls hitTest on the main thread with a live view.
+                    let parent = unsafe { self.superview() };
+                    let point = webview.convertPoint_fromView(point, parent.as_deref());
+                    if !rects.iter().any(|&[x, y, w, h]| {
+                        let (x, y, w, h) = (f64::from(x), f64::from(y), f64::from(w), f64::from(h));
+                        point.x >= x && point.x < x + w && point.y >= y && point.y < y + h
+                    }) {
+                        return std::ptr::null_mut();
+                    }
+                }
+                // SAFETY: NSView implements hitTest: with an unretained NSView return.
+                let hit: *mut NSView = unsafe { msg_send![super(self), hitTest: point] };
+                if std::ptr::eq(hit, &**self) {
+                    return std::ptr::null_mut();
+                }
+                hit
+            }
         }
-        let superclass = MASKED_CLASS
-            .get()
-            .copied()
-            .flatten()
-            .and_then(AnyClass::superclass)
-            .expect("the installed hitTest method has a superclass");
-        // SAFETY: the superclass is the original view class and hitTest returns an unretained NSView.
-        unsafe { msg_send![super(view, superclass), hitTest: point] }
+    );
+
+    pub(in crate::window::canvas_view) fn wrap(
+        view: &wry::WebView,
+    ) -> Result<Retained<NSView>, String> {
+        let mtm = MainThreadMarker::new().expect("web views are built on the main thread");
+        let webview = view.webview();
+        // SAFETY: wry attached the web view on the main thread.
+        let parent = unsafe { webview.superview() }.ok_or("web view has no parent")?;
+        let clip = mtm.alloc::<CanopyBrowserClip>().set_ivars(RefCell::new(None));
+        // SAFETY: initialize the NSView superclass with the parent's bounds.
+        let clip: Retained<CanopyBrowserClip> =
+            unsafe { msg_send![super(clip), initWithFrame: parent.bounds()] };
+        clip.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+        );
+        clip.setWantsLayer(true);
+        // wry retains the original parent for returning focus to GPUI.
+        parent.addSubview(&clip);
+        clip.addSubview(&webview);
+        Ok(Retained::into_super(clip))
     }
 
-    fn install_hit_test(view: &AnyObject) -> bool {
-        let actual = view.class();
-        let Some(class) = *MASKED_CLASS.get_or_init(|| {
-            let mut builder = ClassBuilder::new(c"CanopyMaskedWKWebView", actual)?;
-            // SAFETY: hit_test matches NSView's hitTest: ABI, including its unretained return.
-            unsafe {
-                builder.add_method(
-                    sel!(hitTest:),
-                    hit_test as extern "C-unwind" fn(_, _, _) -> _,
-                );
-            }
-            Some(builder.register())
-        }) else {
-            return false;
-        };
-        if std::ptr::eq(actual, class) {
-            return true;
-        }
-        if !class
-            .superclass()
-            .is_some_and(|parent| std::ptr::eq(actual, parent))
-        {
-            return false;
-        }
-        // SAFETY: this main-thread subclass has the same instance size, no ivars, and one ABI-compatible override.
-        let old = unsafe { AnyObject::set_class(view, class) };
-        debug_assert!(std::ptr::eq(old, actual));
-        true
+    fn container(webview: &NSView) -> Option<Retained<CanopyBrowserClip>> {
+        // SAFETY: only called on the main thread with a live web view.
+        unsafe { webview.superview() }?.downcast().ok()
     }
 
     pub(super) fn local_rects([frame_x, frame_y, _, _]: R, visible: &[R]) -> Vec<R> {
@@ -327,13 +332,9 @@ mod native {
 
     pub(in crate::window::canvas_view) fn clear_mask(view: &wry::WebView) {
         let webview = view.webview();
-        let native: &NSView = &webview;
-        if VISIBLE
-            .lock()
-            .unwrap()
-            .remove(&(native as *const NSView as usize))
-            .is_some()
-            && let Some(layer) = native.layer()
+        if let Some(clip) = container(&webview)
+            && clip.ivars().borrow_mut().take().is_some()
+            && let Some(layer) = webview.layer()
         {
             // SAFETY: this is the view's layer on the main thread.
             unsafe {
@@ -343,19 +344,19 @@ mod native {
     }
 
     pub(super) fn set_mask(view: &wry::WebView, frame: R, visible: &[R]) -> bool {
+        let webview = view.webview();
+        let Some(clip) = container(&webview) else {
+            return false;
+        };
         if visible == [frame] {
             clear_mask(view);
             return true;
         }
-        let webview = view.webview();
         let native: &NSView = &webview;
         native.setWantsLayer(true);
         let Some(layer) = native.layer() else {
             return false;
         };
-        if !install_hit_test(native) {
-            return false;
-        }
 
         let rects = local_rects(frame, visible);
         let path = CGMutablePath::new();
@@ -376,10 +377,7 @@ mod native {
         unsafe {
             layer.setMask(Some(&shape));
         }
-        VISIBLE
-            .lock()
-            .unwrap()
-            .insert(native as *const NSView as usize, rects);
+        *clip.ivars().borrow_mut() = Some(rects);
         true
     }
 }

@@ -206,12 +206,17 @@ struct PaneUi {
 /// A page's native view: the GPUI entity, and the same view for scripts run without a GPUI
 /// context. Both or neither.
 #[cfg(target_os = "macos")]
-struct Native { view: Entity<gpui_wry::WebView>, raw: gpui_wry::WebViewHandle }
+struct Native {
+    view: Entity<gpui_wry::WebView>,
+    raw: gpui_wry::WebViewHandle,
+    clip: objc2::rc::Retained<objc2_app_kit::NSView>,
+}
 
 #[cfg(target_os = "macos")]
 impl Drop for Native {
     fn drop(&mut self) {
         super::browser_mask::clear_mask(self.raw.raw());
+        self.clip.removeFromSuperview();
     }
 }
 
@@ -1490,6 +1495,7 @@ fn destroy(native: Native) {
     let wv = native.raw.raw();
     let _ = wv.evaluate_script("document.querySelectorAll('video,audio').forEach(m => m.pause())");
     let _ = wv.load_url("about:blank");
+    super::browser_mask::clear_mask(wv);
     wv.webview().removeFromSuperview();
 }
 
@@ -1605,6 +1611,7 @@ impl AppWindow {
                 .with_download_started_handler(|_, _| false)
                 .build_as_child(window)
                 .map_err(|e| format!("cannot make the web view: {e}"))?;
+            let clip = super::browser_mask::wrap(&webview)?;
             let view = cx.new(|cx| gpui_wry::WebView::new(webview, window, cx));
             let raw = view.update(cx, |v, _| {
                 v.hide();
@@ -1612,7 +1619,7 @@ impl AppWindow {
                 if popped.is_none() { fit_view(v, rect); }
                 v.handle()
             });
-            Ok(Native { view, raw })
+            Ok(Native { view, raw, clip })
         };
         // The window that asked may itself be the pop-out, which cannot be updated from inside.
         let native = match popped {
