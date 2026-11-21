@@ -8,11 +8,14 @@ mod keyboard;
 mod helper_bar;
 mod pane_commands;
 pub(super) mod browser;
+mod browser_mask;
 mod image_pane;
 mod pdf;
 mod sim;
 #[cfg(target_os = "macos")]
 mod sim_screen;
+
+const PANE_RESIZE_CORNER: f32 = 12.;
 
 /// What an inline name edit renames: a space (by id) or the tab of a cell (by tab id).
 #[derive(Clone, PartialEq)]
@@ -39,7 +42,8 @@ pub(super) struct State {
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
     sims: HashMap<String, sim::SimView>,
     bar_hover: Option<String>,
-    preview_drag: Option<(String, bool, Point<Pixels>)>,
+    // The starting size is present for a corner resize.
+    preview_drag: Option<(String, Option<canvas::Point>, Point<Pixels>)>,
     pub file: Option<String>,
     pub(super) editing: Option<String>,
     /// The Files editor reports transitions between saved and unsaved text.
@@ -355,11 +359,18 @@ impl AppWindow {
         }).collect()
     }
 
-    fn end_canvas_drag(&mut self, cx: &App) {
+    fn end_canvas_drag(&mut self, cx: &mut Context<Self>) {
         if let Some((pin, space)) = self.canvas_state.pending_layout.take() {
             self.solve_layout_now(pin.as_deref(), space.as_deref(), cx);
         }
+        let resize = self.canvas_state.preview_drag.as_ref().and_then(|(id, before, _)| {
+            let before = (*before)?;
+            let pane = self.canvas_state.doc.panes.iter().find(|p| &p.id == id)?;
+            let [_, _, w, h] = pane.pinned.unwrap_or(pane.rect);
+            (before != [w, h]).then(|| id.clone())
+        });
         self.canvas_state.end_drag();
+        if let Some(id) = resize { self.resize_resting_browser(&id, cx); }
     }
 
     /// Resolve cell and space spacing, deferring neighbours until release in drop mode.
@@ -2356,20 +2367,35 @@ impl AppWindow {
         let p = camera.to_screen([card.rect[0], card.rect[1]]);
         let drag = card.id.clone();
         let resize = drag.clone();
+        let [_, _, width, height] = card.pinned.unwrap_or(card.rect);
         let raise = drag.clone();
-        (div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
+        #[cfg(target_os = "macos")]
+        let rest = card.id.clone();
+        let card_element = div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
                 .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).overflow_hidden()
                 .occlude()
                 // Capture phase: the header and corner stop propagation, and a click anywhere raises.
                 .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, _, cx| if e.button == MouseButton::Left { this.raise_pane(&raise, cx); }))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+        #[cfg(target_os = "macos")]
+        let card_element = card_element.when(card.url().is_some(), |d| d.on_mouse_down_out(
+            cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                let state = &this.canvas_state;
+                if matches!(e.button, MouseButton::Left | MouseButton::Right)
+                    && state.drag.is_none() && !state.space_down && !state.hand
+                {
+                    this.rest_live_browser(&rest, cx);
+                }
+            }),
+        ));
+        card_element
                 .child(Self::pane_header().h(px(canvas::HEADER)).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                         this.begin_layout();
                         this.canvas_state.selected = vec![drag.clone()];
                         this.canvas_state.shown = Some(this.canvas_state.doc.clone());
-                        this.canvas_state.preview_drag = Some((drag.clone(), false, e.position)); cx.stop_propagation();
+                        this.canvas_state.preview_drag = Some((drag.clone(), None, e.position)); cx.stop_propagation();
                     }))
                     .map(|head| match header {
                         Some(header) => head.px(px(8.)).py(px(6.)).items_center().child(header),
@@ -2379,14 +2405,14 @@ impl AppWindow {
                             .child(div().flex_1().min_w_0().truncate().text_color(c("muted-foreground")).child(detail)),
                     }))
                 .child(div().flex_1().min_h_0().overflow_hidden().child(body))
-                .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(ui::RADIUS))
+                .child(div().absolute().bottom_0().right_0().size(px(PANE_RESIZE_CORNER * camera.zoom)).rounded_br(px(ui::RADIUS))
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
                     .hover(|d| d.border_color(c("foreground")))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                         this.begin_layout();
                         this.canvas_state.shown = Some(this.canvas_state.doc.clone());
-                        this.canvas_state.preview_drag = Some((resize.clone(), true, e.position)); cx.stop_propagation();
-                    })))).into_any_element()
+                        this.canvas_state.preview_drag = Some((resize.clone(), Some([width, height]), e.position)); cx.stop_propagation();
+                    }))).into_any_element()
     }
     /// Shortcut hints for an empty canvas, like VS Code's empty editor: only actions that have a key.
     fn empty_hints(&self) -> Option<AnyElement> {
@@ -2468,7 +2494,10 @@ impl AppWindow {
             .child(
                 canvas(
                     move |b, _, _| {
-                        maps.borrow_mut().insert("canopy-canvas".into(), b);
+                        let mut maps = maps.borrow_mut();
+                        maps.insert("canopy-canvas".into(), b);
+                        #[cfg(target_os = "macos")]
+                        maps.insert("browser-canvas".into(), b);
                     },
                     move |b, _, window, _| {
                         // Window capture, before any cell sees the wheel: Cmd zooms and a pan in
@@ -2608,7 +2637,8 @@ impl AppWindow {
                     cx.notify();
                     return;
                 }
-                if let Some((id, resize, previous)) = this.canvas_state.preview_drag.clone() {
+                if let Some((id, before, previous)) = this.canvas_state.preview_drag.clone() {
+                    let resize = before.is_some();
                     if e.pressed_button.is_none() {
                         this.end_canvas_drag(cx);
                         return;
@@ -2638,7 +2668,7 @@ impl AppWindow {
                     }
                     this.solve_layout(Some(&id),None,cx);
                     this.animate_layout(window,cx);
-                    this.canvas_state.preview_drag = Some((id, resize, e.position));
+                    this.canvas_state.preview_drag = Some((id, before, e.position));
                     this.canvas_changed(cx);
                     cx.notify();
                     return;

@@ -60,7 +60,13 @@ impl AppWindow {
             };
             (point, doc.room.clone())
         };
-        let url = if kind == "browser" { Some(super::browser::web_url(a["url"].as_str().ok_or("canvas.pane_new: a browser pane needs url")?)?) } else { None };
+        let url = if kind == "browser" {
+            Some(match &a["url"] {
+                Value::Null => String::new(),
+                Value::String(url) => super::browser::web_url(url)?,
+                _ => return Err("canvas.pane_new: url must be a string".into()),
+            })
+        } else { None };
         // A named simulator must exist before a pane points at it.
         let udid = match a["udid"].as_str() { Some(target) if kind == "sim" => super::sim::resolve(target)?, _ => String::new() };
         // A pane opened pinned never lands on the canvas, so nothing should make room for it:
@@ -211,7 +217,7 @@ impl AppWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{canvas, json, Bounds, point, px, size, TestAppContext};
+    use super::{canvas, json, Bounds, point, px, size, TestAppContext, Value};
     use crate::window::tests::{in_own_process, open_window, running_alone};
     const TEST: &str = "window::canvas_view::pane_commands::tests::pane_commands_headless";
 
@@ -270,11 +276,26 @@ mod tests {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
             assert_eq!(this.pane_new(&json!({"kind":"video","path":path}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, browser, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
-            assert_eq!(this.pane_new(&json!({"kind":"browser"}), window, cx).unwrap_err(), "canvas.pane_new: a browser pane needs url");
+            let overlay_count = this.overlays.len();
+            assert_eq!(this.run_as("canvas.pane_new", json!({"kind":"browser"}), true, window, cx), json!({"pane":"p1","kind":"browser","wired":false,"url":""}));
+            assert_eq!(this.run_as("canvas.pane_open", json!({"pane":"p1"}), true, window, cx), json!({"asked":"url"}));
+            this.canvas_state.selected = vec!["p1".into()];
+            assert_eq!(this.run_as("canvas.pane_open", Value::Null, true, window, cx), json!({"asked":"url"}));
+            assert_eq!(this.overlays.len(), overlay_count);
+            this.canvas_state.selected.clear();
+            assert_eq!(this.canvas_state.doc.panes.iter().find(|p| p.id == "p1").unwrap().kind,
+                canvas::Kind::Browser { url: String::new(), home: String::new(), viewport: None });
+            let (tx, rx) = std::sync::mpsc::channel();
+            this.held_reply = Some(tx);
+            this.browser_reply("p1", None, window, cx).unwrap();
+            assert_eq!(rx.try_recv().unwrap()["text"], canvas::envelope("p1", "browser", &[("url", "")], "New tab"));
+            assert_eq!(this.run_as("canvas.pane_new", json!({"kind":"browser","url":null}), false, window, cx)["url"], "");
             assert_eq!(this.pane_new(&json!({"kind":"browser","url":"file:///etc/passwd"}), window, cx).unwrap_err(), "only http and https pages open in a browser pane, not file:");
+            // Dispatch above resyncs the canvas, which drops this test's stand-in terminal.
+            this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
             let web = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","wire":"t1"}), window, cx).unwrap();
-            assert_eq!(web, json!({"pane":"p1","kind":"browser","wired":true,"url":"http://localhost:3000"}));
-            assert_eq!(this.canvas_state.doc.panes.iter().find(|p| p.id == "p1").unwrap().kind, canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into() });
+            assert_eq!(web, json!({"pane":"p3","kind":"browser","wired":true,"url":"http://localhost:3000"}));
+            assert_eq!(this.canvas_state.doc.panes.iter().find(|p| p.id == "p3").unwrap().kind, canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into(), viewport: None });
             // Pinned: it opens in the top right corner, and nothing on the canvas moves for it.
             let rects = |this: &crate::window::AppWindow| this.canvas_state.doc.panes.iter().filter(|p| p.pinned.is_none()).map(|p| (p.id.clone(), p.rect)).collect::<Vec<_>>();
             let before = rects(this);
@@ -293,7 +314,7 @@ mod tests {
             assert_eq!(this.pin_pane(&id, None, false, window, cx), Ok(true));
             this.canvas_state.doc.panes.retain(|p| p.id != id);
             assert!(this.browser_reply("p1", None, window, cx).unwrap_err().contains("canopy pane"), "a read with no caller to answer refuses");
-            this.close_canvas_cell(&json!({"pane":"p1"}), window, cx);
+            this.close_canvas_cell(&json!({"pane":"p3"}), window, cx);
             assert_eq!(this.pane_new(&json!({"kind":"file","path":"README.md"}), window, cx).unwrap_err(), "canvas.pane_new: path must be absolute");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"point":null}), window, cx).unwrap_err(), "invalid canvas point");
             assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"wire":"missing"}), window, cx).unwrap_err(), "missing is not a terminal pane on the canvas");

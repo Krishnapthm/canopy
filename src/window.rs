@@ -2916,10 +2916,13 @@ impl AppWindow {
             self.create_canvas(args, window, cx);
             return json!({"asked":"space"});
         }
-        // A browser pane opened or pointed by a click asks for its URL.
-        if person && ((name == "canvas.pane_new" && args["kind"] == "browser" && args["url"].is_null()) || (name == "canvas.pane_open" && args["target"].is_null())) {
-            self.ask_url(name, args, window, cx);
-            return json!({ "asked": "url" });
+        if person && name == "canvas.pane_open" && args["target"].is_null() {
+            if let Some(id) = Self::owned(&args, "pane").or_else(|| self.selected_browser()) {
+                if let Err(error) = self.focus_browser_url(&id, cx) { return json!({"error":error}); }
+            } else {
+                self.ask_url(args, window, cx);
+            }
+            return json!({"asked":"url"});
         }
         if person && name.ends_with(".rename") && args.get("name").is_none_or(Value::is_null) {
             self.ask_name(name, args, window, cx);
@@ -2983,16 +2986,11 @@ impl AppWindow {
         self.open_overlay("rename".into(), spec, window, cx);
     }
 
-    /// Asks the person for a web address, then runs `name` with it (url for pane_new,
-    /// target for pane_open), starting from the pane's current page.
-    fn ask_url(&mut self, name: &str, mut args: Value, window: &mut Window, cx: &mut Context<Self>) {
-        if !args.is_object() { args = json!({}); }
-        let pane = Self::arg(&args, "pane").and_then(|id| self.canvas_state.doc.panes.iter().find(|p| p.id == id));
-        let current = pane.and_then(|p| p.url()).unwrap_or("").to_owned();
-        let field = if name == "canvas.pane_open" { "target" } else { "url" };
+    /// Asks the person for a web address when Open URL has no pane target.
+    fn ask_url(&mut self, args: Value, window: &mut Window, cx: &mut Context<Self>) {
         let spec = json!({ "mod": "prompt", "kind": "dialog", "width": 420, "props": {
-            "title": "open a page", "label": "Address", "field": field, "value": current, "submit": "Open",
-            "hint": "localhost:3000 opens over http; other bare names over https", "command": { "name": name, "args": args } } });
+            "title": "open a page", "label": "Address", "field": "target", "value": "", "submit": "Open",
+            "hint": "localhost:3000 opens over http; other bare names over https", "command": { "name": "canvas.pane_open", "args": args } } });
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
     }
 
@@ -3876,6 +3874,7 @@ impl AppWindow {
                 self.win_drag = None;
             }
             self.bounds.borrow_mut().remove(&o.slot);
+            self.bounds.borrow_mut().remove(&format!("cover:overlay:{}", o.id));
             self.remove_copy(&o.slot, window, cx);
             if o.layout.is_some() {
                 self.sync(window, cx);
@@ -4511,8 +4510,14 @@ impl AppWindow {
                 Some(l) => self.render_node(l, &HashSet::new(), None, cx),
                 None => self.render_slot(&o.slot, cx),
             };
+            let bounds = self.bounds.clone();
+            let cover = format!("cover:overlay:{}", o.id);
+            let mut measure = Some(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
+                .absolute().size_full());
             let body = div()
                 .id(SharedString::from(format!("ov-{}", o.id)))
+                .relative()
+                .children(if o.kind == OverlayKind::Dialog { None } else { measure.take() })
                 .track_focus(&o.focus)
                 // Esc stays with terminals (agents use it to interrupt) and windows.
                 .when(o.layout.is_none() && o.kind.modal_keys(), |d| d.key_context("Overlay"))
@@ -4532,6 +4537,7 @@ impl AppWindow {
                         .absolute()
                         .inset_0()
                         .bg(hsla(0.0, 0.0, 0.0, 0.35))
+                        .children(measure)
                         .occlude()
                         .flex()
                         .items_center()
@@ -5107,6 +5113,7 @@ impl Render for AppWindow {
             .children(self.image_region_tracker(cx))
             .child(pane_drag)
             .child(crate::bench::frame_end())
+            .children(self.browser_masks(cx))
     }
 }
 

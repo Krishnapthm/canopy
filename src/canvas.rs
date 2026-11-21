@@ -628,7 +628,13 @@ pub enum Kind {
     Mod { kind: String, props: serde_json::Map<String, serde_json::Value> },
     /// A web page. url: the page shown, kept as the person navigates; home: the URL it
     /// was last opened with (`canvas.pane_new`, `canvas.pane_open`), where Home returns.
-    Browser { url: String, home: String },
+    /// An empty URL shows New tab. `viewport` is a fixed CSS page size, else responsive.
+    Browser {
+        url: String,
+        home: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        viewport: Option<[f32; 2]>,
+    },
     /// An iOS Simulator's screen. udid: the simulator; empty until the person picks one.
     Sim { udid: String },
 }
@@ -649,7 +655,12 @@ enum Builtin {
     Terminal { #[serde(default, skip_serializing_if = "Option::is_none")] size: Option<Point> },
     Sub { parent: String, sub: String },
     File { path: String },
-    Browser { url: String, home: String },
+    Browser {
+        url: String,
+        home: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        viewport: Option<[f32; 2]>,
+    },
     Image { path: String },
     Pdf {
         path: String,
@@ -683,7 +694,7 @@ impl TryFrom<RawKind> for Kind {
             Builtin::Terminal { size } => Self::Terminal { size },
             Builtin::Sub { parent, sub } => Self::Sub { parent, sub },
             Builtin::File { path } => Self::File { path },
-            Builtin::Browser { url, home } => Self::Browser { url, home },
+            Builtin::Browser { url, home, viewport } => Self::Browser { url, home, viewport },
             Builtin::Image { path } => Self::Image { path },
             Builtin::Pdf { path, highlights } => Self::Pdf { path, highlights },
             Builtin::Sim { udid } => Self::Sim { udid },
@@ -698,7 +709,7 @@ impl From<Kind> for RawKind {
             Kind::Terminal { size } => Builtin::Terminal { size },
             Kind::Sub { parent, sub } => Builtin::Sub { parent, sub },
             Kind::File { path } => Builtin::File { path },
-            Kind::Browser { url, home } => Builtin::Browser { url, home },
+            Kind::Browser { url, home, viewport } => Builtin::Browser { url, home, viewport },
             Kind::Image { path } => Builtin::Image { path },
             Kind::Pdf { path, highlights } => Builtin::Pdf { path, highlights },
             Kind::Sim { udid } => Builtin::Sim { udid },
@@ -1162,7 +1173,14 @@ mod tests {
         let saved = serde_json::json!({"id":"p2","kind":"browser","props":{"url":"http://localhost:3000/a","home":"http://localhost:3000/"},"rect":[0.,0.,960.,640.],"z":1});
         let pane: Pane = serde_json::from_value(saved.clone()).unwrap();
         assert_eq!((pane.url(), pane.kind_name(), pane.boxed(), pane.verbs()), (Some("http://localhost:3000/a"), "browser", true, &["read", "shot", "open", "close"][..]));
+        assert!(matches!(&pane.kind, Kind::Browser { viewport: None, .. }));
         assert_eq!(serde_json::to_value(pane).unwrap(), saved);
+
+        let mut preset = saved;
+        preset["props"]["viewport"] = serde_json::json!([1280., 800.]);
+        let pane: Pane = serde_json::from_value(preset.clone()).unwrap();
+        assert!(matches!(&pane.kind, Kind::Browser { viewport: Some([1280., 800.]), .. }));
+        assert_eq!(serde_json::to_value(pane).unwrap(), preset);
     }
 
     #[test]

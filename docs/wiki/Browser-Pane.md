@@ -4,11 +4,10 @@ A browser pane shows a web page on the canvas, right next to the agent working o
 
 ## Open a page
 
-1. Click **Browser** at the top right of the window.
-2. Type an address in **Address**, such as `localhost:3000`.
-3. Click **Open**.
+1. Click **Browser** at the top right of the window. A **New tab** pane opens with the address field focused.
+2. Type an address such as `localhost:3000` and press Enter.
 
-The page opens pinned to the top right corner of the window, where it stays while you pan and zoom the canvas. Click **Move to canvas** on its helper bar to put it on the canvas with your other panes, or **Pin to screen** to pin it again.
+The pane opens pinned to the top right corner of the window, where it stays while you pan and zoom the canvas. Click **Move to canvas** on its helper bar to put it on the canvas with your other panes, or **Pin to screen** to pin it again.
 
 Only `http` and `https` pages open. A bare local address like `localhost:3000` gets `http://`, and other bare hosts get `https://`.
 
@@ -26,8 +25,8 @@ canopy pane open p2 http://localhost:3000/pricing  # point an existing pane at a
 A browser pane is either resting or live:
 
 - **Resting**, it shows a snapshot of the page. This keeps the canvas fast when you have several browsers open.
-- **Click the page** to make it live. Canopy pans the canvas so the whole pane is visible at the current zoom, and you can scroll, click and type as in any browser.
-- **Click anywhere else** in the window to rest it again. Moving the pane or the canvas also rests it, after taking a fresh snapshot.
+- **Click the page** to make it live. Scroll, click and type as in any browser. The page stays live while you pan, zoom or resize the pane. The canvas clips the page at its edges, and panes, helper bars and menus in front of the page remain visible and clickable.
+- **Click outside the pane** to rest the page and take a fresh snapshot.
 
 ## The header
 
@@ -46,7 +45,7 @@ Drag the pane by the header's edges, or by the [helper bar](Toolbar-and-Helper-B
 | **Open in default browser** | Opens the current address in your usual browser. |
 | **Copy link** | Copies the address and shows a toast. |
 | **Save screenshot** | Saves the page to `<temp>/canopy/<pane>.png` and shows the path in a toast. |
-| **Viewport: Responsive / Mobile / Desktop** | Resizes the pane to a new pane's size, a 390 x 844 page or a 1280 x 800 page, exact at 100% zoom (the width at any zoom, since the header keeps its screen size). The top left stays put, and a check marks the current size. |
+| **Viewport** | Choose **Responsive**, **1280 × 800**, **1024 × 768**, **Mobile 375 × 812**, or **Tablet 768 × 1024**. A check marks the saved choice. Responsive pages reflow as the pane resizes. Each fixed size sets the page's CSS viewport and scales it to fit, centered in the pane. |
 | **Expand** | See below. |
 | **Pop out** / **Bring back** | See below. |
 | **Keep cookies** | Choose **Until quit** or **Forever**. A check marks the current choice. |
@@ -121,7 +120,7 @@ canopy pane read p2   # the URL, title and text of the page
 canopy pane shot p2   # a PNG screenshot of the page
 ```
 
-Both wait for the page to finish loading, time out after 30 seconds, and work even when the pane is off screen. See [Let Agents Show You](Let-Agents-Show-You#show-me-the-running-app).
+Reading an empty pane returns `New tab`. When the pane has a URL, both commands wait for the page to finish loading, time out after 30 seconds, and work even when the pane is off screen. See [Let Agents Show You](Let-Agents-Show-You#show-me-the-running-app).
 
 ## Helper bar
 
@@ -130,7 +129,7 @@ Both wait for the page to finish loading, time out after 30 seconds, and work ev
 | **Back** | Goes to the previous page. |
 | **Reload** | Reloads the page. |
 | **Home** | Goes to the pane's home address: the first address it opened, or the last one set with **Open URL** or `canopy pane open`. |
-| **Open URL** | Asks for another address. |
+| **Open URL** | Focuses the address field so you can enter another address. |
 | **Pick an element to quote** | Starts the element picker. |
 | **Screenshot** | Saves the page to `<temp>/canopy/<pane>.png` and shows the path in a toast. |
 | **Open in browser** | Opens the current address in your usual browser. |
@@ -141,7 +140,7 @@ Both wait for the page to finish loading, time out after 30 seconds, and work ev
 
 Browser panes are built for local development, and they keep to themselves:
 
-- Canopy loads only pages you or an agent open. There is no start page.
+- New tab is drawn by Canopy. The browser loads a page when you or an agent opens an address.
 - Downloads are blocked.
 - Links that ask for a new window open in the same pane.
 - The element picker is a bundled copy of an open-source tool. It loads only when you pick, with its telemetry turned off and its version check, open-file link and web font import removed.
@@ -151,7 +150,6 @@ See [Security and Privacy](Security-and-Privacy) for the app as a whole.
 
 ## Troubleshooting
 
-- **Clicking the page does not make it live.** Zoom out until the whole pane fits on screen, then click it.
 - **The page is blank or did not load.** Check that the server is running, then click **Reload**.
 - **The quote has no component or file.** The page is not a React development build, or Canopy could not find the file in any space folder. Wire the browser pane to an agent whose folder holds the source.
 

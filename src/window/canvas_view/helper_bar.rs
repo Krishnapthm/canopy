@@ -131,6 +131,8 @@ impl AppWindow {
     /// Helper bars for the hovered pane and every selected pane of the shown
     /// place: a pill of icon buttons above each pane's top-left corner.
     pub(super) fn helper_bars(&self, doc: &Document, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        #[cfg(target_os = "macos")]
+        self.bounds.borrow_mut().retain(|k, _| !k.starts_with("cover:bar:"));
         if self.bars_hidden() { return vec![]; }
         let state = &self.canvas_state;
         // A wire following the pointer keeps its pane's bar up, to show Connect as active.
@@ -160,7 +162,16 @@ impl AppWindow {
             let actions = self.sim_relabel(&id, actions, cx);
             let actions = self.browser_relabel(&id, actions);
             let [x, y] = doc.camera.to_screen([rect[0], rect[1]]);
-            out.push(self.bar(&id, actions, s, connect_active(&id, wiring, &edges), cx).absolute().left(px(x)).top(px(y - 8. - bar_height)).into_any_element());
+            let bar = self.bar(&id, actions, s, connect_active(&id, wiring, &edges), cx)
+                .absolute().left(px(x)).top(px(y - 8. - bar_height));
+            #[cfg(target_os = "macos")]
+            let bar = {
+                let bounds = self.bounds.clone();
+                let cover = format!("cover:bar:{id}");
+                bar.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
+                    .absolute().size_full())
+            };
+            out.push(bar.into_any_element());
         }
         out
     }
@@ -218,7 +229,7 @@ mod helper_bar_tests {
         let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }] };
         assert_eq!(pane_actions(&pane, Some(&hint)).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
-        pane.kind = canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into() };
+        pane.kind = canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into(), viewport: None };
         assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.pane_open", "canvas.browser_pick", "canvas.browser_shot", "canvas.browser_external", "canvas.browser_expand", "canvas.browser_pop", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Sim { udid: String::new() };
         assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
