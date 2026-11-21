@@ -214,14 +214,24 @@ export interface CanvasPane {
   /** A terminal's core address (`t3`), `sub:<parent>:<id>` for a sub-agent cell, or `p<N>`
    *  for any other pane. Wire keys use the same ids. */
   id: string;
-  kind: "terminal" | "sub" | "file" | "image" | "pdf" | `mod:${string}`;
-  /** Kind fields: terminal { size? }, sub { parent, sub }, file/image { path }, pdf { path, highlights? }, mod:<name> { what the mod saved }. */
+  kind: "terminal" | "sub" | "file" | "image" | "pdf" | "browser" | `mod:${string}`;
+  /** Kind fields: terminal { size? }, sub { parent, sub }, file/image { path }, pdf { path, highlights? }, browser (see CanvasBrowserPane), mod:<name> { what the mod saved }. */
   props: any;
   /** World pixels: [x, y, width, height]. */
   rect: [number, number, number, number];
   z: number;
   /** The space it lives in; absent on Home. */
   space?: string;
+}
+
+export interface CanvasBrowserPane extends CanvasPane {
+  kind: "browser";
+  props: {
+    url: string;
+    home: string;
+    /** Fixed CSS page size; absent: responsive */
+    viewport?: [number, number];
+  };
 }
 
 /** Every pane on the canvas, as canvas.json saves it. Live. Not panes(), which lists
