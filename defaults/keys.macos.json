@@ -91,6 +91,8 @@
     "cmd-shift-3": "view.terminals",
     "backspace": "canvas.close",
     "delete": "canvas.close",
+    "cmd-alt-i": "canvas.browser_inspect",
+    "ctrl-shift-i": "canvas.browser_inspect",
     "cmd-z": "canvas.undo",
     "cmd-j": "canvas.mode",
     "cmd-enter": "canvas.expand",

@@ -332,6 +332,14 @@ Pop a browser pane's page out into its own window, or bring it back (pane, else 
 |---|---|
 | `pane` | no |
 
+## `canvas.browser_cookies`
+
+Set how long browser panes keep cookies and site data: until_quit or forever.
+
+| Argument | Required |
+|---|---|
+| `keep` | yes |
+
 ## `canvas.browser_clear`
 
 Delete the cookies, storage and cache of every browser pane (asks first unless confirmed).
@@ -340,6 +348,14 @@ Delete the cookies, storage and cache of every browser pane (asks first unless c
 |---|---|
 | `pane` | no |
 | `confirmed` | no |
+
+## `canvas.browser_inspect`
+
+Open the Web Inspector for a browser pane in its own window, after snapping the pane to a usable size at 100% zoom.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
 
 ## `canvas.sim_refresh`
 

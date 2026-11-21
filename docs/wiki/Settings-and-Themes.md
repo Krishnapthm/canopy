@@ -26,6 +26,17 @@ canopy config
 
 See [Canvas](Canvas) and [Terminals](Terminals) for their settings.
 
+## Browser
+
+Open **Settings** > **Look** and scroll to **Browser**. The same settings are available in `settings.json`.
+
+| Setting | Values |
+|---|---|
+| `browser_keep_cookies` | `until_quit` (default) clears cookies and site data at quit and on the next start. `forever` keeps them. |
+| `browser_open_links` | `built_in` (default) selects a browser pane. `default` selects the system browser. Link routing will use this preference in a later phase. |
+
+See [Cookies and site data](Browser-Pane#cookies-and-site-data) for the browser data controls.
+
 ## Themes
 
 1. Select **Look** in **Settings**.

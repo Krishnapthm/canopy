@@ -138,10 +138,11 @@ selector> "<visible text>"`. Read the file at that range before you edit it.
 Commands: `canvas.browser_back`, `canvas.browser_forward`, `canvas.browser_reload`,
 `canvas.browser_home`, `canvas.browser_pick`, `canvas.browser_shot`,
 `canvas.browser_external`, `canvas.browser_copy`, `canvas.browser_expand` (a tab filling
-the canvas, or back), `canvas.browser_pop` (its own window, or back) and
+the canvas, or back), `canvas.browser_pop` (its own window, or back),
+`canvas.browser_inspect` (open Web Inspector) and
 `canvas.browser_clear` (`{confirmed: true}` skips the dialog), each `{pane?}`, act on the
 pane, else the selected one; `canvas.browser_viewport` is `{size: responsive|mobile|desktop,
-pane?}`.
+pane?}`. `canvas.browser_cookies` takes `{keep: until_quit|forever}` and needs no pane.
 
 ## Agent flags and note in `programs.json`
 
@@ -335,6 +336,7 @@ Hand-edited canvas settings reload live: `canvas_gap` (24, 0..1024 world pixels)
 `tile_gap` (0, tile view cell gap), `tile_focus_grows` (false: equal tiles), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `canvas_resize_terminals` (true: the grid refits to the cell; false keeps it and scales), `space_fill` (0.04, 0..1),
 and `terminal_size` ([100, 30], columns 20..500 and rows 5..200 for new expansions).
 They do not appear in Settings. `canopy config` prints all defaults and explanations.
+Browser settings are `browser_keep_cookies` ("until_quit" clears site data at quit and on the next start, or "forever" keeps it on macOS 14 or later) and `browser_open_links` ("built_in" by default or "default", saved for later link routing).
 Invalid settings.json, keys.json or programs.json keeps the last good values and
 raises a toast with file:line:column for JSON errors. An unknown settings key is a
 warning toast (with a close spelling when there is one) and the rest still applies;

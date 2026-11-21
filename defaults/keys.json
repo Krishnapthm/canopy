@@ -86,6 +86,7 @@
     "ctrl-shift-3": "view.terminals",
     "backspace": "canvas.close",
     "delete": "canvas.close",
+    "ctrl-shift-i": "canvas.browser_inspect",
     "ctrl-shift-u": "canvas.undo",
     "ctrl-shift-j": "canvas.mode",
     "ctrl-shift-enter": "canvas.expand",

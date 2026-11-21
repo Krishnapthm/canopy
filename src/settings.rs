@@ -389,6 +389,10 @@ person_settings! {
     tile_gap: f32 = 0. => "Gap between cells in tile view in world pixels (0..1024).";
     tile_focus_grows: bool = false => "In tile view the selected tile takes more room; off keeps every tile the same size.";
     canvas_push: CanvasPush = CanvasPush::Live => "Move neighbours live, only on drop, or never so cells overlap (live, drop, off).";
+    #[serde(skip_serializing_if = "KeepCookies::is_until_quit")]
+    browser_keep_cookies: KeepCookies = KeepCookies::UntilQuit => "Browser pane cookies and site data: until_quit (deleted when Canopy quits or starts) or forever.";
+    #[serde(skip_serializing_if = "OpenLinks::is_built_in")]
+    browser_open_links: OpenLinks = OpenLinks::BuiltIn => "Where links open: built_in (a browser pane) or default (the system browser).";
     canvas_resize_terminals: bool = true => "Refit a canvas terminal's grid to its cell as the cell resizes (no longer in Settings; false keeps the grid and scales it).";
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
@@ -428,6 +432,36 @@ pub enum CanvasPush {
     Live,
     Drop,
     Off,
+}
+
+/// How long browser panes keep cookies and website data.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeepCookies {
+    #[default]
+    UntilQuit,
+    Forever,
+}
+
+impl KeepCookies {
+    fn is_until_quit(&self) -> bool {
+        *self == Self::UntilQuit
+    }
+}
+
+/// Where Canopy opens links.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenLinks {
+    #[default]
+    BuiltIn,
+    Default,
+}
+
+impl OpenLinks {
+    fn is_built_in(&self) -> bool {
+        *self == Self::BuiltIn
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -475,6 +509,8 @@ pub struct Settings {
     pub canvas_gap: f32,
     /// Whether neighbours move during a drag or on release.
     pub canvas_push: CanvasPush,
+    pub browser_keep_cookies: KeepCookies,
+    pub browser_open_links: OpenLinks,
     /// Whether canvas terminals refit their grid to the cell.
     pub canvas_resize_terminals: bool,
     /// Space background opacity.
@@ -538,6 +574,8 @@ impl Default for Settings {
         Settings {
             canvas_gap: person.canvas_gap,
             canvas_push: person.canvas_push,
+            browser_keep_cookies: person.browser_keep_cookies,
+            browser_open_links: person.browser_open_links,
             canvas_resize_terminals: person.canvas_resize_terminals,
             space_fill: person.space_fill,
             terminal_size: person.terminal_size,
@@ -582,6 +620,8 @@ impl Settings {
         Settings {
             canvas_gap: person.canvas_gap,
             canvas_push: person.canvas_push,
+            browser_keep_cookies: person.browser_keep_cookies,
+            browser_open_links: person.browser_open_links,
             canvas_resize_terminals: person.canvas_resize_terminals,
             space_fill: person.space_fill,
             terminal_size: person.terminal_size,
@@ -1082,6 +1122,24 @@ mod tests {
         let clicks = crate::layout_sync::State { theme: Some(ThemeChoice::One("ink".into())), ..Default::default() };
         clicks.apply(&mut win98);
         assert_eq!(Settings::compose(&person, &win98.look, true).theme, "ink");
+    }
+
+    #[test]
+    fn browser_preferences_validate_and_omit_defaults() {
+        let defaults = parse_person("{}").unwrap();
+        assert_eq!(defaults.browser_keep_cookies, KeepCookies::UntilQuit);
+        assert_eq!(defaults.browser_open_links, OpenLinks::BuiltIn);
+        let serialized = serde_json::to_value(defaults).unwrap();
+        assert!(serialized.get("browser_keep_cookies").is_none());
+        assert!(serialized.get("browser_open_links").is_none());
+
+        let file = r#"{"browser_keep_cookies":"forever","browser_open_links":"default"}"#;
+        assert_eq!(unknown_keys(file), None);
+        let person = parse_person(file).unwrap();
+        assert_eq!(person.browser_keep_cookies, KeepCookies::Forever);
+        assert_eq!(person.browser_open_links, OpenLinks::Default);
+        assert!(parse_person(r#"{"browser_keep_cookies":"session"}"#).is_err());
+        assert!(parse_person(r#"{"browser_open_links":"external"}"#).is_err());
     }
 
     #[test]

@@ -8,6 +8,7 @@
 use crate::hc::Core;
 mod floats;
 mod canvas_view;
+pub(crate) use canvas_view::browser::forget_browser_data_if_until_quit;
 mod ui;
 mod movable;
 mod pane_drag;
@@ -3011,7 +3012,8 @@ impl AppWindow {
             "canvas.close" => self.close_canvas_cell(a, window, cx),
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" => self.pane_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
-            | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop" | "canvas.browser_clear" => self.browser_command(name, a, window, cx),
+            | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
+            | "canvas.browser_cookies" | "canvas.browser_clear" | "canvas.browser_inspect" => self.browser_command(name, a, window, cx),
             name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
             "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
