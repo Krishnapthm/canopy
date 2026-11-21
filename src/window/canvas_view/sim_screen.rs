@@ -23,7 +23,7 @@ pub(super) enum SimEvent {
     Saved { title: String, path: PathBuf },
     /// Open the quote menu with this quote.
     Quote(Value),
-    /// The header (status, recording time) changed.
+    /// The header or device bar changed.
     Changed,
     /// Live failed: show a fresh screenshot instead.
     Fallback,
@@ -358,7 +358,10 @@ impl SimScreen {
         let k = &e.keystroke;
         if k.key == "escape" && !k.modifiers.modified() {
             // Escape hands the keyboard back to the canvas; an annotation ends first.
-            if self.annotation.take().is_some() { return cx.notify(); }
+            if self.annotation.is_some() {
+                let _ = self.annotate(cx);
+                return;
+            }
             window.blur(cx);
             return cx.stop_propagation();
         }
@@ -508,13 +511,18 @@ impl SimScreen {
 
     /// Starts annotating a still of the screen, or cancels the annotation.
     pub fn annotate(&mut self, cx: &mut Context<Self>) -> Result<(), String> {
-        if self.annotation.take().is_some() { cx.notify(); return Ok(()); }
+        if self.annotation.take().is_some() {
+            cx.emit(SimEvent::Changed);
+            cx.notify();
+            return Ok(());
+        }
         let still = self.surface.as_ref().filter(|_| matches!(self.live, Live::On { .. })).and_then(sim_live::rgba)
             .ok_or("The simulator is not live: nothing to annotate")?;
         let mut bgra = still.clone();
         for p in bgra.pixels_mut() { p.0.swap(0, 2); }
         let image = Arc::new(RenderImage::new(smallvec::smallvec![image::Frame::new(bgra)]));
         self.annotation = Some(Annotation { still, image, strokes: vec![], drawing: false });
+        cx.emit(SimEvent::Changed);
         cx.notify();
         Ok(())
     }
@@ -529,12 +537,13 @@ impl SimScreen {
         let path = std::env::temp_dir().join("canopy").join(format!("sim-{}-annotated-{}.png", self.pane, stamp().replace(' ', "-")));
         let saved = std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string()).and_then(|_| a.still.save(&path).map_err(|e| e.to_string()));
         cx.defer(move |cx| cx.drop_image(a.image, None));
+        cx.emit(SimEvent::Changed);
+        cx.notify();
         if let Err(e) = saved { return cx.emit(SimEvent::Toast(format!("Can't save the annotation: {e}"))); }
         let [pw, ph] = self.points().unwrap_or_default();
         self.note(By::You, format!("annotated the screen ({} marks): {}", a.strokes.len(), path.display()));
         let text = format!("Annotated screenshot of {} ({}), {}x{} points. The red marks show what to look at.", self.device.name, self.device.runtime, pw, ph);
         cx.emit(SimEvent::Quote(json!({"path": path, "text": text, "pane": self.pane})));
-        cx.notify();
     }
 
     /// The header's status after the runtime: Live, Recording 0:12, Screenshot...

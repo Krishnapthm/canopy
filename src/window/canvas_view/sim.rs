@@ -5,7 +5,17 @@
 use super::*;
 use crate::sim::{self, Device};
 #[cfg(target_os = "macos")]
+use super::helper_bar::{pane_actions, sim_device_actions};
+#[cfg(target_os = "macos")]
 use super::sim_screen::{AgentStep, By, Live, SimEvent, SimScreen};
+
+#[cfg(target_os = "macos")]
+fn bottom_bar_scale(zoom: f32, body_w: f32, buttons: usize) -> Option<f32> {
+    // The pill's buttons, gaps and padding scale. Its two borders and side margins stay fixed.
+    let scaled_width = 24. * buttons as f32 + 2. * buttons.saturating_sub(1) as f32 + 4.;
+    let max_scale = (body_w - 16. - 2.) / scaled_width;
+    (max_scale >= 0.5).then(|| zoom.clamp(0.75, 1.).min(max_scale))
+}
 
 /// What a sim pane's body shows.
 pub(super) enum Screen {
@@ -397,7 +407,7 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// A sim pane's helper bar labels for its state: stop a recording, end an annotation,
+    /// A simulator bar's labels for its state: stop a recording, end an annotation,
     /// bring a popped-out device back.
     #[cfg(target_os = "macos")]
     pub(super) fn sim_relabel(&self, id: &str, mut actions: Vec<super::helper_bar::BarAction>, cx: &App) -> Vec<super::helper_bar::BarAction> {
@@ -414,12 +424,38 @@ impl AppWindow {
         actions
     }
 
-    /// The helper bar of a popped-out sim pane's window: the device's own actions.
+    /// The device bar over a live simulator on the canvas.
+    #[cfg(target_os = "macos")]
+    pub(super) fn sim_bottom_bar(&self, pane: &canvas::Pane, zoom: f32, cx: &mut Context<Self>) -> Option<Div> {
+        let state = &self.canvas_state;
+        let id = &pane.id;
+        let udid = pane.sim().filter(|udid| !udid.is_empty())?;
+        if self.bars_hidden() || (state.bar_hover.as_ref() != Some(id) && !state.selected.contains(id)) {
+            return None;
+        }
+        let view = state.sims.get(id)?;
+        if view.popped.is_some() || !matches!(view.screen, Screen::Shot(_) | Screen::Loading) {
+            return None;
+        }
+        // Shown on a fallback screenshot too: Refresh is how the live view comes back.
+        if view.live.as_ref().is_some_and(|s| { let s = s.read(cx); s.device.udid != udid || s.annotation.is_some() }) {
+            return None;
+        }
+        let actions = sim_device_actions();
+        // A pinned pane keeps its screen size, so its bar does too.
+        let s = bottom_bar_scale(if pane.pinned.is_some() { 1. } else { zoom }, pane.rect[2] * zoom - 2., actions.len())?;
+        let actions = self.sim_relabel(id, actions, cx);
+        Some(self.bar(id, actions, s, false, cx).occlude())
+    }
+
+    /// The pop-out's device bar also offers Bring back.
     #[cfg(target_os = "macos")]
     pub(super) fn sim_bar(&self, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
-        const KEEP: [&str; 6] = ["canvas.sim_home", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate", "canvas.sim_device", "canvas.sim_pop"];
+        let screen = self.canvas_state.sims.get(id)?.live.as_ref()?.read(cx);
+        if screen.annotation.is_some() { return None; }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
-        let actions = super::helper_bar::pane_actions(pane, None).into_iter().filter(|a| KEEP.contains(&a.command.as_str())).collect();
+        let mut actions = sim_device_actions();
+        actions.push(pane_actions(pane, None).into_iter().find(|a| a.command == "canvas.sim_pop")?);
         let actions = self.sim_relabel(id, actions, cx);
         Some(self.bar(id, actions, 1., false, cx).into_any_element())
     }
@@ -600,12 +636,23 @@ impl Render for SimWindow {
 #[cfg(test)]
 #[cfg(target_os = "macos")]
 mod tests {
-    use super::{AgentStep, agent_steps};
+    use super::{AgentStep, agent_steps, bottom_bar_scale};
     use crate::sim_live::Input;
     use serde_json::json;
 
     fn inputs(steps: &[AgentStep]) -> Vec<Input> {
         steps.iter().filter_map(|s| if let AgentStep::Input(i) = s { Some(*i) } else { None }).collect()
+    }
+
+    #[test]
+    fn bottom_bar_scale_fits_available_width() {
+        assert_eq!(bottom_bar_scale(1., 400., 5), Some(1.));
+        assert_eq!(bottom_bar_scale(2., 400., 5), Some(1.));
+        let s = bottom_bar_scale(1., 100., 5).unwrap();
+        assert!(s >= 0.5 && (5. * 24. + 4. * 2. + 2. * 2.) * s + 2. <= 84.);
+        assert_eq!(bottom_bar_scale(1., 84., 5), Some(0.5));
+        assert_eq!(bottom_bar_scale(1., 83., 5), None);
+        assert_eq!(bottom_bar_scale(1., 50., 5), None);
     }
 
     #[test]

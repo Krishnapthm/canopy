@@ -88,22 +88,29 @@ fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAc
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ],
         canvas::Kind::Sim { .. } => [
-            ("icons/house.svg", "Home", "canvas.sim_home", json!({})),
-            ("icons/camera.svg", "Screenshot", "canvas.sim_screenshot", json!({})),
-            ("icons/video.svg", "Record", "canvas.sim_record", json!({})),
-            ("icons/pencil.svg", "Annotate", "canvas.sim_annotate", json!({})),
             ("icons/zoom-out.svg", "Zoom out", "canvas.sim_zoom", json!({"step":"out"})),
             ("icons/scan.svg", "Actual size", "canvas.sim_zoom", json!({"step":"actual"})),
             ("icons/zoom-in.svg", "Zoom in", "canvas.sim_zoom", json!({"step":"in"})),
             ("icons/picture-in-picture-2.svg", "Pop out", "canvas.sim_pop", json!({})),
             ("icons/smartphone.svg", "Choose simulator", "canvas.sim_device", json!({})),
-            ("icons/rotate-cw.svg", "Refresh", "canvas.sim_refresh", json!({})),
             ("icons/external-link.svg", "Open in Device Hub", "canvas.sim_hub", json!({})),
             ("icons/link.svg", "Connect", "canvas.connect", json!({})),
             ("icons/x.svg", "Close", "canvas.close", json!({})),
         ].into_iter().map(|(icon, label, command, args)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args }).collect(),
         canvas::Kind::Sub { .. } => vec![],
     }
+}
+
+/// Device actions shared by the simulator pane and its pop-out.
+#[cfg(any(target_os = "macos", test))]
+pub(super) fn sim_device_actions() -> Vec<BarAction> {
+    [
+        ("icons/house.svg", "Home", "canvas.sim_home"),
+        ("icons/rotate-cw.svg", "Refresh", "canvas.sim_refresh"),
+        ("icons/camera.svg", "Screenshot", "canvas.sim_screenshot"),
+        ("icons/video.svg", "Record", "canvas.sim_record"),
+        ("icons/pencil.svg", "Annotate", "canvas.sim_annotate"),
+    ].into_iter().map(|(icon, label, command)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args: json!({}) }).collect()
 }
 
 /// Whether a pane's Connect button shows as active: its wire follows the pointer, or any edge
@@ -113,15 +120,19 @@ fn connect_active(id: &str, wiring: Option<&str>, edges: &[canvas::Wire]) -> boo
 }
 
 impl AppWindow {
+    /// Keep floating bars out of the way during canvas gestures.
+    pub(super) fn bars_hidden(&self) -> bool {
+        let state = &self.canvas_state;
+        state.drag.is_some() || state.cell_resize.is_some() || state.preview_drag.is_some()
+            || state.space_drag.is_some() || state.marquee.is_some() || state.rest.is_some() || (state.wire.drag.is_some() && !state.wire.sticky)
+            || state.region.is_some()
+    }
+
     /// Helper bars for the hovered pane and every selected pane of the shown
     /// place: a pill of icon buttons above each pane's top-left corner.
     pub(super) fn helper_bars(&self, doc: &Document, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        if self.bars_hidden() { return vec![]; }
         let state = &self.canvas_state;
-        if state.drag.is_some() || state.cell_resize.is_some() || state.preview_drag.is_some()
-            || state.space_drag.is_some() || state.marquee.is_some() || state.rest.is_some() || (state.wire.drag.is_some() && !state.wire.sticky)
-            || state.region.is_some() {
-            return vec![];
-        }
         // A wire following the pointer keeps its pane's bar up, to show Connect as active.
         let wiring = state.wire.drag.as_ref().filter(|_| state.wire.sticky).map(|d| d.0.as_str());
         let edges = crate::wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
@@ -154,9 +165,7 @@ impl AppWindow {
         out
     }
 
-    /// One helper bar: a pill of icon buttons for pane `id`, at scale `s`. The canvas places
-    /// it above the pane; a sim pane's pop-out window draws it too.
-    /// One helper bar pill. `connected`: draw Connect as active (see `connect_active`).
+    /// One helper bar pill at scale `s`, positioned by its caller. `connected` highlights Connect.
     pub(super) fn bar(&self, id: &str, actions: Vec<BarAction>, s: f32, connected: bool, cx: &mut Context<Self>) -> Div {
         let state = &self.canvas_state;
         let mut bar = div().flex().p(px(2. * s)).gap(px(2. * s)).rounded(px(ui::RADIUS))
@@ -191,7 +200,7 @@ impl AppWindow {
 
 #[cfg(test)]
 mod helper_bar_tests {
-    use super::{connect_active, pane_actions};
+    use super::{connect_active, pane_actions, sim_device_actions};
     use crate::canvas::{self, Wire};
     use serde_json::json;
 
@@ -220,8 +229,9 @@ mod helper_bar_tests {
         assert_eq!(pin(&pane), ("Move to canvas".into(), json!({"pinned":false})));
         pane.pinned = None;
         pane.kind = canvas::Kind::Sim { udid: "U1".into() };
-        assert_eq!(commands(&pane)[..4], ["canvas.sim_home", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate"]);
-        assert_eq!(commands(&pane).last().unwrap(), "canvas.close");
+        assert_eq!(commands(&pane), ["canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_pop", "canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
+        assert_eq!(sim_device_actions().into_iter().map(|a| a.command).collect::<Vec<_>>(),
+            ["canvas.sim_home", "canvas.sim_refresh", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate"]);
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
         assert!(pane_actions(&pane, None).is_empty());
     }

@@ -2884,6 +2884,11 @@ impl AppWindow {
                     drawn_sims.push(card.id.clone());
                     let (title, detail) = self.sim_title(card, cx);
                     let body = self.sim_body(card, cx);
+                    #[cfg(target_os = "macos")]
+                    let body = div().relative().size_full().child(body)
+                        .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(
+                            div().absolute().bottom(px(12.)).left_0().right_0().flex().justify_center().child(bar)))
+                        .into_any_element();
                     self.pane_card(card, "icons/smartphone.svg".into(), title, detail, None, body, camera, cx)
                 }
             };
