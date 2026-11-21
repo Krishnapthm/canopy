@@ -37,6 +37,7 @@ pub fn remove(dir: &Path) -> std::io::Result<bool> {
 }
 
 /// On the window thread: installs for every installed agent with a skills folder, off-thread. Best effort, logged.
+#[cfg(not(test))]
 pub fn install_for_installed() {
     let folders = crate::programs::skill_folders();
     let list = crate::programs::startable();
