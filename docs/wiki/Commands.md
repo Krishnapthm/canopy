@@ -179,7 +179,7 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 
 ## `canvas.pane_new`
 
-Open a pane of a kind ("file" with path, "browser" with url, "sim" on a Mac with Xcode, or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view); wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. A browser click without url asks for it. A sim pane shows udid (a simulator, or "booted"), else lists simulators to pick. Replies with pane, kind, path (files), url (browsers), udid (sim) and wired.
+Open a pane of a kind ("file" with path, "browser" with url, "sim" on a Mac with Xcode, or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view), or with pinned true at the top right of the screen, where it stays while the canvas moves; wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. A browser click without url asks for it. A sim pane shows udid (a simulator, or "booted"), else lists simulators to pick. Replies with pane, kind, path (files), url (browsers), udid (sim) and wired.
 
 | Argument | Required |
 |---|---|
@@ -189,6 +189,16 @@ Open a pane of a kind ("file" with path, "browser" with url, "sim" on a Mac with
 | `udid` | no |
 | `wire` | no |
 | `point` | no |
+| `pinned` | no |
+
+## `canvas.pane_pin`
+
+Pin a pane where it shows on screen, so it stays there while the canvas pans and zooms, or with pinned false move it back onto the canvas. Without pinned it toggles. Acts on pane, else the selected pane. Replies with pane and pinned.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `pinned` | no |
 
 ## `canvas.pane_set`
 

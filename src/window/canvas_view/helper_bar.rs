@@ -9,8 +9,19 @@ pub(super) struct BarAction {
     pub args: Value,
 }
 
-/// The helper bar buttons for a pane, left to right. Sub-agent cells have none.
+/// The helper bar buttons for a pane, left to right. Sub-agent cells have none. Browser and
+/// sim panes also pin to the screen, or move back onto the canvas, before Connect.
 pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAction> {
+    let mut actions = kind_actions(pane, hint);
+    if matches!(pane.kind, canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. }) {
+        let at = actions.iter().position(|a| a.command == "canvas.connect").unwrap_or(actions.len());
+        let (icon, label, pinned) = if pane.pinned.is_some() { ("icons/pin-off.svg", "Move to canvas", false) } else { ("icons/pin.svg", "Pin to screen", true) };
+        actions.insert(at, BarAction { icon: icon.into(), label: label.into(), command: "canvas.pane_pin".into(), args: json!({"pinned":pinned}) });
+    }
+    actions
+}
+
+fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAction> {
     match &pane.kind {
         canvas::Kind::Terminal { size } => vec![
             BarAction { icon: "icons/square-terminal.svg".into(), label: "Enter".into(), command: "canvas.enter".into(), args: json!({}) },
@@ -183,7 +194,7 @@ mod helper_bar_tests {
 
     #[test]
     fn actions_follow_the_pane_kind() {
-        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.], z: 1, space: None };
+        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.], z: 1, space: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.enter", "canvas.expand", "canvas.connect", "canvas.close"]);
         *pane.size_mut().unwrap() = Some([800., 500.]);
@@ -196,9 +207,15 @@ mod helper_bar_tests {
         assert_eq!(pane_actions(&pane, Some(&hint)).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into() };
-        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.pane_open", "canvas.browser_pick", "canvas.browser_shot", "canvas.browser_external", "canvas.connect", "canvas.close"]);
+        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.pane_open", "canvas.browser_pick", "canvas.browser_shot", "canvas.browser_external", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Sim { udid: String::new() };
-        assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.connect", "canvas.close"]);
+        assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
+        // Pinned, the same button moves it back onto the canvas.
+        let pin = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().find(|a| a.command == "canvas.pane_pin").map(|a| (a.label, a.args)).unwrap();
+        assert_eq!(pin(&pane), ("Pin to screen".into(), json!({"pinned":true})));
+        pane.pinned = Some([0., 0., 340., 700.]);
+        assert_eq!(pin(&pane), ("Move to canvas".into(), json!({"pinned":false})));
+        pane.pinned = None;
         pane.kind = canvas::Kind::Sim { udid: "U1".into() };
         assert_eq!(commands(&pane)[..4], ["canvas.sim_home", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate"]);
         assert_eq!(commands(&pane).last().unwrap(), "canvas.close");
@@ -207,7 +224,7 @@ mod helper_bar_tests {
     }
     #[test]
     fn viewer_actions_include_clear_only_when_there_are_marks() {
-        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None };
+        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.pane_quote", "canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Pdf { path: "/a.pdf".into(), highlights: vec![] };

@@ -54,7 +54,7 @@ struct Page {
     /// The last snapshot, BGRA for GPUI.
     shot: Option<Arc<RenderImage>>,
     title: String,
-    /// While live: the camera and pane rect the native view was placed for.
+    /// While live: where the native view was placed (see `placement`); any change rests it.
     live: Option<(canvas::Camera, canvas::Rect)>,
     loading: bool,
     /// Replies held until the page finishes loading.
@@ -283,7 +283,7 @@ impl AppWindow {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Browser { home: url.clone(), url }, rect: [point[0], point[1], SIZE[0], SIZE[1]], z, space });
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Browser { home: url.clone(), url }, rect: [point[0], point[1], SIZE[0], SIZE[1]], z, space, pinned: None });
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
@@ -316,7 +316,7 @@ impl AppWindow {
         let page = self.canvas_state.browsers.pages.get(&id);
         #[cfg(target_os = "macos")]
         if let Some(page) = page && let (Some(view), Some(at)) = (&page.view, page.live) {
-            if at != (camera, pane.rect) || !self.browser_fits(pane, camera) {
+            if at != placement(pane, camera) || !self.browser_fits(pane, camera) {
                 let (this, id) = (cx.entity(), id.clone());
                 cx.defer(move |cx| this.update(cx, |this, cx| this.rest_browser(&id, cx)));
             }
@@ -705,11 +705,13 @@ impl AppWindow {
         let camera = *camera;
         self.ensure_view(id, window, cx)?;
         let page = self.canvas_state.browsers.pages.get_mut(id).unwrap();
-        page.live = Some((camera, pane.rect));
+        page.live = Some(placement(&pane, camera));
         let view = page.view.clone().unwrap();
+        // A pinned page keeps its screen size, so it reads at 100% whatever the canvas zoom.
+        let zoom = if pane.pinned.is_some() { 1. } else { camera.zoom };
         view.update(cx, |v, _| {
             v.show();
-            let _ = v.raw().zoom(camera.zoom as f64);
+            let _ = v.raw().zoom(zoom as f64);
             let _ = v.raw().focus();
         });
         self.canvas_state.selected = vec![id.to_owned()];
@@ -882,5 +884,15 @@ mod tests {
         assert_eq!(format_quote(&dom, None), "@https://x.dev/ main > section:nth-of-type(2) \"Buy now\"\n\nfix this");
         let one = json!({"start":3,"end":3,"source":{"url":"u","component":"A","file":"/x/A.tsx","tag":"<a>"}});
         assert_eq!(format_quote(&one, Some("/w")), "@u <A> /x/A.tsx:3 \"<a>\"");
+    }
+}
+
+/// Where a live page sits: the camera and rect, or for a pinned pane just its screen rect, so
+/// panning or zooming the canvas under a pinned page leaves it live.
+#[cfg(target_os = "macos")]
+fn placement(pane: &canvas::Pane, camera: canvas::Camera) -> (canvas::Camera, canvas::Rect) {
+    match pane.pinned {
+        Some(screen) => (canvas::Camera::default(), screen),
+        None => (camera, pane.rect),
     }
 }

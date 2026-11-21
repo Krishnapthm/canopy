@@ -2973,7 +2973,7 @@ impl AppWindow {
             "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
-            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
+            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" => self.pane_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external" => self.browser_command(name, a, window, cx),
             name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
@@ -4897,6 +4897,7 @@ fn shadow(el: Div, s: Option<&str>) -> Div {
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.release_pdf_drops(window, cx);
+        self.pin_panes();
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
         crate::bench::frame_start();

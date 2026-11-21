@@ -361,6 +361,8 @@ impl AppWindow {
 
     /// Resolve cell and space spacing, deferring neighbours until release in drop mode.
     pub(super) fn solve_layout(&mut self, pin: Option<&str>, space_pin: Option<&str>, cx: &App) {
+        // A pinned pane floats over the canvas: it neither pushes nor gets pushed.
+        if pin.is_some_and(|id| self.canvas_state.doc.panes.iter().any(|p| p.id == id && p.pinned.is_some())) { return; }
         if self.person.canvas_push == settings::CanvasPush::Drop
             && (self.canvas_state.drag.is_some() || self.canvas_state.cell_resize.is_some()
                 || self.canvas_state.preview_drag.is_some() || self.canvas_state.space_drag.is_some()) {
@@ -408,7 +410,7 @@ impl AppWindow {
         // Push off lets cells overlap; spaces and root cells on Home still separate below.
         if let (Some(i), false) = (pinned, self.person.canvas_push == settings::CanvasPush::Off) {
             let indices: Vec<_> = (0..cells.len())
-                .filter(|j| members[*j] == members[i])
+                .filter(|j| members[*j] == members[i] && doc.panes[*j].pinned.is_none())
                 .collect();
             let rects: Vec<_> = indices.iter().map(|j| cells[*j]).collect();
             let solved = canvas::solve(
@@ -423,7 +425,7 @@ impl AppWindow {
         }
         let active = space_pin.or_else(|| pinned.and_then(|i| members[i].as_deref()));
         // On Home, root cells and space cards share one level, so neither covers the other.
-        let roots: Vec<_> = (0..cells.len()).filter(|i|members[*i].is_none()).collect();
+        let roots: Vec<_> = (0..cells.len()).filter(|i|members[*i].is_none() && doc.panes[*i].pinned.is_none()).collect();
         let rects: Vec<_> = doc.spaces.iter().map(|s|s.rect).chain(roots.iter().map(|i|cells[*i])).collect();
         let top_pin = doc.spaces.iter().position(|s|Some(s.space.as_str())==active)
             .or_else(||pinned.and_then(|i|roots.iter().position(|j|*j==i)).map(|i|doc.spaces.len()+i));
@@ -661,7 +663,7 @@ impl AppWindow {
         let area = self.canvas_state.tile.as_ref().map_or(camera, |t| t.camera);
         let area = [area.x, area.y];
         // What the place shows: expanded cells and previews tile; pills (and space cards on Home) line up.
-        let shown = |c: &canvas::Pane| doc.shows(c.space.as_ref())
+        let shown = |c: &canvas::Pane| doc.shows(c.space.as_ref()) && c.pinned.is_none()
             && (c.boxed() || matches!(c.kind, canvas::Kind::Sub { .. }) || canvas::view_allows(&doc.view, self.live.get(&c.id).is_some_and(canvas_agent)));
         let cards: Vec<usize> = (0..doc.panes.len()).filter(|i| shown(&doc.panes[*i])).collect();
         let (tiled, pilled): (Vec<usize>, Vec<usize>) = cards.into_iter().partition(|i| doc.panes[*i].boxed() || doc.panes[*i].size().is_some());
@@ -1209,9 +1211,10 @@ impl AppWindow {
     }
 
     /// The rects of the panes (and, on Home, space cards) in the current place that `pick` keeps.
+    /// Pinned panes float over the camera, so zoom limits and fits leave them out.
     fn place_rects(&self, pick: impl Fn(&String) -> bool, cx: &App) -> Vec<canvas::Rect> {
         let doc = &self.canvas_state.doc;
-        doc.panes.iter().filter(|c| doc.shows(c.space.as_ref()) && pick(&c.id)).map(|c| self.pill_rect(c, cx))
+        doc.panes.iter().filter(|c| doc.shows(c.space.as_ref()) && c.pinned.is_none() && pick(&c.id)).map(|c| self.pill_rect(c, cx))
             .chain(doc.spaces.iter().filter(|s| doc.room.is_none() && pick(&s.space)).map(|s| s.rect))
             .collect()
     }
@@ -1227,6 +1230,16 @@ impl AppWindow {
     /// being yanked to the limit on the next event; `settle_zoom` then eases it inside.
     fn gesture_range(&self, window: &Window, cx: &App) -> [f32; 2] {
         canvas::widen(self.zoom_range(window, cx), self.canvas_state.doc.camera.zoom)
+    }
+
+    /// Puts pinned panes back where they sit on screen (`canvas::Document::pin`). Runs before
+    /// each render, with the canvas size from the last frame.
+    pub(in crate::window) fn pin_panes(&mut self) {
+        let Some(size) = self.bounds.borrow().get("canopy-canvas").map(|b| [f32::from(b.size.width), f32::from(b.size.height)]) else { return };
+        let state = &mut self.canvas_state;
+        let camera = state.doc.camera;
+        state.doc.pin(camera, size);
+        if let Some(shown) = &mut state.shown { shown.pin(camera, size); }
     }
 
     /// The viewport centre in world pixels.
@@ -1274,7 +1287,7 @@ impl AppWindow {
         } else {
             let id = doc.next_file_id();
             let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-            let pane = canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], size[0], size[1]], z, space };
+            let pane = canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], size[0], size[1]], z, space, pinned: None };
             let kind_name = pane.kind_name().to_owned();
             doc.panes.push(pane);
             (id, kind_name)
@@ -1290,7 +1303,7 @@ impl AppWindow {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Mod { kind, props: serde_json::Map::new() }, rect: [point[0], point[1], 320., 240.], z, space });
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Mod { kind, props: serde_json::Map::new() }, rect: [point[0], point[1], 320., 240.], z, space, pinned: None });
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
@@ -1841,7 +1854,7 @@ impl AppWindow {
             .cloned()
             .unwrap_or(canvas::Pane { id: terminal.into(), kind: canvas::Kind::Terminal { size: None },
                 rect: [point[0], point[1], 240., 36.],
-                z: 0, space: None,
+                z: 0, space: None, pinned: None,
             });
         let mut r = self.pill_rect(&card, cx);
         r[0] = point[0];
@@ -1928,7 +1941,7 @@ impl AppWindow {
                 let r = self.pill_rect(
                     &canvas::Pane { id: a.clone(), kind: canvas::Kind::Terminal { size: None },
                         rect: [0., 0., 240., 36.],
-                        z: 0, space: None,
+                        z: 0, space: None, pinned: None,
                     },
                     cx,
                 );
@@ -2563,7 +2576,11 @@ impl AppWindow {
                         .iter_mut()
                         .find(|p| p.id == id)
                     {
-                        if resize {
+                        if let Some(s) = &mut card.pinned {
+                            // A pinned pane moves and sizes in screen px; `pin_panes` moves its rect.
+                            if resize { s[2] = (s[2] + screen[0]).max(240.); s[3] = (s[3] + screen[1]).max(120.); }
+                            else { s[0] += screen[0]; s[1] += screen[1]; }
+                        } else if resize {
                             card.rect[2] = (card.rect[2] + d[0]).max(240.);
                             card.rect[3] = (card.rect[3] + d[1]).max(120.);
                         } else {
@@ -2783,7 +2800,7 @@ impl AppWindow {
             );
         }
         // Every pane kind joins one z-sorted list, so overlapping panes stack the same whatever they are.
-        let mut pills: Vec<(u64, AnyElement)> = Vec::new();
+        let mut pills: Vec<((bool, u64), AnyElement)> = Vec::new();
         let mut drawn_sims = vec![];
         for card in shown_doc.panes.iter().filter(|p| shown_doc.shows(p.space.as_ref()) && canvas::visible(camera, p.rect, viewport)) {
             let element = match &card.kind {
@@ -2819,7 +2836,7 @@ impl AppWindow {
                     self.pane_card(card, "icons/smartphone.svg".into(), title, detail, body, camera, cx)
                 }
             };
-            pills.push((card.z, element));
+            pills.push((paint_order(card), element));
         }
         // A live simulator streams only while its pane is drawn.
         #[cfg(target_os = "macos")]
@@ -2894,7 +2911,7 @@ impl AppWindow {
                 cx.stop_propagation();
             }));
             pill = pill.on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
-            pills.push((card.z, pill.into_any_element()));
+            pills.push((paint_order(&card), pill.into_any_element()));
         }
         let mut shown = shown;
         shown.sort_by_key(|c| c.z);
@@ -3021,7 +3038,7 @@ impl AppWindow {
                 }),
             );
             if !expanded {
-                pills.push((card.z, pill.into_any_element()));
+                pills.push((paint_order(&card), pill.into_any_element()));
                 continue;
             }
             // The body: the terminal, or a flat stand-in when too far out to read. It draws live at every zoom frame; its PTY grid waits for `settled`.
@@ -3119,7 +3136,7 @@ impl AppWindow {
                         }))
                 }).collect()
             };
-            pills.push((card.z, div()
+            pills.push((paint_order(&card), div()
                 .id(SharedString::from(format!("canvas-cell-{}", card.id)))
                 .absolute()
                 .left(px(x))
@@ -3526,6 +3543,9 @@ fn wheel_zooms(m: Modifiers) -> bool {
 /// for a plain wheel while a pan that began on the canvas last moved less than `WHEEL_GESTURE` ago.
 fn wheel_claimed(zoom: bool, last_pan: Option<std::time::Instant>, now: std::time::Instant) -> bool {
     zoom || last_pan.is_some_and(|t| now.saturating_duration_since(t) < WHEEL_GESTURE)
+/// Panes paint by z, with pinned panes over every canvas pane.
+pub(super) fn paint_order(p: &canvas::Pane) -> (bool, u64) { (p.pinned.is_some(), p.z) }
+
 }
 
 impl AppWindow {

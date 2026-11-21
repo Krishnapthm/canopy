@@ -593,6 +593,10 @@ pub struct Pane {
     /// The space (room) it lives in; None for Home.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space: Option<String>,
+    /// Pinned: its screen rect in the canvas area (px). It stays there while the camera moves;
+    /// `rect` follows it each frame (see `Document::pin`), so hit tests and wires need nothing special.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<Rect>,
 }
 
 /// What a pane shows, with its kind-specific fields saved under `props`.
@@ -970,6 +974,19 @@ impl Document {
         changed
     }
 
+    /// Keeps pinned panes where they sit on screen: each one's world rect follows `camera`.
+    /// A pinned rect is drawn inside `viewport`, so a smaller window never hides it; its saved
+    /// spot comes back when the window grows again.
+    pub fn pin(&mut self, camera: Camera, viewport: Point) {
+        for p in &mut self.panes {
+            let Some(s) = p.pinned else { continue };
+            let x = s[0].min(viewport[0] - s[2]).max(0.);
+            let y = s[1].min(viewport[1] - s[3]).max(0.);
+            let [wx, wy] = camera.to_world([x, y]);
+            p.rect = [wx, wy, s[2] / camera.zoom, s[3] / camera.zoom];
+        }
+    }
+
     pub fn place(&mut self, terminal: &str, point: Point, size: Point) {
         let z = self
             .panes
@@ -988,6 +1005,7 @@ impl Document {
                 rect: [point[0], point[1], size[0], size[1]],
                 z,
                 space: self.room.clone(),
+                pinned: None,
             });
         }
     }
@@ -1011,7 +1029,7 @@ impl Document {
                 let z = self.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
                 let child = child_position(rect, &siblings, [PILL_WIDTH, 36.]);
                 // The cell belongs to its parent's space.
-                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child, z, space: space.clone() });
+                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child, z, space: space.clone(), pinned: None });
                 changed = true;
             }
         }
@@ -1072,12 +1090,12 @@ impl Document {
                 (None, _) => (terminal, Kind::Terminal { size }),
                 _ => continue,
             };
-            self.panes.push(Pane { id, kind, rect, z, space });
+            self.panes.push(Pane { id, kind, rect, z, space, pinned: None });
         }
         let max_z = self.panes.iter().map(|p| p.z).max().unwrap_or(0);
         self.file_ids = self.old_previews.len() as u64;
         for (i, Preview { path, rect, space }) in self.old_previews.drain(..).enumerate() {
-            self.panes.push(Pane { id: format!("p{}", i + 1), kind: Kind::File { path }, rect, z: max_z + 1 + i as u64, space });
+            self.panes.push(Pane { id: format!("p{}", i + 1), kind: Kind::File { path }, rect, z: max_z + 1 + i as u64, space, pinned: None });
         }
         self.version = 3;
     }
@@ -1153,7 +1171,7 @@ mod tests {
     fn stack_raises_one_pane_to_the_front() {
         let mut doc = Document::default();
         for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
-            doc.panes.push(Pane { id: id.into(), kind: Kind::Terminal { size: None }, rect: [0.; 4], z: i as u64, space: None });
+            doc.panes.push(Pane { id: id.into(), kind: Kind::Terminal { size: None }, rect: [0.; 4], z: i as u64, space: None, pinned: None });
         }
         assert!(doc.stack(&["a".into()], true));
         assert_eq!(doc.panes.iter().find(|p| p.id == "a").unwrap().z, 2);
@@ -1163,7 +1181,7 @@ mod tests {
     #[test]
     fn next_file_id_counts_mod_panes() {
         let mut doc = Document::default();
-        doc.panes.push(Pane { id: "p5".into(), kind: Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None });
+        doc.panes.push(Pane { id: "p5".into(), kind: Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None, pinned: None });
         assert_eq!(doc.next_file_id(), "p6");
     }
 
@@ -1179,7 +1197,7 @@ mod tests {
 
     #[test]
     fn pane_kinds_and_verbs() {
-        let mut pane = Pane { id: "p1".into(), kind: Kind::File { path: "/a.md".into() }, rect: [0.; 4], z: 0, space: None };
+        let mut pane = Pane { id: "p1".into(), kind: Kind::File { path: "/a.md".into() }, rect: [0.; 4], z: 0, space: None, pinned: None };
         assert_eq!(pane.kind_name(), "file");
         assert_eq!(pane.verbs(), ["read", "shot", "close"]);
         pane.kind = Kind::Terminal { size: None };
@@ -1266,12 +1284,12 @@ mod tests {
         let mut doc = Document::default();
         let id = doc.next_file_id();
         assert_eq!(id, "p1");
-        doc.panes.push(Pane { id, kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None });
+        doc.panes.push(Pane { id, kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, pinned: None });
         doc.panes.remove(0);
         assert_eq!(doc.next_file_id(), "p2");
         let mut doc = Document::default();
         for id in ["p1", "p3"] {
-            doc.panes.push(Pane { id: id.into(), kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None });
+            doc.panes.push(Pane { id: id.into(), kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, pinned: None });
         }
         assert_eq!(doc.next_file_id(), "p4");
     }
@@ -1352,7 +1370,7 @@ mod tests {
         let mut doc = Document::default();
         doc.place("a",[0.,0.],[100.,50.]);
         doc.spaces.push(Space { space:"s".into(),rect:[0.,0.,200.,200.],color:"blue".into(),frame:true });
-        doc.panes.push(Pane { id: "p1".into(), kind: Kind::File { path: "/tmp/plan.md".into() }, rect: [24.,24.,100.,80.], z: 2, space: None });
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::File { path: "/tmp/plan.md".into() }, rect: [24.,24.,100.,80.], z: 2, space: None, pinned: None });
         let rest = Rest::capture(&doc);
         doc.spaces[0].rect = [500.,500.,900.,900.];
         doc.panes[1].rect[0] = 600.;
@@ -1411,7 +1429,7 @@ mod tests {
 
     #[test]
     fn undo_keeps_each_sub_agent_cell_apart() {
-        let sub = |id: &str, x| Pane { id: format!("sub:t1:{id}"), kind: Kind::Sub { parent: "t1".into(), sub: id.into() }, rect: [x, 0., 100., 36.], z: 0, space: None };
+        let sub = |id: &str, x| Pane { id: format!("sub:t1:{id}"), kind: Kind::Sub { parent: "t1".into(), sub: id.into() }, rect: [x, 0., 100., 36.], z: 0, space: None, pinned: None };
         let mut doc = Document { panes: vec![sub("a", 0.), sub("b", 200.)], ..Document::default() };
         let rest = Rest::capture(&doc);
         doc.panes[0].rect[0] = 50.;
@@ -1537,6 +1555,19 @@ mod tests {
         assert_eq!(c.zoom, 0.7);
         c.step(-1, [0., 0.], [0.25, 0.7]);
         assert_eq!(c.zoom, 0.67);
+    }
+    #[test]
+    fn pinned_panes_follow_the_camera_and_stay_in_view() {
+        let mut doc = Document::default();
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [0.; 4], z: 0, space: None, pinned: Some([600., 16., 340., 700.]) });
+        let camera = Camera { x: 100., y: -50., zoom: 2. };
+        doc.pin(camera, [1000., 800.]);
+        assert_eq!(doc.panes[0].rect, [400., -42., 170., 350.]);
+        assert_eq!(camera.to_screen([doc.panes[0].rect[0], doc.panes[0].rect[1]]), [600., 16.]);
+        // A narrower window keeps it whole on screen; its saved spot is untouched.
+        doc.pin(Camera::default(), [800., 800.]);
+        assert_eq!(doc.panes[0].rect[0], 460.);
+        assert_eq!(doc.panes[0].pinned, Some([600., 16., 340., 700.]));
     }
     #[test]
     fn zoom_range_keeps_the_biggest_pane_on_screen() {

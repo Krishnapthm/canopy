@@ -115,7 +115,7 @@ impl AppWindow {
         let s = slop / camera.zoom;
         doc.panes.iter().filter(|c| {
             self.wire_cell(doc, &c.id).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
-        }).max_by_key(|c| c.z).map(|c| c.id.clone())
+        }).max_by_key(|c| super::paint_order(c)).map(|c| c.id.clone())
     }
 
     fn wire_edge_at(&self, position: Point<Pixels>) -> Option<Edge> {
@@ -153,7 +153,7 @@ impl AppWindow {
                             && point[1] >= y - 8. - bar_height && point[1] <= y + r[3] * doc.camera.zoom
                     })
                 // Topmost as drawn: every pane kind paints in one z order.
-                }).max_by_key(|p| p.z).map(|p| p.id.clone())
+                }).max_by_key(|p| super::paint_order(p)).map(|p| p.id.clone())
         };
         if bar_hover != self.canvas_state.bar_hover {
             self.canvas_state.bar_hover = bar_hover;

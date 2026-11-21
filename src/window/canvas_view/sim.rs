@@ -105,7 +105,7 @@ impl AppWindow {
         // A phone in its bezel (about 1:2) under the 36 px header, that size on screen at this zoom.
         let size = [340., 700.];
         let zoom = doc.camera.zoom;
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], size[0] / zoom, size[1] / zoom], z, space });
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], size[0] / zoom, size[1] / zoom], z, space, pinned: None });
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         self.refresh_sim(&id, true, window, cx);
