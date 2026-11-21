@@ -27,6 +27,10 @@ pub const SPACE_CARD: Point = [260., 120.];
 pub const HEADER: f32 = 36.;
 /// The header's height in world px at `zoom`: headers keep their screen size.
 pub fn header_world(zoom: f32) -> f32 { HEADER / zoom }
+/// A browser pane's header: a row of tabs over a row of navigation and the address field.
+pub const BROWSER_HEADER: f32 = 66.;
+/// The header height of a pane of this kind, in screen px at every zoom.
+pub fn header_height(kind: &Kind) -> f32 { if matches!(kind, Kind::Browser { .. }) { BROWSER_HEADER } else { HEADER } }
 /// Below this camera zoom an expanded cell shows a flat stand-in instead of live text.
 pub const EXPANDED_MIN_ZOOM: f32 = 0.5;
 
@@ -1217,6 +1221,13 @@ pub fn view_allows(view: &View, agent: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_panes_have_the_taller_header() {
+        let browser = Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None };
+        assert_eq!(header_height(&browser), BROWSER_HEADER);
+        assert_eq!(header_height(&Kind::File { path: "/a.md".into() }), HEADER);
+    }
 
     #[test]
     fn browser_panes_round_trip() {

@@ -831,7 +831,7 @@ impl AppWindow {
         let mark_key = format!("annotate-body:{id}");
         let bounds = self.bounds.clone();
         let [w, h] = pane.pinned.map_or([pane.rect[2] * zoom, pane.rect[3] * zoom], |p| [p[2], p[3]]);
-        let (w, h) = ((w - 2.).max(1.), (h - canvas::HEADER - 2.).max(1.));
+        let (w, h) = ((w - 2.).max(1.), (h - canvas::header_height(&pane.kind) - 2.).max(1.));
         let target = id.clone();
         let mut root = div().id(SharedString::from(format!("annotate-{id}"))).relative().size_full()
             .track_focus(&a.focus)

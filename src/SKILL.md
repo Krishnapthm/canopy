@@ -147,12 +147,15 @@ selector> "<visible text>"`. Read the file at that range before you edit it.
 Commands: `canvas.browser_back`, `canvas.browser_forward`, `canvas.browser_reload`,
 `canvas.browser_home`, `canvas.browser_pick`, `canvas.browser_shot`,
 `canvas.browser_external`, `canvas.browser_copy`, `canvas.browser_expand` (a tab filling
-the canvas, or back), `canvas.browser_pop` (its own window, or back),
+the canvas, or back), `canvas.browser_pop` (its own window with all its tabs, or back),
 `canvas.browser_inspect` (open Web Inspector) and
 `canvas.browser_clear` (`{confirmed: true}` skips the dialog), each `{pane?}`, act on the
 pane, else the selected one. `canvas.browser_viewport` takes `pane?` and a `size` of
 `responsive`, `1280x800`, `1024x768`, `mobile`, or `tablet`. `desktop` also selects `1280x800`.
 `canvas.browser_cookies` takes `{keep: until_quit|forever}` and needs no pane.
+`canvas.browser_links` takes `{open: built_in|default}` and needs no pane.
+`canvas.browser_open_file` `{pane?}` asks the person to pick an `.html` file and opens it in
+a new tab (agents cannot open `file:` URLs any other way). `canvas.browser_external` also takes `tab`.
 
 Browser and simulator annotations arrive as submitted prompts. Canopy attaches the
 annotated screenshot first, then any area crops, then sends the numbered comments

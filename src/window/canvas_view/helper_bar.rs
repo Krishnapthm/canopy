@@ -66,21 +66,17 @@ fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAc
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ]).collect(),
         canvas::Kind::Browser { .. } => [
-            ("icons/arrow-left.svg", "Back", "canvas.browser_back"),
-            ("icons/rotate-cw.svg", "Reload", "canvas.browser_reload"),
-            ("icons/house.svg", "Home", "canvas.browser_home"),
-            ("icons/globe.svg", "Open URL", "canvas.pane_open"),
-            ("icons/pencil.svg", "Annotate", "canvas.browser_annotate"),
-            ("icons/camera.svg", "Screenshot", "canvas.browser_shot"),
-            ("icons/external-link.svg", "Open in browser", "canvas.browser_external"),
-            ("icons/maximize-2.svg", "Expand", "canvas.browser_expand"),
-            ("icons/picture-in-picture-2.svg", "Pop out", "canvas.browser_pop"),
-            ("icons/link.svg", "Connect", "canvas.connect"),
-            ("icons/x.svg", "Close", "canvas.close"),
-        ].into_iter().map(|(icon, label, command)| BarAction {
-            icon: icon.into(), label: label.into(), command: command.into(),
-            args: if command == "canvas.pane_open" { json!({"pane":pane.id}) } else { json!({}) },
-        }).collect(),
+            ("icons/arrow-left.svg", "Back".to_owned(), "canvas.browser_back"),
+            ("icons/rotate-cw.svg", "Reload".to_owned(), "canvas.browser_reload"),
+            ("icons/house.svg", "Home".to_owned(), "canvas.browser_home"),
+            ("icons/pencil.svg", "Annotate".to_owned(), "canvas.browser_annotate"),
+            ("icons/camera.svg", "Screenshot".to_owned(), "canvas.browser_shot"),
+            ("icons/external-link.svg", super::browser::open_in_label(), "canvas.browser_external"),
+            ("icons/maximize-2.svg", "Expand".to_owned(), "canvas.browser_expand"),
+            ("icons/picture-in-picture-2.svg", "Pop out".to_owned(), "canvas.browser_pop"),
+            ("icons/link.svg", "Connect".to_owned(), "canvas.connect"),
+            ("icons/x.svg", "Close".to_owned(), "canvas.close"),
+        ].into_iter().map(|(icon, label, command)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args: json!({}) }).collect(),
         canvas::Kind::Sim { udid } if udid.is_empty() => vec![
             BarAction { icon: "icons/smartphone.svg".into(), label: "Choose simulator".into(), command: "canvas.sim_device".into(), args: json!({}) },
             BarAction { icon: "icons/external-link.svg".into(), label: "Open in Device Hub".into(), command: "canvas.sim_hub".into(), args: json!({}) },
@@ -234,7 +230,7 @@ mod helper_bar_tests {
         assert_eq!(pane_actions(&pane, Some(&hint)).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = serde_json::from_value(json!({"kind":"browser","props":{"url":"http://localhost:3000","home":"http://localhost:3000"}})).unwrap();
-        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.pane_open", "canvas.browser_annotate", "canvas.browser_shot", "canvas.browser_external", "canvas.browser_expand", "canvas.browser_pop", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
+        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.browser_annotate", "canvas.browser_shot", "canvas.browser_external", "canvas.browser_expand", "canvas.browser_pop", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Sim { udid: String::new() };
         assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
         // Pinned, the same button moves it back onto the canvas.

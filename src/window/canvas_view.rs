@@ -2505,7 +2505,7 @@ impl AppWindow {
             }),
         ));
         card_element
-                .child(Self::pane_header().h(px(canvas::HEADER)).flex_none().border_b_1().border_color(c("border"))
+                .child(Self::pane_header().h(px(canvas::header_height(&card.kind))).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                         this.begin_layout();
                         this.canvas_state.selected = vec![drag.clone()];
@@ -2513,7 +2513,7 @@ impl AppWindow {
                         this.canvas_state.preview_drag = Some((drag.clone(), None, e.position)); cx.stop_propagation();
                     }))
                     .map(|head| match header {
-                        Some(header) => head.px(px(8.)).py(px(6.)).items_center().child(header),
+                        Some(header) => head.p(px(0.)).child(header),
                         None => head
                             .child(div().flex_none().mt(px(1.)).child(svg().path(icon).size(px(16.)).text_color(c("foreground"))))
                             .child(div().min_w_0().truncate().child(title))
@@ -3012,7 +3012,7 @@ impl AppWindow {
                 }
                 canvas::Kind::Browser { .. } => {
                     drawn_pages.extend(self.page_key(&card.id));
-                    let header = self.browser_header(&card.id, cx);
+                    let header = self.browser_chrome(&card.id, browser::Host::Pane, cx);
                     let body = self.browser_body(card, camera, cx);
                     self.pane_card(card, SharedString::default(), String::new(), String::new(), Some(header), body, camera, cx)
                 }
