@@ -11,6 +11,8 @@ use std::collections::VecDeque;
 
 /// Space around the bezel inside the pane, in pixels.
 pub(super) const MARGIN: f32 = 12.;
+/// How long a hidden pane's helper keeps running before it stops.
+const LINGER: Duration = Duration::from_secs(5);
 /// Activity lines kept for `canopy pane read`.
 const LOG: usize = 12;
 
@@ -87,6 +89,8 @@ pub(super) struct SimScreen {
     _agent: Option<Task<()>>,
     /// Stops a helper an agent started, once agents go quiet.
     _agent_idle: Option<Task<()>>,
+    /// Stops a helper whose pane left view, unless it comes back first.
+    _linger: Option<Task<()>>,
     _tasks: Vec<Task<()>>,
 }
 
@@ -105,7 +109,7 @@ impl SimScreen {
         Self {
             pane, device, info: None, shot: None, surface: None, helper: None, live: Live::Off, shown: false, agent_until: None,
             bounds: Rc::default(), touching: false, scrolling: None, focus: cx.focus_handle(), log: VecDeque::new(), typed: None,
-            recording: None, annotation: None, popped: false, _pump: None, _agent: None, _agent_idle: None, _tasks: vec![info],
+            recording: None, annotation: None, popped: false, _pump: None, _agent: None, _agent_idle: None, _linger: None, _tasks: vec![info],
         }
     }
 
@@ -116,14 +120,31 @@ impl SimScreen {
     }
 
     /// Starts or stops the helper to match `shown` (and recent agent input). A failed helper
-    /// stays down until `retry`.
+    /// stays down until `retry`. A helper that is no longer wanted lingers for `LINGER`, so
+    /// panning a pane out of view and back does not restart it.
     pub fn sync(&mut self, cx: &mut Context<Self>) {
-        let want = (self.shown || self.agent_until.is_some_and(|t| t > Instant::now())) && self.device.booted;
+        let want = self.wanted();
         match (&self.live, want) {
             (Live::Off, true) => self.start(cx),
-            (Live::Starting | Live::On { .. }, false) => self.stop(cx),
+            (Live::Starting | Live::On { .. }, false) => {
+                if self._linger.is_none() {
+                    self._linger = Some(cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(LINGER).await;
+                        let _ = this.update(cx, |this, cx| {
+                            this._linger = None;
+                            if !this.wanted() && !matches!(this.live, Live::Off | Live::Failed(_)) { this.stop(cx); }
+                        });
+                    }));
+                }
+                return;
+            }
             _ => {}
         }
+        self._linger = None;
+    }
+
+    fn wanted(&self) -> bool {
+        (self.shown || self.agent_until.is_some_and(|t| t > Instant::now())) && self.device.booted
     }
 
     /// Tries live again after a failure.
@@ -176,7 +197,8 @@ impl SimScreen {
 
     fn event(&mut self, event: Event, cx: &mut Context<Self>) {
         match event {
-            Event::Frame => cx.notify(),
+            // A frame nobody sees (a lingering helper) redraws nothing.
+            Event::Frame => if self.shown { cx.notify() },
             Event::Surface(surface) => {
                 self.surface = Some(surface.take());
                 if self.live == Live::Starting { self.live = Live::On { input: false }; cx.emit(SimEvent::Changed); }
@@ -304,8 +326,9 @@ impl SimScreen {
 
     /// Two-finger scrolling on a trackpad drags the screen, as a finger would.
     fn scroll(&mut self, e: &ScrollWheelEvent, cx: &mut Context<Self>) {
-        cx.stop_propagation();
+        // A screen that takes no touch leaves the wheel to the canvas, which pans.
         if !self.input_ready() || self.annotation.is_some() { return; }
+        cx.stop_propagation();
         let ScrollDelta::Pixels(delta) = e.delta else { return };
         let Some(fit) = self.bounds.get().and_then(|b| self.fit([f32::from(b.size.width), f32::from(b.size.height)])) else { return };
         let [_, _, w, h] = fit.screen;
