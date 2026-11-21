@@ -9,7 +9,7 @@ cargo build --release
 app="$HOME/Applications/Canopy.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$HOME/.local/bin"
 # Replace atomically so installing does not interrupt a running Canopy.
-cp target/release/canopy "$app/Contents/MacOS/Canopy.new"
+cp "${CARGO_TARGET_DIR:-target}/release/canopy" "$app/Contents/MacOS/Canopy.new"
 mv -f "$app/Contents/MacOS/Canopy.new" "$app/Contents/MacOS/Canopy"
 chmod +x "$app/Contents/MacOS/Canopy"
 cp assets/icons/Canopy.icns "$app/Contents/Resources/Canopy.icns"
