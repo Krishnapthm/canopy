@@ -1,4 +1,5 @@
 //! Open a browser pane on the canvas and enter an address in its focused New tab field.
+//! Each tab has its own WebKit view, created when the page first loads.
 //! Click a loaded page to interact with it. WebKit follows pans, zoom and resizes while
 //! live, with the canvas edge and foreground panes, helper bars and overlays masked out.
 //! Click elsewhere to rest the page and draw its last snapshot.
@@ -75,10 +76,13 @@ const TEXT_CUT: usize = 200;
 #[derive(Default)]
 pub(in crate::window) struct Browsers {
     pages: HashMap<String, Page>,
+    panes: HashMap<String, PaneUi>,
+    #[cfg(target_os = "macos")]
+    next_view: u64,
     #[cfg(target_os = "macos")]
     pub(super) last_masks: Rc<RefCell<HashMap<String, Option<Vec<super::browser_mask::R>>>>>,
     /// Page events into the window; made with the first web view.
-    events: Option<async_channel::Sender<(String, Event)>>,
+    events: Option<async_channel::Sender<(String, u64, Event)>>,
 }
 
 #[derive(Default)]
@@ -106,11 +110,17 @@ struct Page {
     picking: bool,
     /// Counts loads, so a load's time limit leaves later loads alone.
     loads: u64,
+    /// Identifies callbacks from this view even if a closed tab's id is used again.
+    view_id: u64,
+}
+
+#[derive(Default)]
+struct PaneUi {
     /// The header's address field, made when the pane is first drawn.
     url_input: Option<(Entity<gpui_base::input::InputState>, Subscription)>,
     focus_url: bool,
-    /// The window showing the page while it is popped out; the pane has no view meanwhile.
-    popped: Option<AnyWindowHandle>,
+    /// The page key and its pop-out window, if one tab is popped out.
+    popped: Option<(String, AnyWindowHandle)>,
 }
 
 /// A page's native view: the GPUI entity, and the same view for scripts run without a GPUI
@@ -145,9 +155,18 @@ pub(in crate::window) enum Event {
     Playing,
 }
 
-/// Where a pane's last snapshot is kept between runs.
-fn shot_file(id: &str) -> std::path::PathBuf {
-    crate::mods::app_dir().join("browser").join(format!("{id}.png"))
+fn tab_key(pane: &str, tab: &str) -> String {
+    format!("{pane}/{tab}")
+}
+
+/// Where a tab's last snapshot is kept between runs.
+fn shot_file(key: &str) -> std::path::PathBuf {
+    crate::mods::app_dir().join("browser").join(format!("{}.png", key.replace('/', "-")))
+}
+
+fn link_target<'a>(last: Option<&str>, shown: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    let last = last?;
+    shown.into_iter().any(|id| id == last).then(|| last.to_owned())
 }
 
 /// GPUI draws BGRA.
@@ -343,47 +362,92 @@ impl AppWindow {
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
         let empty = url.is_empty();
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Browser { home: url.clone(), url, viewport: None }, rect: [point[0], point[1], SIZE[0], SIZE[1]], z, space, pinned: None });
-        if empty { self.canvas_state.browsers.pages.entry(id.clone()).or_default().focus_url = true; }
+        let kind = canvas::Kind::Browser {
+            home: url.clone(), tabs: vec![canvas::Tab { id: "t1".into(), url, title: String::new() }], active: 0, viewport: None,
+        };
+        doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], SIZE[0], SIZE[1]], z, space, pinned: None });
+        self.canvas_state.last_browser = Some(id.clone());
+        if empty { self.canvas_state.browsers.panes.entry(id.clone()).or_default().focus_url = true; }
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
         id
     }
 
-    /// Tears down the pages (and pop-out windows) of closed browser panes, drops their
-    /// snapshots, and loads saved snapshots for panes not seen yet this run.
+    /// Tears down closed tabs and loads saved snapshots for tabs new to this run.
     pub(super) fn sync_browsers(&mut self, cx: &mut Context<Self>) {
-        let ids: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.url().is_some()).map(|p| p.id.clone()).collect();
-        if self.canvas_state.browser_tab.as_ref().is_some_and(|id| !ids.contains(id)) { self.canvas_state.browser_tab = None; }
-        let browsers = &mut self.canvas_state.browsers;
-        #[cfg(target_os = "macos")]
-        browsers.last_masks.borrow_mut().retain(|id, _| ids.contains(id));
-        let pages = &mut browsers.pages;
-        pages.retain(|id, page| {
+        let mut ids = HashSet::new();
+        let mut keys = HashSet::new();
+        for pane in &self.canvas_state.doc.panes {
+            if let canvas::Kind::Browser { tabs, .. } = &pane.kind {
+                ids.insert(pane.id.clone());
+                keys.extend(tabs.iter().map(|tab| tab_key(&pane.id, &tab.id)));
+            }
+        }
+        let state = &mut self.canvas_state;
+        if state.browser_tab.as_ref().is_some_and(|id| !ids.contains(id)) { state.browser_tab = None; }
+        if state.last_browser.as_ref().is_some_and(|id| !ids.contains(id)) { state.last_browser = None; }
+        let browsers = &mut state.browsers;
+        browsers.panes.retain(|id, ui| {
             let keep = ids.contains(id);
-            if !keep {
-                let _ = std::fs::remove_file(shot_file(id));
-                #[cfg(target_os = "macos")]
-                if let Some(native) = page.native.take() { destroy(native); }
-                if let Some(window) = page.popped.take() { let _ = window.update(cx, |_, window, _| window.remove_window()); }
+            if ui.popped.as_ref().is_some_and(|(key, _)| !keys.contains(key))
+                && let Some((_, window)) = ui.popped.take()
+            {
+                let _ = window.update(cx, |_, window, _| window.remove_window());
             }
             keep
         });
-        for id in ids {
-            pages.entry(id.clone()).or_insert_with(|| Page {
-                // shortcut: decodes saved snapshots on the main thread, move to a background task if many panes make loading slow.
-                shot: image::open(shot_file(&id)).ok().map(|i| render_image(i.to_rgba8())),
+        #[cfg(target_os = "macos")]
+        browsers.last_masks.borrow_mut().retain(|key, _| keys.contains(key));
+        browsers.pages.retain(|key, page| {
+            let keep = keys.contains(key);
+            if !keep {
+                let _ = std::fs::remove_file(shot_file(key));
+                for ask in page.waiting.drain(..) {
+                    let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
+                    let _ = tx.send(json!({"error": "the browser tab closed"}));
+                }
+                #[cfg(target_os = "macos")]
+                if let Some(native) = page.native.take() { destroy(native); }
+            }
+            keep
+        });
+        for key in keys {
+            browsers.pages.entry(key.clone()).or_insert_with(|| Page {
+                // shortcut: decodes snapshots on the main thread, move to a background task if many tabs make loading slow.
+                shot: image::open(shot_file(&key)).ok().map(|i| render_image(i.to_rgba8())),
                 ..Default::default()
             });
         }
     }
 
+    /// Resolves pane-level actions to the current tab.
+    pub(super) fn page_key(&self, id: &str) -> Option<String> {
+        let pane = self.canvas_state.doc.panes.iter().find(|pane| pane.id == id)?;
+        Some(tab_key(id, &pane.active_tab()?.id))
+    }
+
+    fn active_page(&self, id: &str) -> Option<&Page> {
+        self.canvas_state.browsers.pages.get(&self.page_key(id)?)
+    }
+
+    fn tab_by_key(&self, key: &str) -> Option<&canvas::Tab> {
+        let (id, tab) = key.split_once('/')?;
+        let pane = self.canvas_state.doc.panes.iter().find(|pane| pane.id == id)?;
+        let canvas::Kind::Browser { tabs, .. } = &pane.kind else { return None };
+        tabs.iter().find(|t| t.id == tab)
+    }
+
+    fn browser_popped(&self, id: &str) -> bool {
+        self.canvas_state.browsers.panes.get(id).and_then(|ui| ui.popped.as_ref())
+            .is_some_and(|(key, _)| self.page_key(id).as_ref() == Some(key))
+    }
+
     /// Draws New tab, the live web view, or the resting snapshot. Click a resting page to wake it.
     pub(super) fn browser_body(&self, pane: &canvas::Pane, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
         let id = pane.id.clone();
-        let page = self.canvas_state.browsers.pages.get(&id);
-        if page.is_some_and(|p| p.popped.is_some()) {
+        let page = self.active_page(&id);
+        if self.browser_popped(&id) {
             let id = id.clone();
             return div().size_full().flex().flex_col().items_center().justify_center().gap(px(12.)).p(px(16.)).bg(c("canvas")).text_color(c("muted-foreground"))
                 .child("Popped out")
@@ -394,7 +458,7 @@ impl AppWindow {
                     .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_pop", json!({"pane": id}), window, cx))))
                 .into_any_element();
         }
-        if pane.url() == Some("") && !page.is_some_and(Page::has_view) {
+        if self.browser_url(&id) == Ok("") {
             return div().id(SharedString::from(format!("browser-{id}"))).size_full()
                 .flex().flex_col().items_center().justify_center().gap(px(8.)).bg(c("canvas")).cursor_pointer()
                 .child(svg().path("icons/globe.svg").size(px(32.)).text_color(c("muted-foreground")))
@@ -412,14 +476,14 @@ impl AppWindow {
             let next = placement(pane, camera);
             let preset = fixed_viewport(pane).is_some();
             if at != next {
-                let (this, id) = (cx.entity(), id.clone());
+                let (this, key) = (cx.entity(), self.page_key(&id).unwrap());
                 let zoom_changed = at.0.zoom != next.0.zoom || (preset && at.1[2..] != next.1[2..]);
                 let zoom = zoom_changed.then(|| {
                     let [_, _, width, height] = pane_body(pane, camera);
                     page_zoom(pane, camera, [width, height])
                 });
                 cx.defer(move |cx| this.update(cx, |this, _| {
-                    let Some(page) = this.canvas_state.browsers.pages.get_mut(&id) else { return };
+                    let Some(page) = this.canvas_state.browsers.pages.get_mut(&key) else { return };
                     if page.live == Some(at) && let Some(native) = &page.native {
                         page.live = Some(next);
                         if let Some(zoom) = zoom.filter(|z| *z > 0.) { let _ = native.raw.raw().zoom(zoom); }
@@ -449,15 +513,41 @@ impl AppWindow {
             })).into_any_element()
     }
 
-    /// The pane's title row text: the page title, else the URL.
+    /// The active tab's title, falling back to its address or New tab.
     pub(super) fn browser_title(&self, pane: &canvas::Pane) -> (String, String) {
-        let title = self.canvas_state.browsers.pages.get(&pane.id).map(|p| p.title.clone()).filter(|t| !t.is_empty());
-        let url = pane.url().unwrap_or_default().to_owned();
-        if url.is_empty() { return ("New tab".into(), url); }
-        match title { Some(title) => (title, url), None => (url, String::new()) }
+        let tab = pane.active_tab().unwrap();
+        if tab.url.is_empty() { return ("New tab".into(), String::new()); }
+        let title = self.active_page(&pane.id).map(|page| page.title.as_str())
+            .filter(|title| !title.is_empty()).unwrap_or(&tab.title);
+        if title.is_empty() { (tab.url.clone(), String::new()) } else { (title.to_owned(), tab.url.clone()) }
     }
 
-    /// A browser pane's header controls: back, forward, reload, the address field, and "⋯".
+    fn browser_tabs(&self, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
+        let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return None };
+        let mut strip = div().id("browser-tabs").role(gpui::Role::TabList).flex().min_w_0()
+            .max_w(gpui::relative(0.42)).h(px(24.)).gap(px(2.)).overflow_x_scroll()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+        for (i, tab) in tabs.iter().enumerate() {
+            let selected = i == *active;
+            let title = if !tab.title.is_empty() { &tab.title } else if !tab.url.is_empty() { &tab.url } else { "New tab" };
+            let args = json!({"pane": id, "tab": tab.id});
+            let close = args.clone();
+            strip = strip.child(div().id(SharedString::from(tab.id.clone())).flex().items_center().flex_none().w(px(112.))
+                .rounded(px(ui::RADIUS_SM)).when(selected, |d| d.bg(c("hover")))
+                .child(div().id("select").role(gpui::Role::Tab).aria_selected(selected).aria_label(title.to_owned())
+                    .flex_1().min_w_0().pl(px(6.)).truncate().cursor_pointer().text_size(px(12.))
+                    .tooltip(strip_tooltip(title.to_owned(), None))
+                    .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_tab_select", args.clone(), window, cx)))
+                    .child(title.to_owned()))
+                .child(panel_button("close", "icons/x.svg", c("muted-foreground"), c("hover")).aria_label("Close tab")
+                    .tooltip(strip_tooltip("Close tab".into(), Some("canvas.browser_tab_close")))
+                    .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_tab_close", close.clone(), window, cx)))));
+        }
+        Some(strip.into_any_element())
+    }
+
+    /// The tab strip and controls for the active page.
     pub(super) fn browser_header(&self, id: &str, cx: &mut Context<Self>) -> AnyElement {
         let button = |slot: &'static str, icon: &'static str, label: &'static str, command: &'static str, cx: &mut Context<Self>| {
             let id = id.to_owned();
@@ -465,8 +555,10 @@ impl AppWindow {
                 .on_click(cx.listener(move |this, _, window, cx| this.run_key(command, json!({"pane": id}), window, cx)))
         };
         let (reset, more) = (id.to_owned(), id.to_owned());
-        let field = self.canvas_state.browsers.pages.get(id).and_then(|p| p.url_input.as_ref()).map(|(input, _)| input.clone());
+        let field = self.canvas_state.browsers.panes.get(id).and_then(|p| p.url_input.as_ref()).map(|(input, _)| input.clone());
         div().flex().flex_1().min_w_0().items_center().gap(px(4.))
+            .children(self.browser_tabs(id, cx))
+            .child(button("browser-tab-new", "mods/workspace-chrome/plus.svg", "New tab", "canvas.browser_tab_new", cx))
             .child(button("browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
             .child(button("browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
             .child(button("browser-reload", "icons/rotate-cw.svg", "Reload", "canvas.browser_reload", cx))
@@ -490,7 +582,7 @@ impl AppWindow {
 
     pub(in crate::window) fn focus_browser_url(&mut self, id: &str, cx: &mut Context<Self>) -> Result<(), String> {
         self.browser_url(id)?;
-        self.canvas_state.browsers.pages.entry(id.to_owned()).or_default().focus_url = true;
+        self.canvas_state.browsers.panes.entry(id.to_owned()).or_default().focus_url = true;
         cx.notify();
         Ok(())
     }
@@ -512,8 +604,8 @@ impl AppWindow {
         let doc = &self.canvas_state.doc;
         let urls: Vec<_> = doc.panes.iter().filter_map(|p| Some((p.id.clone(), p.url()?.to_owned(), doc.shows(p.space.as_ref())))).collect();
         for (id, url, shown) in urls {
-            let Some(page) = self.canvas_state.browsers.pages.get_mut(&id) else { continue };
-            match &page.url_input {
+            let ui = self.canvas_state.browsers.panes.entry(id.clone()).or_default();
+            match &ui.url_input {
                 Some((input, _)) => {
                     let stale = input.read(cx).value().to_string() != url && !input.read(cx).focus_handle(cx).is_focused(window);
                     if stale { input.update(cx, |input, cx| input.set_value(url, window, cx)); }
@@ -531,10 +623,10 @@ impl AppWindow {
                         this.focus.focus(window, cx);
                         this.run_key("canvas.pane_open", json!({"pane": pane, "target": target}), window, cx);
                     });
-                    page.url_input = Some((input, sub));
+                    ui.url_input = Some((input, sub));
                 }
             }
-            if shown && std::mem::take(&mut page.focus_url) && let Some((input, _)) = &page.url_input {
+            if shown && std::mem::take(&mut ui.focus_url) && let Some((input, _)) = &ui.url_input {
                 input.update(cx, |i, cx| i.focus(window, cx));
             }
         }
@@ -543,7 +635,7 @@ impl AppWindow {
     /// Escape in the address field: the pane's URL back in it, and the keyboard back to the canvas.
     fn reset_url(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let url = self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| p.url()).unwrap_or_default().to_owned();
-        if let Some(input) = self.canvas_state.browsers.pages.get(id).and_then(|p| p.url_input.as_ref().map(|(input, _)| input.clone())) {
+        if let Some(input) = self.canvas_state.browsers.panes.get(id).and_then(|p| p.url_input.as_ref().map(|(input, _)| input.clone())) {
             input.update(cx, |input, cx| input.set_value(url, window, cx));
         }
         self.focus.focus(window, cx);
@@ -553,7 +645,7 @@ impl AppWindow {
     fn browser_menu(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
         let canvas::Kind::Browser { viewport, .. } = &pane.kind else { return };
-        let popped = self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some());
+        let popped = self.browser_popped(id);
         let at = json!({"pane": id});
         let mut items = vec![
             json!(["Open in default browser", "canvas.browser_external", at]),
@@ -599,7 +691,7 @@ impl AppWindow {
 
     /// Shows the expanded live page over the measured canvas area.
     pub(super) fn expanded_browser(&self, bg: Hsla) -> Option<AnyElement> {
-        let page = self.canvas_state.browsers.pages.get(self.canvas_state.browser_tab.as_ref()?)?;
+        let page = self.active_page(self.canvas_state.browser_tab.as_ref()?)?;
         let bounds = self.bounds.clone();
         Some(div().id("canopy-browser-tab").relative().flex_1().h_full().overflow_hidden().bg(bg)
             .child(canvas(move |b, _, _| {
@@ -612,53 +704,65 @@ impl AppWindow {
     }
 
     /// Answers page events from the web views.
-    fn browser_event(&mut self, id: String, event: Event, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(page) = self.canvas_state.browsers.pages.get_mut(&id) else { return };
+    fn browser_event(&mut self, key: String, view: u64, event: Event, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((id, tab)) = key.split_once('/') else { return };
+        let active = self.page_key(id).as_deref() == Some(key.as_str());
+        let Some(page) = self.canvas_state.browsers.pages.get_mut(&key).filter(|p| p.view_id == view && p.has_view()) else { return };
         match event {
             // A navigation inside the page (a link) committed.
-            Event::Started => return self.begin_load(&id, cx),
-            Event::Title(title) => page.title = title,
+            Event::Started => return self.begin_load(&key, cx),
+            Event::Title(title) => {
+                page.title = title.clone();
+                if let Some(saved) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id)
+                    && let canvas::Kind::Browser { tabs, .. } = &mut saved.kind
+                    && let Some(saved) = tabs.iter_mut().find(|t| t.id == tab)
+                    && saved.title != title
+                {
+                    saved.title = title;
+                    self.canvas_changed(cx);
+                }
+            }
             Event::Loaded => {
                 // Scripts often render after the load event (React does): let the page settle
                 // before answering. The timer runs only while a load is pending.
                 cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(SETTLE).await;
-                    let _ = this.update(cx, |this, cx| this.page_ready(id, cx));
+                    let _ = this.update(cx, |this, cx| this.page_ready(&key, view, cx));
                 }).detach();
                 return;
             }
             Event::Open(url) => {
-                if let Ok(url) = web_url(&url) { self.load_browser(&id, &url, false, window, cx); }
+                if let Ok(url) = web_url(&url) { self.navigate_browser(&key, &url, cx); }
             }
             Event::Rested(shot) => {
                 if let Some(rgba) = shot {
-                    let file = shot_file(&id);
+                    let file = shot_file(&key);
                     if let Some(dir) = file.parent() { let _ = std::fs::create_dir_all(dir); }
                     let _ = crate::control::save_png(&rgba, &file);
                     page.shot = Some(render_image(rgba));
                 }
                 #[cfg(target_os = "macos")]
                 if page.live.is_none() && let Some(native) = &page.native {
-                    native.view.update(cx, |v, _| v.hide());
+                    native.view.update(cx, |v, _| { if v.visible() { v.hide(); } });
                     super::browser_mask::clear_mask(native.raw.raw());
                 }
                 cx.notify();
             }
             Event::Playing => {
-                if std::mem::replace(&mut page.told, true) { return; }
+                if page.live.is_some() || std::mem::replace(&mut page.told, true) { return; }
                 let title = Some(page.title.clone()).filter(|t| !t.is_empty())
-                    .or_else(|| self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| p.url()).map(|u| u.split_once("://").map_or(u, |(_, r)| r).split(['/', '?', '#']).next().unwrap_or(u).to_owned()))
-                    .unwrap_or_else(|| id.clone());
+                    .or_else(|| self.tab_by_key(&key).map(|tab| tab.url.as_str()).map(|u| u.split_once("://").map_or(u, |(_, r)| r).split(['/', '?', '#']).next().unwrap_or(u).to_owned()))
+                    .unwrap_or_else(|| id.to_owned());
                 self.toast(Toast { title: format!("{title} is still playing"), body: None, level: Level::Info, action: Some(("pane.focus".into(), json!({"pane": id}))) }, window, cx);
             }
             Event::Message(body) => {
-                if !std::mem::take(&mut page.picking) { return; }
+                if !std::mem::take(&mut page.picking) || !active { return; }
                 let Ok(message) = serde_json::from_str::<Value>(&body) else { return };
                 if let Some(error) = message["error"].as_str() {
                     tracing::warn!("browser pane {id}: {error}");
                     self.toast(Toast { title: "Pick failed".into(), body: Some(error.into()), level: Level::Error, action: None }, window, cx);
                 } else if message["pick"].is_object() {
-                    self.browser_picked(&id, &message["pick"], window, cx);
+                    self.browser_picked(id, &message["pick"], window, cx);
                 }
             }
         }
@@ -668,49 +772,56 @@ impl AppWindow {
     /// Marks the page loading. wry reports no failed load (a refused connection sends no
     /// event at all), so a page still loading after LOAD_LIMIT is answered anyway; the timer
     /// runs once per load.
-    fn begin_load(&mut self, id: &str, cx: &mut Context<Self>) {
-        let Some(page) = self.canvas_state.browsers.pages.get_mut(id) else { return };
+    fn begin_load(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(page) = self.canvas_state.browsers.pages.get_mut(key) else { return };
         page.loading = true;
         page.loads += 1;
-        let (load, id) = (page.loads, id.to_owned());
+        let (load, view, key) = (page.loads, page.view_id, key.to_owned());
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(LOAD_LIMIT).await;
             let _ = this.update(cx, |this, cx| {
-                if this.canvas_state.browsers.pages.get(&id).is_some_and(|p| p.loading && p.loads == load) { this.page_ready(id, cx); }
+                if this.canvas_state.browsers.pages.get(&key).is_some_and(|p| p.loading && p.loads == load && p.view_id == view) {
+                    this.page_ready(&key, view, cx);
+                }
             });
         }).detach();
     }
 
-    /// A loaded page has settled: answer what waited for it, start a pending pick, and
-    /// refresh the snapshot of a resting page.
-    fn page_ready(&mut self, id: String, cx: &mut Context<Self>) {
-        let Some(page) = self.canvas_state.browsers.pages.get_mut(&id) else { return };
+    /// Answers the tab's waiting replies and refreshes its snapshot if it is resting.
+    fn page_ready(&mut self, key: &str, view: u64, cx: &mut Context<Self>) {
+        let Some(page) = self.canvas_state.browsers.pages.get_mut(key).filter(|p| p.view_id == view && p.has_view()) else { return };
         page.loading = false;
         let waiting = std::mem::take(&mut page.waiting);
         let pick = std::mem::take(&mut page.pick) && page.live.is_some();
         let resting = page.live.is_none();
-        self.note_browser_url(&id, cx);
-        for ask in waiting { self.answer_browser(&id, ask); }
-        if pick { self.eval_browser(&id, "window.__canopy && window.__canopy.pick()"); }
-        if resting { self.rest_browser(&id, cx); }
+        self.note_browser_url(key, cx);
+        for ask in waiting { self.answer_browser(key, ask); }
+        if let Some((id, _)) = key.split_once('/') && pick && self.page_key(id).as_deref() == Some(key) {
+            self.eval_browser(id, "window.__canopy && window.__canopy.pick()");
+        }
+        if resting { self.rest_page(key, cx); }
         cx.notify();
     }
 
-    /// Saves the URL the page navigated to.
-    fn note_browser_url(&mut self, id: &str, cx: &mut Context<Self>) {
+    /// Saves the URL the tab navigated to, including navigation while resting.
+    fn note_browser_url(&mut self, key: &str, cx: &mut Context<Self>) {
         #[cfg(target_os = "macos")]
         {
-            let Some(url) = self.raw_browser(id).and_then(|raw| page_url(raw.raw())) else { return };
-            if let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id)
-                && let canvas::Kind::Browser { url: saved, .. } = &mut pane.kind
-                && *saved != url && web_url(&url).is_ok()
+            let Some((id, tab)) = key.split_once('/') else { return };
+            let Some(url) = self.raw_page(key).and_then(|raw| page_url(raw.raw())) else { return };
+            if web_url(&url).is_err() || self.tab_by_key(key).is_none_or(|t| t.url == url) { return; }
+            let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return };
+            if pane.active_tab().is_some_and(|t| t.id == tab) {
+                pane.set_url(url);
+            } else if let canvas::Kind::Browser { tabs, .. } = &mut pane.kind
+                && let Some(saved) = tabs.iter_mut().find(|t| t.id == tab)
             {
-                *saved = url;
-                self.canvas_changed(cx);
+                saved.url = url;
             }
+            self.canvas_changed(cx);
         }
         #[cfg(not(target_os = "macos"))]
-        let _ = (id, cx);
+        let _ = (key, cx);
     }
 
     /// A picked element becomes a quote. The page rests and the quote popover opens.
@@ -764,20 +875,172 @@ impl AppWindow {
         }
     }
 
+    pub(super) fn select_browser_pane(&mut self, id: &str) {
+        self.canvas_state.last_browser = Some(id.to_owned());
+        self.canvas_state.selected = vec![id.to_owned()];
+    }
+
+    fn select_tab(&mut self, id: &str, tab: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no browser pane {id}"))?;
+        let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return Err(format!("no browser pane {id}")); };
+        let next = tabs.iter().position(|t| t.id == tab).ok_or_else(|| format!("no tab {tab} in browser pane {id}"))?;
+        let shown = self.canvas_state.doc.shows(pane.space.as_ref());
+        if next == *active {
+            if shown { self.select_browser_pane(id); }
+            if self.browser_url(id)? == "" { self.focus_browser_url(id, cx)?; }
+            cx.notify();
+            return Ok(());
+        }
+        let was_live = self.active_page(id).is_some_and(|page| page.live.is_some());
+        if self.canvas_state.browser_tab.as_deref() == Some(id) {
+            self.collapse_browser(window, cx);
+        } else if was_live {
+            self.rest_browser(id, cx);
+        }
+        #[cfg(target_os = "macos")]
+        if was_live && let Some(native) = self.active_page(id).and_then(|page| page.native.as_ref()) {
+            native.view.update(cx, |v, _| v.hide());
+        }
+        let pane = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id).unwrap();
+        let canvas::Kind::Browser { tabs, active, .. } = &mut pane.kind else { unreachable!() };
+        *active = next;
+        let empty = tabs[next].url.is_empty();
+        let url = tabs[next].url.clone();
+        let ui = self.canvas_state.browsers.panes.entry(id.to_owned()).or_default();
+        ui.focus_url = empty;
+        if let Some((input, _)) = &ui.url_input {
+            input.update(cx, |input, cx| input.set_value(url, window, cx));
+        }
+        if shown { self.select_browser_pane(id); }
+        self.canvas_changed(cx);
+        cx.notify();
+        if was_live && shown && !empty && !self.browser_popped(id) { self.wake_browser_result(id, window, cx)?; }
+        Ok(())
+    }
+
+    fn new_browser_tab(&mut self, id: &str, url: String, live: bool, window: &mut Window, cx: &mut Context<Self>) -> Result<String, String> {
+        let pane = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id).ok_or_else(|| format!("no browser pane {id}"))?;
+        let canvas::Kind::Browser { tabs, .. } = &mut pane.kind else { return Err(format!("no browser pane {id}")); };
+        let tab = canvas::next_tab_id(tabs);
+        let has_url = !url.is_empty();
+        tabs.push(canvas::Tab { id: tab.clone(), url, title: String::new() });
+        self.canvas_state.last_browser = Some(id.to_owned());
+        self.select_tab(id, &tab, window, cx)?;
+        if has_url {
+            if live && !self.active_page(id).is_some_and(|page| page.live.is_some()) {
+                self.wake_browser_result(id, window, cx)?;
+            } else if let Err(e) = self.ensure_view(id, window, cx) {
+                self.command_error("Open tab", &e, window, cx);
+            }
+        }
+        Ok(tab)
+    }
+
+    fn close_browser_tab(&mut self, id: &str, tab: Option<&str>, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let pane = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id).unwrap();
+        let canvas::Kind::Browser { tabs, active, .. } = &mut pane.kind else { unreachable!() };
+        let index = match tab {
+            Some(tab) => tabs.iter().position(|t| t.id == tab).ok_or_else(|| format!("no tab {tab} in browser pane {id}"))?,
+            None => *active,
+        };
+        if tabs.len() == 1 {
+            tabs.push(canvas::Tab { id: canvas::next_tab_id(tabs), url: String::new(), title: String::new() });
+        }
+        let selected = if index == *active {
+            let next = if index == 0 { 1 } else { index - 1 };
+            let tab = tabs[next].id.clone();
+            self.select_tab(id, &tab, window, cx)
+        } else {
+            Ok(())
+        };
+        let pane = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id).unwrap();
+        let canvas::Kind::Browser { tabs, active, .. } = &mut pane.kind else { unreachable!() };
+        tabs.remove(index);
+        if index < *active { *active -= 1; }
+        self.sync_browsers(cx);
+        self.canvas_changed(cx);
+        cx.notify();
+        selected
+    }
+
+    /// Opens an HTTP(S) link clicked in a terminal in the last browser here or in a pane beside it.
+    pub(in crate::window) fn open_link(&mut self, terminal: &str, url: String, window: &mut Window, cx: &mut Context<Self>) {
+        let url = match web_url(&url) {
+            Ok(url) => url,
+            Err(e) => return self.command_error("Open link", &e, window, cx),
+        };
+        let doc = &self.canvas_state.doc;
+        let shown = doc.panes.iter().filter(|pane| pane.url().is_some() && doc.shows(pane.space.as_ref())).map(|p| p.id.as_str());
+        let last = link_target(self.canvas_state.last_browser.as_deref(), shown);
+        let id = last.unwrap_or_else(|| {
+            let doc = &self.canvas_state.doc;
+            let (at, space) = match self.wire_cell(doc, terminal).zip(doc.panes.iter().find(|p| p.id == terminal)) {
+                Some(([x, y, w, _], pane)) => ([x + w + settings::get().canvas_gap, y], pane.space.clone()),
+                None => {
+                    let [x, y] = self.view_center(window);
+                    ([x - SIZE[0] / 2., y - SIZE[1] / 2.], doc.room.clone())
+                }
+            };
+            self.add_browser_pane(String::new(), at, space, cx)
+        });
+        if self.canvas_state.browser_tab.as_deref().is_some_and(|expanded| expanded != id) {
+            self.collapse_browser(window, cx);
+        }
+        self.select_browser_pane(&id);
+        if let Err(e) = self.new_browser_tab(&id, url, true, window, cx) {
+            self.command_error("Open link", &e, window, cx);
+        }
+    }
+
     /// canvas.browser_back | forward | reload | home | pick | shot | external | copy | viewport
-    /// | expand | pop | cookies | clear | inspect.
-    pub(in crate::window) fn browser_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+    /// | expand | pop | cookies | clear | inspect | tab_new | tab_select | tab_close.
+    pub(in crate::window) fn browser_command(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         if name == "canvas.browser_cookies" {
             let Ok(keep) = serde_json::from_value::<settings::KeepCookies>(a["keep"].clone()) else {
                 return self.fail("keep must be until_quit or forever");
             };
             return self.write_person(|person| person.browser_keep_cookies = keep, window, cx);
         }
+        if a["pane"].is_null() && self.selected_browser().is_none() {
+            if name == "canvas.browser_tab_new" {
+                return self.canvas_keyboard("canvas.new", &Value::Null, window, cx);
+            }
+            if name == "canvas.browser_tab_close" {
+                if crate::keys::listing().iter().any(|(_, _, action)| {
+                    action == "tab.close" || action.starts_with("tab.close:")
+                        || serde_json::from_str::<Value>(action).is_ok_and(|binding| binding["command"] == "tab.close")
+                }) {
+                    let reply = self.run_as("tab.close", Value::Null, person, window, cx);
+                    self.reply = Some(reply);
+                }
+                return;
+            }
+        }
         let id = match self.browser_target(a) { Ok(id) => id, Err(e) => return self.fail(e) };
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap();
-        let canvas::Kind::Browser { url, home, .. } = pane.kind.clone() else { return };
+        let canvas::Kind::Browser { home, .. } = &pane.kind else { return };
+        let home = home.clone();
+        let url = pane.url().unwrap().to_owned();
         if url.is_empty() && matches!(name, "canvas.browser_home" | "canvas.browser_reload" | "canvas.browser_back" | "canvas.browser_forward") { return; }
         match name {
+            "canvas.browser_tab_new" => {
+                let url = match &a["url"] {
+                    Value::Null => Ok(String::new()),
+                    Value::String(url) => web_url(url),
+                    _ => Err("url must be a string".into()),
+                };
+                let result = url.and_then(|url| self.new_browser_tab(&id, url, false, window, cx))
+                    .map(|tab| json!({"pane":id,"tab":tab}));
+                self.answer(result);
+            }
+            "canvas.browser_tab_select" => {
+                let Some(tab) = a["tab"].as_str() else { return self.fail("tab must be a tab id"); };
+                if let Err(e) = self.select_tab(&id, tab, window, cx) { self.fail(e); }
+            }
+            "canvas.browser_tab_close" => {
+                if !a["tab"].is_null() && !a["tab"].is_string() { return self.fail("tab must be a tab id"); }
+                if let Err(e) = self.close_browser_tab(&id, a["tab"].as_str(), window, cx) { self.fail(e); }
+            }
             "canvas.browser_external" => {
                 if url.is_empty() { return self.fail(ENTER_URL); }
                 crate::links::open(&crate::links::Target::Url(url));
@@ -821,7 +1084,8 @@ impl AppWindow {
                     self.collapse_browser(window, cx);
                     if let Err(e) = self.wake_browser_result(&id, window, cx) { return self.fail(e); }
                 }
-                let page = self.canvas_state.browsers.pages.get_mut(&id).unwrap();
+                let key = self.page_key(&id).unwrap();
+                let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
                 page.picking = true;
                 if page.loading { page.pick = true; } else { self.eval_browser(&id, "window.__canopy && window.__canopy.pick()"); }
             }
@@ -847,13 +1111,15 @@ impl AppWindow {
     /// A browser pane's helper bar labels for its state: bring back a popped page. (An expanded
     /// page hides its pane and bar, so no Collapse label is needed.)
     pub(super) fn browser_relabel(&self, id: &str, mut actions: Vec<super::helper_bar::BarAction>) -> Vec<super::helper_bar::BarAction> {
-        let popped = self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some());
+        let popped = self.browser_popped(id);
         for a in actions.iter_mut().filter(|a| popped && a.command == "canvas.browser_pop") { a.label = "Bring back".into(); }
         actions
     }
 
     /// Saves the CSS viewport and updates a live pane's zoom at its current size.
     fn set_browser_viewport(&mut self, id: &str, size: Option<[f32; 2]>, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        let key = self.page_key(id);
         let state = &mut self.canvas_state;
         let Some(pane) = state.doc.panes.iter_mut().find(|p| p.id == id) else { return };
         let canvas::Kind::Browser { viewport, .. } = &mut pane.kind else { return };
@@ -865,7 +1131,7 @@ impl AppWindow {
         }
         #[cfg(target_os = "macos")]
         if state.browser_tab.is_none()
-            && let Some(page) = state.browsers.pages.get(id).filter(|p| p.live.is_some())
+            && let Some(page) = key.as_ref().and_then(|key| state.browsers.pages.get(key)).filter(|p| p.live.is_some())
             && let Some(native) = &page.native
         {
             let camera = state.doc.camera;
@@ -904,14 +1170,20 @@ impl AppWindow {
     fn browser_ask(&mut self, id: &str, ask: Ask, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         self.require_browser_url(id)?;
         self.ensure_view(id, window, cx)?;
-        let page = self.canvas_state.browsers.pages.get_mut(id).unwrap();
-        if page.loading { page.waiting.push(ask); } else { self.answer_browser(id, ask); }
+        let key = self.page_key(id).unwrap();
+        let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
+        if page.loading { page.waiting.push(ask); } else { self.answer_browser(&key, ask); }
         Ok(())
     }
 
-    /// `canvas.pane_open`: loads `target` in the pane and makes it its Home.
-    pub(super) fn browser_open(&mut self, id: &str, target: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
+    /// Loads a target in the active tab, or in a new tab when requested.
+    pub(super) fn browser_open(&mut self, id: &str, target: &str, tab: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
         let url = web_url(target)?;
+        if tab == "new" {
+            let tab = self.new_browser_tab(id, url.clone(), false, window, cx)?;
+            return Ok(json!({"pane":id,"url":url,"tab":tab}));
+        }
+        if !tab.is_null() { return Err("tab must be new".into()); }
         self.load_browser(id, &url, true, window, cx);
         Ok(json!({"pane":id,"url":url}))
     }
@@ -919,20 +1191,18 @@ impl AppWindow {
     /// Loads `url`, saving it (and as Home when `home`); toasts when the view cannot be made.
     fn load_browser(&mut self, id: &str, url: &str, home: bool, window: &mut Window, cx: &mut Context<Self>) {
         if url.is_empty() { return; }
-        if let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id)
-            && let canvas::Kind::Browser { url: saved, home: saved_home, .. } = &mut pane.kind
-        {
-            *saved = url.to_owned();
-            if home { *saved_home = url.to_owned(); }
-            self.canvas_changed(cx);
-        }
-        let made = self.canvas_state.browsers.pages.get(id).is_some_and(Page::has_view);
+        let Some(key) = self.page_key(id) else { return };
+        let pane = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id).unwrap();
+        pane.set_url(url.to_owned());
+        if home && let canvas::Kind::Browser { home, .. } = &mut pane.kind { *home = url.to_owned(); }
+        self.canvas_changed(cx);
+        let made = self.canvas_state.browsers.pages.get(&key).is_some_and(Page::has_view);
         if let Err(e) = self.ensure_view(id, window, cx) {
             self.toast(Toast { title: "Page not opened".into(), body: Some(e), level: Level::Error, action: None }, window, cx);
             return;
         }
         // A new view already loads the saved URL.
-        if made { self.navigate_browser(id, url, cx); }
+        if made { self.navigate_browser(&key, url, cx); }
         cx.notify();
     }
 
@@ -1024,18 +1294,23 @@ fn snapshot(view: &wry::WebView, done: impl FnOnce(Option<image::RgbaImage>) + '
 #[cfg(target_os = "macos")]
 impl AppWindow {
     /// Makes the pane's web view (hidden, loading the saved URL) unless it has one.
-    // shortcut: a view lives until its pane closes (`destroy`), so each page opened this run keeps
-    // a WebKit process and its hidden page's (throttled) scripts; drop views on rest if memory matters.
+    // shortcut: hidden views stay allocated until their tab closes, drop views on rest if memory matters.
     fn ensure_view(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         self.require_browser_url(id)?;
-        if self.canvas_state.browsers.pages.get(id).is_some_and(Page::has_view) { return Ok(()); }
-        if self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some()) { return Err(format!("pane {id} is popped out: bring it back first")); }
+        let key = self.page_key(id).unwrap();
+        if self.canvas_state.browsers.pages.get(&key).is_some_and(Page::has_view) { return Ok(()); }
+        if self.browser_popped(id) { return Err(format!("pane {id} is popped out: bring it back first")); }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.url().is_some()).ok_or_else(|| format!("no browser pane {id}"))?;
         let (url, rect) = (pane.url().unwrap().to_owned(), pane.rect);
         let tx = self.browser_events(window, cx);
-        let send = |event: fn(String) -> Event| { let (tx, id) = (tx.clone(), id.to_owned()); move |s: String| { let _ = tx.try_send((id.clone(), event(s))); } };
-        let (load_tx, load_id) = (tx.clone(), id.to_owned());
-        let (open_tx, open_id) = (tx.clone(), id.to_owned());
+        self.canvas_state.browsers.next_view += 1;
+        let view_id = self.canvas_state.browsers.next_view;
+        let send = |event: fn(String) -> Event| {
+            let (tx, key) = (tx.clone(), key.clone());
+            move |s: String| { let _ = tx.try_send((key.clone(), view_id, event(s))); }
+        };
+        let (load_tx, load_key) = (tx.clone(), key.clone());
+        let (open_tx, open_key) = (tx.clone(), key.clone());
         let ipc = send(Event::Message);
         let webview = browser_store(wry::WebViewBuilder::new())
             .with_url(url)
@@ -1047,10 +1322,10 @@ impl AppWindow {
             .with_document_title_changed_handler(send(Event::Title))
             .with_on_page_load_handler(move |event, _| {
                 let event = match event { wry::PageLoadEvent::Started => Event::Started, wry::PageLoadEvent::Finished => Event::Loaded };
-                let _ = load_tx.try_send((load_id.clone(), event));
+                let _ = load_tx.try_send((load_key.clone(), view_id, event));
             })
             .with_new_window_req_handler(move |url, _| {
-                let _ = open_tx.try_send((open_id.clone(), Event::Open(url)));
+                let _ = open_tx.try_send((open_key.clone(), view_id, Event::Open(url)));
                 wry::NewWindowResponse::Deny
             })
             // No downloads: a pane shows pages, it does not save files.
@@ -1063,9 +1338,10 @@ impl AppWindow {
             fit_view(v, rect);
             v.handle()
         });
-        let page = self.canvas_state.browsers.pages.entry(id.to_owned()).or_default();
+        let page = self.canvas_state.browsers.pages.entry(key.clone()).or_default();
         page.native = Some(Native { view, raw });
-        self.begin_load(id, cx);
+        page.view_id = view_id;
+        self.begin_load(&key, cx);
         Ok(())
     }
 
@@ -1079,17 +1355,18 @@ impl AppWindow {
         let frame = self.bounds.borrow().get("canopy-canvas").copied().ok_or("the canvas is not shown")?;
         self.ensure_view(id, window, cx)?;
         // The expanded page replaces all panes, so the other live pages step aside.
-        let others: Vec<String> = self.canvas_state.browsers.pages.iter().filter(|(k, p)| k.as_str() != id && p.live.is_some()).map(|(k, _)| k.clone()).collect();
-        for other in others { self.rest_browser(&other, cx); }
+        let key = self.page_key(id).unwrap();
+        let others: Vec<String> = self.canvas_state.browsers.pages.iter().filter(|(k, p)| k.as_str() != key && p.live.is_some()).map(|(k, _)| k.clone()).collect();
+        for other in others { self.rest_page(&other, cx); }
         let camera = self.canvas_state.doc.camera;
-        let page = self.canvas_state.browsers.pages.get_mut(id).unwrap();
+        let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
         page.live = Some((camera, pane.rect));
         (page.told, page.watch) = (false, false);
         page.native.as_ref().unwrap().view.update(cx, |v, _| {
             show_view(v, frame, 1.);
         });
         self.canvas_state.browser_tab = Some(id.to_owned());
-        self.canvas_state.selected = vec![id.to_owned()];
+        self.select_browser_pane(id);
         cx.notify();
         Ok(())
     }
@@ -1099,7 +1376,7 @@ impl AppWindow {
     pub(super) fn collapse_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.canvas_state.browser_tab.take() else { return };
         let rect = self.canvas_state.doc.panes.iter().find(|p| p.id == id).map(|p| p.rect);
-        if let (Some(rect), Some(native)) = (rect, self.canvas_state.browsers.pages.get(&id).and_then(|p| p.native.as_ref())) {
+        if let (Some(rect), Some(native)) = (rect, self.active_page(&id).and_then(|p| p.native.as_ref())) {
             native.view.update(cx, |v, _| fit_view(v, rect));
         }
         // shortcut: the snapshot is taken right after the resize, so it may predate WebKit's relayout; a rested page re-snapshots when it next loads.
@@ -1112,17 +1389,22 @@ impl AppWindow {
     /// meanwhile and the pane says so; the window loads the pane's current URL in a fresh,
     /// private web view and is not tracked after that.
     fn pop_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
-        if let Some(popped) = self.canvas_state.browsers.pages.get_mut(id).and_then(|p| p.popped.take()) {
+        // shortcut: pop-out takes only the active tab, phase 3 moves the tab set
+        let key = self.page_key(id).ok_or_else(|| format!("no browser pane {id}"))?;
+        let ui = self.canvas_state.browsers.panes.entry(id.to_owned()).or_default();
+        if let Some((popped_key, _)) = &ui.popped {
+            if popped_key != &key { return Err("bring back the pane's popped-out tab first".into()); }
+            let (_, popped) = ui.popped.take().unwrap();
             let _ = popped.update(cx, |_, window, _| window.remove_window());
             return Ok(cx.notify());
         }
         self.require_browser_url(id)?;
         if self.canvas_state.browser_tab.as_deref() == Some(id) { self.collapse_browser(window, cx); }
-        self.note_browser_url(id, cx);
-        self.canvas_state.browsers.last_masks.borrow_mut().remove(id);
+        self.note_browser_url(&key, cx);
+        self.canvas_state.browsers.last_masks.borrow_mut().remove(&key);
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.url().is_some()).cloned().ok_or_else(|| format!("no browser pane {id}"))?;
         let (title, _) = self.browser_title(&pane);
-        let page = self.canvas_state.browsers.pages.get_mut(id).ok_or_else(|| format!("no browser pane {id}"))?;
+        let page = self.canvas_state.browsers.pages.entry(key.clone()).or_default();
         if let Some(native) = page.native.take() { destroy(native); }
         (page.live, page.picking, page.pick, page.loading, page.watch) = (None, false, false, false, false);
         for ask in std::mem::take(&mut page.waiting) {
@@ -1131,7 +1413,7 @@ impl AppWindow {
         }
         let url = pane.url().unwrap().to_owned();
         let owner = window.window_handle().downcast::<AppWindow>().unwrap();
-        let (closed, id) = (id.to_owned(), id.to_owned());
+        let (closed, id, closed_key) = (id.to_owned(), id.to_owned(), key.clone());
         let failed = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
         let build_failed = failed.clone();
         let options = WindowOptions {
@@ -1144,7 +1426,11 @@ impl AppWindow {
                 window.set_window_title(&title);
                 window.on_window_should_close(cx, move |_, cx| {
                     let _ = owner.update(cx, |this, _, cx| {
-                        if let Some(page) = this.canvas_state.browsers.pages.get_mut(&closed) { page.popped = None; }
+                        if let Some(ui) = this.canvas_state.browsers.panes.get_mut(&closed)
+                            && ui.popped.as_ref().is_some_and(|(key, _)| key == &closed_key)
+                        {
+                            ui.popped = None;
+                        }
                         cx.notify();
                     });
                     true
@@ -1172,7 +1458,11 @@ impl AppWindow {
             let _ = owner.update(cx, |this, window, cx| {
                 let error = match (opened, failed.take()) {
                     (Ok(handle), None) => {
-                        if let Some(page) = this.canvas_state.browsers.pages.get_mut(&id) { page.popped = Some(handle.into()); }
+                        if this.tab_by_key(&key).is_some() {
+                            this.canvas_state.browsers.panes.entry(id).or_default().popped = Some((key, handle.into()));
+                        } else {
+                            let _ = handle.update(cx, |_, window, _| window.remove_window());
+                        }
                         return cx.notify();
                     }
                     (Ok(handle), Some(e)) => { let _ = handle.update(cx, |_, window, _| window.remove_window()); e }
@@ -1192,7 +1482,9 @@ impl AppWindow {
             if let Some(native) = &page.native {
                 views.push(native.raw.clone());
             }
-            if let Some(popped) = page.popped.and_then(|window| window.downcast::<BrowserWindow>())
+        }
+        for ui in self.canvas_state.browsers.panes.values() {
+            if let Some(popped) = ui.popped.as_ref().and_then(|(_, window)| window.downcast::<BrowserWindow>())
                 && let Ok(Some(view)) = popped.update(cx, |page, _, _| page.native.as_ref().map(|native| native.raw.clone()))
             {
                 views.push(view);
@@ -1228,12 +1520,12 @@ impl AppWindow {
 
     /// The channel web views report into, and the task that hands its events to the window.
     /// The task waits on the channel: nothing runs while pages are quiet.
-    fn browser_events(&mut self, window: &mut Window, cx: &mut Context<Self>) -> async_channel::Sender<(String, Event)> {
+    fn browser_events(&mut self, window: &mut Window, cx: &mut Context<Self>) -> async_channel::Sender<(String, u64, Event)> {
         if let Some(tx) = &self.canvas_state.browsers.events { return tx.clone(); }
-        let (tx, rx) = async_channel::unbounded::<(String, Event)>();
+        let (tx, rx) = async_channel::unbounded::<(String, u64, Event)>();
         cx.spawn_in(window, async move |this, cx| {
-            while let Ok((id, event)) = rx.recv().await {
-                if this.update_in(cx, |this, window, cx| this.browser_event(id, event, window, cx)).is_err() { break; }
+            while let Ok((key, view, event)) = rx.recv().await {
+                if this.update_in(cx, |this, window, cx| this.browser_event(key, view, event, window, cx)).is_err() { break; }
             }
         }).detach();
         self.canvas_state.browsers.events = Some(tx.clone());
@@ -1241,28 +1533,30 @@ impl AppWindow {
     }
 
     /// Makes the page live at the pane's current scale and window position.
-    fn wake_browser_result(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+    pub(super) fn wake_browser_result(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         self.require_browser_url(id)?;
-        let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
-        let pane = doc.panes.iter().find(|p| p.id == id).cloned().ok_or_else(|| format!("no pane {id}"))?;
-        if !doc.shows(pane.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
+        let doc = &self.canvas_state.doc;
+        let saved = doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
+        let pane = self.canvas_state.shown.as_ref().and_then(|shown| shown.panes.iter().find(|p| p.id == id)).unwrap_or(saved).clone();
+        if !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
         let frame = self.body_rect(&pane).ok_or("the canvas is not shown")?;
         let camera = self.canvas_state.doc.camera;
         let [_, _, width, height] = pane_body(&pane, camera);
         let zoom = page_zoom(&pane, camera, [width, height]);
         self.ensure_view(id, window, cx)?;
-        let page = self.canvas_state.browsers.pages.get_mut(id).unwrap();
+        let key = self.page_key(id).unwrap();
+        let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
         page.live = Some(placement(&pane, camera));
         (page.told, page.watch) = (false, false);
         page.native.as_ref().unwrap().view.update(cx, |v, _| show_view(v, frame, zoom));
-        self.canvas_state.selected = vec![id.to_owned()];
+        self.select_browser_pane(id);
         self.canvas_changed(cx);
         cx.notify();
         Ok(())
     }
 
     pub(super) fn rest_live_browser(&mut self, id: &str, cx: &mut Context<Self>) {
-        if self.canvas_state.browsers.pages.get(id).is_some_and(|page| page.live.is_some()) {
+        if self.active_page(id).is_some_and(|page| page.live.is_some()) {
             self.rest_browser(id, cx);
         }
     }
@@ -1270,17 +1564,25 @@ impl AppWindow {
     /// Steps a live page aside: snapshot, then hide (in `Event::Rested`), so the pane never
     /// shows blank. A resting page with a view only refreshes its snapshot.
     pub(super) fn rest_browser(&mut self, id: &str, cx: &mut Context<Self>) {
-        let Some(page) = self.canvas_state.browsers.pages.get_mut(id) else { return };
+        if let Some(key) = self.page_key(id) { self.rest_page(&key, cx); }
+    }
+
+    fn rest_page(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(page) = self.canvas_state.browsers.pages.get_mut(key) else { return };
         let Some(view) = page.native.as_ref().map(|n| n.view.clone()) else { return };
-        page.live = None;
-        self.canvas_state.browsers.last_masks.borrow_mut().remove(id);
-        // A pick not finished before the page rests is over.
+        let view_id = page.view_id;
+        let was_live = page.live.take().is_some();
+        self.canvas_state.browsers.last_masks.borrow_mut().remove(key);
         page.picking = false;
+        page.pick = false;
         page.watch = true;
         let Some(tx) = self.canvas_state.browsers.events.clone() else { return };
-        let owned = id.to_owned();
-        view.update(cx, |v, _| { let _ = v.focus_parent(); snapshot(v.raw(), move |shot| { let _ = tx.try_send((owned, Event::Rested(shot))); }); });
-        self.note_browser_url(id, cx);
+        let owned = key.to_owned();
+        view.update(cx, |v, _| {
+            if was_live { let _ = v.focus_parent(); }
+            snapshot(v.raw(), move |shot| { let _ = tx.try_send((owned, view_id, Event::Rested(shot))); });
+        });
+        self.note_browser_url(key, cx);
         cx.notify();
     }
 
@@ -1288,50 +1590,55 @@ impl AppWindow {
     /// canvas view) for media still playing; a playing one is toasted (`Event::Playing`).
     pub(super) fn watch_pages(&self, drawn: &[String], cx: &mut Context<Self>) {
         let unseen: Vec<String> = self.canvas_state.browsers.pages.iter()
-            .filter(|(id, p)| p.watch && !p.told && !drawn.contains(id)).map(|(id, _)| id.clone()).collect();
+            .filter(|(key, page)| page.watch && !page.told && !drawn.contains(key)).map(|(key, _)| key.clone()).collect();
         if unseen.is_empty() { return; }
         let this = cx.entity();
         cx.defer(move |cx| this.update(cx, |this, _| for id in unseen {
-            let Some(page) = this.canvas_state.browsers.pages.get_mut(&id) else { continue };
+            let Some(page) = this.canvas_state.browsers.pages.get_mut(&id).filter(|p| p.watch && !p.told) else { continue };
             page.watch = false;
             let (Some(raw), Some(tx)) = (page.native.as_ref().map(|n| n.raw.clone()), this.canvas_state.browsers.events.clone()) else { continue };
+            let view = page.view_id;
             let script = "[...document.querySelectorAll('video,audio')].some(m => !m.paused && !m.ended && m.readyState > 2)";
             let _ = raw.raw().evaluate_script_with_callback(script, move |result| {
-                if result.trim() == "true" { let _ = tx.try_send((id.clone(), Event::Playing)); }
+                if result.trim() == "true" { let _ = tx.try_send((id.clone(), view, Event::Playing)); }
             });
         }));
     }
 
     /// Runs a script in the page; false when the pane has no view.
-    fn eval_browser(&mut self, id: &str, script: &str) -> bool {
+    pub(super) fn eval_browser(&mut self, id: &str, script: &str) -> bool {
         let Some(raw) = self.raw_browser(id) else { return false };
         let _ = raw.raw().evaluate_script(script);
         true
     }
 
-    fn raw_browser(&self, id: &str) -> Option<gpui_wry::WebViewHandle> {
-        self.canvas_state.browsers.pages.get(id)?.native.as_ref().map(|n| n.raw.clone())
+    pub(super) fn raw_browser(&self, id: &str) -> Option<gpui_wry::WebViewHandle> {
+        self.raw_page(&self.page_key(id)?)
     }
 
-    fn navigate_browser(&mut self, id: &str, url: &str, cx: &mut Context<Self>) {
-        let Some(raw) = self.raw_browser(id) else { return };
-        self.begin_load(id, cx);
+    fn raw_page(&self, key: &str) -> Option<gpui_wry::WebViewHandle> {
+        self.canvas_state.browsers.pages.get(key)?.native.as_ref().map(|n| n.raw.clone())
+    }
+
+    fn navigate_browser(&mut self, key: &str, url: &str, cx: &mut Context<Self>) {
+        let Some(raw) = self.raw_page(key) else { return };
+        self.begin_load(key, cx);
         let _ = raw.raw().load_url(url);
     }
 
     /// Answers one held reply from the loaded page.
-    fn answer_browser(&mut self, id: &str, ask: Ask) {
-        let Some(raw) = self.raw_browser(id) else { return };
+    fn answer_browser(&mut self, key: &str, ask: Ask) {
+        let Some(raw) = self.raw_page(key) else { return };
         // No page ever committed (the server refused or never answered): say so, since
         // WebKit would drop the script callback and the caller would hear nothing.
         if page_url(raw.raw()).is_none() {
-            let url = self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| p.url()).unwrap_or_default();
+            let url = self.tab_by_key(key).map(|tab| tab.url.as_str()).unwrap_or_default();
             let error = json!({"error": format!("{url} did not load: is its server running?")});
             let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
             let _ = tx.send(error);
             return;
         }
-        let id = id.to_owned();
+        let id = key.split_once('/').unwrap().0.to_owned();
         match ask {
             Ask::Read(tx) => {
                 let tx = std::sync::Mutex::new(Some(tx));
@@ -1379,7 +1686,7 @@ impl AppWindow {
 
     /// Move the pane before making its native view live, since movement rests a live view.
     fn inspect_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
-        if self.canvas_state.browsers.pages.get(id).is_some_and(|p| p.popped.is_some()) {
+        if self.browser_popped(id) {
             return Err("the page is popped out: bring it back first".into());
         }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
@@ -1514,11 +1821,12 @@ impl AppWindow {
         self.require_browser_url(id)?;
         Err("browser panes run on macOS only for now".into())
     }
-    fn wake_browser_result(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+    pub(super) fn wake_browser_result(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         self.require_browser_url(id)?;
         self.ensure_view(id, window, cx)
     }
     pub(super) fn rest_browser(&mut self, _: &str, _: &mut Context<Self>) {}
+    fn rest_page(&mut self, _: &str, _: &mut Context<Self>) {}
     pub(super) fn collapse_browser(&mut self, _: &mut Window, _: &mut Context<Self>) {}
     fn expand_browser(&mut self, _: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
         Err("browser panes run on macOS only for now".into())
@@ -1530,7 +1838,7 @@ impl AppWindow {
         Err("browser panes run on macOS only for now".into())
     }
     pub(super) fn watch_pages(&self, _: &[String], _: &mut Context<Self>) {}
-    fn eval_browser(&mut self, _: &str, _: &str) -> bool { false }
+    pub(super) fn eval_browser(&mut self, _: &str, _: &str) -> bool { false }
     fn navigate_browser(&mut self, _: &str, _: &str, _: &mut Context<Self>) {}
     fn answer_browser(&mut self, _: &str, _: Ask) {}
 }
@@ -1569,16 +1877,28 @@ mod tests {
         assert!(parse_viewport(Some("Mobile")).is_err());
         let camera = Camera { zoom: 0.75, ..Default::default() };
         let mut pane = Pane {
-            id: "p1".into(), kind: Kind::Browser { url: String::new(), home: String::new(), viewport: None },
+            id: "p1".into(), kind: Kind::Browser {
+                tabs: vec![crate::canvas::Tab { id: "t1".into(), url: String::new(), title: String::new() }],
+                active: 0, home: String::new(), viewport: None,
+            },
             rect: [0., 0., 640., 838.], z: 1, space: None, pinned: None,
         };
         assert_eq!(page_zoom(&pane, camera, [640., 800.]), 0.75);
         pane.pinned = Some(pane.rect);
         assert_eq!(page_zoom(&pane, camera, [640., 800.]), 1.);
-        pane.kind = Kind::Browser { url: String::new(), home: String::new(), viewport: Some([1280., 800.]) };
+        let Kind::Browser { viewport, .. } = &mut pane.kind else { unreachable!() };
+        *viewport = Some([1280., 800.]);
         assert_eq!(page_zoom(&pane, camera, [640., 800.]), 0.5);
-        pane.kind = Kind::Browser { url: String::new(), home: String::new(), viewport: Some([0., 0.]) };
+        let Kind::Browser { viewport, .. } = &mut pane.kind else { unreachable!() };
+        *viewport = Some([0., 0.]);
         assert_eq!(page_zoom(&pane, camera, [640., 800.]), 1.);
+    }
+
+    #[test]
+    fn terminal_links_reuse_only_the_last_shown_browser() {
+        assert_eq!(super::link_target(Some("p2"), ["p1", "p2"]), Some("p2".into()));
+        assert_eq!(super::link_target(Some("p2"), ["p1"]), None);
+        assert_eq!(super::link_target(None, ["p1"]), None);
     }
 
     #[test]
@@ -1702,7 +2022,7 @@ impl AppWindow {
     /// Retakes a resting browser's snapshot at its settled pane size.
     pub(super) fn resize_resting_browser(&mut self, id: &str, cx: &mut Context<Self>) {
         #[cfg(target_os = "macos")]
-        if let Some(page) = self.canvas_state.browsers.pages.get(id).filter(|p| p.live.is_none())
+        if let Some(page) = self.active_page(id).filter(|p| p.live.is_none())
             && let Some(native) = &page.native
             && let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id)
         {

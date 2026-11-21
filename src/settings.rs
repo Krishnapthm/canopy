@@ -392,7 +392,7 @@ person_settings! {
     #[serde(skip_serializing_if = "KeepCookies::is_until_quit")]
     browser_keep_cookies: KeepCookies = KeepCookies::UntilQuit => "Browser pane cookies and site data: until_quit (deleted when Canopy quits or starts) or forever.";
     #[serde(skip_serializing_if = "OpenLinks::is_built_in")]
-    browser_open_links: OpenLinks = OpenLinks::BuiltIn => "Where links open: built_in (a browser pane) or default (the system browser).";
+    browser_open_links: OpenLinks = OpenLinks::BuiltIn => "Where HTTP and HTTPS links clicked in terminals open: built_in (a new browser tab) or default (the system browser).";
     canvas_resize_terminals: bool = true => "Refit a canvas terminal's grid to its cell as the cell resizes (no longer in Settings; false keeps the grid and scales it).";
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";

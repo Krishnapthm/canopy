@@ -2062,6 +2062,7 @@ impl AppWindow {
                 if this.has_canvas() { this.open_preview(json!({"path":path}), window, cx); }
                 else { crate::links::open(&crate::links::Target::File(path.clone())); }
             }
+            TerminalEvent::OpenUrl(url) => this.open_link(&addr, url.clone(), window, cx),
             TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
             TerminalEvent::TitleChanged => this.publish(cx),
             TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
@@ -2813,6 +2814,7 @@ impl AppWindow {
         // Close the dialog holding the keyboard, not the terminal behind it.
         let implicit_close = match crate::keys::current(name).as_str() {
             "tab.close" => Self::arg(&args, "id").is_none(),
+            "canvas.browser_tab_close" => args["pane"].is_null() && self.selected_browser().is_none(),
             "pane.close" => Self::arg(&args, "pane").is_none(),
             _ => false,
         };
@@ -3011,7 +3013,8 @@ impl AppWindow {
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" => self.pane_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
             | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
-            | "canvas.browser_cookies" | "canvas.browser_clear" | "canvas.browser_inspect" => self.browser_command(name, a, window, cx),
+            | "canvas.browser_cookies" | "canvas.browser_clear" | "canvas.browser_inspect"
+            | "canvas.browser_tab_new" | "canvas.browser_tab_select" | "canvas.browser_tab_close" => self.browser_command(name, a, person, window, cx),
             name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
             "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),

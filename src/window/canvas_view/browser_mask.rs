@@ -141,7 +141,8 @@ impl AppWindow {
             .unwrap_or_default();
         self.bounds.borrow_mut().remove("browser-canvas");
         let pages: Vec<_> = live
-            .map(|(id, view)| {
+            .filter_map(|(key, view)| {
+                let (id, _) = key.split_once('/')?;
                 let expanded = state.browser_tab.as_deref() == Some(id);
                 let body = doc
                     .panes
@@ -158,7 +159,7 @@ impl AppWindow {
                 } else {
                     vec![]
                 };
-                (id.to_owned(), view, expanded, body, above)
+                Some((key.to_owned(), id.to_owned(), view, expanded, body, above))
             })
             .collect();
         let bounds = self.bounds.clone();
@@ -174,7 +175,7 @@ impl AppWindow {
                         .filter(|(k, _)| k.starts_with("cover:"))
                         .map(|(_, b)| rect(*b))
                         .collect();
-                    for (id, view, expanded, body, above) in pages {
+                    for (key, id, view, expanded, body, above) in pages {
                         let (frame, pieces) = match canvas {
                             Some(canvas @ [x, y, _, _]) if expanded || body.is_some() => {
                                 let frame = if expanded {
@@ -194,15 +195,16 @@ impl AppWindow {
                         };
                         // Compare local positions so a translating page can reuse its mask.
                         let local = (pieces != [frame]).then(|| local_rects(frame, &pieces));
-                        if last.borrow().get(&id) == Some(&local) {
+                        if last.borrow().get(&key) == Some(&local) {
                             continue;
                         }
                         if set_mask(view.raw(), frame, &pieces) {
-                            last.borrow_mut().insert(id, local);
+                            last.borrow_mut().insert(key, local);
                         } else {
                             let this = this.clone();
                             window.defer(cx, move |window, cx| {
                                 let _ = this.update(cx, |this, cx| {
+                                    if this.page_key(&id).as_deref() != Some(key.as_str()) { return; }
                                     if expanded
                                         && this.canvas_state.browser_tab.as_deref()
                                             == Some(id.as_str())
