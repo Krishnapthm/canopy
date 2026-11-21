@@ -62,7 +62,7 @@ A browser pane's header has two rows. The pop-out window draws the same header.
 
 - The tab list and **New tab**.
 - **⋯**, the menu below.
-- **Pop out**, **Expand** and **Close** (see below). In the pop-out, **Close** brings the page back, and **Expand** is not shown.
+- **Pop out**, **Expand** and **Close** (see below). In the pop-out, **Close** brings the page back, and **Pop out** and **Expand** are not shown. Its menu has no Viewport rows: the page fills the window.
 
 **Row 2** holds navigation:
 

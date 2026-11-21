@@ -671,7 +671,8 @@ impl AppWindow {
             .child(div().flex_1())
             .child(panel_button("browser-more", "icons/ellipsis.svg", c("muted-foreground"), c("hover")).aria_label("More").tooltip(strip_tooltip("More".into(), None))
                 .on_click(cx.listener(move |this, _, window, cx| this.browser_menu(&more, host, window, cx))))
-            .child(button("browser-pop", "icons/picture-in-picture-2.svg", pop_label, "canvas.browser_pop", cx))
+            // In the pop-out, Close already brings the page back.
+            .when(host == Host::Pane, |d| d.child(button("browser-pop", "icons/picture-in-picture-2.svg", pop_label, "canvas.browser_pop", cx)))
             .when(host == Host::Pane, |d| d.child(button("browser-expand", "icons/maximize-2.svg", "Expand", "canvas.browser_expand", cx)))
             .child(match host {
                 Host::Pane => button("browser-close", "icons/x.svg", "Close", "canvas.close", cx),
@@ -791,7 +792,9 @@ impl AppWindow {
     fn browser_menu(&mut self, id: &str, host: Host, window: &mut Window, cx: &mut Context<Self>) {
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
         let canvas::Kind::Browser { viewport, .. } = &pane.kind else { return };
-        let items = menu_items(id, *viewport, self.person.browser_keep_cookies, self.person.browser_open_links, &open_in_label());
+        let mut items = menu_items(id, *viewport, self.person.browser_keep_cookies, self.person.browser_open_links, &open_in_label());
+        // The pop-out shows the page at window size: viewport presets apply on the canvas only.
+        if host == Host::Window { items.retain(|i| i[1] != "canvas.browser_viewport" && i[0] != "Viewport"); }
         self.show_browser_menu(id, host, items, window, cx);
     }
 
@@ -1951,13 +1954,15 @@ impl AppWindow {
     /// Captures the same still used when a browser rests, with an RGBA copy for annotations.
     pub(super) fn freeze_browser(&mut self, pane: &str, done: impl FnOnce(&mut Self, Option<image::RgbaImage>, &mut Context<Self>) + 'static, cx: &mut Context<Self>) {
         let Some(key) = self.page_key(pane) else { return done(self, None, cx) };
+        // A popped page stays in sight in its window: no "still playing" watch for it.
+        let popped = self.browser_popped(pane);
         let Some(page) = self.canvas_state.browsers.pages.get_mut(&key) else { return done(self, None, cx) };
         let Some(view) = page.native.as_ref().map(|n| n.view.clone()) else { return done(self, None, cx) };
         let view_id = page.view_id;
         page.live = None;
         page.pick = false;
         page.picking = false;
-        page.watch = true;
+        page.watch = !popped;
         self.canvas_state.browsers.last_masks.borrow_mut().remove(&key);
         let events = self.canvas_state.browsers.events.clone();
         let id = key.clone();
@@ -2408,7 +2413,9 @@ impl AppWindow {
     /// Retakes a resting browser's snapshot at its settled pane size.
     pub(super) fn resize_resting_browser(&mut self, id: &str, cx: &mut Context<Self>) {
         #[cfg(target_os = "macos")]
-        if let Some(page) = self.active_page(id).filter(|p| p.live.is_none())
+        // A popped page is sized by its own window.
+        if !self.browser_popped(id)
+            && let Some(page) = self.active_page(id).filter(|p| p.live.is_none())
             && let Some(native) = &page.native
             && let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id)
         {
