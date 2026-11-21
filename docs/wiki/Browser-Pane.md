@@ -1,6 +1,6 @@
 # Browser Pane
 
-A browser pane shows a web page on the canvas, right next to the agent working on it. Its main use is your own app: put the dev server beside the agent, watch changes land, and when something looks wrong, click the element and quote it to the agent with its component and source file. Browser panes run on macOS only.
+A browser pane keeps web pages in tabs on the canvas, right next to the agent working on it. Its main use is your own app: put the dev server beside the agent, watch changes land, and when something looks wrong, click the element and quote it to the agent with its component and source file. Browser panes run on macOS only.
 
 ## Open a page
 
@@ -20,6 +20,26 @@ canopy pane open p2 http://localhost:3000/pricing  # point an existing pane at a
 
 `canopy pane open` also makes the new address the pane's **Home**.
 
+## Tabs
+
+Click **New tab** (the plus button) in the browser pane's header to open an empty
+tab and focus its address field. Click a tab to switch to it, or click its
+**Close tab** button to close it. In [canvas mode](Canvas), `Cmd+W` also closes
+the active tab of the selected browser pane.
+
+Closing the active tab selects the tab to its left, or the next tab when the
+first tab closes. Closing the last tab leaves the pane open with an empty tab.
+Each tab keeps its own address and page history while its view is open.
+
+## Links from terminals
+
+Hold `Cmd` and click an HTTP or HTTPS link in a terminal. With **Open links**
+set to **Built-in browser** (`built_in`), the link opens in a new tab in the
+browser pane you used last in the current place. If that pane is unavailable, Canopy opens a browser pane
+beside the terminal, or centers it when the terminal is off the canvas.
+Choose **Default browser** (`default`) to open links in your system browser.
+See [Settings and Themes](Settings-and-Themes#browser).
+
 ## Use the page
 
 A browser pane is either resting or live:
@@ -30,8 +50,9 @@ A browser pane is either resting or live:
 
 ## The header
 
-A browser pane's header is its controls, left to right:
+A browser pane's header holds its tabs and controls for the active page, left to right:
 
+- The tab list and **New tab**.
 - **Back**, **Forward** and **Reload**.
 - The **address field**. Type an address and press Enter to open it (`localhost:3000` gets `http://`); this also sets the pane's **Home**. Press Escape to put the current address back. While you are not typing, the field follows the page.
 - **⋯**, the menu below.
@@ -144,7 +165,7 @@ Browser panes are built for local development, and they keep to themselves:
 - Downloads are blocked.
 - Links that ask for a new window open in the same pane.
 - The element picker is a bundled copy of an open-source tool. It loads only when you pick, with its telemetry turned off and its version check, open-file link and web font import removed.
-- Canopy keeps the last snapshot of each pane in `<app home>/browser/<pane>.png` so the canvas can draw it after a restart, and deletes it when you close the pane.
+- Canopy keeps the last snapshot of each tab in `<app home>/browser/<pane>-<tab>.png` so the canvas can draw it after a restart. Closing the tab or pane deletes the snapshot.
 
 See [Security and Privacy](Security-and-Privacy) for the app as a whole.
 

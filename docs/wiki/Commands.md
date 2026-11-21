@@ -236,12 +236,40 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a browser or simulator pane at a target. A browser loads the URL and makes it Home. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
+Point a browser or simulator pane at a target. A browser loads the URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
 
 | Argument | Required |
 |---|---|
 | `pane` | yes |
 | `target` | yes |
+| `tab` | no |
+
+## `canvas.browser_tab_new`
+
+Open a new tab in a browser pane. Pass a URL to load it, or omit url for an empty tab. Replies with pane and tab. With no pane and no single browser pane selected, runs canvas.new.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `url` | no |
+
+## `canvas.browser_tab_close`
+
+Close a tab in a browser pane. Without tab, closes the active tab. Closing the last tab leaves an empty tab. With no pane and no single browser pane selected, runs tab.close if bound.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `tab` | no |
+
+## `canvas.browser_tab_select`
+
+Switch to a browser tab by id. Pass pane or use the selected browser pane.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `tab` | yes |
 
 ## `canvas.browser_back`
 

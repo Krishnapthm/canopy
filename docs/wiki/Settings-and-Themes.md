@@ -33,9 +33,9 @@ Open **Settings** > **Look** and scroll to **Browser**. The same settings are av
 | Setting | Values |
 |---|---|
 | `browser_keep_cookies` | `until_quit` (default) clears cookies and site data at quit and on the next start. `forever` keeps them. |
-| `browser_open_links` | `built_in` (default) selects a browser pane. `default` selects the system browser. Link routing will use this preference in a later phase. |
+| `browser_open_links` | `built_in` (initial setting) opens HTTP and HTTPS links clicked in terminals in a new browser tab. `default` opens them in the system browser. |
 
-See [Cookies and site data](Browser-Pane#cookies-and-site-data) for the browser data controls.
+See [Cookies and site data](Browser-Pane#cookies-and-site-data) for data controls and [Links from terminals](Browser-Pane#links-from-terminals) for where new tabs open.
 
 ## Themes
 
