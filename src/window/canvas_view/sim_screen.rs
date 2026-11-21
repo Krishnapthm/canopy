@@ -280,12 +280,12 @@ impl SimScreen {
         self.note(By::You, what);
     }
 
-    fn touch_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
+    fn touch_move(&mut self, e: &MouseMoveEvent) {
         if !self.touching || e.pressed_button != Some(MouseButton::Left) { return; }
         if let Some(at) = self.to_screen_clamped(e.position) { self.send(Input::Touch { phase: Phase::Move, x: at[0], y: at[1] }); }
     }
 
-    pub(super) fn touch_up(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+    pub(super) fn touch_up(&mut self, at: Point<Pixels>) {
         if !self.touching { return; }
         self.touching = false;
         if let Some(to) = self.to_screen_clamped(at) {
@@ -589,9 +589,9 @@ impl Render for SimScreen {
             .cursor(CursorStyle::Arrow)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::touch_down))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| this.scroll(e, cx))))
-            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| this.touch_move(e, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, cx| this.touch_up(e.position, cx)))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, cx| this.touch_up(e.position, cx)));
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, _| this.touch_move(e)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, _| this.touch_up(e.position)))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, e: &MouseUpEvent, _, _| this.touch_up(e.position)));
 
         root
     }

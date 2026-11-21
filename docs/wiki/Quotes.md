@@ -1,6 +1,6 @@
 # Quotes
 
-A quote takes something you selected in a pane and puts a precise reference to it into an agent's prompt, so you can say "fix this" and point instead of describe. You can add a message, and You can review the draft in the agent’s prompt before you send it.
+A quote takes something you selected in a pane and puts a precise reference to it into an agent's prompt, so you can say "fix this" and point instead of describe. You can add a message. Canopy never presses `Enter` for a quote, so you see exactly what the agent will get before you send it. Annotations are the exception: they are submitted.
 
 This page is the reference for the quote menu and quote formats. For examples of quoting from each kind of pane, read [Point Agents at Things](Point-Agents-at-Things).
 

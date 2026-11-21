@@ -662,7 +662,7 @@ impl AppWindow {
         cx.notify();
         if matches!(a.host, Host::Sim { .. }) {
             if let Some(screen) = self.canvas_state.sims.get(id).and_then(|v| v.live.as_ref()) {
-                screen.update(cx, |s, cx| s.touch_up(window.mouse_position(), cx));
+                screen.update(cx, |s, _| s.touch_up(window.mouse_position()));
             }
             let result = self.capture_sim(id, cx).map(|(_, capture)| capture);
             self.replace_annotation_still(id, result, window, cx);
