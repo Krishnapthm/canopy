@@ -73,7 +73,8 @@
   },
   "layout:main": {
     "ctrl-shift-a": "canvas.select_all",
-    "ctrl-shift-t": "canvas.new",
+    "ctrl-shift-t": "canvas.browser_tab_new",
+    "ctrl-shift-w": "canvas.browser_tab_close",
     "ctrl-alt-t": {"command": "canvas.new", "args": {"like": true}},
     "ctrl-=": "canvas.zoom_in",
     "ctrl-+": "canvas.zoom_in",

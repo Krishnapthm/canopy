@@ -24,7 +24,7 @@ impl AppWindow {
             "canvas.pane_read" => self.pane_read(a, cx),
             "canvas.pane_set" => self.pane_set(a, cx),
             "canvas.pane_shot" => self.pane_shot(a, window),
-            _ if self.is_browser(a) => self.browser_open(a["pane"].as_str().unwrap(), a["target"].as_str().unwrap_or_default(), window, cx),
+            _ if self.is_browser(a) => self.browser_open(a["pane"].as_str().unwrap(), a["target"].as_str().unwrap_or_default(), &a["tab"], window, cx),
             _ => self.pane_open(a, window, cx),
         };
         self.answer(r);
@@ -283,8 +283,24 @@ mod tests {
             assert_eq!(this.run_as("canvas.pane_open", Value::Null, true, window, cx), json!({"asked":"url"}));
             assert_eq!(this.overlays.len(), overlay_count);
             this.canvas_state.selected.clear();
-            assert_eq!(this.canvas_state.doc.panes.iter().find(|p| p.id == "p1").unwrap().kind,
-                canvas::Kind::Browser { url: String::new(), home: String::new(), viewport: None });
+            let active = |this: &crate::window::AppWindow, id: &str| {
+                this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap().active_tab().unwrap().clone()
+            };
+            assert_eq!(active(this, "p1").url, "");
+            let (new, select, close) = ("canvas.browser_tab_new", "canvas.browser_tab_select", "canvas.browser_tab_close");
+            assert_eq!(this.run_as(new, json!({"pane":"p1"}), false, window, cx), json!({"pane":"p1","tab":"t2"}));
+            assert_eq!(active(this, "p1").id, "t2");
+            assert_eq!(this.run_as(select, json!({"pane":"p1","tab":"t1"}), false, window, cx), json!({"ok":true}));
+            assert_eq!(active(this, "p1").id, "t1");
+            assert_eq!(this.run_as(select, json!({"pane":"p1","tab":"missing"}), false, window, cx)["error"], "no tab missing in browser pane p1");
+            assert!(this.run_as(new, json!({"pane":"p1","url":"file:///tmp/page.html"}), false, window, cx)["error"].is_string());
+            assert_eq!(active(this, "p1").id, "t1");
+            assert_eq!(this.run_as(close, json!({"pane":"p1","tab":"t1"}), false, window, cx), json!({"ok":true}));
+            assert_eq!(active(this, "p1").id, "t2");
+            assert_eq!(this.run_as(close, json!({"pane":"p1"}), false, window, cx), json!({"ok":true}));
+            assert_eq!(active(this, "p1").url, "");
+            let pane = this.canvas_state.doc.panes.iter().find(|p| p.id == "p1").unwrap();
+            assert!(matches!(&pane.kind, canvas::Kind::Browser { tabs, active: 0, .. } if tabs.len() == 1));
             let (tx, rx) = std::sync::mpsc::channel();
             this.held_reply = Some(tx);
             this.browser_reply("p1", None, window, cx).unwrap();
@@ -295,7 +311,15 @@ mod tests {
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
             let web = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","wire":"t1"}), window, cx).unwrap();
             assert_eq!(web, json!({"pane":"p3","kind":"browser","wired":true,"url":"http://localhost:3000"}));
-            assert_eq!(this.canvas_state.doc.panes.iter().find(|p| p.id == "p3").unwrap().kind, canvas::Kind::Browser { url: "http://localhost:3000".into(), home: "http://localhost:3000".into(), viewport: None });
+            assert_eq!(active(this, "p3").url, "http://localhost:3000");
+            let url = "http://localhost:3000/pricing";
+            assert_eq!(this.run_as("canvas.pane_open", json!({"pane":"p3","target":url,"tab":"new"}), false, window, cx), json!({"pane":"p3","url":url,"tab":"t2"}));
+            assert_eq!(active(this, "p3").url, url);
+            assert_eq!(this.run_as(new, json!({"pane":"p3"}), false, window, cx)["tab"], "t3");
+            let (tx, rx) = std::sync::mpsc::channel();
+            this.held_reply = Some(tx);
+            this.pane_command("canvas.pane_read", &json!({"pane":"p3"}), window, cx);
+            assert_eq!(rx.try_recv().unwrap()["text"], canvas::envelope("p3", "browser", &[("url", "")], "New tab"));
             // Pinned: it opens in the top right corner, and nothing on the canvas moves for it.
             let rects = |this: &crate::window::AppWindow| this.canvas_state.doc.panes.iter().filter(|p| p.pinned.is_none()).map(|p| (p.id.clone(), p.rect)).collect::<Vec<_>>();
             let before = rects(this);

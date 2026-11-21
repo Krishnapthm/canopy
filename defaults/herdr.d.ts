@@ -59,7 +59,7 @@ export function playSound(sound: string): null;
  *   pane.focus {pane | terminal}, pane.go {direction}, pane.swap {pane?, direction | target}.
  *   Pane menus get target { pane, terminal }.
  * Canvas panes: canvas.pane_new {kind: "file", path, wire?, point?}, canvas.pane_read {pane},
- *   canvas.pane_shot {pane, path?}, canvas.pane_open {pane, target}, canvas.close {pane}.
+ *   canvas.pane_shot {pane, path?}, canvas.pane_open {pane, target, tab?}, canvas.close {pane}.
  * Terminals: terminal.open {argv?, folder?, place?: "tab" | "right" | "down"}, terminal.kill {terminal},
  *   terminal.keep {terminal, place?} (a running one without a pane, e.g. a sub-agent, gets one),
  *   terminal.park {terminal} (its pane goes, it keeps running; the menu's "Send back"),
@@ -227,7 +227,11 @@ export interface CanvasPane {
 export interface CanvasBrowserPane extends CanvasPane {
   kind: "browser";
   props: {
+    /** The active tab's address. */
     url: string;
+    tabs: { id: string; url: string; title?: string }[];
+    /** Zero-based index in tabs. */
+    active: number;
     home: string;
     /** Fixed CSS page size; absent: responsive */
     viewport?: [number, number];

@@ -611,7 +611,7 @@ export default class Settings extends View {
       .child(this.row(t, "Focused tile grows", "In tile view the selected tile takes more room. Off keeps every tile the same size.", this.toggle(t, "st-tile-grows", this.person.tile_focus_grows === true, (_e, cx) => this.change((q) => { if (q.tile_focus_grows) delete q.tile_focus_grows; else q.tile_focus_grows = true; }, cx))))
       .child(this.heading(t, "Browser"))
       .child(this.row(t, "Keep cookies", "Until quit deletes cookies and site data when Canopy quits. Kept between runs on macOS 14 or later.", this.settingPicker(t, "browser_keep_cookies", [["until_quit", "Until quit"], ["forever", "Forever"]])))
-      .child(this.row(t, "Open links", "Where links you click in terminals open.", this.settingPicker(t, "browser_open_links", [["built_in", "Built-in browser"], ["default", "Default browser"]])))
+      .child(this.row(t, "Open links", "Open web links clicked in terminals in a new browser tab or in the system browser.", this.settingPicker(t, "browser_open_links", [["built_in", "Built-in browser"], ["default", "Default browser"]])))
       .child(this.heading(t, "Size and fonts"))
       .child(
         this.row(

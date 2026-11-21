@@ -113,6 +113,8 @@ pub(super) struct State {
     drag_live: bool,
     /// Browser panes' web views and snapshots (not saved).
     pub(super) browsers: browser::Browsers,
+    /// Most recently used browser pane, for routing terminal links.
+    last_browser: Option<String>,
     /// The browser pane expanded into a tab of the top strip, filling the canvas area (not saved).
     pub(super) browser_tab: Option<String>,
     /// An image region drag: pane id, start and current window points.
@@ -222,6 +224,7 @@ impl State {
             tile: None,
             drag_live: false,
             browsers: Default::default(),
+            last_browser: None,
             browser_tab: None,
             region: None,
             image_sizes: HashMap::new(),
@@ -2369,6 +2372,7 @@ impl AppWindow {
         let resize = drag.clone();
         let [_, _, width, height] = card.pinned.unwrap_or(card.rect);
         let raise = drag.clone();
+        let browser = card.url().is_some();
         #[cfg(target_os = "macos")]
         let rest = card.id.clone();
         let card_element = div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
@@ -2376,7 +2380,14 @@ impl AppWindow {
                 .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).overflow_hidden()
                 .occlude()
                 // Capture phase: the header and corner stop propagation, and a click anywhere raises.
-                .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, _, cx| if e.button == MouseButton::Left { this.raise_pane(&raise, cx); }))
+                .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                    if e.button != MouseButton::Left { return; }
+                    this.raise_pane(&raise, cx);
+                    if browser {
+                        this.select_browser_pane(&raise);
+                        cx.notify();
+                    }
+                }))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         #[cfg(target_os = "macos")]
         let card_element = card_element.when(card.url().is_some(), |d| d.on_mouse_down_out(
@@ -2896,7 +2907,7 @@ impl AppWindow {
                     element
                 }
                 canvas::Kind::Browser { .. } => {
-                    drawn_pages.push(card.id.clone());
+                    drawn_pages.extend(self.page_key(&card.id));
                     let header = self.browser_header(&card.id, cx);
                     let body = self.browser_body(card, camera, cx);
                     self.pane_card(card, SharedString::default(), String::new(), String::new(), Some(header), body, camera, cx)

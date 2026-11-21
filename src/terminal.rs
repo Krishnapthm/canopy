@@ -120,6 +120,7 @@ enum LinkTarget {
 pub enum TerminalEvent {
     Peek(String),
     Preview(std::path::PathBuf),
+    OpenUrl(String),
     TitleChanged,
     /// The program ended.
     Ended,
@@ -2422,6 +2423,12 @@ impl Render for TerminalView {
                 {
                     match target {
                         LinkTarget::External(links::Target::File(path)) if path.is_file() => cx.emit(TerminalEvent::Preview(path)),
+                        LinkTarget::External(links::Target::Url(url))
+                            if crate::settings::get().browser_open_links == crate::settings::OpenLinks::BuiltIn
+                                && url.split_once("://").is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")) =>
+                        {
+                            cx.emit(TerminalEvent::OpenUrl(url));
+                        }
                         LinkTarget::External(target) => links::open(&target),
                         LinkTarget::Terminal(address) => cx.emit(TerminalEvent::Peek(address)),
                     }
