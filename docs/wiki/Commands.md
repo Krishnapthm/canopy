@@ -179,7 +179,7 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 
 ## `canvas.pane_new`
 
-Open a pane of a kind ("file" with path, "browser" with url, "sim" on a Mac with Xcode, or "mod:<name>" for a mod that declares a pane) at a world point (default: the middle of the view), or with pinned true at the top right of the screen, where it stays while the canvas moves; wire names a terminal to put it beside, in its space, wired to it. A file path already open moves its pane. A browser click without url asks for it. A sim pane shows udid (a simulator, or "booted"), else lists simulators to pick. Replies with pane, kind, path (files), url (browsers), udid (sim) and wired.
+Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. The pane opens at point (the middle of the view by default) or at the top right when pinned is true. Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
 
 | Argument | Required |
 |---|---|
@@ -236,7 +236,7 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a pane at a target: a browser pane loads the URL (http or https; a bare localhost:3000 gets http://) and makes it its Home, and a click without target asks for it; a sim pane takes a udid or "booted" (it boots, and its current udid refreshes the screenshot). Kinds without open refuse.
+Point a browser or simulator pane at a target. A browser loads the URL and makes it Home. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
 
 | Argument | Required |
 |---|---|
@@ -309,7 +309,7 @@ Copy a browser pane's page URL to the clipboard and toast it (pane, else the sel
 
 ## `canvas.browser_viewport`
 
-Resize a browser pane to a preset page size: size responsive (a new pane's size), mobile (390x844) or desktop (1280x800), exact at 100% zoom (the width at any zoom); the top left stays put (pane, else the selected pane).
+Set a browser viewport to responsive, 1280x800, 1024x768, mobile (375x812) or tablet (768x1024). The desktop alias selects 1280x800. Fixed CSS sizes scale to fit and center inside the pane. Responsive pages reflow as the pane resizes. Pass pane or use the selected browser pane.
 
 | Argument | Required |
 |---|---|
