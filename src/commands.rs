@@ -70,7 +70,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.sim_screenshot", &[opt("pane")], "Save a simulator pane's live screen to the Desktop as a PNG. Replies with path. Acts on pane, else the selected simulator pane."),
     cmd("canvas.sim_record", &[opt("pane")], "Start recording a simulator pane's screen to a movie on the Desktop, or stop and save it. Replies with the path when it starts. Acts on pane, else the selected simulator pane."),
     cmd("canvas.sim_annotate", &[opt("pane")], "Draw on a still of a simulator pane's screen, then send it to an agent as a quote; again cancels. Acts on pane, else the selected simulator pane."),
-    cmd("canvas.sim_zoom", &[opt("step"), opt("pane")], "Resize a simulator pane: step actual (1 point per pixel, the default), in or out. Acts on pane, else the selected simulator pane."),
+    cmd("canvas.sim_zoom", &[opt("step"), opt("pane")], "Resize a simulator pane: step actual (1 point per screen pixel, the default), in or out. Acts on pane, else the selected simulator pane."),
     cmd("canvas.sim_pop", &[opt("pane")], "Pop a simulator pane's device out into its own window, or bring it back. Acts on pane, else the selected simulator pane."),
     cmd("canvas.sim_reveal", &[req("path")], "Show a saved screenshot or recording in Finder."),
     cmd("canvas.sim_input", &[req("pane"), req("action"), opt("x"), opt("y"), opt("x1"), opt("y1"), opt("x2"), opt("y2"), opt("ms"), opt("text"), opt("button")], "An agent's input for a live simulator pane, in device points from the top left: action tap (x, y), swipe (x1, y1, x2, y2, ms, default 300), type (text, US keyboard) or press (button: home, lock, power, siri, volume-up, volume-down, action). Starts the device if the pane is off screen."),

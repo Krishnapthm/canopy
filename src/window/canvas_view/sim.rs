@@ -97,13 +97,35 @@ impl AppWindow {
         }
     }
 
+    /// Keeps every sim pane its on-screen size at any zoom: a device is read at its real size,
+    /// like a pin on a map. Its world rect follows the camera, so hit tests, wires and culling
+    /// need nothing special. A pane without a size yet takes it from its rect at this zoom
+    /// (the saved rect and zoom give back the size it had). Runs before each render. Tile view
+    /// sizes every pane to its grid cell, sims too; their sizes come back when it ends.
+    pub(in crate::window) fn pin_sims(&mut self) {
+        let state = &mut self.canvas_state;
+        if state.tile.is_some() { return; }
+        let zoom = state.doc.camera.zoom;
+        let sizes = &mut state.sim_sizes;
+        for doc in std::iter::once(&mut state.doc).chain(state.shown.as_mut()) {
+            for p in doc.panes.iter_mut().filter(|p| p.sim().is_some()) {
+                let s = *sizes.entry(p.id.clone()).or_insert([p.rect[2] * zoom, p.rect[3] * zoom]);
+                p.rect[2] = s[0] / zoom;
+                p.rect[3] = s[1] / zoom;
+            }
+        }
+    }
+
     /// Adds a sim pane (udid empty: it lists simulators to pick) and starts showing it.
     pub(super) fn add_sim_pane(&mut self, udid: String, point: canvas::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> String {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-        // A phone in its bezel (about 1:2) under the 36 px header.
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], 340., 700.], z, space });
+        // A phone in its bezel (about 1:2) under the 36 px header, that size on screen at any zoom.
+        let size = [340., 700.];
+        let zoom = doc.camera.zoom;
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], size[0] / zoom, size[1] / zoom], z, space });
+        self.canvas_state.sim_sizes.insert(id.clone(), size);
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         self.refresh_sim(&id, true, window, cx);
@@ -114,6 +136,7 @@ impl AppWindow {
     /// recordings, and closes their pop-out windows.
     pub(super) fn forget_sims(&mut self, ids: &[String], cx: &mut App) {
         for id in ids {
+            self.canvas_state.sim_sizes.remove(id);
             let Some(view) = self.canvas_state.sims.remove(id) else { continue };
             if let Screen::Shot(old) = view.screen { drop_shot(old, cx); }
             #[cfg(target_os = "macos")]
@@ -317,7 +340,7 @@ impl AppWindow {
         self.answer(Ok(json!({})));
     }
 
-    /// Resizes a sim pane so its device draws at 1 point per pixel ("actual"), or one step
+    /// Resizes a sim pane so its device draws at 1 point per screen pixel ("actual"), or one step
     /// larger ("in") or smaller ("out"). The top left stays put.
     #[cfg(target_os = "macos")]
     fn zoom_sim(&mut self, id: &str, step: &str, screen: &Entity<SimScreen>, cx: &mut Context<Self>) -> Result<Value, String> {
@@ -328,10 +351,13 @@ impl AppWindow {
         let chrome = s.info.as_ref().and_then(|i| i.chrome.as_ref());
         let outer = chrome.map_or(points, |c| [c.size[0] + 2. * c.pad, c.size[1]]);
         let margin = 2. * super::sim_screen::MARGIN;
+        // On-screen pixels: the body is the pane minus its 36 px header and 1 px borders.
+        let size = [outer[0] * scale + margin + 2., outer[1] * scale + margin + canvas::HEADER + 2.];
+        let zoom = self.canvas_state.doc.camera.zoom;
         let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return Err(format!("no pane {id}")) };
-        // The body is the pane minus its 36 px header and 1 px borders.
-        pane.rect[2] = outer[0] * scale + margin + 2.;
-        pane.rect[3] = outer[1] * scale + margin + canvas::HEADER + 2.;
+        pane.rect[2] = size[0] / zoom;
+        pane.rect[3] = size[1] / zoom;
+        self.canvas_state.sim_sizes.insert(id.to_owned(), size);
         self.solve_layout(Some(id), None, cx);
         self.canvas_changed(cx);
         cx.notify();

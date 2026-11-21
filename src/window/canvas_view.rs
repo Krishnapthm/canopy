@@ -38,6 +38,8 @@ pub(super) struct State {
     sub_watches: HashMap<String, Task<()>>,
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
     sims: HashMap<String, sim::SimView>,
+    /// Each sim pane's on-screen size in pixels, kept at any zoom (see `pin_sims`; not saved).
+    sim_sizes: HashMap<String, canvas::Point>,
     bar_hover: Option<String>,
     preview_drag: Option<(String, bool, Point<Pixels>)>,
     pub file: Option<String>,
@@ -171,6 +173,7 @@ impl State {
             sub_watches: HashMap::new(),
             previews: HashMap::new(),
             sims: HashMap::new(),
+            sim_sizes: HashMap::new(),
             bar_hover: None,
             preview_drag: None,
             file: None,
@@ -2296,13 +2299,15 @@ impl AppWindow {
     /// The shared saved-rect frame, header drag and resize corner for boxed panes.
     fn pane_card(&self, card: &canvas::Pane, icon: SharedString, title: String, detail: String, body: AnyElement, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
         let p = camera.to_screen([card.rect[0], card.rect[1]]);
+        // A sim pane keeps its on-screen size (see `pin_sims`), so its chrome does not scale.
+        let ui = if card.sim().is_some() { 1. } else { camera.zoom };
         let drag = card.id.clone();
         let resize = drag.clone();
         (div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
                 .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).overflow_hidden()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(div().flex().items_center().gap(px(8.)).px(px(12.)).h(px(36. * camera.zoom)).flex_none().border_b_1().border_color(c("border"))
+                .child(div().flex().items_center().gap(px(8.)).px(px(12.)).h(px(canvas::HEADER * ui)).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                         this.begin_layout();
                         this.canvas_state.selected = vec![drag.clone()];
@@ -2313,7 +2318,7 @@ impl AppWindow {
                     .child(div().text_ellipsis().child(title))
                     .child(div().flex_1().min_w_0().text_ellipsis().text_color(c("muted-foreground")).child(detail)))
                 .child(div().flex_1().min_h_0().overflow_hidden().child(body))
-                .child(div().absolute().bottom_0().right_0().size(px(12. * camera.zoom)).rounded_br(px(ui::RADIUS))
+                .child(div().absolute().bottom_0().right_0().size(px(12. * ui)).rounded_br(px(ui::RADIUS))
                     .border_r_2().border_b_2().border_color(c("muted-foreground")).cursor(CursorStyle::ResizeUpLeftDownRight)
                     .hover(|d| d.border_color(c("foreground")))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -2535,6 +2540,8 @@ impl AppWindow {
                         if resize {
                             card.rect[2] = (card.rect[2] + d[0]).max(240.);
                             card.rect[3] = (card.rect[3] + d[1]).max(120.);
+                            // A resized sim takes its new on-screen size from the rect.
+                            this.canvas_state.sim_sizes.remove(&id);
                         } else {
                             card.rect[0] += d[0];
                             card.rect[1] += d[1];

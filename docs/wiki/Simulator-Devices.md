@@ -28,6 +28,8 @@ canopy pane new sim <udid>           # a specific simulator
 - Press `Esc` to give the keyboard back to the canvas.
 - Click the bezel's side buttons to press them.
 
+A simulator pane keeps its size on screen when you zoom the canvas, so the device stays readable and its taps land where you expect. Panning moves it with the canvas like any pane. Resize it with its corner handle or the zoom buttons below.
+
 The pane header shows the iOS version and the state: **Live**, **Connecting**, **Screenshot** or **Recording**.
 
 ## Helper bar
@@ -38,7 +40,7 @@ The pane header shows the iOS version and the state: **Live**, **Connecting**, *
 | **Screenshot** | Saves a PNG to the Desktop. The toast shows the file. |
 | **Record** | Records a video to the Desktop. Click **Stop recording** to stop. |
 | **Annotate** | Freezes the screen so you can draw on it. **Send to agent** quotes the marked picture. See [Point Agents at Things](Point-Agents-at-Things#a-spot-on-the-simulator). |
-| **Zoom out**, **Actual size**, **Zoom in** | Changes the device size. **Actual size** is 1 point per canvas pixel. |
+| **Zoom out**, **Actual size**, **Zoom in** | Changes the device size. **Actual size** is 1 point per screen pixel. |
 | **Pop out** | Moves the device to its own window. **Bring back** returns it. |
 | **Choose simulator** | Shows every simulator. Xcode's version is at the top. |
 | **Refresh** | Tries the live view again. |
@@ -62,7 +64,7 @@ An agent can drive a pane that is off screen: Canopy connects to the device for 
 
 While the pane is on screen, Canopy starts a small helper in a sandbox with no network access.
 The helper shares the simulator's screen with Canopy directly, so a still screen costs nothing.
-The helper stops when the pane leaves the screen, closes or Canopy quits.
+The helper stops 5 seconds after the pane leaves the screen (so panning past it does not restart it), and at once when the pane closes or Canopy quits.
 
 ## Troubleshooting
 
