@@ -35,8 +35,12 @@ pub(super) struct State {
     pending_layout: Option<(Option<String>, Option<String>)>,
     undo: Option<canvas::Rest>,
     shown: Option<Document>,
-    layout_motion: Option<(Document, std::time::Instant)>,
+    layout_motion: Option<(canvas::Rest, std::time::Instant)>,
     layout_frame: bool,
+    /// Latest move event to apply on the next frame or before ending the drag.
+    queued_move: Option<Point<Pixels>>,
+    #[cfg(test)]
+    layout_solves: usize,
     pub(super) selected: Vec<String>,
     pub subs: HashMap<String, Vec<crate::subs::Sub>>,
     sub_watches: HashMap<String, Task<()>>,
@@ -179,6 +183,9 @@ impl State {
             shown: None,
             layout_motion: None,
             layout_frame: false,
+            queued_move: None,
+            #[cfg(test)]
+            layout_solves: 0,
             selected: vec![],
             subs: HashMap::new(),
             sub_watches: HashMap::new(),
@@ -284,13 +291,27 @@ impl State {
         true
     }
 
+    /// The last applied pointer of a pane or space move. Resizes and pans have their own handlers.
+    fn move_pointer(&mut self) -> Option<&mut Point<Pixels>> {
+        if let Some((_, None, previous)) = &mut self.preview_drag {
+            Some(previous)
+        } else if let Some((_, _, previous)) = &mut self.space_drag {
+            Some(previous)
+        } else if let Some((Some(_), previous)) = &mut self.drag {
+            Some(previous)
+        } else {
+            None
+        }
+    }
+
     /// End any drag, returning whether geometry was committed.
     pub(super) fn end_drag(&mut self) -> bool {
         self.drag_live = false;
+        self.queued_move = None;
         let mut changed = false;
         let resized = self.cell_resize.take();
         if let Some(rest) = self.rest.take() {
-            if rest != canvas::Rest::capture(&self.doc) {
+            if !rest.matches(&self.doc) {
                 // Undo would put neighbours back over a cell that stays big, so a corner drag is not undoable.
                 match resized {
                     Some((key, _)) => if let Some((base, moved)) = self.moves.get_mut(&key) { *moved = base.changed(&canvas::Rest::capture(&self.doc)); },
@@ -352,6 +373,7 @@ impl AppWindow {
 
     fn begin_layout(&mut self) {
         self.canvas_state.drag_live = false;
+        self.canvas_state.queued_move = None;
         self.canvas_state.motion.target = None;
         self.canvas_state.motion.velocity = [0.; 2];
         if self.canvas_state.rest.is_none() {
@@ -371,7 +393,74 @@ impl AppWindow {
         }).collect()
     }
 
+    /// Keep pointer handling cheap even when several move events arrive between frames.
+    fn queue_canvas_move(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let state = &mut self.canvas_state;
+        let Some(&mut previous) = state.move_pointer() else { return false };
+        let delta = [f32::from(position.x - previous.x), f32::from(position.y - previous.y)];
+        if state.space_drag.is_none() && !state.drag_live(delta) { return true; }
+        if state.queued_move.unwrap_or(previous) == position { return true; }
+        state.pan_moved |= delta != [0., 0.];
+        state.queued_move = Some(position);
+        self.layout_frame(window, cx);
+        true
+    }
+
+    /// Move the carried panes directly. Only neighbours need to ease to their new positions.
+    fn apply_canvas_move(&mut self, cx: &mut Context<Self>) -> bool {
+        let state = &mut self.canvas_state;
+        let Some(position) = state.queued_move.take() else { return false };
+        let Some(previous) = state.move_pointer() else { return false };
+        let delta = [f32::from(position.x - previous.x), f32::from(position.y - previous.y)];
+        *previous = position;
+        if delta == [0., 0.] { return false; }
+
+        let pane = state.preview_drag.as_ref().map(|(id, _, _)| id)
+            .or_else(|| state.drag.as_ref().and_then(|(id, _)| id.as_ref())).cloned();
+        let space = state.space_drag.as_ref().map(|(id, _, _)| id.clone());
+        let zoom = state.doc.camera.zoom;
+        state.shown.get_or_insert_with(|| state.doc.clone());
+        if let Some(id) = &pane {
+            state.group = if state.preview_drag.is_none() && state.selected.contains(id) {
+                state.selected.clone()
+            } else {
+                vec![id.clone()]
+            };
+            for card in state.doc.panes.iter_mut().filter(|card| state.group.contains(&card.id)) {
+                let (rect, scale) = if let Some(pinned) = &mut card.pinned {
+                    (pinned, 1.)
+                } else {
+                    (&mut card.rect, zoom)
+                };
+                rect[0] += delta[0] / scale;
+                rect[1] += delta[1] / scale;
+            }
+        } else if let Some(card) = state.doc.spaces.iter_mut().find(|s| Some(&s.space) == space.as_ref()) {
+            state.group.clear();
+            card.rect[0] += delta[0] / zoom;
+            card.rect[1] += delta[1] / zoom;
+        }
+        self.solve_layout(pane.as_deref(), space.as_deref(), cx);
+        let state = &mut self.canvas_state;
+        let shown = state.shown.as_mut().unwrap();
+        for card in state.doc.panes.iter().filter(|card| state.group.contains(&card.id)) {
+            if let Some(drawn) = shown.panes.iter_mut().find(|p| p.id == card.id) {
+                drawn.rect = card.rect;
+                drawn.pinned = card.pinned;
+            }
+        }
+        if let Some(card) = state.doc.spaces.iter().find(|s| Some(&s.space) == space.as_ref())
+            && let Some(drawn) = shown.spaces.iter_mut().find(|s| s.space == card.space)
+        {
+            drawn.rect = card.rect;
+        }
+        self.retarget_layout();
+        self.canvas_changed(cx);
+        true
+    }
+
     fn end_canvas_drag(&mut self, cx: &mut Context<Self>) {
+        self.apply_canvas_move(cx);
         if let Some((pin, space)) = self.canvas_state.pending_layout.take() {
             self.solve_layout_now(pin.as_deref(), space.as_deref(), cx);
         }
@@ -400,6 +489,8 @@ impl AppWindow {
     }
 
     fn solve_layout_now(&mut self, pin: Option<&str>, space_pin: Option<&str>, cx: &App) {
+        #[cfg(test)]
+        { self.canvas_state.layout_solves += 1; }
         let members = self.canvas_members();
         let sizes: Vec<_> = self
             .canvas_state
@@ -427,8 +518,8 @@ impl AppWindow {
             .map(|(c, r)| [c.rect[0], c.rect[1], r[2], r[3]])
             .collect();
         // The pinned cell, and the rest of a dragged selection, stay where they were put.
-        let keys: Vec<String> = doc.panes.iter().map(|c| c.id.clone()).collect();
-        for i in (0..cells.len()).filter(|i| Some(*i) == pinned || state.group.contains(&keys[*i])) {
+        let carried = |i: usize| state.group.contains(&doc.panes[i].id);
+        for i in (0..cells.len()).filter(|i| Some(*i) == pinned || carried(*i)) {
             cells[i] = current[i];
             cells[i][2] = sizes[i][2];
             cells[i][3] = sizes[i][3];
@@ -444,6 +535,7 @@ impl AppWindow {
                 indices.iter().position(|j| *j == i).unwrap(),
                 cells[i],
                 self.person.canvas_gap,
+                |j| carried(indices[j]),
             );
             for (j, r) in indices.into_iter().zip(solved) {
                 cells[j] = r;
@@ -456,7 +548,10 @@ impl AppWindow {
         let top_pin = doc.spaces.iter().position(|s|Some(s.space.as_str())==active)
             .or_else(||pinned.and_then(|i|roots.iter().position(|j|*j==i)).map(|i|doc.spaces.len()+i));
         if let Some(i) = top_pin {
-            let solved = canvas::solve(&rects,i,rects[i],self.person.canvas_gap);
+            let space_count = doc.spaces.len();
+            let solved = canvas::solve(&rects, i, rects[i], self.person.canvas_gap, |j| {
+                j.checked_sub(space_count).is_some_and(|j| carried(roots[j]))
+            });
             for (space,r) in doc.spaces.iter_mut().zip(&solved) { space.rect = *r; }
             for (i,r) in roots.iter().zip(&solved[doc.spaces.len()..]) { cells[*i] = *r; }
         }
@@ -471,17 +566,21 @@ impl AppWindow {
     }
 
     fn animate_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let state = &mut self.canvas_state;
-        let from = state.shown.clone().unwrap_or_else(|| state.doc.clone());
-        if canvas::Rest::capture(&from) == canvas::Rest::capture(&state.doc) {
-            state.shown = None;
-            state.layout_motion = None;
+        if self.retarget_layout() {
+            self.layout_frame(window, cx);
+        } else {
             self.canvas_changed(cx);
-            cx.notify();
-            return;
         }
-        state.layout_motion = Some((from, std::time::Instant::now()));
-        self.layout_frame(window, cx);
+        cx.notify();
+    }
+
+    fn retarget_layout(&mut self) -> bool {
+        let state = &mut self.canvas_state;
+        let from = state.shown.as_ref().map(canvas::Rest::capture);
+        state.layout_motion = from.filter(|from| !from.matches(&state.doc))
+            .map(|from| (from, std::time::Instant::now()));
+        if state.layout_motion.is_none() { state.shown = None; }
+        state.layout_motion.is_some()
     }
 
     fn layout_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -492,15 +591,17 @@ impl AppWindow {
         let entity = cx.entity().downgrade();
         window.on_next_frame(move |window, cx| {
             let _ = entity.update(cx, |this, cx| {
+                this.canvas_state.layout_frame = false;
+                let moved = this.apply_canvas_move(cx);
                 let state = &mut this.canvas_state;
-                state.layout_frame = false;
                 let Some((from, start)) = &state.layout_motion else {
+                    if moved { cx.notify(); }
                     return;
                 };
                 let t = start.elapsed().as_secs_f32() / 0.12;
                 let a = canvas::ease_out(t);
                 let mut shown = state.doc.clone();
-                canvas::Rest::capture(from).restore(&mut shown);
+                from.restore(&mut shown);
                 for (r, to) in shown
                     .panes
                     .iter_mut()
@@ -561,7 +662,6 @@ impl AppWindow {
                 cx.notify();
             });
         });
-        cx.notify();
     }
 
     /// Arrange selected cells or the current space, remembering the layout choice.
@@ -2740,6 +2840,7 @@ impl AppWindow {
                     cx.notify();
                     return;
                 }
+                if this.queue_canvas_move(e.position, window, cx) { return; }
                 if this.canvas_state.rest.is_some() && this.canvas_state.shown.is_none() {
                     this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                 }
@@ -2760,56 +2861,22 @@ impl AppWindow {
                     cx.notify();
                     return;
                 }
-                if let Some((id, before, previous)) = this.canvas_state.preview_drag.clone() {
-                    let resize = before.is_some();
-                    if e.pressed_button.is_none() {
-                        this.end_canvas_drag(cx);
-                        return;
-                    }
+                if let Some((id, Some(before), previous)) = this.canvas_state.preview_drag.clone() {
                     let screen = [f32::from(e.position.x - previous.x), f32::from(e.position.y - previous.y)];
-                    if !resize && !this.canvas_state.drag_live(screen) { return; }
                     let z = this.canvas_state.doc.camera.zoom;
-                    let d = [screen[0] / z, screen[1] / z];
-                    if let Some(card) = this
-                        .canvas_state
-                        .doc
-                        .panes
-                        .iter_mut()
-                        .find(|p| p.id == id)
-                    {
+                    if let Some(card) = this.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) {
                         if let Some(s) = &mut card.pinned {
-                            // A pinned pane moves and sizes in screen px; `pin_panes` moves its rect.
-                            if resize { s[2] = (s[2] + screen[0]).max(240.); s[3] = (s[3] + screen[1]).max(120.); }
-                            else { s[0] += screen[0]; s[1] += screen[1]; }
-                        } else if resize {
-                            card.rect[2] = (card.rect[2] + d[0]).max(240.);
-                            card.rect[3] = (card.rect[3] + d[1]).max(120.);
+                            // Pinned sizes are in screen px; `pin_panes` updates the world rect.
+                            s[2] = (s[2] + screen[0]).max(240.);
+                            s[3] = (s[3] + screen[1]).max(120.);
                         } else {
-                            card.rect[0] += d[0];
-                            card.rect[1] += d[1];
+                            card.rect[2] = (card.rect[2] + screen[0] / z).max(240.);
+                            card.rect[3] = (card.rect[3] + screen[1] / z).max(120.);
                         }
                     }
                     this.solve_layout(Some(&id),None,cx);
                     this.animate_layout(window,cx);
-                    this.canvas_state.preview_drag = Some((id, before, e.position));
-                    this.canvas_changed(cx);
-                    cx.notify();
-                    return;
-                }
-                if let Some((id, resize, previous)) = this.canvas_state.space_drag.clone() {
-                    // A space card moves on Home; what is inside it stays where it is.
-                    let zoom = this.canvas_state.doc.camera.zoom;
-                    let delta = [
-                        f32::from(e.position.x - previous.x) / zoom,
-                        f32::from(e.position.y - previous.y) / zoom,
-                    ];
-                    if let Some(space) = this.canvas_state.doc.spaces.iter_mut().find(|s| s.space == id) {
-                        space.rect[0] += delta[0];
-                        space.rect[1] += delta[1];
-                    }
-                    this.solve_layout(None,Some(&id),cx);
-                    this.animate_layout(window,cx);
-                    this.canvas_state.space_drag = Some((id, resize, e.position));
+                    this.canvas_state.preview_drag = Some((id, Some(before), e.position));
                     this.canvas_changed(cx);
                     cx.notify();
                     return;
@@ -2830,36 +2897,17 @@ impl AppWindow {
                     cx.notify();
                     return;
                 }
-                let Some((card, previous)) = this.canvas_state.drag.clone() else {
-                    return;
-                };
+                let Some((None, previous)) = this.canvas_state.drag else { return };
                 let d = [
                     f32::from(e.position.x - previous.x),
                     f32::from(e.position.y - previous.y),
                 ];
-                if card.is_some() && !this.canvas_state.drag_live(d) { return; }
-                this.canvas_state.pan_moved |= d != [0., 0.];
-                if let Some(id) = card {
-                    // The whole selection moves together when the dragged cell is part of it.
-                    let zoom = this.canvas_state.doc.camera.zoom;
-                    let state = &mut this.canvas_state;
-                    state.group = if state.selected.contains(&id) { state.selected.clone() } else { vec![id.clone()] };
-                    for key in &state.group {
-                        if let Some(r) = state.doc.panes.iter_mut().find(|c| &c.id == key).map(|c| &mut c.rect) {
-                            r[0] += d[0] / zoom;
-                            r[1] += d[1] / zoom;
-                        }
-                    }
-                    this.solve_layout(Some(&id),None,cx);
-                    this.animate_layout(window,cx);
-                } else {
-                    let now = std::time::Instant::now();
-                    let dt = this.canvas_state.motion.sample.map(|t| now.duration_since(t).as_secs_f32()).unwrap_or(0.016).max(0.001);
-                    this.canvas_state.motion.velocity = [d[0]/dt, d[1]/dt];
-                    this.canvas_state.motion.sample = Some(now);
-                    this.canvas_state.doc.camera.pan(d);
-                    this.canvas_state.pan_moved = true;
-                }
+                let now = std::time::Instant::now();
+                let dt = this.canvas_state.motion.sample.map(|t| now.duration_since(t).as_secs_f32()).unwrap_or(0.016).max(0.001);
+                this.canvas_state.motion.velocity = [d[0]/dt, d[1]/dt];
+                this.canvas_state.motion.sample = Some(now);
+                this.canvas_state.doc.camera.pan(d);
+                this.canvas_state.pan_moved = true;
                 this.canvas_state.drag.as_mut().unwrap().1 = e.position;
                 this.canvas_changed(cx);
                 cx.notify();
@@ -3729,6 +3777,13 @@ impl AppWindow {
             row = row.child(panel);
         }
         div().relative().size_full().flex().flex_col().child(bar).child(row).children(grip)
+            .capture_any_mouse_up(cx.listener(|this, e: &MouseUpEvent, _, cx| {
+                if e.button == MouseButton::Left && this.canvas_state.move_pointer().is_some() {
+                    this.end_canvas_drag(cx);
+                    this.canvas_changed(cx);
+                    cx.notify();
+                }
+            }))
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
                 if this.canvas_state.resizing {
                     let width = f32::from(window.viewport_size().width - e.position.x);
@@ -4202,6 +4257,65 @@ mod settings_tests {
 
     #[test]
     fn drop_waits_for_release() { in_own_process(TEST); }
+
+    #[test]
+    fn pane_moves_follow_frames_and_flush_on_release() {
+        in_own_process("window::canvas_view::settings_tests::queued_moves");
+    }
+
+    #[gpui::test]
+    fn queued_moves(cx: &mut TestAppContext) {
+        if !running_alone("window::canvas_view::settings_tests::queued_moves") { return; }
+        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
+        let x = |doc: &crate::canvas::Document| [doc.panes[0].rect[0], doc.panes[1].rect[0]];
+        let solves = view.update_in(cx, |this, window, cx| {
+            this.person.canvas_push = settings::CanvasPush::Live;
+            this.canvas_state.doc.camera.zoom = 1.;
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"t1","kind":"terminal","props":{"size":[200,100]},"rect":[0,0,200,100],"z":0},
+                {"id":"t2","kind":"terminal","props":{"size":[200,100]},"rect":[300,0,200,100],"z":1},
+                {"id":"t3","kind":"terminal","props":{"size":[200,100]},"rect":[520,0,200,100],"z":2}
+            ])).unwrap();
+            this.canvas_state.selected = vec!["t1".into(), "t2".into()];
+            this.begin_layout();
+            this.canvas_state.drag = Some((Some("t1".into()), point(px(0.), px(0.))));
+            let solves = this.canvas_state.layout_solves;
+            for at in [90., 230., 200.] {
+                assert!(this.queue_canvas_move(point(px(at), px(0.)), window, cx));
+            }
+            assert_eq!(x(&this.canvas_state.doc), [0., 300.]);
+            assert_eq!(this.canvas_state.layout_solves, solves);
+            solves
+        });
+
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        view.update_in(cx, |this, window, cx| {
+            assert_eq!(this.canvas_state.layout_solves, solves + 1);
+            assert_eq!(x(&this.canvas_state.doc), [200., 500.]);
+            assert_eq!(x(this.canvas_state.shown.as_ref().unwrap()), [200., 500.]);
+            assert_ne!(this.canvas_state.doc.panes[2].rect, [520., 0., 200., 100.]);
+
+            assert!(this.queue_canvas_move(point(px(245.), px(0.)), window, cx));
+            this.end_canvas_drag(cx);
+            assert_eq!(x(&this.canvas_state.doc), [245., 545.]);
+            assert_eq!(this.canvas_state.layout_solves, solves + 2);
+        });
+
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        view.update_in(cx, |this, window, cx| {
+            assert_eq!(x(&this.canvas_state.doc), [245., 545.]);
+            assert_eq!(this.canvas_state.layout_solves, solves + 2);
+
+            this.canvas_state.doc.camera.zoom = 2.;
+            this.canvas_state.doc.panes[2].pinned = Some([10., 20., 240., 120.]);
+            this.begin_layout();
+            this.canvas_state.preview_drag = Some(("t3".into(), None, point(px(0.), px(0.))));
+            assert!(this.queue_canvas_move(point(px(30.), px(15.)), window, cx));
+            this.end_canvas_drag(cx);
+            assert_eq!(this.canvas_state.doc.panes[2].pinned, Some([40., 35., 240., 120.]));
+            assert_eq!(this.canvas_state.layout_solves, solves + 2);
+        });
+    }
 
     #[gpui::test]
     fn drop_layout(cx: &mut TestAppContext) {

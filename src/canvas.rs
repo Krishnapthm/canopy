@@ -234,14 +234,17 @@ pub fn space_at(spaces: &[Space], p: Point) -> Option<&Space> {
 #[cfg(test)]
 const GAP: f32 = 24.;
 
-/// Resolve from rest positions, fixing the pinned rect first and then its nearest neighbours.
-pub fn solve(rest: &[Rect], pinned: usize, rect: Rect, gap: f32) -> Vec<Rect> {
+/// Resolve from rest positions, holding the dragged group fixed and placing its neighbours.
+pub fn solve(rest: &[Rect], pinned: usize, rect: Rect, gap: f32, carried: impl Fn(usize) -> bool) -> Vec<Rect> {
     if pinned >= rest.len() {
         return rest.to_vec();
     }
     let mut out = rest.to_vec();
     out[pinned] = rect;
-    let mut order: Vec<_> = (0..rest.len()).filter(|i| *i != pinned).collect();
+    let (mut fixed, mut order): (Vec<_>, Vec<_>) = (0..rest.len())
+        .filter(|i| *i != pinned)
+        .partition(|i| carried(*i));
+    fixed.insert(0, pinned);
     let distance = |r: Rect| {
         (r[0] + r[2] / 2. - rect[0] - rect[2] / 2.).powi(2)
             + (r[1] + r[3] / 2. - rect[1] - rect[3] / 2.).powi(2)
@@ -251,7 +254,6 @@ pub fn solve(rest: &[Rect], pinned: usize, rect: Rect, gap: f32) -> Vec<Rect> {
             .total_cmp(&distance(rest[*b]))
             .then(a.cmp(b))
     });
-    let mut fixed = vec![pinned];
     for i in order {
         let r = rest[i];
         let clear = |r: Rect| fixed.iter().all(|j| separated(r, out[*j], gap));
@@ -393,6 +395,12 @@ impl Rest {
                 .collect(),
         }
     }
+    /// Whether the same panes and spaces still have these rectangles.
+    pub fn matches(&self, doc: &Document) -> bool {
+        self.panes.iter().map(|(id, rect)| (id, *rect)).eq(doc.panes.iter().map(|p| (&p.id, p.rect)))
+            && self.spaces.iter().map(|(id, rect)| (id, *rect)).eq(doc.spaces.iter().map(|s| (&s.space, s.rect)))
+    }
+
     /// The entries of `later` whose geometry differs from this snapshot's.
     pub fn changed(&self, later: &Rest) -> Rest {
         let diff = |before: &[(String, Rect)], after: &[(String, Rect)]| -> Vec<(String, Rect)> {
@@ -1401,12 +1409,12 @@ mod tests {
     fn spacing_is_deterministic_pinned_and_returns_to_rest() {
         let rest = [[0.,0.,100.,50.],[124.,0.,100.,50.],[248.,0.,100.,50.],[124.,74.,100.,50.]];
         let pin = [100.,0.,100.,50.];
-        let result = solve(&rest,0,pin,GAP);
-        assert_eq!(result,solve(&rest,0,pin,GAP));
+        let result = solve(&rest,0,pin,GAP, |_| false);
+        assert_eq!(result,solve(&rest,0,pin,GAP, |_| false));
         assert_eq!(result[0],pin);
         for i in 0..result.len() { for j in 0..i { assert!(separated(result[i],result[j],GAP)); } }
-        assert_eq!(solve(&rest,0,rest[0],GAP),rest);
-        assert_eq!(solve(&[],0,pin,GAP),Vec::<Rect>::new());
+        assert_eq!(solve(&rest,0,rest[0],GAP, |_| false),rest);
+        assert_eq!(solve(&[],0,pin,GAP, |_| false),Vec::<Rect>::new());
     }
 
     
@@ -1502,7 +1510,7 @@ mod tests {
         let expanded = [0., 0., 600., 400.];
         let mut rest = rects(&doc);
         rest[0] = expanded;
-        let solved = solve(&rest, 0, expanded, GAP);
+        let solved = solve(&rest, 0, expanded, GAP, |_| false);
         assert_eq!(solved[0], expanded);
         for (card, r) in doc.panes.iter_mut().zip(&solved) { card.rect = *r; }
         *doc.panes[0].size_mut().unwrap() = Some([600., 400.]);
@@ -1545,9 +1553,9 @@ mod tests {
     fn fifty_cells_solve_quickly() {
         let rest: Vec<_> = (0..50).map(|i|[(i%10) as f32*124.,(i/10) as f32*74.,100.,50.]).collect();
         let start = std::time::Instant::now();
-        for _ in 0..100 { std::hint::black_box(solve(&rest,0,[124.,74.,100.,50.],GAP)); }
+        for _ in 0..100 { std::hint::black_box(solve(&rest,0,[124.,74.,100.,50.],GAP, |_| false)); }
         eprintln!("50-cell solve: {:?} per pass",start.elapsed()/100);
-        let result = solve(&rest,0,[124.,74.,100.,50.],GAP);
+        let result = solve(&rest,0,[124.,74.,100.,50.],GAP, |_| false);
         for i in 0..result.len() { for j in 0..i { assert!(separated(result[i],result[j],GAP)); } }
     }
 
