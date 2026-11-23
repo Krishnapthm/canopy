@@ -181,7 +181,7 @@ impl AppWindow {
             "canvas.nudge" => {
                 let Some(d) = args["direction"].as_str().and_then(direction) else { return self.fail("use left, right, up or down"); };
                 let Some(key) = selected else { return self.fail("select a cell first"); };
-                self.canvas_state.end_drag();
+                self.end_canvas_drag(cx);
                 self.begin_layout();
                 if self.canvas_state.nudge(&key, d, self.person.canvas_gap) {
                     // Tile view puts the tile back instead of pushing neighbours.

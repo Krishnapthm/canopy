@@ -5847,13 +5847,27 @@ export default class Probe extends View {
         assert_eq!((selected, mode), (vec!["t1".to_owned(), "t2".to_owned()], true), "a box on empty canvas selects what it touches");
 
         cx.simulate_mouse_down(at(210., 218.), MouseButton::Left, none);
-        cx.simulate_mouse_move(at(260., 268.), MouseButton::Left, none);
+        cx.simulate_mouse_move(at(240., 218.), MouseButton::Left, none);
+        assert_eq!(state(cx).2, [[100., 200.], [500., 200.]], "input waits for a frame");
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        assert_eq!(state(cx).2, [[130., 200.], [530., 200.]], "the drag follows the pointer over the pill itself");
+        for (x, y) in [(225., 238.), (280., 282.), (260., 268.)] {
+            cx.simulate_mouse_move(at(x, y), MouseButton::Left, none);
+        }
+        assert_eq!(state(cx).2, [[130., 200.], [530., 200.]], "later input still waits for the next frame");
         cx.simulate_mouse_up(at(260., 268.), MouseButton::Left, none);
         let (_, _, rects) = state(cx);
         assert_eq!(rects, [[150., 250.], [550., 250.]], "the whole selection moves together");
         cx.run_until_parked();
 
-        let target = at(260., 268.);
+        // Re-entering after a mouse-up outside commits the last position seen while pressed.
+        cx.simulate_mouse_down(at(260., 268.), MouseButton::Left, none);
+        cx.simulate_mouse_move(at(280., 290.), MouseButton::Left, none);
+        cx.simulate_mouse_move(at(260., 268.), None, none);
+        assert_eq!(state(cx).2, [[170., 272.], [570., 272.]]);
+        cx.run_until_parked();
+
+        let target = at(280., 290.);
         cx.simulate_mouse_move(target, None, none);
         view.update(cx, |this, _| this.canvas_state.settle_for_test());
         cx.update(|window, _| window.refresh());
