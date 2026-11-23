@@ -1,6 +1,4 @@
-<img src="assets/icons/canopy.svg" width="128" height="128" align="left" alt="Canopy icon">
-
-<h1>Canopy</h1>
+<h1><img src="assets/icons/canopy.svg" width="128" height="128" align="left" alt="Canopy icon">Canopy</h1>
 
 Canopy puts your terminals and coding agents side by side on one canvas.<br>
 Wire agents together, see which one is waiting on you, and open files, a browser<br>
