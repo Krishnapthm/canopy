@@ -1,121 +1,96 @@
-<p align="center">
-  <img src="assets/icons/canopy.svg" width="128" height="128" alt="">
-</p>
+<img src="assets/icons/canopy.svg" width="128" height="128" align="left" alt="Canopy icon">
 
-<h1 align="center">Canopy</h1>
+<h1>Canopy</h1>
 
-<p align="center">
-  <b>One canvas for your terminals and coding agents.</b><br>
-  <a href="#install">Install</a> · <a href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start">Quick start</a> ·
-  <a href="https://github.com/Krishnapthm/canopy/wiki">Docs</a> · <a href="#build-from-source">Build from source</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a>
-</p>
+Put terminals and agents on one canvas.
 
-Put terminals and agents on one canvas, connect them with wires, and see which agent needs you.
-Terminals keep running when you close the window. Canopy runs them on
-[herdr-core](https://github.com/herdrdev/herdr-core).
+<br clear="left">
+
+Canopy is a native desktop app for working with terminals and coding agents side by side. Lay them out on a canvas, wire them together, and see at a glance which agent is waiting on you. Your terminals live in [herdr-core](https://github.com/herdrdev/herdr-core), so they keep running after you close the window.
+
+[Quick start](https://github.com/Krishnapthm/canopy/wiki/Quick-Start) · [Docs](https://github.com/Krishnapthm/canopy/wiki) · [Contributing](CONTRIBUTING.md)
 
 ## Install
 
-macOS (Apple Silicon) and Linux:
+Canopy runs on macOS (Apple Silicon) and Linux.
 
 ```sh
 curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/install.sh | sh
 ```
 
-The installer adds Canopy and, if it is missing, herdr-core.
-Open Canopy from your apps or run `canopy`.
-Then follow the [Quick start](https://github.com/Krishnapthm/canopy/wiki/Quick-Start).
+The installer also sets up herdr-core if you don't have it yet. Open Canopy from your apps or run `canopy`, then follow the [Quick start](https://github.com/Krishnapthm/canopy/wiki/Quick-Start) to set up your first canvas.
 
-To update, run the installer again. The app never updates itself.
+Canopy never updates itself. To update, run the same command again.
 
-To uninstall, delete the app and its config in `~/.config/canopy`:
+<details>
+<summary>Uninstall</summary>
 
-- macOS: `~/Applications/Canopy.app` and the `~/.local/bin/canopy` link.
-- Linux: `~/.local/share/canopy`, `~/.local/bin/canopy`,
-  `~/.local/share/applications/canopy.desktop` and
-  `~/.local/share/icons/hicolor/scalable/apps/canopy.svg`.
+Delete the app, its command-line link and its config in `~/.config/canopy`.
 
-herdr-core stays, because other apps can use it.
+On macOS the app is `~/Applications/Canopy.app` and the link is `~/.local/bin/canopy`.
 
-## Docs
+On Linux, remove `~/.local/share/canopy`, `~/.local/bin/canopy`, `~/.local/share/applications/canopy.desktop` and `~/.local/share/icons/hicolor/scalable/apps/canopy.svg`.
 
-The [wiki](https://github.com/Krishnapthm/canopy/wiki) has every feature, how to use it and how to fix problems.
+herdr-core stays installed, because other apps can use it.
+
+</details>
 
 ## Build from source
 
-### 1. Install the tools
+You need [Rust](https://rustup.rs) 1.95 or newer, [Zig](https://ziglang.org/download/) 0.16 to build the terminal engine, and [herdr-core](https://github.com/herdrdev/herdr-core) to run your terminals. [just](https://github.com/casey/just) and [Bun](https://bun.sh) are optional and only needed for the full test suite.
 
-- [Rust](https://rustup.rs) 1.95 or newer
-- [Zig](https://ziglang.org/download/) 0.16, which builds the terminal engine
-- [herdr-core](https://github.com/herdrdev/herdr-core), which runs your terminals
-- Optional: [just](https://github.com/casey/just) and [Bun](https://bun.sh) for the full test suite
+<details>
+<summary>Set up on macOS</summary>
 
-**macOS**, with the Xcode Command Line Tools and [Homebrew](https://brew.sh):
+With the Xcode Command Line Tools and [Homebrew](https://brew.sh):
 
 ```sh
 xcode-select --install
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 brew install zig@0.16 just oven-sh/bun/bun
+curl -fsSL https://releases.herdr.dev/core/install.sh | sh
+```
+
+Homebrew's `zig@0.16` is keg-only, so add it to your `PATH` in your shell profile:
+
+```sh
 export PATH="$(brew --prefix zig@0.16)/bin:$PATH"
 ```
 
-Homebrew's `zig@0.16` is keg-only, so add that `export` line to your shell profile.
+</details>
 
-**Linux** (Debian or Ubuntu), with Zig 0.16 from [ziglang.org](https://ziglang.org/download/) on your `PATH`:
+<details>
+<summary>Set up on Linux (Debian or Ubuntu)</summary>
+
+Put Zig 0.16 from [ziglang.org](https://ziglang.org/download/) on your `PATH`, then:
 
 ```sh
 sudo apt-get install build-essential pkg-config clang libclang-dev \
   libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
   libvulkan-dev mesa-vulkan-drivers libfontconfig-dev libfreetype-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-**herdr-core**, on both:
-
-```sh
 curl -fsSL https://releases.herdr.dev/core/install.sh | sh
 ```
 
-### 2. Clone and build
+</details>
+
+Then clone, build and test:
 
 ```sh
 git clone https://github.com/Krishnapthm/canopy.git
 cd canopy
 cargo build --locked
-```
-
-### 3. Test
-
-```sh
 cargo test --locked
-just test    # also runs the Bun mod and script tests
 ```
 
-### 4. Run it
+`just test` runs the same tests plus the Bun mod and script tests.
 
-Open a development window with its own scratch home and core, so it never touches your installed Canopy:
+To try your build, run `scripts/dev`. It opens a development window with its own scratch home and core, so it never touches your installed Canopy. When you're done, close the window and run `scripts/dev-stop` to stop its core. Don't run the debug binary directly, because it would use your real app home and core.
 
-```sh
-scripts/dev
-```
+The wiki's [Build from source](https://github.com/Krishnapthm/canopy/wiki/Build-from-Source) page covers the checks to run before a pull request, the Linux sandbox and Windows checkouts.
 
-Close that window, then stop its core:
+## Credits and license
 
-```sh
-scripts/dev-stop
-```
+Canopy stands on [herdr](https://github.com/herdrdev). It began as a fork of [herdr-app](https://github.com/herdrdev/herdr-app), and every terminal you open in Canopy runs on herdr-core. Thank you to the herdr authors for the foundation.
 
-Don't run the debug binary directly: it would use your real app home and core.
-[Build from source](https://github.com/Krishnapthm/canopy/wiki/Build-from-Source) in the wiki covers the checks before a pull request, the Linux sandbox and Windows checkouts.
-
-## Thanks to herdr
-
-Canopy stands on [herdr](https://github.com/herdrdev). It began as a fork of
-[herdr-app](https://github.com/herdrdev/herdr-app), and every terminal you open in Canopy runs on
-[herdr-core](https://github.com/herdrdev/herdr-core). Thank you to the herdr authors for the
-foundation and for releasing it under Apache-2.0.
-
-## License
-
-Apache-2.0, like herdr-app. See LICENSE, NOTICE and THIRD-PARTY-NOTICES.
+Canopy is licensed under Apache-2.0, like herdr-app. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
