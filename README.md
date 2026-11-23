@@ -1,12 +1,17 @@
 <p align="center">
-  <img src="docs/assets/canopy-header.svg" alt="Canopy: a free canvas of agent and terminal panes joined by wires" width="100%">
+  <img src="assets/icons/canopy.svg" width="128" height="128" alt="">
 </p>
 
-# Canopy
+<h1 align="center">Canopy</h1>
 
-Canopy is a desktop app for terminals and coding agents. Put them on one canvas,
-connect them with wires, and see which agent needs you.
+<p align="center">
+  <b>One canvas for your terminals and coding agents.</b><br>
+  <a href="#install">Install</a> · <a href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start">Quick start</a> ·
+  <a href="https://github.com/Krishnapthm/canopy/wiki">Docs</a> · <a href="#build-from-source">Build from source</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
+Put terminals and agents on one canvas, connect them with wires, and see which agent needs you.
 Terminals keep running when you close the window. Canopy runs them on
 [herdr-core](https://github.com/herdrdev/herdr-core).
 
@@ -39,16 +44,57 @@ The [wiki](https://github.com/Krishnapthm/canopy/wiki) has every feature, how to
 
 ## Build from source
 
-You need Rust, Zig 0.16 and herdr-core. On macOS:
+### 1. Install the tools
+
+- [Rust](https://rustup.rs) 1.95 or newer
+- [Zig](https://ziglang.org/download/) 0.16, which builds the terminal engine
+- [herdr-core](https://github.com/herdrdev/herdr-core), which runs your terminals
+- Optional: [just](https://github.com/casey/just) and [Bun](https://bun.sh) for the full test suite
+
+**macOS**, with the Xcode Command Line Tools and [Homebrew](https://brew.sh):
 
 ```sh
-brew install zig@0.16
+xcode-select --install
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+brew install zig@0.16 just oven-sh/bun/bun
 export PATH="$(brew --prefix zig@0.16)/bin:$PATH"
-cargo build --locked
-cargo test --locked
 ```
 
-Open an isolated development window with its own home and core:
+Homebrew's `zig@0.16` is keg-only, so add that `export` line to your shell profile.
+
+**Linux** (Debian or Ubuntu), with Zig 0.16 from [ziglang.org](https://ziglang.org/download/) on your `PATH`:
+
+```sh
+sudo apt-get install build-essential pkg-config clang libclang-dev \
+  libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+  libvulkan-dev mesa-vulkan-drivers libfontconfig-dev libfreetype-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+**herdr-core**, on both:
+
+```sh
+curl -fsSL https://releases.herdr.dev/core/install.sh | sh
+```
+
+### 2. Clone and build
+
+```sh
+git clone https://github.com/Krishnapthm/canopy.git
+cd canopy
+cargo build --locked
+```
+
+### 3. Test
+
+```sh
+cargo test --locked
+just test    # also runs the Bun mod and script tests
+```
+
+### 4. Run it
+
+Open a development window with its own scratch home and core, so it never touches your installed Canopy:
 
 ```sh
 scripts/dev
@@ -60,9 +106,16 @@ Close that window, then stop its core:
 scripts/dev-stop
 ```
 
-[Build from source](https://github.com/Krishnapthm/canopy/wiki/Build-from-Source) has the details.
+Don't run the debug binary directly: it would use your real app home and core.
+[Build from source](https://github.com/Krishnapthm/canopy/wiki/Build-from-Source) in the wiki covers the checks before a pull request, the Linux sandbox and Windows checkouts.
+
+## Thanks to herdr
+
+Canopy stands on [herdr](https://github.com/herdrdev). It began as a fork of
+[herdr-app](https://github.com/herdrdev/herdr-app), and every terminal you open in Canopy runs on
+[herdr-core](https://github.com/herdrdev/herdr-core). Thank you to the herdr authors for the
+foundation and for releasing it under Apache-2.0.
 
 ## License
 
-Apache-2.0. Based on [herdr-app](https://github.com/herdrdev/herdr-app).
-See LICENSE, NOTICE and THIRD-PARTY-NOTICES.
+Apache-2.0, like herdr-app. See LICENSE, NOTICE and THIRD-PARTY-NOTICES.
