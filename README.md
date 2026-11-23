@@ -1,12 +1,6 @@
-<img src="assets/icons/canopy.svg" width="128" height="128" align="left" alt="Canopy icon">
+<h1><img src="assets/icons/canopy.svg" width="128" height="128" align="left" alt="Canopy icon">Canopy<br clear="left"></h1>
 
-<h1>Canopy</h1>
-
-Put terminals and agents on one canvas.
-
-<br clear="left">
-
-Canopy is a native desktop app for working with terminals and coding agents side by side. Lay them out on a canvas, wire them together, and see at a glance which agent is waiting on you. Your terminals live in [herdr-core](https://github.com/herdrdev/herdr-core), so they keep running after you close the window.
+Canopy gives your terminals and coding agents one big canvas to live on. Put them wherever makes sense to you, wire agents together so they can talk, and glance over to see which one is waiting on you. It's not just shells, either: open the file you're working on, a browser on your dev server or an iOS simulator right next to the agent building it, so you both see the same thing. Your terminals run in [herdr-core](https://github.com/herdrdev/herdr-core), so closing the window doesn't kill them.
 
 [Quick start](https://github.com/Krishnapthm/canopy/wiki/Quick-Start) · [Docs](https://github.com/Krishnapthm/canopy/wiki) · [Contributing](CONTRIBUTING.md)
 
