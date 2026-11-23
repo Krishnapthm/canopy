@@ -1,6 +1,12 @@
-<h1><img src="assets/icons/canopy.svg" width="128" height="128" align="left" alt="Canopy icon">Canopy<br clear="left"></h1>
+<img src="assets/icons/canopy.svg" width="128" height="128" align="left" alt="Canopy icon">
 
-Canopy gives your terminals and coding agents one big canvas to live on. Put them wherever makes sense to you, wire agents together so they can talk, and glance over to see which one is waiting on you. It's not just shells, either: open the file you're working on, a browser on your dev server or an iOS simulator right next to the agent building it, so you both see the same thing. Your terminals run in [herdr-core](https://github.com/herdrdev/herdr-core), so closing the window doesn't kill them.
+<h1>Canopy</h1>
+
+Canopy puts your terminals and coding agents side by side on one canvas.<br>
+Wire agents together, see which one is waiting on you, and open files, a browser<br>
+or an iOS simulator next to them. Close the window and everything keeps running.
+
+<br clear="left">
 
 [Quick start](https://github.com/Krishnapthm/canopy/wiki/Quick-Start) · [Docs](https://github.com/Krishnapthm/canopy/wiki) · [Contributing](CONTRIBUTING.md)
 
@@ -25,7 +31,7 @@ On macOS the app is `~/Applications/Canopy.app` and the link is `~/.local/bin/ca
 
 On Linux, remove `~/.local/share/canopy`, `~/.local/bin/canopy`, `~/.local/share/applications/canopy.desktop` and `~/.local/share/icons/hicolor/scalable/apps/canopy.svg`.
 
-herdr-core stays installed, because other apps can use it.
+herdr-core is the engine herdr runs on too, so keep it if you use herdr. If you only installed it for Canopy, run `hc server stop` to stop it, which ends any terminals still running in it. Then delete `~/.local/bin/herdr-core`, `~/.local/bin/hc`, `~/.config/herdr-core` and `~/.local/state/herdr-core`, plus `~/.local/share/herdr-core` on macOS.
 
 </details>
 
@@ -36,7 +42,7 @@ You need [Rust](https://rustup.rs) 1.95 or newer, [Zig](https://ziglang.org/down
 <details>
 <summary>Set up on macOS</summary>
 
-With the Xcode Command Line Tools and [Homebrew](https://brew.sh):
+These steps use the Xcode Command Line Tools and [Homebrew](https://brew.sh).
 
 ```sh
 xcode-select --install
@@ -45,7 +51,7 @@ brew install zig@0.16 just oven-sh/bun/bun
 curl -fsSL https://releases.herdr.dev/core/install.sh | sh
 ```
 
-Homebrew's `zig@0.16` is keg-only, so add it to your `PATH` in your shell profile:
+Homebrew's `zig@0.16` is keg-only, so add this line to your shell profile to put it on your `PATH`.
 
 ```sh
 export PATH="$(brew --prefix zig@0.16)/bin:$PATH"
@@ -56,7 +62,7 @@ export PATH="$(brew --prefix zig@0.16)/bin:$PATH"
 <details>
 <summary>Set up on Linux (Debian or Ubuntu)</summary>
 
-Put Zig 0.16 from [ziglang.org](https://ziglang.org/download/) on your `PATH`, then:
+Put Zig 0.16 from [ziglang.org](https://ziglang.org/download/) on your `PATH`, then install the rest.
 
 ```sh
 sudo apt-get install build-essential pkg-config clang libclang-dev \
@@ -68,7 +74,7 @@ curl -fsSL https://releases.herdr.dev/core/install.sh | sh
 
 </details>
 
-Then clone, build and test:
+Then clone, build and test.
 
 ```sh
 git clone https://github.com/Krishnapthm/canopy.git
@@ -85,6 +91,6 @@ The wiki's [Build from source](https://github.com/Krishnapthm/canopy/wiki/Build-
 
 ## Credits and license
 
-Canopy began as a fork of [herdr-app](https://github.com/herdrdev/herdr-app), and every terminal you open in it runs on herdr-core. Huge thanks to [herdr](https://github.com/herdrdev) for building that foundation in the open.
+Canopy is built on top of [herdr](https://github.com/herdrdev). It started as a fork of [herdr-app](https://github.com/herdrdev/herdr-app), and every terminal you open in Canopy still runs on herdr-core, which is why your agents keep working after the window closes. We never had to write a terminal runtime from scratch because herdr had already built a good one and shared it. herdr is a great app in its own right too, so give it a try if you haven't. Thank you, herdr.
 
 Canopy is licensed under Apache-2.0, like herdr-app. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
