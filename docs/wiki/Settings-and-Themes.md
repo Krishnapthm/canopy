@@ -4,7 +4,9 @@ Canopy has two places for preferences. The **Settings** window covers the common
 
 ## Open settings
 
-Press `Cmd+,` (`Ctrl+,` on Linux and Windows).
+On macOS, choose **Settings** in the **Canopy** menu or press **Cmd+,**.
+On Linux, choose **Settings** in the [Main Menu](Linux-Desktop) or press **Ctrl+,**.
+On Windows, press **Ctrl+,**.
 Changes save immediately.
 
 ![The Settings window](images/settings-and-themes-1.png)

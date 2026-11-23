@@ -227,6 +227,35 @@ fn main() {
         });
 }
 
+const LINUX_APP_ID: &str = "canopy";
+
+/// Identifies Canopy to the desktop shell. Linux matches the installed canopy.desktop.
+fn desktop_app_id() -> String {
+    std::env::var("HERDR_APP_ID")
+        .ok()
+        .filter(|id| !id.is_empty())
+        .unwrap_or_else(|| if cfg!(target_os = "linux") { LINUX_APP_ID } else { "dev.canopy.app" }.into())
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::LINUX_APP_ID;
+
+    #[test]
+    fn linux_app_id_matches_both_installers() {
+        let wm_class = format!("StartupWMClass={LINUX_APP_ID}");
+        let icon = format!("Icon={LINUX_APP_ID}");
+        for installer in [
+            include_str!("../scripts/install-linux"),
+            include_str!("../distribution/install.sh"),
+        ] {
+            assert!(installer.contains(&format!("applications/{LINUX_APP_ID}.desktop")));
+            assert!(installer.lines().any(|line| line == wm_class));
+            assert!(installer.lines().any(|line| line == icon));
+        }
+    }
+}
+
 /// The main window, on a connected core.
 pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiver<mods::Request>, cx: &mut App) {
     // Never waits on WebKit: a page opened before the removal ends keeps its cookies for one more run.
@@ -253,7 +282,7 @@ pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiv
                 // it to 20x20; turning it on later (a "system" layout) is fine.
                 window_decorations: Some(WindowDecorations::Client),
                 // Canopy Dev and other side-by-side builds get their own dock icon.
-                app_id: Some(std::env::var("HERDR_APP_ID").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "dev.canopy.app".into())),
+                app_id: Some(desktop_app_id()),
                 ..Default::default()
             };
             cx.open_window(options, |window, cx| cx.new(|cx| window::AppWindow::new(core, requests, window, cx)))

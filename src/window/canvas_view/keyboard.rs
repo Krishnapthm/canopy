@@ -37,6 +37,11 @@ impl AppWindow {
             } else { window.dispatch_action(action, cx); }
             return true;
         }
+        // The Linux Main Menu has a regular GPUI binding so users can override it.
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        if key.key == "f10" && !key.modifiers.modified() {
+            return false;
+        }
         let m = key.modifiers;
         !(m.control || m.alt || m.platform)
     }

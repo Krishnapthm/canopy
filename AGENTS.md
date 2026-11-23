@@ -56,6 +56,16 @@ Read AGENTS.local.md too when present.
 - Every dependency is a cost: say what it replaces, its size and its license
   (MIT, Apache-2.0, BSD, ISC or public domain) before adding it.
 
+## Desktop integration
+
+- Share commands, state, labels, settings, toasts and GPUI components across
+  platforms. Keep native menus, window decorations, shortcuts and launcher
+  identity at the platform boundary. Use GPUI and system capabilities first.
+- macOS and Linux are the primary desktops. Verify native UI changes on both.
+  Use Ubuntu GNOME Wayland as the Linux reference and check X11 when changing
+  window or launcher behavior. Keep shared code usable by Windows so it can
+  add its own desktop integration later.
+
 ## How agents learn Canopy
 
 Skills are not fetched by running a command: a harness discovers an

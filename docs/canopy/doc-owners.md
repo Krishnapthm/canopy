@@ -53,6 +53,7 @@ Guides tell the story and link to feature pages for each control.
 | Page | Owns |
 |---|---|
 | Settings-and-Themes | The Settings window, `settings.json`, themes, settings errors. |
+| Linux-Desktop | Main Menu, window controls, and launcher identity on Linux. |
 | Keys-and-Mouse | Every default key and gesture, changing keys, `keys.json`. |
 | Layouts-and-Mods | Built-in layouts, changing a layout, writing mods, mod panes. |
 | Classic-Layout | The Classic layout's sidebar, tabs and status bar. |

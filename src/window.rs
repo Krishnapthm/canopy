@@ -13,7 +13,7 @@ mod ui;
 mod movable;
 mod pane_drag;
 mod pane_size;
-mod titlebar;
+pub(crate) mod titlebar;
 
 use crate::layout::{Axis, Background as Paint, Content, Fit, HeaderContent, Kind, Line, Node, PaneFrame, Size as Span};
 use crate::model::{self, Tab, Model};
@@ -593,6 +593,8 @@ impl AppWindow {
                 this.place_write = Some(t);
             }
         }));
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        window.observe_button_layout_changed(|window, _| window.refresh()).detach();
         let closing = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
             // macOS: the red button hides the app instead, so alerts keep ringing;
@@ -603,8 +605,7 @@ impl AppWindow {
             }
             let _ = closing.update(cx, |this, cx| {
                 this.close_pop_outs(cx);
-                this.drain_documents(window, cx);
-                this.close_mods_now(std::time::Instant::now() + Duration::from_millis(250), window, cx);
+                this.prepare_close(window, cx);
             });
             crate::place::save(window, cx);
             true
@@ -3027,15 +3028,14 @@ impl AppWindow {
             "canvas.pane_quote" => self.quote_image(window, cx),
             "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
             "app.menu" => {
-                let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
-                let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
-                    groups.into_iter().find(|(name, _)| *name == group).map(|(_, rows)| rows.into_iter().filter(|row| !row.is_null()).map(|mut row| {
-                        if row[3] == true { row[0] = json!(format!("✓ {}", row[0].as_str().unwrap())); }
-                        row.as_array_mut().unwrap().truncate(3);
-                        row
-                    }).collect()).unwrap_or_default()
-                } else { groups.into_iter().map(|(name, _)| json!([format!("{name} >"), "app.menu", {"group":name}])).collect() };
-                self.open_menu("primary", json!({"items":rows}), None, window, cx);
+                let Some(target) = crate::app_menu::popup(&self.canvas_state.doc.view, a["group"].as_str()) else {
+                    return self.fail("Unknown main menu group");
+                };
+                #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                let anchor = self.main_menu_anchor();
+                #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+                let anchor = None;
+                self.open_menu("primary", target, anchor, window, cx);
             }
             "quote.menu" | "quote.send" => self.quote_command(name, a, window, cx),
             "panel.open" => {
@@ -3704,8 +3704,24 @@ impl AppWindow {
             "menu"
         };
         let defaults = self.folders.get(name).map(|f| mod_overlay(&f.dir)).unwrap_or_else(|| json!({}));
-        let spec = terminal_menu_spec(name, &defaults, tab, target);
-        self.open_overlay(mods::new_overlay_id(), spec, window, cx);
+        let home = target["group"].is_null();
+        let mut spec = terminal_menu_spec(name, &defaults, tab, target);
+        let id = if tab == "primary" {
+            const ID: &str = "main-menu";
+            if name == "menu" {
+                spec["width"] = json!(220);
+            }
+            if self.overlays.iter().any(|o| o.id == ID) {
+                self.close_overlay(ID, window, cx);
+                if home {
+                    return;
+                }
+            }
+            ID.into()
+        } else {
+            mods::new_overlay_id()
+        };
+        self.open_overlay(id, spec, window, cx);
     }
 
     /// The layout's notification mod (`"toast"` on the root), else the shipped `toast`.
@@ -5964,6 +5980,14 @@ export default class Probe extends View {
             assert!(!this.canvas_key(&gpui::Keystroke::parse("ctrl-alt-shift-escape").unwrap(), window, cx), "modified keys reach the keymap");
         }));
         cx.simulate_keystrokes("q l");
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        {
+            cx.simulate_keystrokes("f10");
+            assert!(view.update(cx, |this, _| this.overlays.iter().any(|o| o.id == "main-menu")));
+            cx.simulate_keystrokes("f10");
+            assert!(view.update(cx, |this, _| this.overlays.iter().all(|o| o.id != "main-menu")));
+            assert!(cx.update(|window, cx| view.read(cx).focus.is_focused(window)));
+        }
         cx.update(|window, cx| view.update(cx, |this, cx| {
             assert_eq!(this.canvas_state.selected, ["t2"]);
             assert!(!this.overlays.iter().any(|o| o.kind.modal_keys()), "global close did not take the mode key");

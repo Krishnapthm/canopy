@@ -15,6 +15,8 @@ Keys are shown for macOS first. Many canvas-mode keys are single letters, and wo
 
 Hold `Cmd` (`Ctrl` on Linux and Windows) alone for 0.4 seconds to show shortcut hints, including with a terminal entered. Release it or press a key to hide the hints.
 
+On Linux, **F10** opens the [Main Menu](Linux-Desktop).
+
 ## Canvas mode keys
 
 These keys apply when the canvas has the keyboard and no input has focus. See [Canvas](Canvas), [Terminals](Terminals) and [Images and PDFs](Images-and-PDFs) for the actions.

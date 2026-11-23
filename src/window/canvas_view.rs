@@ -351,14 +351,33 @@ impl State {
 pub(super) struct PopOut {
     pub(super) terminal: Entity<TerminalView>,
     _sub: Option<Subscription>,
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    frame: (SharedString, WindowHandle<AppWindow>, String),
 }
 impl Render for PopOut {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .bg(c("surface"))
-            .child(shown_terminal(&self.terminal, cx))
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let tree = div().size_full().bg(c("surface"))
+            .child(shown_terminal(&self.terminal, cx)).into_any_element();
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let tree = {
+            let (title, owner, addr) = self.frame.clone();
+            super::titlebar::linux::frame(tree, title, true, None, _window, cx, move |window, cx| {
+                return_popped_pane(owner, &addr, cx);
+                window.remove_window();
+            })
+        };
+        tree
     }
+}
+
+/// Restores the canvas pane after its separate window closes.
+fn return_popped_pane(owner: WindowHandle<AppWindow>, addr: &str, cx: &mut App) {
+    let _ = owner.update(cx, |this, window, cx| {
+        this.canvas_state.popped.remove(addr);
+        this.set_expanded(addr, true, window, cx);
+        this.sync(window, cx);
+        cx.notify();
+    });
 }
 impl AppWindow {
     /// A cell's own menu (`canvas-card` in the menu mod): from its pill, header or terminal.
@@ -1530,15 +1549,18 @@ impl AppWindow {
         let owner = window.window_handle().downcast::<AppWindow>().unwrap();
         let closed_addr = addr.clone();
         let terminal_addr = addr.clone();
-        let result = cx.open_window(WindowOptions::default(), move |window, cx| {
+        let options = WindowOptions {
+            app_id: cfg!(target_os = "linux").then(crate::desktop_app_id),
+            ..Default::default()
+        };
+        let result = cx.open_window(options, move |window, cx| {
             window.set_window_title(&title);
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            window.observe_button_layout_changed(|window, _| window.refresh()).detach();
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            let frame = (title.into(), owner, closed_addr.clone());
             window.on_window_should_close(cx, move |_, cx| {
-                let _ = owner.update(cx, |this, window, cx| {
-                    this.canvas_state.popped.remove(&closed_addr);
-                    this.set_expanded(&closed_addr, true, window, cx);
-                    this.sync(window, cx);
-                    cx.notify();
-                });
+                return_popped_pane(owner, &closed_addr, cx);
                 true
             });
             cx.new(|cx| {
@@ -1553,6 +1575,8 @@ impl AppWindow {
                 PopOut {
                     terminal,
                     _sub: None,
+                    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                    frame,
                 }
             })
         });
@@ -3882,7 +3906,7 @@ impl Render for StripTooltip {
                 .when_some(self.1.clone(), |d, key| d.child(div().text_color(c("muted-foreground")).child(key))))
     }
 }
-fn strip_tooltip(label: String, command: Option<&str>) -> impl Fn(&mut Window, &mut App) -> AnyView + use<> {
+pub(super) fn strip_tooltip(label: String, command: Option<&str>) -> impl Fn(&mut Window, &mut App) -> AnyView + use<> {
     let command = command.map(str::to_owned);
     move |_, cx| {
         let key = command.as_deref().and_then(|command| action_key(&crate::keys::listing(), command));

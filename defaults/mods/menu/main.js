@@ -153,6 +153,7 @@ export default class Menu extends View {
         cx.notify();
       });
     this.at = 0;
+    this.group = p?.target?.group ?? null;
     const space = p?.tab === "space" && spaces().find((s) => s.id === p.target?.id);
     const folder = space && place(space);
     if (folder)
@@ -164,8 +165,14 @@ export default class Menu extends View {
 
   // `sub`: the open submenu {i, tab, target}; `subAt`: its keyboard row, or -1 while the keys stay on the menu.
   choose(i, cx) {
-    const it = items(props(), this.git, this.agents)[i];
+    const it = this.list[i];
     if (!it?.[1]) return;
+    if (props()?.tab === "primary" && Array.isArray(props().target?.home) && it[1] === "app.menu") {
+      this.group = it[2].group ?? null;
+      this.at = 0;
+      cx.notify();
+      return;
+    }
     if (it[1].startsWith("sub:")) return this.open(i, it, 0, cx);
     this.run(it);
   }
@@ -204,15 +211,17 @@ export default class Menu extends View {
             // Only agents carry an icon: the program's own.
             .when(it[1] === "canvas.create" && it[3]?.icon, el => el.child(it[3].tint ? svg(it[3].icon).size(14).flex_none().text_color(t.foreground) : image(it[3].icon).w(14).h(14).flex_none()))
             .child(div().flex_1().child(it[0]))
-            .child(it[1].startsWith("sub:")
-              ? svg("mods/workspace-chrome/chevron-right.svg").size(12).flex_none().text_color(t.muted)
-              : div().text_size(11).text_color(t.dim).child(props()?.tab === "canvas-agents" && it[1] === "canvas.create"
-                ? (i < 9 ? String(i + 1) : "") : shortcut(it[1], it[2]))), it, i))));
+            .when(!it[1].startsWith("sub:"), el => el.child(div().text_size(11).text_color(t.dim)
+              .child(props()?.tab === "canvas-agents" && it[1] === "canvas.create"
+                ? (i < 9 ? String(i + 1) : "") : shortcut(it[1], it[2])))), it, i))));
   }
 
   render(cx) {
     const t = theme();
-    const list = this.list = items(props(), this.git, this.agents);
+    const p = props();
+    const primary = p?.tab === "primary" && Array.isArray(p.target?.home) ? p.target : null;
+    const page = this.group ? primary?.groups?.[this.group] : primary?.home;
+    const list = this.list = Array.isArray(page) ? page : items(p, this.git, this.agents);
     const sub = this.sub && items({ tab: this.sub.tab, target: this.sub.target }, null, null);
     // Arrow keys step over labels and notes.
     const step = (rows, from, d) => { for (let n = 1; n <= rows.length; n++) { const j = (from + d * n + rows.length * n) % rows.length; if (rows[j][1]) return j; } return from; };
@@ -243,7 +252,8 @@ export default class Menu extends View {
           else return;
         } else if (e.key === "down") { this.at = step(list, this.at, 1); this.sub = null; }
         else if (e.key === "up") { this.at = step(list, this.at, -1); this.sub = null; }
-        else if (e.key === "right" && list[this.at]?.[1]?.startsWith("sub:")) return this.open(this.at, list[this.at], 0, cx);
+        else if (e.key === "left" && this.group && list[0]?.[1] === "app.menu") return this.choose(0, cx);
+        else if (e.key === "right" && (list[this.at]?.[1]?.startsWith("sub:") || (primary && list[this.at]?.[2]?.group))) return this.choose(this.at, cx);
         else if (e.key === "enter") this.choose(this.at, cx);
         else if (e.key === "escape") closeOverlay(props().overlay);
         else return;
