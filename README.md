@@ -10,11 +10,11 @@
   <a href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start">quick start</a> · <a href="https://github.com/Krishnapthm/canopy/wiki">docs</a> · <a href="CONTRIBUTING.md">contributing</a>
 </p>
 
-canopy puts your terminals and coding agents side by side on one canvas. wire agents together, see which one is waiting on you, and open files, a browser or an iOS simulator next to them. close the window and everything keeps running.
+canopy puts your coding agents, terminals, browser and an iOS simulator on a single figma like canvas. wire agents with browsers/simulators, let them interract, see which one is waiting on you, and open files. close the window and everything keeps running.
 
 ## Install
 
-canopy runs on macOS (apple silicon) and linux.
+macOS (apple silicon) & linux
 
 ```sh
 curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/install.sh | sh
@@ -63,5 +63,3 @@ canopy is a fork of [herdr-app](https://github.com/herdrdev/herdr-app), and ever
 ## License
 
 canopy is licensed under Apache-2.0, like herdr-app. see [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
-
-made by [krishna](https://github.com/Krishnapthm).
