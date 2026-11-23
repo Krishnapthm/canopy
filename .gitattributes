@@ -1,0 +1,3 @@
+# Check out text as LF on every OS: the app embeds files (src/SKILL.md, shipped
+# keys, themes, layouts) with include_str! and compares or parses them byte-exact.
+* text=auto eol=lf

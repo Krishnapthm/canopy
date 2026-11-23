@@ -1,7 +1,6 @@
 // The quote popover: opened by quote.menu when a selection in a pane is finished.
-// Rows: agents wired to that pane first, then other running agents (a click pastes the
-// quote and the optional message, never pressing Enter), then installed agents to start
-// with the quote ("New agent with this").
+// Rows: wired agents, other running agents, then installed agents to start with the quote.
+// Annotations submit their prompt. Other quotes stay in the prompt for review.
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea } from "gpui-base";
 import { run, props, closeOverlay, theme, ui, knownAgents, spaces } from "herdr";
@@ -48,7 +47,8 @@ export default class Quote extends View {
     const wired = agents.filter(a => a.wired);
     const running = agents.filter(a => !a.wired);
     const any = agents.length > 0 || this.known.length > 0;
-    const { path = "", start, end } = props()?.quote ?? {};
+    const { path = "", start, end, kind } = props()?.quote ?? {};
+    const annotation = kind === "annotation";
     const where = path.split("/").pop() + (start ? `:${start}${end && end !== start ? `-${end}` : ""}` : "");
     return v_flex().id("quote").w_full().p(5).gap(4).bg(t.popover).text_size(ui.size.text).text_color(t.foreground)
       .on_key_down((e, cx) => {
@@ -59,9 +59,9 @@ export default class Quote extends View {
       // Says what the popover does: the selection goes to an agent's prompt.
       .child(h_flex().px(8).pt(4).pb(2).gap(8).items_center()
         .child(svg("icons/quote.svg").size(14).flex_none().text_color(t.muted))
-        .child(div().font_semibold().child("Send quote to an agent")))
+        .child(div().font_semibold().child(annotation ? "Send annotation to an agent" : "Send quote to an agent")))
       .child(div().px(8).pb(4).text_size(11).text_color(t.dim).truncate()
-        .child(any ? `${where} · pasted into the prompt, not sent` : where))
+        .child(any ? (annotation ? "Submits the screenshot and comments" : `${where} · pasted into the prompt, not sent`) : where))
       .child(div().mx(3).h(1).bg(t.border))
       .when(wired.length > 0, el => el.child(this.label("Wired to this pane"))
         .children(wired.map((a, i) => this.row(`wired-${i}`, a, { terminal: a.terminal }))))

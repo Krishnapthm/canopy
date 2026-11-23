@@ -19,6 +19,8 @@ root=${TMPDIR:-/tmp}/canopy-dev
 export HERDR_APP_HOME=$root/home HC_SESSION=canopy-dev HC_SOCKET=$root/c.sock
 export XDG_STATE_HOME=$root/state XDG_CONFIG_HOME=$root/config
 export HERDR_APP_NO_SOUND=1
+# The agent skill install writes here, never the person's real harness folders.
+export CANOPY_SKILL_HOME=$root/skill-home
 [[ ${#HC_SOCKET} -le 80 ]] || { echo 'TMPDIR socket path too long; use TMPDIR=/tmp' >&2; exit 1; }
 [[ -x $repo/target/debug/canopy ]] || { echo 'debug app missing; build it separately' >&2; exit 1; }
 hc=$(command -v hc) || { echo 'hc missing from PATH' >&2; exit 1; }

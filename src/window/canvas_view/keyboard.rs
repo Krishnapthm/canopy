@@ -16,7 +16,8 @@ impl AppWindow {
         if !self.canvas_state.mode || !self.has_canvas() || self.overlays.iter().any(|o| o.kind.modal_keys()) { return false; }
         // Something else on the canvas has the keyboard (a rename, the thread input, the files panel).
         if !self.focus.is_focused(window) { return false; }
-        if key.key == "escape" && self.wire_cancel(cx) { return true; }
+        if key.key == "escape" && self.wire_cancel(window, cx) { return true; }
+        if key.key == "escape" && self.canvas_state.browser_tab.is_some() { self.collapse_browser(window, cx); return true; }
         // A lone modifier tap (GPUI sends releasing Option as an "alt" key) is never swallowed:
         // its release must still reach the modifier listeners.
         if matches!(key.key.as_str(), "shift" | "control" | "alt" | "platform" | "function") { return false; }
@@ -180,7 +181,7 @@ impl AppWindow {
             "canvas.nudge" => {
                 let Some(d) = args["direction"].as_str().and_then(direction) else { return self.fail("use left, right, up or down"); };
                 let Some(key) = selected else { return self.fail("select a cell first"); };
-                self.canvas_state.end_drag();
+                self.end_canvas_drag(cx);
                 self.begin_layout();
                 if self.canvas_state.nudge(&key, d, self.person.canvas_gap) {
                     // Tile view puts the tile back instead of pushing neighbours.

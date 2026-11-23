@@ -8,6 +8,7 @@
 use crate::hc::Core;
 mod floats;
 mod canvas_view;
+pub(crate) use canvas_view::browser::forget_browser_data_if_until_quit;
 mod ui;
 mod movable;
 mod pane_drag;
@@ -291,6 +292,26 @@ struct Copy {
     error: Option<String>,
 }
 
+/// A notification (defaults/mods/toast): see AGENTS.md "Toasts" for when to raise one.
+pub(crate) struct Toast { pub title: String, pub body: Option<String>, pub level: Level, pub action: Option<(String, Value)> }
+
+#[derive(Clone, Copy)]
+pub(crate) enum Level { Info, Success, Error }
+
+impl Level {
+    fn name(self) -> &'static str {
+        match self { Level::Info => "info", Level::Success => "success", Level::Error => "error" }
+    }
+}
+
+/// The overlay spec `open_overlay` takes for a toast; absent fields are left out.
+fn toast_json(t: &Toast) -> Value {
+    let mut note = json!({"title": t.title, "level": t.level.name()});
+    if let Some(body) = &t.body { note["body"] = json!(body); }
+    if let Some((name, args)) = &t.action { note["action"] = json!({"name": name, "args": args}); }
+    json!({"kind": "toast", "notification": note})
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum OverlayKind {
     Dialog,
@@ -313,6 +334,8 @@ struct Overlay {
     kind: OverlayKind,
     slot: String,
     at: Point<Pixels>,
+    /// Popup hangs above the floating block under the pointer.
+    above: bool,
     /// As designed; drawn at the current zoom. Up to 1: a share of the window.
     size: Size<f32>,
     expires: Option<Instant>,
@@ -401,6 +424,9 @@ pub struct AppWindow {
     person: settings::Person,
     /// What the last command made or why it didn't (for callers that wait for it).
     reply: Option<Value>,
+    /// The control socket caller of the command running now. A command that answers later
+    /// (a browser pane's read or shot) takes it and sends its reply when ready.
+    held_reply: Option<std::sync::mpsc::Sender<Value>>,
     /// The `where` label last written per terminal address.
     written_where: HashMap<String, String>,
     /// `herdr.seen` turns written but not yet back from the core.
@@ -505,6 +531,7 @@ impl AppWindow {
             written_view: String::new(),
             person: settings::Person::default(),
             reply: None,
+            held_reply: None,
             written_where: HashMap::new(),
             written_seen: HashMap::new(),
             looked: HashMap::new(),
@@ -553,7 +580,10 @@ impl AppWindow {
         w._canvas_keys = Some(cx.intercept_keystrokes(move |event, window, cx| {
             if window.window_handle() != owner_window { return; }
             let swallowed = owner.update(cx, |this, cx| {
-                this.record_shortcut(&event.keystroke) || this.canvas_key(&event.keystroke, window, cx)
+                if this.record_shortcut(&event.keystroke) { return true; }
+                #[cfg(target_os = "macos")]
+                if this.annotation_escape(&event.keystroke, window, cx) { return true; }
+                this.canvas_key(&event.keystroke, window, cx)
             }).unwrap_or(false);
             if swallowed { cx.stop_propagation(); }
         }));
@@ -588,6 +618,9 @@ impl AppWindow {
         w.watched.programs = mtime(&crate::programs::path());
         w.reload_config(window, cx);
         mods::warm_known_agents();
+        // Test windows run this startup too; they must never write the person's harness folders.
+        #[cfg(not(test))]
+        crate::skill::install_for_installed();
         w.check_editors(window, cx);
         install_layouts();
         let name = mods::shared("layout").and_then(|v| v.as_str().map(str::to_owned)).filter(|n| layout_path(n).exists());
@@ -1359,6 +1392,17 @@ impl AppWindow {
         self.agent = Some(addr.to_owned());
     }
 
+    /// On the canvas: goes to the agent's space, brings its pane into view and
+    /// enters it, so the next keystroke goes to that agent.
+    fn enter_canvas_agent(&mut self, addr: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(space) = self.canvas_state.doc.panes.iter().find(|c| c.id == addr).map(|c| c.space.clone()) else { return };
+        self.go_room(space, window, cx);
+        self.canvas_state.selected = vec![addr.clone()];
+        self.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+        // After entering: the expanded cell is what must be on screen.
+        self.reveal_pane(&addr, window, cx);
+    }
+
     /// The parent chain's top: the agent a sub-agent belongs to in the agent order.
     fn root_agent(&self, addr: &str) -> String {
         let mut cur = addr.to_owned();
@@ -1515,7 +1559,7 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// Shares what the person looks at as `herdr.seen` (docs/labels.md): an
+    /// Shares what the person looks at as `herdr.seen` (docs/wiki/Labels.md): an
     /// agent on screen in the active window, once per turn while it stays
     /// there, so a phone marking it unread isn't undone by a screen nobody
     /// watches. Only ever raises it. True when a status changed.
@@ -1565,7 +1609,11 @@ impl AppWindow {
             return self.hand_keyboard();
         }
         let shown = if self.has_canvas() {
-            self.focused_cell().filter(|_| !self.canvas_state.mode).map(|t| t.focus.clone())
+            #[cfg(target_os = "macos")]
+            let annotation = self.annotation_focus(cx);
+            #[cfg(not(target_os = "macos"))]
+            let annotation = None;
+            annotation.or_else(|| self.focused_cell().filter(|_| !self.canvas_state.mode).map(|t| t.focus.clone()))
         } else if terminal_block(&self.chrome, self.focused_pane.as_deref()).is_some() {
             self.focused_pane.as_deref().and_then(|p| self.pane_focus(p, cx))
         } else if let Some(block) = self.agent_block() {
@@ -1863,6 +1911,11 @@ impl AppWindow {
         }
     }
 
+    /// Opens a notification toast.
+    pub(crate) fn toast(&mut self, t: Toast, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_overlay(mods::new_overlay_id(), toast_json(&t), window, cx);
+    }
+
     fn layout_notice(&mut self, title: &str, body: &str, window: &mut Window, cx: &mut Context<Self>) {
         let spec = json!({"kind":"toast", "notification":{"title":title,"body":body,"level":"info"}});
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
@@ -1907,6 +1960,7 @@ impl AppWindow {
             self.documents_updated(None, vec![result], window, cx);
         }
         self.save_view();
+        self.release_pdfs(window, cx);
     }
 
     fn documents_updated(&mut self, machines: Option<Value>, results: Vec<(String, crate::mirror_sync::Outcome)>, window: &mut Window, cx: &mut Context<Self>) -> bool {
@@ -2015,6 +2069,7 @@ impl AppWindow {
                 if this.has_canvas() { this.open_preview(json!({"path":path}), window, cx); }
                 else { crate::links::open(&crate::links::Target::File(path.clone())); }
             }
+            TerminalEvent::OpenUrl(url) => this.open_link(&addr, url.clone(), window, cx),
             TerminalEvent::Peek(address) => this.peek_terminal(address, window, cx),
             TerminalEvent::TitleChanged => this.publish(cx),
             TerminalEvent::Ended => this.terminal_ended(&block, window, cx),
@@ -2766,6 +2821,7 @@ impl AppWindow {
         // Close the dialog holding the keyboard, not the terminal behind it.
         let implicit_close = match crate::keys::current(name).as_str() {
             "tab.close" => Self::arg(&args, "id").is_none(),
+            "canvas.browser_tab_close" => args["pane"].is_null() && self.selected_browser().is_none(),
             "pane.close" => Self::arg(&args, "pane").is_none(),
             _ => false,
         };
@@ -2869,6 +2925,14 @@ impl AppWindow {
             self.create_canvas(args, window, cx);
             return json!({"asked":"space"});
         }
+        if person && name == "canvas.pane_open" && args["target"].is_null() {
+            if let Some(id) = Self::owned(&args, "pane").or_else(|| self.selected_browser()) {
+                if let Err(error) = self.focus_browser_url(&id, cx) { return json!({"error":error}); }
+            } else {
+                self.ask_url(args, window, cx);
+            }
+            return json!({"asked":"url"});
+        }
         if person && name.ends_with(".rename") && args.get("name").is_none_or(Value::is_null) {
             self.ask_name(name, args, window, cx);
             return json!({ "asked": "name" });
@@ -2931,6 +2995,14 @@ impl AppWindow {
         self.open_overlay("rename".into(), spec, window, cx);
     }
 
+    /// Asks the person for a web address when Open URL has no pane target.
+    fn ask_url(&mut self, args: Value, window: &mut Window, cx: &mut Context<Self>) {
+        let spec = json!({ "mod": "prompt", "kind": "dialog", "width": 420, "props": {
+            "title": "open a page", "label": "Address", "field": "target", "value": "", "submit": "Open",
+            "hint": "localhost:3000 opens over http; other bare names over https", "command": { "name": "canvas.pane_open", "args": args } } });
+        self.open_overlay(mods::new_overlay_id(), spec, window, cx);
+    }
+
     fn dispatch(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
@@ -2945,7 +3017,15 @@ impl AppWindow {
             "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
-            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" => self.pane_command(name, a, window, cx),
+            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" => self.pane_command(name, a, window, cx),
+            "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" => self.annotation_command(name, a, window, cx),
+            "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
+            | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
+            | "canvas.browser_cookies" | "canvas.browser_links" | "canvas.browser_clear" | "canvas.browser_inspect" | "canvas.browser_open_file"
+            | "canvas.browser_tab_new" | "canvas.browser_tab_select" | "canvas.browser_tab_close" => self.browser_command(name, a, person, window, cx),
+            name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
+            "canvas.pane_quote" => self.quote_image(window, cx),
+            "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
             "app.menu" => {
                 let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
                 let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
@@ -2974,6 +3054,7 @@ impl AppWindow {
             "preview.open" => self.open_preview(a.clone(), window, cx),
             "canvas.hand" => {
                 self.canvas_state.hand = a["on"].as_bool().unwrap_or(!self.canvas_state.hand);
+                if mods::publish_window(self.window_json(window)) { self.refresh_snapshot_mods(cx); }
                 cx.notify();
             }
             "canvas.create" => {
@@ -3007,6 +3088,9 @@ impl AppWindow {
                 }
                 let addrs = self.model.remove_space(&id);
                 self.kill(&addrs, cx);
+                // Terminals went with the space; its file, browser and other boxed panes stay on the canvas document, so close them too (this tears down browser pages).
+                let boxed: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.boxed() && p.space.as_deref() == Some(id.as_str())).map(|p| p.id.clone()).collect();
+                if !boxed.is_empty() { self.close_boxed_panes(&boxed, cx); }
             }
             "space.rename" => {
                 let Some(id) = Self::owned(a, "id").or_else(|| self.model.active.clone()) else { return self.fail("no space to rename") };
@@ -3141,6 +3225,14 @@ impl AppWindow {
                 }
             }
             "pane.focus" => {
+                // A boxed canvas pane (file, browser, mod...): go to its place, select it, bring it into view.
+                if let Some(id) = Self::owned(a, "pane") && let Some(space) = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.boxed()).map(|p| p.space.clone()) {
+                    self.go_room(space, window, cx);
+                    self.canvas_state.selected = vec![id.clone()];
+                    self.reveal_pane(&id, window, cx);
+                    cx.notify();
+                    return;
+                }
                 if Self::arg(a, "pane").is_none()
                     && let Some(terminal) = Self::arg(a, "terminal")
                     && let Some(block) = self.chrome.visible_blocks().into_iter().find(|n| n.terminal() == Some(terminal))
@@ -3301,6 +3393,9 @@ impl AppWindow {
                     return self.fail(format!("no running terminal {t:?}"));
                 }
                 self.focus_agent(&t);
+                if self.has_canvas() {
+                    self.enter_canvas_agent(t, window, cx);
+                }
             }
             "agent.next" | "agent.prev" => {
                 let order = self.agent_order();
@@ -3664,9 +3759,13 @@ impl AppWindow {
             // No height: as tall as the content, up to most of the window.
             _ => size(num("width", 420.0), num("height", 0.85)),
         };
+        let above = (spec.get("at").and_then(Value::as_str) == Some("above")).then(|| {
+            self.bounds.borrow().iter().find(|(id, bounds)| id.starts_with("float:") && !id.ends_with("#content") && bounds.contains(&self.pointer))
+                .map(|(_, bounds)| point(self.pointer.x - px(16.), bounds.origin.y - px(8.)))
+        }).flatten();
         let at = match spec.get("at") {
             Some(v) if v.get("x").is_some() => point(px(num_in(v, "x")), px(num_in(v, "y"))),
-            _ => self.pointer,
+            _ => above.unwrap_or(self.pointer),
         };
         let top = (spec.get("at").and_then(Value::as_str) == Some("top")).then(|| num("offset", 0.0));
         let fit = layout.is_none() && (kind == OverlayKind::Popup || (matches!(kind, OverlayKind::Dialog | OverlayKind::Window) && spec.get("height").is_none()));
@@ -3700,6 +3799,7 @@ impl AppWindow {
             kind,
             slot,
             at,
+            above: above.is_some(),
             size,
             expires: (kind == OverlayKind::Toast).then(|| Instant::now() + Duration::from_millis(timeout as u64)),
             focus,
@@ -3785,6 +3885,7 @@ impl AppWindow {
                 self.win_drag = None;
             }
             self.bounds.borrow_mut().remove(&o.slot);
+            self.bounds.borrow_mut().remove(&format!("cover:overlay:{}", o.id));
             self.remove_copy(&o.slot, window, cx);
             if o.layout.is_some() {
                 self.sync(window, cx);
@@ -3834,7 +3935,9 @@ impl AppWindow {
             Request::CloseOverlay { id } => self.close_overlay(&id, window, cx),
             Request::Refresh => self.refresh_mods(cx),
             Request::Control { cmd, reply } => {
-                let _ = reply.send(self.control(cmd, window, cx));
+                self.held_reply = Some(reply);
+                let answer = self.control(cmd, window, cx);
+                if let Some(reply) = self.held_reply.take() { let _ = reply.send(answer); }
             }
         }
     }
@@ -3960,6 +4063,7 @@ impl AppWindow {
             if active {
                 self.sync(window, cx);
             } else {
+                self.hide_key_hints(window, cx);
                 self.looked.clear();
                 // A key-up lost to another app would leave Space pan stuck on.
                 self.canvas_state.space_down = false;
@@ -4417,8 +4521,14 @@ impl AppWindow {
                 Some(l) => self.render_node(l, &HashSet::new(), None, cx),
                 None => self.render_slot(&o.slot, cx),
             };
+            let bounds = self.bounds.clone();
+            let cover = format!("cover:overlay:{}", o.id);
+            let mut measure = Some(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
+                .absolute().size_full());
             let body = div()
                 .id(SharedString::from(format!("ov-{}", o.id)))
+                .relative()
+                .children(if o.kind == OverlayKind::Dialog { None } else { measure.take() })
                 .track_focus(&o.focus)
                 // Esc stays with terminals (agents use it to interrupt) and windows.
                 .when(o.layout.is_none() && o.kind.modal_keys(), |d| d.key_context("Overlay"))
@@ -4438,6 +4548,7 @@ impl AppWindow {
                         .absolute()
                         .inset_0()
                         .bg(hsla(0.0, 0.0, 0.0, 0.35))
+                        .children(measure)
                         .occlude()
                         .flex()
                         .items_center()
@@ -4461,7 +4572,7 @@ impl AppWindow {
                                 let id = o.id.clone();
                                 move |this, _, w, cx| this.close_overlay(&id, w, cx)
                             }))
-                            .child(position_popup(at, body))
+                            .child(position_popup(at, o.above, body))
                             .into_any_element(),
                     );
                 }
@@ -4515,7 +4626,10 @@ fn nearest(cur: Bounds<Pixels>, dir: &str, candidates: impl IntoIterator<Item = 
         .map(|(_, _, _, id)| id)
 }
 
-fn position_popup(at: Point<Pixels>, body: Stateful<Div>) -> Anchored {
+fn position_popup(at: Point<Pixels>, above: bool, body: Stateful<Div>) -> Anchored {
+    if above {
+        return anchored().anchor(gpui::Anchor::BottomLeft).position(at).snap_to_window_with_margin(px(8.)).child(body);
+    }
     anchored()
         .position(point(at.x.max(px(8.0)), at.y.max(px(8.0))))
         .snap_to_window_with_margin(px(8.0))
@@ -4852,6 +4966,9 @@ fn shadow(el: Div, s: Option<&str>) -> Div {
 
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_browser_inputs(window, cx);
+        self.release_pdf_drops(window, cx);
+        self.pin_panes();
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
         crate::bench::frame_start();
@@ -4909,6 +5026,9 @@ impl Render for AppWindow {
                 }
             }))
             .on_modifiers_changed(cx.listener(|this, e: &ModifiersChangedEvent, window, cx| this.canvas_modifiers(e.modifiers, window, cx)))
+            .capture_key_down(cx.listener(|this, _: &KeyDownEvent, window, cx| {
+                this.hide_key_hints(window, cx);
+            }))
             .on_key_up(cx.listener(|this, e: &KeyUpEvent, _, cx| {
                 if e.keystroke.key == "space" {
                     this.canvas_state.space_down = false;
@@ -5001,8 +5121,10 @@ impl Render for AppWindow {
             .children(self.quote_chip_element())
             .children(tracker)
             .children(win_tracker)
+            .children(self.image_region_tracker(cx))
             .child(pane_drag)
             .child(crate::bench::frame_end())
+            .children(self.browser_masks(cx))
     }
 }
 
@@ -5053,6 +5175,16 @@ fn changed_asset_paths(home: &std::path::Path, changed: &[std::path::PathBuf]) -
 mod tests {
     use gpui::{div, point, px, size, Context, IntoElement, Render, TestAppContext, Window};
     use gpui::prelude::*;
+
+    #[test]
+    fn toasts_become_overlay_specs() {
+        let full = super::Toast { title: "T".into(), body: Some("B".into()), level: super::Level::Error, action: Some(("pane.focus".into(), serde_json::json!({"pane": "p2"}))) };
+        assert_eq!(super::toast_json(&full), serde_json::json!({"kind":"toast","notification":{"title":"T","body":"B","level":"error","action":{"name":"pane.focus","args":{"pane":"p2"}}}}));
+        let bare = super::Toast { title: "T".into(), body: None, level: super::Level::Info, action: None };
+        assert_eq!(super::toast_json(&bare), serde_json::json!({"kind":"toast","notification":{"title":"T","level":"info"}}));
+        let levels = [super::Level::Info, super::Level::Success, super::Level::Error].map(super::Level::name);
+        assert_eq!(levels, ["info", "success", "error"]);
+    }
 
     #[test]
     fn going_back_into_a_split_column_takes_its_top_pane_whatever_the_fractions() {
@@ -5145,8 +5277,7 @@ mod tests {
     #[gpui::test]
     fn image_invalidation_drops_cached_atlas_tiles_without_loading_missing_assets(cx: &mut TestAppContext) {
         use gpui::{ImgResourceLoader, Resource};
-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let home = temp.join(format!("herdr-image-atlas-test-{}", std::process::id()));
+        let home = test_home("image-atlas-test");
         std::fs::create_dir_all(&home).unwrap();
         let file = home.join("image.gif");
         let mut encoder = image::codecs::gif::GifEncoder::new(std::fs::File::create(&file).unwrap());
@@ -5233,8 +5364,7 @@ mod tests {
                 encoder.encode_frame(image::Frame::new(image::RgbaImage::from_pixel(2, 2, image::Rgba(color)))).unwrap();
             }
         }
-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let dir = temp.join(format!("herdr-many-images-{}", std::process::id()));
+        let dir = test_home("many-images");
         std::fs::create_dir_all(&dir).unwrap();
         let sources: Vec<_> = (0..24).map(|id| {
             let path = dir.join(format!("{id}.gif"));
@@ -5326,8 +5456,7 @@ mod tests {
                 element
             }
         }
-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let home = temp.join(format!("herdr-image-release-test-{}", std::process::id()));
+        let home = test_home("image-release-test");
         std::fs::create_dir_all(&home).unwrap();
         let gif = home.join("animated.gif");
         let png = home.join("still.png");
@@ -5393,8 +5522,7 @@ mod tests {
 
     #[test]
     fn directory_changes_include_nested_assets() {
-        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
-        let home = temp.join(format!("herdr-image-directory-test-{}", std::process::id()));
+        let home = test_home("image-directory-test");
         std::fs::create_dir_all(home.join("mods/probe/nested")).unwrap();
         std::fs::write(home.join("mods/probe/nested/icon.svg"), "svg").unwrap();
         for ignored in ["node_modules/pkg", ".git"] {
@@ -5524,6 +5652,7 @@ mod tests {
         struct Popup {
             height: f32,
             edge: bool,
+            above: bool,
         }
         impl Render for Popup {
             fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -5535,6 +5664,7 @@ mod tests {
                 };
                 div().size_full().child(super::position_popup(
                     at,
+                    self.above,
                     div()
                         .id("popup")
                         .debug_selector(|| "popup".into())
@@ -5544,17 +5674,21 @@ mod tests {
                 ))
             }
         }
-        let (view, cx) = cx.add_window_view(|_, _| Popup { height: 72.0, edge: false });
-        for (height, edge) in [(72.0, false), (72.0, true), (300.0, true)] {
+        let (view, cx) = cx.add_window_view(|_, _| Popup { height: 72.0, edge: false, above: false });
+        for (height, edge, above) in [(72.0, false, false), (72.0, true, false), (300.0, true, false), (72.0, false, true)] {
             view.update(cx, |view, cx| {
                 view.height = height;
                 view.edge = edge;
+                view.above = above;
                 cx.notify();
             });
             cx.run_until_parked();
             let bounds = cx.debug_bounds("popup").unwrap();
             assert_eq!(bounds.size, size(px(220.0), px(height)));
-            if edge {
+            if above {
+                assert_eq!(bounds.origin, point(px(100.0), px(200.0 - height)));
+                assert_eq!(bounds.bottom(), px(200.0));
+            } else if edge {
                 let viewport = cx.update(|window, _| window.viewport_size());
                 assert_eq!(bounds.bottom_right(), point(viewport.width - px(8.0), viewport.height - px(8.0)));
             } else {
@@ -5573,11 +5707,22 @@ mod tests {
         assert_eq!(restored.terminal_menu.as_deref(), Some("personal-menu"));
     }
 
+    /// A scratch path `herdr-<label>-<pid>` for one test, under /var/tmp on
+    /// Linux and the OS temp dir elsewhere (a "/tmp" literal is not absolute on
+    /// Windows). The caller creates and removes it.
+    fn test_home(label: &str) -> std::path::PathBuf {
+        let temp = if cfg!(target_os = "linux") { std::path::PathBuf::from("/var/tmp") } else { std::env::temp_dir() };
+        temp.join(format!("herdr-{label}-{}", std::process::id()))
+    }
+
     /// Runs `window::tests::<name>` alone in a test process of its own, on a
     /// fresh app home: a window takes process-wide things (the app home, the
     /// mods' request channel) that tests beside it would otherwise share.
     pub(super) fn in_own_process(name: &str) {
-        let home = std::path::PathBuf::from(format!("/tmp/herdr-window-test-{}-{}", name.replace("::", "-"), std::process::id()));
+        // A counter, not the test name: macOS caps socket paths at 104 bytes and
+        // the home holds herdr-app.sock under an already long temp dir.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let home = test_home(&format!("w{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&home);
         let out = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", &if name.contains("::") { name.to_owned() } else { format!("window::tests::{name}") }, "--nocapture", "--test-threads=1"])
@@ -5666,7 +5811,7 @@ export default class Probe extends View {
     }
 
     /// Real pointer events through hit testing: box select, group drag, double-click to enter,
-    /// click out to leave, Option to show actions.
+    /// click out to leave, delayed Cmd/Ctrl hints with terminal focus.
     #[gpui::test]
     fn figma_mouse(cx: &mut TestAppContext) {
         use gpui::{point, px, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent};
@@ -5702,13 +5847,27 @@ export default class Probe extends View {
         assert_eq!((selected, mode), (vec!["t1".to_owned(), "t2".to_owned()], true), "a box on empty canvas selects what it touches");
 
         cx.simulate_mouse_down(at(210., 218.), MouseButton::Left, none);
-        cx.simulate_mouse_move(at(260., 268.), MouseButton::Left, none);
+        cx.simulate_mouse_move(at(240., 218.), MouseButton::Left, none);
+        assert_eq!(state(cx).2, [[100., 200.], [500., 200.]], "input waits for a frame");
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        assert_eq!(state(cx).2, [[130., 200.], [530., 200.]], "the drag follows the pointer over the pill itself");
+        for (x, y) in [(225., 238.), (280., 282.), (260., 268.)] {
+            cx.simulate_mouse_move(at(x, y), MouseButton::Left, none);
+        }
+        assert_eq!(state(cx).2, [[130., 200.], [530., 200.]], "later input still waits for the next frame");
         cx.simulate_mouse_up(at(260., 268.), MouseButton::Left, none);
         let (_, _, rects) = state(cx);
         assert_eq!(rects, [[150., 250.], [550., 250.]], "the whole selection moves together");
         cx.run_until_parked();
 
-        let target = at(260., 268.);
+        // Re-entering after a mouse-up outside commits the last position seen while pressed.
+        cx.simulate_mouse_down(at(260., 268.), MouseButton::Left, none);
+        cx.simulate_mouse_move(at(280., 290.), MouseButton::Left, none);
+        cx.simulate_mouse_move(at(260., 268.), None, none);
+        assert_eq!(state(cx).2, [[170., 272.], [570., 272.]]);
+        cx.run_until_parked();
+
+        let target = at(280., 290.);
         cx.simulate_mouse_move(target, None, none);
         view.update(cx, |this, _| this.canvas_state.settle_for_test());
         cx.update(|window, _| window.refresh());
@@ -5726,12 +5885,39 @@ export default class Probe extends View {
         assert!(state(cx).1, "a click on empty canvas leaves the cell");
         assert!(cx.update(|window, cx| view.read(cx).focus.is_focused(window)));
 
-        cx.simulate_modifiers_change(Modifiers { alt: true, ..Default::default() });
-        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_some()), "Option shows actions");
-        cx.update(|window, _| window.refresh());
+        cx.update(|window, _| window.activate_window());
+        let hint = if cfg!(target_os = "macos") { Modifiers { platform: true, ..none } } else { Modifiers { control: true, ..none } };
+        cx.simulate_modifiers_change(Modifiers { alt: true, ..none });
+        assert!(view.update(cx, |this, _| this.canvas_state.hint_timer.is_none()), "Option no longer starts hints");
+        cx.simulate_modifiers_change(hint);
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_none()), "a short press does not show hints");
         cx.run_until_parked();
         cx.simulate_modifiers_change(none);
-        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_none()), "releasing Option hides them");
+        cx.executor().advance_clock(std::time::Duration::from_millis(400));
+        cx.run_until_parked();
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_none()), "release cancels the delay");
+
+        // Hints also work with a terminal focused, without swallowing its key down.
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.canvas_state.selected = vec!["t1".into()];
+            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_state.settle_for_test();
+            window.refresh();
+        }));
+        assert!(!state(cx).1);
+        cx.run_until_parked();
+        cx.simulate_modifiers_change(hint);
+        let held_state = cx.update(|window, cx| view.update(cx, |this, _| (this.canvas_state.hint_timer.is_some(), window.is_window_active(), this.has_canvas(), window.modifiers())));
+        assert!(held_state.0, "terminal focus starts the hold delay: {held_state:?}");
+        cx.run_until_parked();
+        cx.executor().advance_clock(std::time::Duration::from_millis(400));
+        cx.run_until_parked();
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_some()), "a hold shows hints with terminal focus");
+        cx.simulate_keystrokes("f13");
+        assert!(view.update(cx, |this, _| this.canvas_state.actions.is_none() && this.canvas_state.hint_timer.is_none()), "any key hides hints");
+        cx.simulate_modifiers_change(none);
+        cx.simulate_click(at(60., 700.), none);
+        cx.run_until_parked();
 
         // The shipped keys: Shift+1 fits everything; the platform's leave key leaves an entered cell.
         // This window's layout is "test", so the shipped `layout:main` keys apply to it here.
@@ -6570,7 +6756,8 @@ export default class SystemToast extends View {
     #[test]
     fn shipped_layouts_parse_and_show_what_they_promise() {
         let main = super::default_layout("main");
-        assert!(matches!(main.kind, super::Kind::Canvas));
+        assert!(main.walk().iter().any(|n| matches!(n.kind, super::Kind::Canvas)));
+        assert!(main.find("status").is_some());
         assert!(main.find("sidebar").is_none());
         let classic=super::default_layout("classic");
         assert!(classic.find("sidebar").is_some());

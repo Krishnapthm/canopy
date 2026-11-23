@@ -328,7 +328,7 @@ pub struct Hint {
     pub focusable: bool,
 }
 
-/// mod.json "pane": the mod draws canvas panes of kind mod:<name>. docs/mods.md.
+/// mod.json "pane": the mod draws canvas panes of kind mod:<name>. docs/wiki/Layouts-and-Mods.md.
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 pub struct PaneHint {
     pub label: String,
@@ -1035,7 +1035,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         .function("panes", reader(reads.clone(), "panes", |s| &s.panes))
         .function("canvasPanes", reader(reads.clone(), "canvas_panes", |s| &s.canvas_panes))
         .function("paneKinds", |_| {
-            let mut kinds: Vec<_> = crate::canvas::PANE_KINDS.iter().map(|(kind, verbs)| json!({"kind":kind,"verbs":verbs})).collect();
+            let mut kinds: Vec<_> = crate::canvas::PANE_KINDS.iter().filter(|(kind, _)| *kind != "sim" || crate::sim::available()).map(|(kind, verbs)| json!({"kind":kind,"verbs":verbs})).collect();
             kinds.extend(scan().into_iter().filter_map(|f| f.hint.pane.map(|p| json!({"kind":format!("mod:{}", f.id),"verbs":crate::canvas::MOD_VERBS,"label":p.label,"icon":p.icon}))));
             Ok(to_host(&Value::Array(kinds)))
         })
@@ -1061,7 +1061,7 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         .function("theme", |_| Ok(to_host(&serde_json::to_value(&*crate::settings::theme()).unwrap_or(Value::Null))))
         .function("settings", |_| Ok(to_host(&serde_json::to_value(&*crate::settings::get()).unwrap_or(Value::Null))))
         .function("keys", |_| {
-            let list: Vec<Value> = crate::keys::listing().into_iter().map(|(s, k, a)| json!({ "section": s, "keys": k, "action": a })).collect();
+            let list: Vec<Value> = crate::keys::listing().into_iter().map(|(s, k, a)| json!({ "section": s, "keys": k, "label": crate::keys::pretty(&k), "action": a })).collect();
             Ok(to_host(&Value::Array(list)))
         })
         .function("openOverlay", |a| {

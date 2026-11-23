@@ -10,7 +10,9 @@ cargo build --release
 
 data=${XDG_DATA_HOME:-$HOME/.local/share}
 mkdir -p "$HOME/.local/bin" "$data/applications" "$data/icons/hicolor/scalable/apps"
-ln -sfn "$PWD/target/release/canopy" "$HOME/.local/bin/canopy"
+target=${CARGO_TARGET_DIR:-target}
+[[ $target == /* ]] || target=$PWD/$target
+ln -sfn "$target/release/canopy" "$HOME/.local/bin/canopy"
 cp assets/icons/canopy.svg "$data/icons/hicolor/scalable/apps/canopy.svg"
 cat > "$data/applications/canopy.desktop" <<EOF
 [Desktop Entry]

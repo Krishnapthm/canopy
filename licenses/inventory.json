@@ -129,6 +129,13 @@
       ]
     },
     {
+      "name": "react-grab 0.2.0 (browser pane picker)",
+      "source": "https://www.npmjs.com/package/react-grab/v/0.2.0 dist/index.global.js, unchanged; Canopy removes its network URLs at runtime (src/window/canvas_view/browser.rs).",
+      "files": [
+        "vendor/react-grab/LICENSE"
+      ]
+    },
+    {
       "name": "Lucide / Feather icons (defaults/icons and shipped mods)",
       "source": "https://github.com/lucide-icons/lucide",
       "files": [
@@ -190,6 +197,13 @@
       "source": "Ram path adapted from https://github.com/herdrdev/herdr/blob/HEAD/assets/logo.svg (Apache-2.0). Herdr 98 artwork is drawn by defaults/mods/win98/art/generate.ts, under the app's Apache-2.0 license.",
       "files": [
         "LICENSE"
+      ]
+    },
+    {
+      "name": "facebook/idb (src/sim_live.m follows its CoreSimulator, DTUHID and XPC code)",
+      "source": "https://github.com/facebook/idb/tree/5f5a5fb35b78d58ea5d39f826b4198df78483fa6",
+      "files": [
+        "licenses/idb.txt"
       ]
     }
   ]

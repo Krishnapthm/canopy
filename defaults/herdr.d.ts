@@ -59,7 +59,7 @@ export function playSound(sound: string): null;
  *   pane.focus {pane | terminal}, pane.go {direction}, pane.swap {pane?, direction | target}.
  *   Pane menus get target { pane, terminal }.
  * Canvas panes: canvas.pane_new {kind: "file", path, wire?, point?}, canvas.pane_read {pane},
- *   canvas.pane_shot {pane, path?}, canvas.pane_open {pane, target}, canvas.close {pane}.
+ *   canvas.pane_shot {pane, path?}, canvas.pane_open {pane, target, tab?}, canvas.close {pane}.
  * Terminals: terminal.open {argv?, folder?, place?: "tab" | "right" | "down"}, terminal.kill {terminal},
  *   terminal.keep {terminal, place?} (a running one without a pane, e.g. a sub-agent, gets one),
  *   terminal.park {terminal} (its pane goes, it keeps running; the menu's "Send back"),
@@ -214,8 +214,8 @@ export interface CanvasPane {
   /** A terminal's core address (`t3`), `sub:<parent>:<id>` for a sub-agent cell, or `p<N>`
    *  for any other pane. Wire keys use the same ids. */
   id: string;
-  kind: "terminal" | "sub" | "file" | `mod:${string}`;
-  /** Kind fields: terminal { size? }, sub { parent, sub }, file { path }, mod:<name> { what the mod saved }. */
+  kind: "terminal" | "sub" | "file" | "image" | "pdf" | "browser" | `mod:${string}`;
+  /** Kind fields: terminal { size? }, sub { parent, sub }, file/image { path }, pdf { path, highlights? }, browser (see CanvasBrowserPane), mod:<name> { what the mod saved }. */
   props: any;
   /** World pixels: [x, y, width, height]. */
   rect: [number, number, number, number];
@@ -224,12 +224,26 @@ export interface CanvasPane {
   space?: string;
 }
 
+export interface CanvasBrowserPane extends CanvasPane {
+  kind: "browser";
+  props: {
+    /** The active tab's address. */
+    url: string;
+    tabs: { id: string; url: string; title?: string }[];
+    /** Zero-based index in tabs. */
+    active: number;
+    home: string;
+    /** Fixed CSS page size; absent: responsive */
+    viewport?: [number, number];
+  };
+}
+
 /** Every pane on the canvas, as canvas.json saves it. Live. Not panes(), which lists
  *  the panes of tab layouts. */
 export function canvasPanes(): CanvasPane[];
 
-/** The kinds canvas.pane_new creates, with the `canopy pane` verbs each answers; mod kinds
- *  carry their label and icon. */
+/** Pane kinds and the `canopy pane` verbs they answer. Open image and pdf through kind file.
+ *  Mod kinds carry their label and icon. */
 export function paneKinds(): { kind: string; verbs: string[]; label?: string; icon?: string }[];
 
 /** Sets agent.next / agent.prev order to match the list a mod displays.
@@ -280,6 +294,10 @@ export function window(): {
   maximized: boolean;
   fullscreen: boolean;
   active: boolean;
+  /** The canvas hand tool is on (canvas.hand). */
+  hand: boolean;
+  /** The person holds Cmd (Ctrl off macOS): surfaces show their keys. */
+  keys: boolean;
 };
 
 /** For a floating mod: where it sits now. `vertical` on the left/right edges, horizontal on
@@ -313,8 +331,11 @@ export function fonts(): string[];
  *  number, default 1, clamped to 0.1..5. Layout values override settings.json. */
 export function settings(): Record<string, unknown>;
 
-/** Every key binding: { section, keys, action }. */
-export function keys(): { section: string; keys: string; action: string }[];
+/** Every key binding, with its readable label. */
+export function keys(): { section: string; keys: string; action: string;
+  /** The binding as people read it, e.g. "⇧⌘N" (macOS) or "Ctrl+Shift+N". */
+  label: string;
+}[];
 
 export interface OverlaySpec {
   /** One mod, or `layout`. */
@@ -344,7 +365,8 @@ export interface OverlaySpec {
   /** px, or up to 1: a share of the window. */
   width?: number;
   height?: number;
-  at?: "pointer" | { x: number; y: number };
+  /** "above": over the floating block under the pointer (the toolbar), its bottom 8 px above the block's top, left edge at the pointer minus 16 px. Pointer otherwise. */
+  at?: "pointer" | "above" | { x: number; y: number };
 }
 
 /** Shows a mod (or a layout) above everything. Returns its id. The mod gets `props().overlay` = that id. */

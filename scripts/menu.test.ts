@@ -94,23 +94,30 @@ test("confirm forwards the terminal opt-out only when the dialog offers it", asy
 test("canvas hint bar reads rebound mode keys and distinguishes the layout picker", async () => {
   const source = (await readFile(new URL("../defaults/mods/canvas-keys/main.js", import.meta.url), "utf8"))
     .replace(/^import .*;\n/gm, "").replace("export default class CanvasKeys", "class CanvasKeys");
-  const shown: string[] = [];
+  let shown: string[] = [];
+  let shownProps: Record<string, unknown> = {};
   const element: unknown = new Proxy({}, { get: (_, name) => (...args: unknown[]) => {
     if (name === "child" && typeof args[0] === "string") shown.push(args[0]);
     return element;
   } });
   const Hint = new Function("View", "div", "v_flex", "keys", "props", "theme", `${source}; return CanvasKeys;`)(class {}, () => element, () => element, () => [
-    {section:"global", keys:"q", action:"app.quit"},
-    {section:"canvas-mode", keys:"z", action:"canvas.new"},
-    {section:"canvas-mode", keys:"b", action:"{}"},
-    {section:"canvas-mode", keys:"shift-z", action:JSON.stringify({command:"canvas.arrange",args:{picker:true}})},
-  ], () => ({connecting:true}), () => ({}));
+    {section:"global", keys:"q", label:"Q", action:"app.quit"},
+    {section:"canvas-mode", keys:"z", label:"Z", action:"canvas.new"},
+    {section:"canvas-mode", keys:"b", label:"B", action:"{}"},
+    {section:"canvas-mode", keys:"shift-z", label:"⇧Z", action:JSON.stringify({command:"canvas.arrange",args:{picker:true}})},
+  ], () => shownProps, () => ({}));
   new Hint().render();
   expect(shown).toContain("z new terminal");
   expect(shown).toContain("b invalid binding");
   expect(shown).toContain("shift-z layout picker");
-  expect(shown.some(s => s.includes("Connect:"))).toBe(true);
   expect(shown.some(s => s.includes("app.quit"))).toBe(false);
+  // A connection shows one line instead of the key list.
+  [shown, shownProps] = [[], {pointer:true}];
+  new Hint().render();
+  expect(shown).toEqual(["Click a pane to connect · Esc cancels"]);
+  [shown, shownProps] = [[], {connecting:true}];
+  new Hint().render();
+  expect(shown).toEqual(["Arrows pick a pane · Enter connects · Esc cancels"]);
 });
 
 test("full key help names object bindings without splitting their JSON", async () => {
@@ -155,4 +162,37 @@ test("pane confirmation lists each pane and cancels without running its captured
   expect(sent).toEqual([]);
   confirm.yes();
   expect(sent).toEqual([["canvas.close", current.command.args]]);
+});
+
+
+test("canvas-agents numbers installed rows and starts the numbered agent", () => {
+  const shown: string[] = [], sent: unknown[] = [];
+  let keydown: (e: unknown, cx: unknown) => void;
+  const element: any = new Proxy({}, { get: (_, name) => (...args: any[]) => {
+    if (name === "when" && args[0]) args[1](element);
+    if (name === "child" && typeof args[0] === "string") shown.push(args[0]);
+    if (name === "on_key_down") keydown = args[0];
+    return element;
+  } });
+  const current = { tab: "canvas-agents", target: { space: "s1", machine: "m1" } };
+  const Menu = new Function("View", "div", "svg", "image", "h_flex", "v_flex", "props", "theme", "ui", "keys", "closeOverlay", "run", `${source}; return Menu;`)(
+    class {}, () => element, () => element, () => element, () => element, () => element,
+    () => current, () => ({}), { size: {} }, () => [], () => {}, (...args: unknown[]) => sent.push(args));
+  const menu = new Menu();
+  menu.agents = [
+    { name: "First", installed: true, run: ["first"] },
+    { name: "Missing", installed: false, run: ["missing"] },
+    { name: "Second", installed: true, run: ["second", "--flag"] },
+    { name: "Third", installed: true, run: ["third"] },
+  ];
+  menu.render();
+  expect(shown.filter(text => /^[1-9]$/.test(text))).toEqual(["1", "2", "3"]);
+  let stopped = 0;
+  const cx = { stop_propagation() { stopped++; } };
+  keydown!({ key: "2", modifiers: {} }, cx);
+  expect(sent).toEqual([["canvas.create", { space: "s1", argv: ["second", "--flag"] }]]);
+  keydown!({ key: "7", modifiers: {} }, cx);
+  keydown!({ key: "1", modifiers: { shift: true } }, cx);
+  expect(sent).toHaveLength(1);
+  expect(stopped).toBe(2);
 });

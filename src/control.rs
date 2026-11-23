@@ -44,7 +44,9 @@ fn serve(stream: UnixStream, tx: async_channel::Sender<Request>) {
     }
     let reply = match serde_json::from_str::<Value>(&line) {
         Ok(cmd) => {
-            let timeout = Duration::from_secs(if cmd.get("shot").is_some() { 30 } else { 5 });
+            // A shot, or a browser pane read or shot waiting for its page, can take a while.
+            let slow = cmd.get("shot").is_some() || matches!(cmd["do"].as_str(), Some("canvas.pane_read" | "canvas.pane_shot"));
+            let timeout = Duration::from_secs(if slow { 30 } else { 5 });
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             let _ = tx.send_blocking(Request::Control { cmd, reply: reply_tx });
             reply_rx.recv_timeout(timeout).unwrap_or_else(|_| json!({ "error": "the window did not answer" }))
@@ -157,7 +159,10 @@ pub fn save_png(image: &image::RgbaImage, path: &std::path::Path) -> anyhow::Res
         encoder.write_header()?.write_image_data(image.as_raw())?;
     }
     // A sibling temporary file keeps publication on the same filesystem.
-    let temporary = path.with_file_name(format!(".canopy-shot-{}.png", std::process::id()));
+    // Unique per save: two saves into one folder at once must not share a temporary file.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temporary = path.with_file_name(format!(".canopy-shot-{}-{n}.png", std::process::id()));
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
     let result = (|| -> anyhow::Result<()> {
         file.write_all(&bytes)?;

@@ -3,7 +3,7 @@
 //! talked to. Agents message each other with the core's own `hc send`, `hc wait` and `hc read`;
 //! nothing here carries a message. This file holds the edge model (`neighbors`, `born`, `all`),
 //! `canopy wire` (who you are and your wired peers), `canopy spawn` and the peer-change hook.
-//! Wired peers include file panes, which agents read with `canopy pane`; docs/wire.md explains it.
+//! Wired peers include file panes, which agents read with `canopy pane`; docs/wiki/Wiring.md explains it.
 
 use crate::canvas::{Document, Wire};
 use serde_json::Value;
@@ -55,7 +55,7 @@ fn hc_message(err: &str) -> String {
     serde_json::from_str::<Value>(err.trim()).ok().and_then(|v| v["error"]["message"].as_str().map(str::to_owned)).unwrap_or_else(|| err.trim().to_owned())
 }
 
-/// A terminal as `hc get --json` reports it (shape not checked against a live core, see docs/wire.md).
+/// A terminal as `hc get --json` reports it (shape not checked against a live core, see docs/wiki/Wiring.md).
 pub struct Rec {
     pub addr: String,
     pub name: String,
@@ -318,7 +318,7 @@ pub fn told_line(told: &std::collections::BTreeMap<String, String>, now: &std::c
     } else {
         now.iter().filter(|(k, _)| !told.contains_key(*k)).map(|(_, v)| format!("+{v}")).chain(told.iter().filter(|(k, _)| !now.contains_key(*k)).map(|(_, v)| format!("-{v}"))).collect()
     };
-    (!change.is_empty()).then(|| format!("Wired: {}. `canopy wire` lists your peers.", change.join(", ")))
+    (!change.is_empty()).then(|| format!("Wired: {}. `canopy wire` lists your peers and panes; the canopy skill explains them.", change.join(", ")))
 }
 
 // shortcut: one small file per terminal id, never swept; delete them when terminals end if they pile up.
@@ -376,7 +376,7 @@ mod tests {
     fn file_panes_wire_to_terminals_and_round_trip() {
         let mut d = doc(serde_json::json!({}));
         for id in ["p1", "p2"] {
-            d.panes.push(crate::canvas::Pane { id: id.into(), kind: crate::canvas::Kind::File { path: format!("/tmp/{id}.md") }, rect: [0., 0., 560., 420.], z: 0, space: None });
+            d.panes.push(crate::canvas::Pane { id: id.into(), kind: crate::canvas::Kind::File { path: format!("/tmp/{id}.md") }, rect: [0., 0., 560., 420.], z: 0, space: None, pinned: None });
         }
         assert!(d.connect("t1", "p1"));
         assert!(!d.connect("p1", "p2"));
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn file_peers_describe_their_verbs() {
         let mut d = doc(serde_json::json!({}));
-        d.panes.push(crate::canvas::Pane { id: "p1".into(), kind: crate::canvas::Kind::File { path: "/tmp/a.md".into() }, rect: [0.; 4], z: 0, space: None });
+        d.panes.push(crate::canvas::Pane { id: "p1".into(), kind: crate::canvas::Kind::File { path: "/tmp/a.md".into() }, rect: [0.; 4], z: 0, space: None, pinned: None });
         let peer = Peer::new("p1", &d);
         assert_eq!(peer.name, "a.md");
         assert!(peer.rec.is_none());
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn mod_peers_describe_their_verbs() {
         let mut d = doc(serde_json::json!({}));
-        d.panes.push(crate::canvas::Pane { id: "p2".into(), kind: crate::canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None });
+        d.panes.push(crate::canvas::Pane { id: "p2".into(), kind: crate::canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None, pinned: None });
         let peer = Peer::new("p2", &d);
         assert_eq!(peer.name, "mod:note");
         assert!(peer.rec.is_none());
@@ -428,7 +428,7 @@ mod tests {
         wires.push(Wire { a: "t3".into(), b: "t1".into(), born: false });
         assert_eq!(neighbors(&wires, "t1"), ["t2", "t3"]);
         assert_eq!(neighbors(&wires, "t2"), ["t1"]);
-        d.panes.push(crate::canvas::Pane { id: "sub:t1:a".into(), kind: crate::canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() }, rect: [0., 100., 220., 36.], z: 4, space: None });
+        d.panes.push(crate::canvas::Pane { id: "sub:t1:a".into(), kind: crate::canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() }, rect: [0., 100., 220., 36.], z: 4, space: None, pinned: None });
         let edges = born(&d, |k| (k == "t3").then(|| "t2".to_owned()));
         assert_eq!(edges, [Wire { a: "t2".into(), b: "t3".into(), born: true }, Wire { a: "t1".into(), b: "sub:t1:a".into(), born: true }]);
         // Closing a cell removes its wires.
@@ -478,10 +478,10 @@ mod tests {
         let map = |l: &[(&str, &str)]| l.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<BTreeMap<_, _>>();
         let (none, ab) = (map(&[]), map(&[("a", "api"), ("b", "reviewer (codex)")]));
         assert_eq!(told_line(&none, &none, true), None);
-        assert_eq!(told_line(&none, &ab, true).unwrap(), "Wired: api, reviewer (codex). `canopy wire` lists your peers.");
+        assert_eq!(told_line(&none, &ab, true).unwrap(), "Wired: api, reviewer (codex). `canopy wire` lists your peers and panes; the canopy skill explains them.");
         assert_eq!(told_line(&ab, &ab, false), None);
-        assert_eq!(told_line(&ab, &ab, true).unwrap(), "Wired: api, reviewer (codex). `canopy wire` lists your peers.");
-        assert_eq!(told_line(&ab, &map(&[("b", "reviewer (codex)"), ("c", "web")]), false).unwrap(), "Wired: +web, -api. `canopy wire` lists your peers.");
+        assert_eq!(told_line(&ab, &ab, true).unwrap(), "Wired: api, reviewer (codex). `canopy wire` lists your peers and panes; the canopy skill explains them.");
+        assert_eq!(told_line(&ab, &map(&[("b", "reviewer (codex)"), ("c", "web")]), false).unwrap(), "Wired: +web, -api. `canopy wire` lists your peers and panes; the canopy skill explains them.");
     }
 
 }

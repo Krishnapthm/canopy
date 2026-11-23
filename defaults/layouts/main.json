@@ -1,7 +1,6 @@
 {
   "id": "root",
-  "type": "canvas",
-  "floating": [ { "id": "toolbar", "content": { "mod": "toolbar" }, "edge": "bottom", "align": "center" } ],
+  "type": "column",
   "titlebar": "none",
   "traffic_lights": [
     12,
@@ -10,5 +9,18 @@
   "terminal_padding": [
     14,
     12
+  ],
+  "children": [
+    {
+      "id": "canvas",
+      "type": "canvas",
+      "floating": [ { "id": "toolbar", "content": { "mod": "toolbar" }, "edge": "bottom", "align": "center" } ]
+    },
+    {
+      "id": "status",
+      "type": "block",
+      "size": { "px": 24 },
+      "content": { "mod": "workspace-status" }
+    }
   ]
 }

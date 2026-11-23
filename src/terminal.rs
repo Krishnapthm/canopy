@@ -120,6 +120,7 @@ enum LinkTarget {
 pub enum TerminalEvent {
     Peek(String),
     Preview(std::path::PathBuf),
+    OpenUrl(String),
     TitleChanged,
     /// The program ended.
     Ended,
@@ -132,6 +133,7 @@ struct Grid {
     vt: Vt,
     core: Arc<Core>,
     channel: Option<u32>,
+    last_input: Option<Instant>,
     attach_ready: bool,
     fit_ready: Option<async_channel::Sender<()>>,
     cell: Size<Pixels>,
@@ -275,6 +277,14 @@ pub fn initial_display(window: &Window) -> serde_json::Value {
 }
 
 impl Grid {
+    fn type_bytes(&mut self, bytes: &[u8]) -> bool {
+        let Some(channel) = self.channel.filter(|_| !bytes.is_empty()) else { return false };
+        self.vt.scroll_to_bottom();
+        if !self.core.try_input(channel, bytes) { return false; }
+        self.last_input = Some(Instant::now());
+        true
+    }
+
     fn ready_to_attach(&mut self) {
         self.attach_ready = true;
         if let Some(ready) = self.fit_ready.take() {
@@ -354,6 +364,7 @@ impl TerminalView {
                 vt: Vt::new(size_hint.0.max(2), size_hint.1.max(1)),
                 core: core.clone(),
                 channel: None,
+                last_input: None,
                 attach_ready: false,
                 fit_ready: None,
                 cell: size(px(9.0), px(18.0)),
@@ -748,32 +759,49 @@ impl TerminalView {
     }
 
     pub(crate) fn paste_quote(&self, text: &str) -> bool {
-        let grid = self.grid.borrow();
-        if grid.channel.is_none() || !grid.vt.mode(crate::vt::BRACKETED_PASTE) { return false; }
-        let bytes = grid.vt.paste_bytes(text);
-        drop(grid);
+        let Some(bytes) = self.quote_bytes(text) else { return false };
         self.send(&bytes);
         true
     }
 
-    fn send(&self, bytes: &[u8]) {
+    fn quote_bytes(&self, text: &str) -> Option<Vec<u8>> {
+        let grid = self.grid.borrow();
+        (grid.channel.is_some() && grid.vt.mode(crate::vt::BRACKETED_PASTE)).then(|| grid.vt.paste_bytes(text))
+    }
+
+    /// An annotation is delivered only to its chosen terminal, even while sync input is on.
+    pub(crate) fn paste_own(&self, text: &str) -> bool {
+        let Some(bytes) = self.quote_bytes(text) else { return false };
+        self.send_own(&bytes)
+    }
+
+    pub(crate) fn press_enter(&self) -> bool {
+        self.send_own(b"\r")
+    }
+
+    pub(crate) fn annotation_input(&self) -> Option<Instant> {
+        let grid = self.grid.borrow();
+        if grid.channel.is_none() || !grid.vt.mode(crate::vt::BRACKETED_PASTE) { return None; }
+        grid.last_input
+    }
+
+    pub(crate) fn screen_text(&self) -> String {
+        self.grid.borrow().vt.screen_text()
+    }
+
+    fn send_own(&self, bytes: &[u8]) -> bool {
         self.typed_at.set(Some(Instant::now()));
-        {
-            let mut g = self.grid.borrow_mut();
-            if let Some(ch) = g.channel
-                && !bytes.is_empty()
-            {
-                g.vt.scroll_to_bottom();
-                g.core.input(ch, bytes);
-            }
-        }
+        self.grid.borrow_mut().type_bytes(bytes)
+    }
+
+    fn send(&self, bytes: &[u8]) {
+        self.send_own(bytes);
         // Sync input: the same bytes go to every other synced terminal (written directly, never re-sent).
         SYNCED.with_borrow(|synced| {
             if bytes.is_empty() || !synced.iter().any(|(a, _)| *a == self.address) { return; }
             for (_, handle) in synced.iter().filter(|(a, _)| *a != self.address) {
-                if let Some(grid) = handle.0.upgrade() && let Ok(mut g) = grid.try_borrow_mut() && let Some(ch) = g.channel {
-                    g.vt.scroll_to_bottom();
-                    g.core.input(ch, bytes);
+                if let Some(grid) = handle.0.upgrade() && let Ok(mut g) = grid.try_borrow_mut() {
+                    g.type_bytes(bytes);
                 }
             }
         });
@@ -1306,7 +1334,7 @@ pub(crate) fn shown_title(title: &str) -> std::borrow::Cow<'_, str> {
 
 /// Paths as a shell reads them, space-separated with a trailing space: bare
 /// when plain, else single-quoted (`'` escaped as the shell wants it).
-fn quote_paths(paths: impl IntoIterator<Item = String>) -> String {
+pub(crate) fn quote_paths(paths: impl IntoIterator<Item = String>) -> String {
     let quote = |p: String| {
         if !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+=,:@%~".contains(c)) {
             return p;
@@ -2422,6 +2450,12 @@ impl Render for TerminalView {
                 {
                     match target {
                         LinkTarget::External(links::Target::File(path)) if path.is_file() => cx.emit(TerminalEvent::Preview(path)),
+                        LinkTarget::External(links::Target::Url(url))
+                            if crate::settings::get().browser_open_links == crate::settings::OpenLinks::BuiltIn
+                                && url.split_once("://").is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")) =>
+                        {
+                            cx.emit(TerminalEvent::OpenUrl(url));
+                        }
                         LinkTarget::External(target) => links::open(&target),
                         LinkTarget::Terminal(address) => cx.emit(TerminalEvent::Peek(address)),
                     }

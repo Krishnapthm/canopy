@@ -141,7 +141,7 @@ fn fixture(populated: bool, props: Value) -> BTreeMap<String, Value> {
     let mut values = BTreeMap::from([
         ("props".into(), props),
         ("machines".into(), json!([{ "name": null, "layout": "ready" }])),
-        ("spaces".into(), json!([])), ("agents".into(), json!([])), ("terminals".into(), json!([])), ("panes".into(), json!([])), ("canvasPanes".into(), json!([])), ("paneKinds".into(), json!([{"kind":"file","verbs":["read","shot","close"]}])), ("focused".into(), Value::Null),
+        ("spaces".into(), json!([])), ("agents".into(), json!([])), ("terminals".into(), json!([])), ("panes".into(), json!([])), ("canvasPanes".into(), json!([])), ("paneKinds".into(), json!([{"kind":"file","verbs":["read","shot","close"]},{"kind":"image","verbs":["read","shot","close"]},{"kind":"pdf","verbs":["read","shot","close"]}])), ("focused".into(), Value::Null),
         ("layout".into(), serde_json::from_str(include_str!("../../defaults/layouts/classic.json")).unwrap()),
         ("layouts".into(), json!(crate::window::shipped_layouts())),
         ("theme".into(), serde_json::to_value(&*crate::settings::theme()).unwrap()),
@@ -217,6 +217,8 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
                 "readTextFile" if first == "/fixture/app/frame/settings/keys.macos.json" => Some(json!(include_str!("../../defaults/keys.macos.json"))),
                 "readTextFile" if first == "/fixture/hello.rs" => Some(json!("fn main() {}")),
                 "readTextFile" if first == "/fixture/app/settings.json" || first == "/fixture/.ssh/config" => Some(Value::Null),
+                // project-setup reads the fixture space's instruction files: both missing.
+                "readTextFile" if first == "/fixture/project/AGENTS.md" || first == "/fixture/project/CLAUDE.md" => Some(Value::Null),
                 "readTextFile" => first
                     .as_str()
                     .and_then(|p| p.strip_prefix("/fixture/app/layouts/"))
@@ -963,7 +965,8 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
             "frame/palette",
             true,
             props(),
-            Some(&format!("this.query = {query:?};")),
+            // Set the field too: a change event landing late would reset the query to it.
+            Some(&format!("this.input.set_value({query:?}); this.query = {query:?};")),
         )
         .unwrap();
         // The query sits in a native text field; what the list shows tells it apart.

@@ -17,7 +17,7 @@ const SECTIONS = [
 
 const LOOKS = { main: "Canopy", terminals: "Terminals", win98: "Canopy 98" };
 const APPEARANCES = [
-  [null, "System"],
+  ["system", "System"],
   ["light", "Light"],
   ["dark", "Dark"],
 ];
@@ -397,8 +397,9 @@ export default class Settings extends View {
       );
   }
 
-  appearancePicker(t, cx) {
-    const now = this.person.appearance ?? null;
+  settingPicker(t, key, choices) {
+    const defaultValue = choices[0][0];
+    const now = this.person[key] ?? defaultValue;
     return h_flex()
       .p(2)
       .gap(2)
@@ -407,9 +408,9 @@ export default class Settings extends View {
       .border_color(t.border)
       .bg(t.background)
       .children(
-        APPEARANCES.map(([value, label]) =>
+        choices.map(([value, label]) =>
           div()
-            .id(`st-ap-${label}`)
+            .id(`st-${key}-${value}`)
             .px(12)
             .py(4)
             .rounded(6)
@@ -419,8 +420,8 @@ export default class Settings extends View {
             .when(now !== value, (el) => el.text_color(t.muted).hover((s) => s.text_color(t.foreground)))
             .on_click((_e, cx) =>
               this.change((p) => {
-                if (value === null) delete p.appearance;
-                else p.appearance = value;
+                if (value === defaultValue) delete p[key];
+                else p[key] = value;
               }, cx),
             )
             .child(label),
@@ -597,7 +598,7 @@ export default class Settings extends View {
       .child(this.layoutPicker(t, cx))
       .child(div().h(18))
       .child(this.heading(t, "Theme"))
-      .child(this.row(t, "Appearance", "Light or dark, or as your system is now.", this.appearancePicker(t, cx)))
+      .child(this.row(t, "Appearance", "Light or dark, or as your system is now.", this.settingPicker(t, "appearance", APPEARANCES)))
       .child(div().pt(12).pb(8).text_size(12.5).text_color(t.dim).child("For the layout you're in: each layout keeps its own light and dark theme."))
       .child(div().pb(6).text_size(12.5).font_medium().text_color(t.muted).child("Dark"))
       .child(this.themePicker(t, false))
@@ -608,6 +609,9 @@ export default class Settings extends View {
       .child(this.heading(t, "Canvas"))
       .child(this.row(t, "Push neighbours", "Cells nudge each other apart. Off lets them overlap. For drop-on-release, set canvas_push to \"drop\" in settings.json.", this.toggle(t, "st-canvas-push", this.person.canvas_push !== "off", (_e, cx) => this.change((q) => { if (q.canvas_push === "off") delete q.canvas_push; else q.canvas_push = "off"; }, cx))))
       .child(this.row(t, "Focused tile grows", "In tile view the selected tile takes more room. Off keeps every tile the same size.", this.toggle(t, "st-tile-grows", this.person.tile_focus_grows === true, (_e, cx) => this.change((q) => { if (q.tile_focus_grows) delete q.tile_focus_grows; else q.tile_focus_grows = true; }, cx))))
+      .child(this.heading(t, "Browser"))
+      .child(this.row(t, "Keep cookies", "Until quit deletes cookies and site data when Canopy quits. Kept between runs on macOS 14 or later.", this.settingPicker(t, "browser_keep_cookies", [["until_quit", "Until quit"], ["forever", "Forever"]])))
+      .child(this.row(t, "Open links", "Open web links clicked in terminals in a new browser tab or in the system browser.", this.settingPicker(t, "browser_open_links", [["built_in", "Built-in browser"], ["default", "Default browser"]])))
       .child(this.heading(t, "Size and fonts"))
       .child(
         this.row(

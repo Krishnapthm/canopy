@@ -6,4 +6,4 @@ Include the Canopy version (`canopy --version`), OS, what you found, steps to re
 
 Only the latest release is supported.
 
-Problems in herdr-core itself belong to its own project. For how Canopy handles trusted mods and telemetry, see [security and privacy](docs/security.md).
+Problems in herdr-core itself belong to its own project. For how Canopy handles trusted mods and telemetry, see [security and privacy](https://github.com/Krishnapthm/canopy/wiki/Security-and-Privacy).

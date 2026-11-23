@@ -37,6 +37,7 @@ pub const DEFAULTS: &str = include_str!("../defaults/keys.macos.json");
 // Keep these when defaults change: only untouched shipped files may migrate.
 #[cfg(any(not(target_os = "macos"), test))]
 const SHIPPED_KEYS: &[&str] = &[
+    include_str!("keys/shipped/v0.1.15-dev8-keys.json"),
     include_str!("keys/shipped/v0.1.0-keys.json"),
     include_str!("keys/shipped/v0.1.15-dev7-keys.json"),
     include_str!("keys/shipped/v0.1.15-dev6-keys.json"),
@@ -51,6 +52,7 @@ const SHIPPED_KEYS: &[&str] = &[
 ];
 #[cfg(any(target_os = "macos", test))]
 const SHIPPED_MACOS_KEYS: &[&str] = &[
+    include_str!("keys/shipped/v0.1.15-dev8-keys.macos.json"),
     include_str!("keys/shipped/v0.1.0-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-dev7-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-dev6-keys.macos.json"),
@@ -123,6 +125,64 @@ pub fn listing() -> Vec<(String, String, String)> {
     }
     out.push(("global".into(), ESCAPE_HATCH.into(), "app.reset".into()));
     out
+}
+
+/// A binding as people read it: macOS `cmd-shift-n` → `⇧⌘N`, elsewhere `Ctrl+Shift+N`.
+/// Chords stay space-separated. Modifier order: ctrl, alt, shift, cmd.
+pub fn pretty(keys: &str) -> String {
+    pretty_for(keys, cfg!(target_os = "macos"))
+}
+
+fn pretty_for(keys: &str, mac: bool) -> String {
+    keys.split_whitespace()
+        .map(|stroke| stroke_caps(stroke, mac).join(if mac { "" } else { "+" }))
+        .collect::<Vec<_>>().join(" ")
+}
+
+/// One label per key to press, for drawing key caps.
+pub fn caps(keys: &str) -> Vec<String> {
+    caps_for(keys, cfg!(target_os = "macos"))
+}
+
+fn caps_for(keys: &str, mac: bool) -> Vec<String> {
+    keys.split_whitespace().flat_map(|stroke| stroke_caps(stroke, mac)).collect()
+}
+
+fn stroke_caps(stroke: &str, mac: bool) -> Vec<String> {
+    let mut parts: Vec<_> = stroke.split('-').collect();
+    let mut key = parts.pop().unwrap_or_default();
+    if key.is_empty() { key = "-"; parts.pop(); }
+    let mut held = [false; 4];
+    for modifier in parts {
+        let index = match modifier.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => 0,
+            "alt" | "option" => 1,
+            "shift" => 2,
+            "secondary" if !mac => 0,
+            "cmd" | "super" | "win" | "secondary" => 3,
+            _ => continue,
+        };
+        held[index] = true;
+    }
+    let lower = key.to_lowercase();
+    let label = match lower.as_str() {
+        "space" => "Space".into(),
+        "enter" => if mac { "↵" } else { "Enter" }.into(),
+        "escape" => "Esc".into(),
+        "backspace" => if mac { "⌫" } else { "Backspace" }.into(),
+        "delete" => if mac { "⌦" } else { "Delete" }.into(),
+        "tab" => if mac { "⇥" } else { "Tab" }.into(),
+        "left" => "←".into(), "right" => "→".into(),
+        "up" => "↑".into(), "down" => "↓".into(),
+        _ => {
+            let mut chars = lower.chars();
+            chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+        }
+    };
+    let names = if mac { ["⌃", "⌥", "⇧", "⌘"] } else { ["Ctrl", "Alt", "Shift", "Super"] };
+    let mut labels: Vec<_> = names.into_iter().zip(held).filter_map(|(name, held)| held.then(|| name.to_owned())).collect();
+    labels.push(label);
+    labels
 }
 
 pub fn path() -> std::path::PathBuf {
@@ -317,6 +377,27 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pretty_bindings() {
+        for (keys, mac, other) in [
+            ("cmd-o", "⌘O", "Super+O"), ("shift-n", "⇧N", "Shift+N"),
+            ("v", "V", "V"), ("cmd-shift-a", "⇧⌘A", "Shift+Super+A"),
+            ("ctrl--", "⌃-", "Ctrl+-"), ("space", "Space", "Space"), ("g g", "G G", "G G"),
+            ("secondary-option-control-shift-enter", "⌃⌥⇧⌘↵", "Ctrl+Alt+Shift+Enter"),
+            ("backspace delete tab left right up down escape", "⌫ ⌦ ⇥ ← → ↑ ↓ Esc", "Backspace Delete Tab ← → ↑ ↓ Esc"),
+        ] {
+            assert_eq!(super::pretty_for(keys, true), mac);
+            assert_eq!(super::pretty_for(keys, false), other);
+        }
+    }
+
+    #[test]
+    fn binding_caps() {
+        assert_eq!(super::caps_for("cmd-shift-p", true), ["⇧", "⌘", "P"]);
+        assert_eq!(super::caps_for("ctrl-shift-p", false), ["Ctrl", "Shift", "P"]);
+        assert_eq!(super::caps_for("n", true), ["N"]);
+    }
+
     #[test]
     fn only_byte_identical_shipped_keys_are_upgraded() {
         let dir = std::env::temp_dir().join(format!("herdr-keys-migration-{}", std::process::id()));

@@ -18,6 +18,10 @@ mod model;
 mod mirror;
 mod mirror_sync;
 mod panes;
+mod sim;
+#[cfg(target_os = "macos")]
+mod sim_live;
+mod skill;
 mod place;
 mod persist;
 #[cfg(target_os = "macos")]
@@ -60,6 +64,7 @@ Usage:
   canopy check <mod folder>     load a mod once and report what's wrong
   canopy config                 Settings defaults and explanations
   canopy --skill                Agent Skill: driving the window, and where hc fits
+  canopy skill remove           delete the skill Canopy installed for your agents
   canopy --version
 
 The terminals run in herdr-core (`hc`), which keeps them alive when the
@@ -84,6 +89,11 @@ fn attach_console() {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // A live sim pane's helper, started by Canopy itself under sandbox-exec: nothing else runs.
+    #[cfg(target_os = "macos")]
+    if args.get(1).is_some_and(|s| s == "--sim-helper") {
+        sim_live::helper_main(&args[2..]);
+    }
     #[cfg(unix)]
     core_bin::hand_off_to_owner(&args);
     if args.get(1).is_some_and(|s| s == "hook") {
@@ -101,6 +111,7 @@ fn main() {
         std::process::exit(wire::spawn_cli(&args[2..]));
     }
     if args.get(1).is_some_and(|s| s == "pane") { std::process::exit(panes::cli(&args[2..])); }
+    if args.get(1).is_some_and(|s| s == "skill") { std::process::exit(skill::cli(&args[2..])); }
     #[cfg(target_os = "macos")]
     macos_check::startup(&args);
     #[cfg(windows)]
@@ -192,7 +203,8 @@ fn main() {
                     }
                 }
                 mods::finish_shared();
-                async {}
+                // GPUI drops the windows before polling this future, so WebKit can remove the store.
+                async { drop(window::forget_browser_data_if_until_quit()); }
             })
             .detach();
             #[cfg(target_os = "macos")]
@@ -217,6 +229,12 @@ fn main() {
 
 /// The main window, on a connected core.
 pub fn open_main(core: std::sync::Arc<hc::Core>, requests: async_channel::Receiver<mods::Request>, cx: &mut App) {
+    // Never waits on WebKit: a page opened before the removal ends keeps its cookies for one more run.
+    if let Some(removal) = window::forget_browser_data_if_until_quit() {
+        cx.background_executor().spawn(async move {
+            if let Err(e) = removal.await { tracing::warn!("cannot remove the browser data store at startup: {e}"); }
+        }).detach();
+    }
             let (window_bounds, display_id) = place::initial(cx);
             let options = WindowOptions {
                 window_bounds: Some(window_bounds),
