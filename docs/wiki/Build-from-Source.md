@@ -19,6 +19,15 @@ See [herdr-core](herdr-core) for core installation.
 - `just test` runs the Bun mod tests and `cargo test --locked`.
 - `just check` runs the same tests as `just test`.
 
+## Change the app icon
+
+The app icon identifies Canopy in the macOS Dock and Linux launcher.
+To change the artwork, export a square 1024 × 1024 PNG from Figma, update the three files in `assets/icons/`, and rebuild the package.
+
+The macOS app bundle and disk image use `Canopy.icns`, which contains standard and Retina sizes.
+The Linux launcher uses `canopy.svg`, which embeds the PNG.
+The Windows executable embeds the sizes from `canopy.ico` at build time.
+
 ## The development window
 
 > **Warning:** Never launch a bare debug binary against your daily app home or core.
