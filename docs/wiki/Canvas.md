@@ -29,7 +29,7 @@ In canvas mode, a click on a pane selects it. Selection is how you tell Canopy w
 - Arrow keys nudge the selected pane by one gap. `h`, `j`, `k` and `l` (or `Tab` and `Shift+Tab`) move the selection to the nearest pane in that direction.
 
 When you drag a pane into others, the neighbors step aside and slide back once you have passed, so panes never end up stacked by accident. The `canvas_push` setting changes this (see [Settings](#settings-that-change-the-canvas)).
-The canvas uses the latest pointer position for each frame and applies any remaining movement when you release. Dragging a selected group moves it together while neighbors slide aside.
+A drag follows the pointer even across other panes. The canvas uses the latest pointer position for each frame and applies any remaining movement when you release. Dragging a selected group moves it together while neighbors slide aside.
 
 A few more things you can do with selected panes:
 

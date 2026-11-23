@@ -2723,6 +2723,25 @@ impl AppWindow {
                         maps.insert("browser-canvas".into(), b);
                     },
                     move |b, _, window, _| {
+                        // A pane can hide the canvas hitbox under its own header.
+                        // Once a move starts, follow the pointer anywhere in the window.
+                        let move_view = view.clone();
+                        window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
+                            if phase != DispatchPhase::Capture {
+                                return;
+                            }
+                            move_view.update(cx, |this, cx| {
+                                if e.pressed_button == Some(MouseButton::Left)
+                                    && this.queue_canvas_move(e.position, window, cx)
+                                {
+                                    cx.stop_propagation();
+                                } else if e.pressed_button.is_none() && this.canvas_state.move_pointer().is_some() {
+                                    this.end_canvas_drag(cx);
+                                    this.canvas_changed(cx);
+                                    cx.notify();
+                                }
+                            });
+                        });
                         // Window capture, before any cell sees the wheel: Cmd zooms and a pan in
                         // progress continues over cells; a fresh plain wheel is left to the cell
                         // under it (an entered terminal scrolls) or to the canvas handler below.
@@ -2833,14 +2852,13 @@ impl AppWindow {
                 if this.wire_pointer(e, cx) { return; }
                 // The button came up outside the window: end any drag instead of panning on hover.
                 if e.pressed_button.is_none()
-                    && (this.canvas_state.drag.is_some() || this.canvas_state.space_drag.is_some() || this.canvas_state.preview_drag.is_some() || this.canvas_state.cell_resize.is_some())
+                    && (this.canvas_state.drag.is_some() || this.canvas_state.preview_drag.is_some() || this.canvas_state.cell_resize.is_some())
                 {
                     this.end_canvas_drag(cx);
                     this.canvas_changed(cx);
                     cx.notify();
                     return;
                 }
-                if this.queue_canvas_move(e.position, window, cx) { return; }
                 if this.canvas_state.rest.is_some() && this.canvas_state.shown.is_none() {
                     this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                 }
