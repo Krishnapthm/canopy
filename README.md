@@ -91,6 +91,6 @@ The wiki's [Build from source](https://github.com/Krishnapthm/canopy/wiki/Build-
 
 ## Credits and license
 
-Canopy stands on [herdr](https://github.com/herdrdev). It began as a fork of [herdr-app](https://github.com/herdrdev/herdr-app), and every terminal you open in Canopy runs on herdr-core. Thank you to the herdr authors for the foundation.
+Canopy began as a fork of [herdr-app](https://github.com/herdrdev/herdr-app), and every terminal you open in it runs on herdr-core. Huge thanks to [herdr](https://github.com/herdrdev) for building that foundation in the open.
 
 Canopy is licensed under Apache-2.0, like herdr-app. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
