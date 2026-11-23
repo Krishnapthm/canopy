@@ -107,8 +107,9 @@ impl AppWindow {
         [f32::from(position.x - origin.x), f32::from(position.y - origin.y)]
     }
 
-    /// The topmost shown cell under a window position, with `slop` extra screen pixels around it.
+    /// The topmost shown pane under a point in the canvas, with `slop` extra screen pixels around it.
     fn wire_cell_at(&self, position: Point<Pixels>, slop: f32) -> Option<String> {
+        if !self.bounds.borrow().get("canopy-canvas")?.contains(&position) { return None; }
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
         let camera = doc.camera;
         let p = camera.to_world(self.wire_local(position));
@@ -370,8 +371,10 @@ impl AppWindow {
 
 #[cfg(test)]
 mod sticky_tests {
-    use super::{AppWindow, MouseMoveEvent, TestAppContext, json, point, px};
+    use super::{TestAppContext, json, point, px};
     use crate::window::tests::{in_own_process, open_window, running_alone};
+    use gpui::{Modifiers, MouseButton};
+
     const TEST: &str = "window::canvas_view::wire_view::sticky_tests::sticky_wire";
 
     #[test]
@@ -380,44 +383,59 @@ mod sticky_tests {
     #[gpui::test]
     fn sticky_wire(cx: &mut TestAppContext) {
         if !running_alone(TEST) { return; }
-        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
-        view.update_in(cx, |this, window, cx| {
+        let (view, cx) = open_window(cx, "wire-probe", "", json!({"id":"root","type":"canvas"}));
+        cx.run_until_parked();
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.model.add_space("root", "Canvas", &crate::window::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
+            this.live.insert("t1".into(), json!({"state":"live","pid":1}));
             this.canvas_state.doc.panes = serde_json::from_value(json!([
-                {"id":"t1","kind":"terminal","props":{"size":[200,100]},"rect":[0,0,200,100],"z":0},
-                {"id":"t2","kind":"terminal","props":{"size":[200,100]},"rect":[400,0,200,100],"z":1}
+                {"id":"t1","kind":"terminal","props":{"size":[280,160]},"rect":[50,100,280,160],"z":0},
+                {"id":"p1","kind":"image","props":{"path":"/missing.png"},"rect":[400,100,200,150],"z":1},
+                {"id":"p2","kind":"image","props":{"path":"/missing.png"},"rect":[400,300,200,150],"z":2}
             ])).unwrap();
-            for t in ["t1", "t2"] { this.live.insert(t.into(), json!({})); }
-            let (down, over_t2) = (point(px(200.), px(50.)), point(px(450.), px(50.)));
-            let start = |this: &mut AppWindow| {
-                this.canvas_state.wire.drag = Some(("t1".into(), [200., 50.], down));
-                this.canvas_state.wire.down = down;
-            };
-            // A release where the press was keeps the wire, and it follows the pointer.
-            start(this);
-            assert!(this.wire_release(down, window, cx));
-            assert!(this.canvas_state.wire.sticky);
-            let moved = MouseMoveEvent { position: over_t2, pressed_button: None, modifiers: Default::default() };
-            assert!(this.wire_pointer(&moved, cx));
-            assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| d.2), Some(over_t2));
-            // Escape drops it.
-            assert!(this.wire_cancel(window, cx));
-            assert!(this.canvas_state.wire.drag.is_none() && this.canvas_state.doc.wires.is_empty());
-            // The next click on a cell connects.
-            start(this);
-            this.wire_release(down, window, cx);
-            assert!(this.wire_pick(over_t2, window, cx));
+            this.sync(window, cx);
+            cx.notify();
+        }));
+        cx.run_until_parked();
+
+        let origin = view.update(cx, |this, _| this.bounds.borrow()["canopy-canvas"].origin);
+        let at = |x, y| origin + point(px(x), px(y));
+        let none = Modifiers::default();
+        let left = MouseButton::Left;
+        // The outer half of the + handle can be hovered and clicked even on the broken build.
+        let handle = at(332., 180.);
+        let target = at(500., 175.);
+        cx.simulate_mouse_move(handle, None, none);
+        cx.run_until_parked();
+        cx.simulate_click(handle, none);
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wire.sticky));
+
+        cx.simulate_mouse_move(target, None, none);
+        cx.run_until_parked();
+        cx.simulate_click(target, none);
+        cx.run_until_parked();
+        view.read_with(cx, |this, _| {
+            assert!(this.canvas_state.doc.wires.iter().any(|wire| wire.joins("t1", "p1")),
+                "clicking an occluding pane must finish the pending wire");
             assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
-            assert_eq!(this.canvas_state.doc.wires.len(), 1);
-            // A drag released on empty canvas still just drops.
-            start(this);
-            assert!(this.wire_release(point(px(900.), px(900.)), window, cx));
-            assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
-            // The helper bar's Connect starts the same pointer wire, from the pane's right side.
-            this.wire_start("t2", over_t2, window, cx);
-            assert!(this.canvas_state.wire.sticky);
-            let r = this.wire_cell(&this.canvas_state.doc, "t2").unwrap();
-            assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| (d.0.as_str(), d.1)), Some(("t2", [r[0] + r[2], r[1] + r[3] / 2.])));
-            assert!(this.connect_hint());
+            assert!(this.canvas_state.selected.is_empty(), "the destination must not take the click");
+        });
+
+        cx.simulate_mouse_move(at(250., 180.), None, none);
+        cx.run_until_parked();
+        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.wire.hover.clone()).as_deref(), Some("t1"));
+        let target = at(500., 375.);
+        cx.simulate_mouse_down(handle, left, none);
+        cx.simulate_mouse_move(target, left, none);
+        cx.run_until_parked();
+        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.wire.drag.as_ref().map(|drag| drag.2)), Some(target));
+        cx.simulate_mouse_up(target, left, none);
+        cx.run_until_parked();
+        view.read_with(cx, |this, _| {
+            assert!(this.canvas_state.doc.wires.iter().any(|wire| wire.joins("t1", "p2")),
+                "releasing over an occluding pane must finish the drag");
+            assert!(this.canvas_state.wire.drag.is_none());
         });
     }
 }

@@ -2683,6 +2683,7 @@ impl AppWindow {
         let maps = self.bounds.clone();
         let bg = self.person.canvas_color.as_deref().unwrap_or("canvas");
         let panning = matches!(state.drag, Some((None, _)));
+        let wire_input = !self.overlays.iter().any(|o| o.kind.modal_keys());
         let view = cx.entity();
         let mut area = div()
             .id("canopy-canvas")
@@ -2697,11 +2698,7 @@ impl AppWindow {
             })
             // Capture phase, before pills and space labels: middle drag, or left drag with
             // Space held, pans from anywhere on the canvas.
-            .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, window, cx| {
-                if e.button == MouseButton::Left && this.wire_pick(e.position, window, cx) {
-                    cx.stop_propagation();
-                    return;
-                }
+            .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, cx| {
                 this.canvas_state.motion.target = None;
                 this.canvas_state.motion.velocity = [0.; 2];
                 this.canvas_state.motion.sample = Some(std::time::Instant::now());
@@ -2723,15 +2720,35 @@ impl AppWindow {
                         maps.insert("browser-canvas".into(), b);
                     },
                     move |b, _, window, _| {
-                        // A pane can hide the canvas hitbox under its own header.
-                        // Once a move starts, follow the pointer anywhere in the window.
+                        // Pane hitboxes hide the canvas hitbox. Use window capture to
+                        // pick a pane or release a wire before the pane handles the event.
+                        let down_view = view.clone();
+                        window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
+                            if wire_input && phase == DispatchPhase::Capture
+                                && e.button == MouseButton::Left && b.contains(&e.position)
+                                && down_view.update(cx, |this, cx| this.wire_pick(e.position, window, cx))
+                            {
+                                cx.stop_propagation();
+                            }
+                        });
+                        let up_view = view.clone();
+                        window.on_mouse_event(move |e: &MouseUpEvent, phase, window, cx| {
+                            if wire_input && phase == DispatchPhase::Capture && e.button == MouseButton::Left
+                                && up_view.update(cx, |this, cx| this.wire_release(e.position, window, cx))
+                            {
+                                cx.stop_propagation();
+                            }
+                        });
+                        // Once a pane move starts, follow the pointer anywhere in the window.
                         let move_view = view.clone();
                         window.on_mouse_event(move |e: &MouseMoveEvent, phase, window, cx| {
                             if phase != DispatchPhase::Capture {
                                 return;
                             }
                             move_view.update(cx, |this, cx| {
-                                if e.pressed_button == Some(MouseButton::Left)
+                                if wire_input && b.contains(&e.position) && this.wire_pointer(e, cx) {
+                                    cx.stop_propagation();
+                                } else if e.pressed_button == Some(MouseButton::Left)
                                     && this.queue_canvas_move(e.position, window, cx)
                                 {
                                     cx.stop_propagation();
@@ -2849,7 +2866,6 @@ impl AppWindow {
                 }),
             )
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
-                if this.wire_pointer(e, cx) { return; }
                 // The button came up outside the window: end any drag instead of panning on hover.
                 if e.pressed_button.is_none()
                     && (this.canvas_state.drag.is_some() || this.canvas_state.preview_drag.is_some() || this.canvas_state.cell_resize.is_some())
@@ -2933,7 +2949,6 @@ impl AppWindow {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, e: &MouseUpEvent, window, cx| {
-                    if this.wire_release(e.position, window, cx) { return; }
                     // A click (no box drawn) inside a space: its files go to the panel tree.
                     let click = this.canvas_state.marquee.take().is_some() && !this.canvas_state.pan_moved;
                     this.end_canvas_drag(cx);
