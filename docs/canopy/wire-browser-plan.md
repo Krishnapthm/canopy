@@ -161,6 +161,14 @@ Do this after `feat/linux-desktop-integration` lands.
   after it. In `scripts/dev` on the Mac, a click on "+" then a pane, a drag
   from "+" onto a pane, and Connect then a pane each make a wire. Escape
   still cancels.
+  - macOS automated result: the simulated click reached the destination pane
+    without forming a wire before the fix. With window-level capture, the
+    same test connects by click and drag and verifies that the destination
+    does not take the click.
+  - The sandboxed development app could not open a usable GUI window. Manual
+    checks are pending. The final `just test` run passed 110 Bun and 562 Rust
+    tests, including the regression. Seven Rust tests failed in the launchd
+    bootstrap, temporary-file access and native file watches. One was ignored.
 - Phase 2: before and after Instruments numbers for idle, pan and zoom.
 - Phase 3: the `scripts/sandbox` steps above, and the Linux CI job.
 - Each phase: `just test` with the shared `CARGO_TARGET_DIR`,
