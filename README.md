@@ -93,6 +93,8 @@ the wiki's [build from source](https://github.com/Krishnapthm/canopy/wiki/Build-
 
 ## Credits and license
 
-canopy is built on top of [herdr](https://github.com/herdrdev). it started as a fork of [herdr-app](https://github.com/herdrdev/herdr-app), and every terminal you open in canopy still runs on herdr-core, which is why your agents keep working after the window closes. we never had to write a terminal runtime from scratch because herdr had already built a good one and shared it. herdr is a great app in its own right too, so give it a try if you haven't. thank you, herdr.
+canopy is built on top of [herdr](https://github.com/herdrdev). it started as a fork of [herdr-app](https://github.com/herdrdev/herdr-app), and every terminal you open in canopy still runs on herdr-core, which is why your agents keep working after the window closes. canopy didn't need a terminal runtime of its own, because herdr had already built a good one and shared it. herdr is a great app in its own right too, so give it a try if you haven't. thank you, herdr.
 
 canopy is licensed under Apache-2.0, like herdr-app. see [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).
+
+made by [krishna](https://github.com/Krishnapthm).
