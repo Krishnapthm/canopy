@@ -10,11 +10,11 @@
   <a href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start">quick start</a> · <a href="https://github.com/Krishnapthm/canopy/wiki">docs</a> · <a href="CONTRIBUTING.md">contributing</a>
 </p>
 
-canopy puts your terminals and coding agents side by side on one canvas. wire agents together, see which one is waiting on you, and open files, a browser or an ios simulator next to them. close the window and everything keeps running.
+canopy puts your terminals and coding agents side by side on one canvas. wire agents together, see which one is waiting on you, and open files, a browser or an iOS simulator next to them. close the window and everything keeps running.
 
 ## Install
 
-canopy runs on macos (apple silicon) and linux.
+canopy runs on macOS (apple silicon) and linux.
 
 ```sh
 curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/install.sh | sh
@@ -29,11 +29,11 @@ canopy never updates itself. to update, run the same command again.
 
 delete the app, its command-line link and its config in `~/.config/canopy`.
 
-on macos the app is `~/Applications/Canopy.app` and the link is `~/.local/bin/canopy`.
+on macOS the app is `~/Applications/Canopy.app` and the link is `~/.local/bin/canopy`.
 
 on linux, remove `~/.local/share/canopy`, `~/.local/bin/canopy`, `~/.local/share/applications/canopy.desktop` and `~/.local/share/icons/hicolor/scalable/apps/canopy.svg`.
 
-herdr-core is the engine herdr runs on too, so keep it if you use herdr. if you only installed it for canopy, run `hc server stop` to stop it, which ends any terminals still running in it. then delete `~/.local/bin/herdr-core`, `~/.local/bin/hc`, `~/.config/herdr-core` and `~/.local/state/herdr-core`, plus `~/.local/share/herdr-core` on macos.
+herdr-core is the engine herdr runs on too, so keep it if you use herdr. if you only installed it for canopy, run `hc server stop` to stop it, which ends any terminals still running in it. then delete `~/.local/bin/herdr-core`, `~/.local/bin/hc`, `~/.config/herdr-core` and `~/.local/state/herdr-core`, plus `~/.local/share/herdr-core` on macOS.
 
 </details>
 
@@ -42,7 +42,7 @@ herdr-core is the engine herdr runs on too, so keep it if you use herdr. if you 
 you need [rust](https://rustup.rs) 1.95 or newer, [zig](https://ziglang.org/download/) 0.16 to build the terminal engine, and [herdr-core](https://github.com/herdrdev/herdr-core) to run your terminals. [just](https://github.com/casey/just) and [bun](https://bun.sh) are optional and only needed for the full test suite.
 
 <details>
-<summary>set up on macos</summary>
+<summary>set up on macOS</summary>
 
 these steps use the xcode command line tools and [homebrew](https://brew.sh).
 
