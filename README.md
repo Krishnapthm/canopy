@@ -1,4 +1,4 @@
-<h1 align="center">Canopy</h1>
+<h1>Canopy</h1>
 
 <p align="center">
   <img src="assets/icons/canopy.svg" width="128" height="128" alt="Canopy icon">
