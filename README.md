@@ -1,12 +1,16 @@
-<h1><img src="assets/icons/canopy.svg" width="128" height="128" align="left" alt="Canopy icon">Canopy</h1>
+<p align="center">
+  <img src="assets/icons/canopy.svg" width="128" height="128" alt="Canopy icon">
+</p>
 
-Canopy puts your terminals and coding agents side by side on one canvas.<br>
-Wire agents together, see which one is waiting on you, and open files, a browser<br>
-or an iOS simulator next to them. Close the window and everything keeps running.
+<h1 align="center">Canopy</h1>
 
-<br clear="left">
+<p align="center"><b>The canvas your coding agents work on.</b></p>
 
-[Quick start](https://github.com/Krishnapthm/canopy/wiki/Quick-Start) · [Docs](https://github.com/Krishnapthm/canopy/wiki) · [Contributing](CONTRIBUTING.md)
+<p align="center">
+  <a href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start">Quick start</a> · <a href="https://github.com/Krishnapthm/canopy/wiki">Docs</a> · <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+Canopy puts your terminals and coding agents side by side on one canvas. Wire agents together, see which one is waiting on you, and open files, a browser or an iOS simulator next to them. Close the window and everything keeps running.
 
 ## Install
 
