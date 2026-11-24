@@ -2085,7 +2085,7 @@ mod panel_tests {
     #[test]
     fn docking_keeps_the_rect_and_hides_the_pane_from_the_canvas() {
         let mut doc = Document::default();
-        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [10., 20., 300., 400.], z: 0, space: None, pinned: Some([1., 1., 2., 2.]) });
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [10., 20., 300., 400.], z: 0, space: None, color: None, pinned: Some([1., 1., 2., 2.]) });
         doc.dock("p1");
         assert!(doc.docked("p1") && !doc.shown(&doc.panes[0]) && doc.panes[0].pinned.is_none());
         doc.dock("p1");

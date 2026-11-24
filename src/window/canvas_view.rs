@@ -172,6 +172,16 @@ impl State {
     pub(super) fn file_path(&self) -> Option<&String> {
         self.file.as_ref().and_then(canvas::PanelTab::file)
     }
+
+    fn active_panel_pane(&self) -> Option<&str> {
+        self.file.as_ref().and_then(canvas::PanelTab::pane).map(String::as_str)
+    }
+
+    /// A pane can be visible at its current canvas place or in the open panel tab.
+    fn shows_pane(&self, pane: &canvas::Pane) -> bool {
+        self.doc.shown(pane) || self.active_panel_pane() == Some(pane.id.as_str())
+    }
+
     pub fn load() -> Self {
         let (doc, error, writable) = match Document::load(&file("canvas.json")) {
             Ok((doc, bad)) => (
@@ -474,7 +484,7 @@ impl AppWindow {
         state.shown.get_or_insert_with(|| state.doc.clone());
         if let Some(id) = &pane {
             state.group = if state.preview_drag.is_none() && state.selected.contains(id) {
-                state.selected.clone()
+                state.selected.iter().filter(|id| !state.doc.docked(id)).cloned().collect()
             } else {
                 vec![id.clone()]
             };
@@ -598,7 +608,8 @@ impl AppWindow {
             .map(|c| self.pill_rect(c, cx))
             .collect();
         let state = &mut self.canvas_state;
-        let pinned = pin.and_then(|id| state.doc.panes.iter().position(|p| p.id == id));
+        let pinned = pin.and_then(|id| state.doc.panes.iter().position(|p| p.id == id
+            && p.pinned.is_none() && !state.doc.docked(id)));
         let current: Vec<_> = state
             .doc
             .panes
@@ -2682,7 +2693,7 @@ impl AppWindow {
             "panel.close" => {
                 state.dirty = None;
                 // The tabs stay (a docked pane lives in them); the folder button reopens on this one.
-                state.closed = state.file.take();
+                if let Some(tab) = state.file.take() { state.closed = Some(tab); }
                 state.files = false;
                 state.panel_expanded = false;
                 self.focus.focus(window, cx);
@@ -3314,7 +3325,7 @@ impl AppWindow {
             pills.push((paint_order(card), element));
         }
         // A docked simulator is drawn while its tab is the panel's active one.
-        drawn_sims.extend(state.file.as_ref().and_then(canvas::PanelTab::pane).filter(|id| state.doc.panes.iter().any(|p| p.id == **id && p.sim().is_some())).cloned());
+        drawn_sims.extend(state.active_panel_pane().filter(|id| state.doc.panes.iter().any(|p| p.id == *id && p.sim().is_some())).map(str::to_owned));
         // A live simulator streams only while its pane is drawn.
         #[cfg(target_os = "macos")]
         self.show_sims(&drawn_sims, cx);
@@ -3688,10 +3699,10 @@ impl AppWindow {
                     } else {
                         this.canvas_state.files = true;
                         this.canvas_state.doc.panel.tree_hidden = false;
-                        // Bring back the tabs it closed with; files and terminals closed since are gone.
-                        if let Some(tab) = this.canvas_state.closed.take().filter(|t| this.canvas_state.doc.panel.tabs.contains(t)) {
-                            this.canvas_state.file = Some(tab);
-                        }
+                        let tabs = &this.canvas_state.doc.panel.tabs;
+                        this.canvas_state.file = this.canvas_state.closed.take()
+                            .filter(|tab| tabs.contains(tab))
+                            .or_else(|| tabs.last().cloned());
                         this.sync(window, cx);
                         cx.notify();
                     }
@@ -3699,12 +3710,12 @@ impl AppWindow {
         );
         // Browser (the macOS web view) and simulator (a Mac with Xcode) open docked in the Files
         // panel; their helper bar moves them onto the canvas.
-        let pinned_new = |id: &'static str, icon: &'static str, label: &'static str, kind: &'static str| panel_button(id, icon, c("muted-foreground"), c("hover"))
+        let docked_new = |id: &'static str, icon: &'static str, label: &'static str, kind: &'static str| panel_button(id, icon, c("muted-foreground"), c("hover"))
             .aria_label(label).tooltip(strip_tooltip(label.into(), None))
             .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.pane_new", json!({"kind":kind}), window, cx)));
         tabs = control()
-            .when(cfg!(target_os = "macos"), |d| d.child(pinned_new("canvas-browser", "icons/globe.svg", "Browser", "browser")))
-            .when(crate::sim::available(), |d| d.child(pinned_new("canvas-sim", "icons/smartphone.svg", "Simulator", "sim")))
+            .when(cfg!(target_os = "macos"), |d| d.child(docked_new("canvas-browser", "icons/globe.svg", "Browser", "browser")))
+            .when(crate::sim::available(), |d| d.child(docked_new("canvas-sim", "icons/smartphone.svg", "Simulator", "sim")))
             .child(panel_button("canvas-tile", "icons/layout-grid.svg", c("muted-foreground"), c("hover"))
             .aria_label("Tile view").tooltip(strip_tooltip("Tile view".into(), Some("canvas.tile")))
             .on_click(cx.listener(|this, _, window, cx| this.tile_canvas(true, window, cx))))
@@ -3783,9 +3794,9 @@ impl AppWindow {
                 let active = state.file.as_ref() == Some(&tab);
                 let dirty = tab.file().is_some_and(|path| state.dirty.as_ref() == Some(path));
                 // A pane tab: its kind's icon, its title, and a dot while it is wired.
-                let (icon, label, wired, tip) = match &tab {
-                    canvas::PanelTab::File(path) => ("mods/files/file.svg", crate::subs::transcript_title(path).unwrap_or_else(|| std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy().into_owned()), false, path.clone()),
-                    canvas::PanelTab::Pane(id) => { let (icon, title, wired) = self.docked_tab(id, cx); (icon, title.clone(), wired, title) }
+                let (icon, label, tint, tip) = match &tab {
+                    canvas::PanelTab::File(path) => ("mods/files/file.svg", crate::subs::transcript_title(path).unwrap_or_else(|| std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy().into_owned()), None, path.clone()),
+                    canvas::PanelTab::Pane(id) => { let (icon, title, tint) = self.docked_tab(id, cx); (icon, title.clone(), tint, title) }
                 };
                 let key = match &tab { canvas::PanelTab::File(path) => path.clone(), canvas::PanelTab::Pane(id) => format!("pane:{id}") };
                 let activate = tab.clone();
@@ -3807,8 +3818,7 @@ impl AppWindow {
                     }))
                     .child(svg().path(icon).flex_none().size(px(14.)).text_color(c(if active { "foreground" } else { "muted-foreground" })).group_hover(group.clone(), |s| s.text_color(c("foreground"))))
                     .child(div().flex_1().min_w_0().truncate().child(label))
-                    // The wire's color (P2's effective_color later); the foreground until then.
-                    .when(wired, |d| d.child(div().flex_none().size(px(6.)).rounded_full().bg(c("foreground"))))
+                    .when_some(tint, |d, tint| d.child(div().flex_none().size(px(6.)).rounded_full().bg(c(&tint))))
                     .child(div().relative().flex_none().size(px(24.)).flex().items_center().justify_center()
                         .when(dirty, |d| d.child(div().absolute().size(px(6.)).rounded_full().bg(c("foreground"))
                             .group_hover(group.clone(), |d| d.opacity(0.))))

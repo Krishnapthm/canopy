@@ -25,7 +25,9 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>, d
             vec![BarAction { icon: icon.into(), label: label.into(), command: "canvas.pane_pin".into(), args: json!({"pinned":pinned}) }, dock("icons/panel-right.svg", "Open in panel", true)]
         };
         actions.splice(at..at, extra);
-        if docked { actions.retain(|a| !matches!(a.command.as_str(), "canvas.browser_expand" | "canvas.close")); }
+        if docked {
+            actions.retain(|a| !matches!(a.command.as_str(), "canvas.browser_expand" | "canvas.sim_zoom" | "canvas.close"));
+        }
     }
     actions
 }

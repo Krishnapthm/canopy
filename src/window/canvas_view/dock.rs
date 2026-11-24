@@ -40,7 +40,7 @@ impl Home {
 
 /// A copy of `pane` sized so the geometry code (placement, zoom, fixed viewports) sees its body as
 /// exactly `body`, like a pinned pane whose body starts at the origin.
-fn fit_to_body(mut pane: canvas::Pane, body: Size<Pixels>) -> canvas::Pane {
+pub(super) fn fit_to_body(mut pane: canvas::Pane, body: Size<Pixels>) -> canvas::Pane {
     let (w, h) = (f32::from(body.width), f32::from(body.height));
     let header = canvas::header_height(&pane.kind);
     pane.rect = [-1., -(header + 1.), w + 2., h + header + 2.];
@@ -53,20 +53,32 @@ impl AppWindow {
     /// the pane is the panel's active tab and its body has been measured.
     pub(super) fn docked_view(&self, id: &str) -> Option<(canvas::Pane, Bounds<Pixels>)> {
         let state = &self.canvas_state;
-        if state.file.as_ref().and_then(PanelTab::pane).map(String::as_str) != Some(id) { return None; }
-        let body = *self.bounds.borrow().get(&format!("panel-body:{id}"))?;
+        let body = self.docked_bounds(id)?;
         let pane = state.doc.panes.iter().find(|p| p.id == id)?.clone();
         Some((fit_to_body(pane, body.size), body))
     }
 
-    /// Docks a pane in the Files panel and shows it there.
+    /// The measured body of the panel's active pane.
+    pub(super) fn docked_bounds(&self, id: &str) -> Option<Bounds<Pixels>> {
+        if !self.has_canvas() || self.canvas_state.active_panel_pane() != Some(id) { return None; }
+        self.bounds.borrow().get(&format!("panel-body:{id}")).copied()
+            .filter(|b| b.size.width > px(0.) && b.size.height > px(0.))
+    }
+
+    /// Docks a pane in the Files panel and shows it there when the editor has no unsaved changes.
     pub(super) fn dock_pane(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         // A live page rests first, so it wakes again at its new place.
-        self.rest_live_browser(id, cx);
+        if self.canvas_state.browser_tab.as_deref() == Some(id) {
+            self.collapse_browser(window, cx);
+        } else {
+            self.rest_live_browser(id, cx);
+        }
         let state = &mut self.canvas_state;
         state.doc.dock(id);
-        state.file = Some(PanelTab::Pane(id.to_owned()));
-        state.selected = vec![id.to_owned()];
+        if state.dirty.is_none() {
+            state.file = Some(PanelTab::Pane(id.to_owned()));
+            state.selected = vec![id.to_owned()];
+        }
         self.canvas_changed(cx);
         self.sync(window, cx);
         cx.notify();
@@ -76,10 +88,15 @@ impl AppWindow {
     /// room for it.
     pub(super) fn undock_pane(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.rest_live_browser(id, cx);
+        if let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id)
+            && pane.space != self.canvas_state.doc.room {
+            self.go_room(pane.space.clone(), window, cx);
+        }
         let center = self.view_center(window);
         let state = &mut self.canvas_state;
-        let was_active = state.file.as_ref().and_then(PanelTab::pane).is_some_and(|p| p == id);
+        let was_active = state.active_panel_pane() == Some(id);
         state.doc.undock(id, center);
+        state.panel_expanded = false;
         if was_active { state.file = state.doc.panel.tabs.last().cloned(); }
         self.raise_pane(id, cx);
         self.solve_layout(Some(id), None, cx);
@@ -101,22 +118,28 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// The name of the terminal a pane is wired to, if any.
+    /// The first wired agent, in wire order. Boxed panes have only drawn wires.
     fn wired_agent(&self, id: &str) -> Option<String> {
-        let doc = &self.canvas_state.doc;
-        let edges = crate::wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
-        let other = edges.iter().find_map(|w| if w.a == id { Some(&w.b) } else if w.b == id { Some(&w.a) } else { None })?;
-        doc.panes.iter().any(|p| p.id == *other && p.terminal().is_some()).then(|| self.pill_name(other))
+        crate::wire::neighbors(&self.canvas_state.doc.wires, id).into_iter()
+            .find(|other| self.live.get(other).is_some_and(canvas_agent))
     }
 
-    /// A pane tab's icon, title, and whether it is wired (the tab then shows the wire's dot).
-    pub(super) fn docked_tab(&self, id: &str, cx: &App) -> (&'static str, String, bool) {
-        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return ("icons/x.svg", id.to_owned(), false) };
+    /// A pane tab's icon, title and color token for its wired agent's dot.
+    pub(super) fn docked_tab(&self, id: &str, cx: &App) -> (&'static str, String, Option<String>) {
+        let doc = &self.canvas_state.doc;
+        let Some(pane) = doc.panes.iter().find(|p| p.id == id) else { return ("icons/x.svg", id.to_owned(), None) };
         let (icon, title) = match &pane.kind {
             canvas::Kind::Browser { .. } => ("icons/globe.svg", self.browser_title(pane).0),
-            _ => ("icons/smartphone.svg", self.sim_title(pane, cx).0),
+            canvas::Kind::Sim { .. } => ("icons/smartphone.svg", self.sim_title(pane, cx).0),
+            canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } | canvas::Kind::File { .. }
+            | canvas::Kind::Pdf { .. } | canvas::Kind::Image { .. } | canvas::Kind::Mod { .. } => {
+                return ("icons/x.svg", id.to_owned(), None);
+            }
         };
-        (icon, title, self.wired_agent(id).is_some())
+        let tint = self.wired_agent(id).map(|agent| {
+            doc.effective_color(&agent).map_or_else(|| "foreground".into(), canvas::Hue::tint_token)
+        });
+        (icon, title, tint)
     }
 
     /// The panel's header and body for the docked pane `id`: its helper bar over the same body
@@ -136,7 +159,7 @@ impl AppWindow {
         #[cfg(target_os = "macos")]
         let actions = self.sim_relabel(id, actions, cx);
         let actions = self.browser_relabel(id, actions);
-        let label = wired.as_ref().map_or(title, |agent| format!("Wired to {agent}"));
+        let label = wired.as_ref().map_or(title, |agent| format!("Wired to {}", self.pill_name(agent)));
         let header = div().flex().flex_col().flex_none()
             .children(chrome)
             .child(div().flex().items_center().gap(px(6.)).px(px(12.)).h(px(36.)).border_b_1().border_color(c("border"))

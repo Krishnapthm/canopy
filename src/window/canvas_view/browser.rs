@@ -453,7 +453,6 @@ impl AppWindow {
         doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], SIZE[0], SIZE[1]], z, space, color: None, pinned: None });
         self.canvas_state.last_browser = Some(id.clone());
         if empty { self.canvas_state.browsers.panes.entry(id.clone()).or_default().focus_url = true; }
-        self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
         id
@@ -739,7 +738,7 @@ impl AppWindow {
     /// `localhost:3000` a URL and refuses non-web schemes). Runs from `render`, which has a window.
     pub(in crate::window) fn sync_browser_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let doc = &self.canvas_state.doc;
-        let urls: Vec<_> = doc.panes.iter().filter(|p| p.url().is_some()).map(|p| (p.id.clone(), doc.shows(p.space.as_ref()))).collect();
+        let urls: Vec<_> = doc.panes.iter().filter(|p| p.url().is_some()).map(|p| (p.id.clone(), self.canvas_state.shows_pane(p))).collect();
         // The page events task belongs to this window: a pop-out window must not be the one to start it.
         #[cfg(target_os = "macos")]
         if !urls.is_empty() { self.browser_events(window, cx); }
@@ -1090,7 +1089,7 @@ impl AppWindow {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no browser pane {id}"))?;
         let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return Err(format!("no browser pane {id}")); };
         let next = tabs.iter().position(|t| t.id == tab).ok_or_else(|| format!("no tab {tab} in browser pane {id}"))?;
-        let shown = self.canvas_state.doc.shows(pane.space.as_ref());
+        let shown = self.canvas_state.shows_pane(pane);
         if next == *active {
             if shown { self.select_browser_pane(id); }
             if self.browser_url(id)? == "" { self.focus_browser_url(id, cx)?; }
@@ -1189,7 +1188,7 @@ impl AppWindow {
             Err(e) => return self.command_error("Open link", &e, window, cx),
         };
         let doc = &self.canvas_state.doc;
-        let shown = doc.panes.iter().filter(|pane| pane.url().is_some() && doc.shows(pane.space.as_ref())).map(|p| p.id.as_str());
+        let shown = doc.panes.iter().filter(|pane| pane.url().is_some() && self.canvas_state.shows_pane(pane)).map(|p| p.id.as_str());
         let last = link_target(self.canvas_state.last_browser.as_deref(), shown);
         let id = last.unwrap_or_else(|| {
             let doc = &self.canvas_state.doc;
@@ -1200,7 +1199,9 @@ impl AppWindow {
                     ([x - SIZE[0] / 2., y - SIZE[1] / 2.], doc.room.clone())
                 }
             };
-            self.add_browser_pane(String::new(), at, space, cx)
+            let id = self.add_browser_pane(String::new(), at, space, cx);
+            self.solve_layout(Some(&id), None, cx);
+            id
         });
         if self.canvas_state.browser_tab.as_deref().is_some_and(|expanded| expanded != id) {
             self.collapse_browser(window, cx);
@@ -1638,6 +1639,7 @@ impl AppWindow {
     /// another space.
     fn expand_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).cloned().ok_or_else(|| format!("no pane {id}"))?;
+        if self.canvas_state.doc.docked(id) { return Err("Use Expand panel for a browser in the Files panel".into()); }
         if !self.canvas_state.doc.shows(pane.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
         if self.browser_popped(id) { return Err(format!("pane {id} is popped out: bring it back first")); }
         self.require_browser_url(id)?;
@@ -2041,6 +2043,7 @@ impl AppWindow {
 
     /// Give an unpinned browser room to work at 100%, or fit it with a margin.
     pub(super) fn snap_usable(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.canvas_state.doc.docked(id) { return; }
         let Some(bounds) = self.bounds.borrow().get("canopy-canvas").copied() else { return };
         let [w, h] = [f32::from(bounds.size.width), f32::from(bounds.size.height)];
         if w <= 0. || h <= 0. { return; }
@@ -2059,7 +2062,7 @@ impl AppWindow {
     fn inspect_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         let popped = self.browser_popped(id);
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
-        if !popped && !self.canvas_state.doc.shows(pane.space.as_ref()) {
+        if !popped && !self.canvas_state.shows_pane(pane) {
             return Err(format!("pane {id} is in another space: go there first"));
         }
         self.ensure_view(id, window, cx)?;
@@ -2384,7 +2387,7 @@ fn pane_body(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
 
 /// A fixed viewport fits inside the body at its original aspect ratio.
 #[cfg(target_os = "macos")]
-fn viewport_rect(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
+pub(super) fn viewport_rect(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
     let [x, y, w, h] = pane_body(pane, camera);
     let Some([css_w, css_h]) = fixed_viewport(pane) else { return [x, y, w, h] };
     let zoom = page_zoom(pane, camera, [w, h]);

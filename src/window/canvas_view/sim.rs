@@ -125,7 +125,6 @@ impl AppWindow {
         let size = DEFAULT_SIZE;
         let zoom = doc.camera.zoom;
         doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], size[0] / zoom, size[1] / zoom], z, space, color: None, pinned: None });
-        self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         self.refresh_sim(&id, true, window, cx);
         id
@@ -417,6 +416,7 @@ impl AppWindow {
     /// Resets the pane or sizes its device in canvas points. In and out step the drawn scale.
     #[cfg(target_os = "macos")]
     fn zoom_sim(&mut self, id: &str, step: &str, cx: &mut Context<Self>) -> Result<Value, String> {
+        if self.canvas_state.doc.docked(id) { return Err("Move the simulator to the canvas to change its size".into()); }
         let (size, result) = if step == "default" {
             (DEFAULT_SIZE, json!({}))
         } else {
