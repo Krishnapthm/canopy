@@ -1,6 +1,7 @@
 {
   "id": "root",
   "type": "column",
+  "preview": "layouts/main.svg",
   "titlebar": "none",
   "traffic_lights": [
     12,

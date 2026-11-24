@@ -146,7 +146,10 @@ const LAYOUTS: &[(&str, &str)] = &[
 ];
 
 /// Pictures shipped layouts name as their `preview`, written beside them.
-const LAYOUT_PREVIEWS: &[(&str, &str)] = &[("win98.svg", include_str!("../defaults/layouts/win98.svg"))];
+const LAYOUT_PREVIEWS: &[(&str, &str)] = &[
+    ("main.svg", include_str!("../defaults/layouts/main.svg")),
+    ("win98.svg", include_str!("../defaults/layouts/win98.svg")),
+];
 
 pub fn shipped_layouts() -> Vec<&'static str> {
     LAYOUTS.iter().map(|(n, _)| *n).collect()
