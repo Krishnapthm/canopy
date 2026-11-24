@@ -11,6 +11,7 @@ canopy pane new file ./README.md --wire  # open a file beside the calling agent
 canopy pane new mod:note --wire         # open a note beside the calling agent
 ```
 
+- `--place panel|canvas|pinned` chooses where a browser or simulator opens. The default is `panel`, a tab in the [files panel](Files-Panel). Other kinds default to the canvas.
 - `--wire` wires the pane to the calling terminal, using `HC_TERMINAL_ID`. It requires a Canopy terminal.
 - `new` prints the pane ID, its path, URL or kind, and a command to read it. Wired panes add `wired to you`.
 - See [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices) for their opening commands.
@@ -44,8 +45,8 @@ canopy pane shot p1 ./pane.png  # choose the output file
 ```
 
 - The output file must end in `.png`.
-- Except for browser panes, `shot` crops the drawn canvas to the visible part of the pane.
-- `shot` refuses these panes when they are in another space, off screen or absent from the view.
+- For a pane on the canvas, `shot` saves the part you can see. Bring the pane into view first.
+- To capture a docked simulator, open its Files panel tab first. The screenshot shows the panel's device area.
 - Browser panes capture the page directly. See [Browser Pane](Browser-Pane).
 
 ## Close a pane

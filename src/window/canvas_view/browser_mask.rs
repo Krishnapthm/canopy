@@ -109,7 +109,7 @@ impl AppWindow {
             .chain(
                 doc.panes
                     .iter()
-                    .filter(|p| doc.shows(p.space.as_ref()) && paint_order(p) > paint_order(page))
+                    .filter(|p| doc.shown(p) && paint_order(p) > paint_order(page))
                     .filter_map(|p| self.wire_cell_rect(p).map(|world| screen_rect(p, world, camera))),
             )
             .collect()
@@ -132,22 +132,18 @@ impl AppWindow {
             .filter_map(|(key, view)| {
                 let (id, _) = key.split_once('/')?;
                 let expanded = state.browser_tab.as_deref() == Some(id);
-                let body = doc
-                    .panes
-                    .iter()
-                    .find(|p| p.id == id && doc.shows(p.space.as_ref()))
+                let docked = state.doc.panes.iter().find(|p| p.id == id)
+                    .filter(|_| self.has_canvas() && state.active_panel_pane() == Some(id)).cloned();
+                let body = doc.panes.iter()
+                    .find(|p| p.id == id && state.doc.shown(p))
                     .filter(|_| state.browser_tab.is_none())
                     .and_then(|p| self.body_rect(p))
                     .map(|mut b| {
                         b.origin = b.origin - origin;
                         rect(b)
                     });
-                let above = if body.is_some() {
-                    self.page_covers(id)
-                } else {
-                    vec![]
-                };
-                Some((key.to_owned(), id.to_owned(), view, expanded, body, above))
+                let above = if body.is_some() { self.page_covers(id) } else { vec![] };
+                Some((key.to_owned(), id.to_owned(), view, expanded, body, above, docked))
             })
             .collect();
         let bounds = self.bounds.clone();
@@ -163,8 +159,15 @@ impl AppWindow {
                         .filter(|(k, _)| k.starts_with("cover:"))
                         .map(|(_, b)| rect(*b))
                         .collect();
-                    for (key, id, view, expanded, body, above) in pages {
-                        let (frame, pieces) = match canvas {
+                    for (key, id, view, expanded, body, above, docked) in pages {
+                        // The panel's body is measured in this frame, including while resizing.
+                        let (clip, body) = if let Some(pane) = docked {
+                            let panel = bounds.get(&format!("panel-body:{id}")).copied();
+                            (panel.map(rect), panel.map(|b| {
+                                browser::viewport_rect(&dock::fit_to_body(pane, b.size), canvas::Camera::default())
+                            }))
+                        } else { (canvas, body) };
+                        let (frame, pieces) = match clip {
                             Some(canvas @ [x, y, _, _]) if expanded || body.is_some() => {
                                 let frame = if expanded {
                                     canvas

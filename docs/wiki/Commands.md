@@ -179,7 +179,7 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 
 ## `canvas.pane_new`
 
-Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. The pane opens at point (the middle of the view by default) or at the top right when pinned is true. Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
+Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
 
 | Argument | Required |
 |---|---|
@@ -189,7 +189,17 @@ Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files requi
 | `udid` | no |
 | `wire` | no |
 | `point` | no |
+| `place` | no |
 | `pinned` | no |
+
+## `canvas.pane_dock`
+
+Dock a browser or sim pane as a tab in the Files panel, or with docked false move it back onto the canvas at its saved place. Without docked it toggles. Acts on pane, else the selected pane. Replies with pane and docked.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `docked` | no |
 
 ## `canvas.pane_pin`
 
@@ -483,12 +493,21 @@ Run a drawing tool or toolbar action in an active annotation. Used by its menus.
 
 ## `canvas.sim_zoom`
 
-Resize a simulator pane: step actual (1 point per screen pixel at the current zoom, the default), in or out. Acts on pane, else the selected simulator pane.
+Resize a simulator pane: step actual (one device point per canvas unit, requires a live frame), default (340x700 on screen), in or out. Omit step for actual. Acts on pane, else the selected simulator pane.
 
 | Argument | Required |
 |---|---|
 | `step` | no |
 | `pane` | no |
+
+## `canvas.sim_shutdown`
+
+Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `close` | no |
 
 ## `canvas.sim_pop`
 
