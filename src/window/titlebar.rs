@@ -191,9 +191,7 @@ impl AppWindow {
     }
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-    pub(super) fn canvas_strip(&self, bar: Div, controls: Option<(Div, Div)>, cx: &mut Context<Self>) -> AnyElement {
-        let content = div().flex().flex_1().min_w_0().h_full().items_center().justify_between()
-            .when_some(controls, |row, (crumbs, actions)| row.child(crumbs).child(actions));
+    pub(super) fn canvas_strip(&self, bar: Div, content: Div, cx: &mut Context<Self>) -> AnyElement {
         linux::CanvasStrip {
             bar,
             content,

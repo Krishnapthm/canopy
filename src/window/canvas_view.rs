@@ -3703,11 +3703,14 @@ impl AppWindow {
         let bar = self.window_drag(div().flex().flex_none().items_center().justify_between().w_full().h(px(BAR))
             .pl(px(bar_inset(cfg!(target_os = "macos"), self.fullscreen)))
             .bg(c(strip)), cx);
-        let controls = (!expanded).then(|| (crumbs.child(div().flex_1().h_full()), tabs.flex_none().px(px(8.))));
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-        let bar = self.canvas_strip(bar, controls, cx);
+        let (frame, mut bar) = (bar, div().flex().flex_1().min_w_0().h_full()
+            .items_center().justify_between().overflow_hidden());
         #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-        let bar = bar.when_some(controls, |row, (crumbs, actions)| row.child(crumbs).child(actions));
+        let mut bar = bar;
+        if !expanded {
+            bar = bar.child(crumbs.child(div().flex_1().h_full())).child(tabs.flex_none().px(px(8.)));
+        }
         if self.connect_hint() {
             area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(32.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -3959,6 +3962,8 @@ impl AppWindow {
             panel = panel.child(body);
             row = row.child(panel);
         }
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let bar = self.canvas_strip(frame, bar, cx);
         div().relative().size_full().flex().flex_col().child(bar).child(row).children(grip)
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
                 if this.canvas_state.resizing {
