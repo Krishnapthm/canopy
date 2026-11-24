@@ -305,7 +305,7 @@ Load the URL a browser pane was last opened with (pane, else the selected pane).
 
 ## `canvas.browser_pick`
 
-Make a browser pane live and pick an element on its page; the pick opens the quote popover (pane, else the selected pane).
+Start annotating a browser page with the Select tool: click an element to pin a comment on it (pane, else the selected pane).
 
 | Argument | Required |
 |---|---|
@@ -313,7 +313,7 @@ Make a browser pane live and pick an element on its page; the pick opens the quo
 
 ## `canvas.browser_annotate`
 
-Start or stop annotating a still of a browser page. Acts on pane, else the selected browser pane.
+Start or stop annotating a browser page: select elements, draw, and send comments to an agent. Acts on pane, else the selected browser pane.
 
 | Argument | Required |
 |---|---|
@@ -466,7 +466,7 @@ Start or stop annotating a still of a simulator screen. Acts on pane, else the s
 
 ## `canvas.annotate_send`
 
-Submit the annotated screenshot and comments to the wired agent, or open the agent picker. Acts on pane, else the selected annotation.
+Submit the annotated screenshot and comments to the sole wired agent, or the one chosen with canvas.annotate_agent. Acts on pane, else the selected annotation.
 
 | Argument | Required |
 |---|---|
@@ -474,12 +474,20 @@ Submit the annotated screenshot and comments to the wired agent, or open the age
 
 ## `canvas.annotate_action`
 
-Run a drawing tool or toolbar action in an active annotation. Used by its menus.
+Run a tool, colour, stroke, undo or redo in an active annotation, or choose its target agent with `agent:<terminal>`. Used by its menus.
 
 | Argument | Required |
 |---|---|
 | `pane` | yes |
 | `action` | yes |
+
+## `canvas.annotate_agent`
+
+Open the menu that chooses which agent an annotation is sent to (wired agents first). Acts on pane, else the selected annotation.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
 
 ## `canvas.sim_zoom`
 

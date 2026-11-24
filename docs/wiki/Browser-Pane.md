@@ -93,7 +93,7 @@ Drag the pane by the empty part of row 1, or by the [helper bar](Toolbar-and-Hel
 
 **Pop out** moves the whole pane into its own window: every tab, not just the active one. The window has the same header and a title bar drawn around the traffic lights; drag it by the empty part of row 1. Its size is the pane's size at 100% zoom, at least 640 × 480. The pane shows "Popped out" and a **Bring back** button.
 
-Tabs, Back, Forward, Reload, the address field, the ⋯ menu and the Web Inspector all work on the window's pages. Sign-ins carry over, because the pane and the window share one website data store. The window has no element picker or annotating.
+Tabs, Back, Forward, Reload, the address field, the ⋯ menu and the Web Inspector all work on the window's pages. Sign-ins carry over, because the pane and the window share one website data store. The window annotates the same way the pane does.
 
 **Bring back** (the pane's button, the window's **Close**, or its red traffic light) destroys the window's pages and puts the pane back as it was: the same tabs and active tab at the addresses they last had. Pages load again when you click them. Closing the pane closes its window.
 
@@ -121,47 +121,40 @@ A page you rested keeps running out of sight, so a video can keep playing. When 
 
 ## Annotate
 
-When a layout bug is easier to point at than describe, click **Annotate** in the header or the helper bar. The page holds on a still while you work. A popped-out page is annotated the same way in its own window.
+When a layout bug is easier to point at than describe, click **Annotate** in the header or the helper bar. It is one tool for pointing at an element, drawing on the page and sending the result to an agent. Canopy takes a still of the page while you work, so the page does not move under your pen. A popped-out page is annotated the same way in its own window.
 
-- With **Select**, click an element and save a comment to place a numbered pin. Drag to comment on an area. Start the drag on text to highlight a range. Click a pin to edit or delete its comment.
-- Use **Pen**, **Arrow**, **Box**, or **Text** to mark the picture. Click to place a text label, type it, then press `Enter`. The bar has five colours, three widths, **Undo**, and **Redo**. On narrow panes, open **Drawing tools** for these controls.
-- Use **Area screenshot** and drag to attach an extra crop to a comment. **Hide marks** lets you see the still underneath. **Trash** clears all marks and comments in one undoable step.
-- On an element comment, **Adjust** opens font size, weight, align, text colour, background, padding and margin, prefilled from the page. Edit any value (any CSS), then **Preview** applies it to the live page and takes a fresh still. **Save** keeps only the changed values with the comment, and the agent receives them as `Adjust: prop old -> new`. **Compare** in the bar toggles the page between the original and adjusted styles. Adjustments are inline styles in the live page only: the page's own styles come back when you send, discard or close.
-- Hold `Space` to scroll or interact with the live page. Release it to take a fresh still. Element pins follow their elements. Area and text annotations keep their original page coordinates.
+The bar sits at the bottom of the pane. It has four icon tools and an **x** to stop:
 
-Click **Send** to submit to the sole wired agent. With multiple wired agents or none, choose an agent from the quote menu. The agent receives the annotated screenshot first, then any crops, followed by the URL, viewport, and numbered comments. Element comments include the selector, visible text, a short HTML excerpt, styles, and React source details when available. Text labels are listed with their coordinates in the message.
+| Tool | What it does |
+|---|---|
+| **Select** | Hover to see the element under the pointer, outlined with its tag and class. Click it to drop a numbered blue pin and open the comment box next to it. Drag from text to comment on a range, or drag elsewhere to comment on an area. |
+| **Pen** | Draws freehand on the still. |
+| **Box** | Draws a rectangle. |
+| **Text** | Click, type a label, then press `Enter`. |
 
-Click **Stop annotating** or press `Esc` to leave. With marks or comments on the still, choose **Keep editing** or **Discard**.
+Colour and stroke width appear in the bar only while **Pen**, **Box** or **Text** is on (**Text** has no stroke). **Send** appears once something is queued. The bar does not move. `Cmd+Z` undoes and `Shift+Cmd+Z` redoes.
 
-## Pick an element to quote
+### The comment box
 
-![A browser pane with the element picker on a button](images/browser-pane-1.png)
+The comment box is a single line that grows when you press `Shift+Enter` for a new line. Press `Enter` to **Add** the comment to the queue, or `Cmd+Enter` to **Send** everything queued. Hover the round button beside the box to see both choices as a small menu. `Esc` closes the box and keeps the annotation. Click a pin later to edit its comment. Saving an edited comment with no text deletes it.
 
-1. Run `canvas.browser_pick` on the selected browser pane. The page becomes live.
-2. Click the element you mean.
-3. Pick an agent in the [quote menu](Quotes), optionally with a message.
+Hold `Space` to scroll or interact with the live page. Release it to take a fresh still. Element pins follow their elements. Area and text annotations keep their original page coordinates.
 
-The quote points at the element rather than copying its HTML. For a React development build, it names the component and its source file and lines, so the agent can go straight to the code:
+### Choose the agent
 
-```text
-@http://localhost:3000/pricing <PricingCard> src/components/PricingCard.tsx:42-61 "<div class=\"card\">"
-```
+With exactly one agent wired to the pane, **Send** goes to it and there is nothing to choose. Otherwise a button with a bot icon appears in the header next to **Annotate**, labelled **Choose agent** until you pick one. It lists agents wired to the pane first, then the other running agents. **Send** with no agent chosen asks you to choose one first.
 
-For other pages, it uses a CSS selector and the element's visible text:
+The agent receives the annotated screenshot, then the URL, viewport and numbered comments. Element comments include the selector, visible text, a short HTML excerpt and styles. Text labels are listed with their coordinates in the message.
 
-```text
-@https://example.com/ main > section:nth-of-type(2) "Buy now"
-```
+Click the **x** or press `Esc` with no comment box open to leave. With marks or comments on the still, choose **Keep editing** or **Discard**.
+
+Run `canvas.browser_pick` to start annotating with **Select** already on. It is the same tool, so there is no separate picker.
 
 ### How Canopy finds the source file
 
-React development builds report each component's source file and starting line. Canopy then looks for that file, in this order: the folders of agents wired to the pane, the pane's space folder, then every space's folder. It scans the file for the element's closing tag to find the end line.
+React development builds report each component's source file and starting line. An element comment lists them as `Component: PricingCard (src/components/PricingCard.tsx:42)`. Canopy turns the file the page reports into a path on disk by looking in this order: the folders of agents wired to the pane, the pane's space folder, then every space's folder. If it finds no file, the message keeps the path the page gave.
 
-Some limits apply:
-
-- The fallback search skips dependency, version control and build folders, and stops after 50,000 entries.
-- Canopy scans files up to 512 KiB, and at most 400 lines for the closing tag. If it cannot find the end, the quote gives the start line only.
-- Without source information, the visible text is cut at 200 characters. Opening tags are cut at 80 characters.
+The fallback search skips dependency, version control and build folders, and stops after 50,000 entries.
 
 ## What agents can do with a browser pane
 
@@ -195,7 +188,7 @@ Browser panes are built for local development, and they keep to themselves:
 - New tab is drawn by Canopy. The browser loads a page when you or an agent opens an address.
 - Downloads are blocked.
 - Links that ask for a new window open in the same pane.
-- The element picker is a bundled copy of an open-source tool. It loads only when you pick, with its telemetry turned off and its version check, open-file link and web font import removed.
+- Annotate reads each element's React source through a bundled copy of an open-source tool. It starts only when you click an element, with its telemetry and its own toolbar turned off, and its version check, open-file link and web font import removed.
 - Canopy keeps the last snapshot of each tab in `<app home>/browser/<pane>-<tab>.png` so the canvas can draw it after a restart. Closing the tab or pane deletes the snapshot.
 
 See [Security and Privacy](Security-and-Privacy) for the app as a whole.
