@@ -290,6 +290,9 @@ impl AppWindow {
                 "canvas.pdf_highlight" => view.toggle_select_mode(cx),
                 "canvas.pdf_prev" => view.prev_page(cx),
                 "canvas.pdf_next" => view.next_page(cx),
+                "canvas.pdf_zoom_out" => view.zoom_out(cx),
+                "canvas.pdf_zoom_reset" => view.reset_zoom(cx),
+                "canvas.pdf_zoom_in" => view.zoom_in(cx),
                 _ => unreachable!(),
             });
         } else {

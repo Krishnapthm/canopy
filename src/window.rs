@@ -3073,7 +3073,7 @@ impl AppWindow {
             | "canvas.browser_tab_new" | "canvas.browser_tab_select" | "canvas.browser_tab_close" => self.browser_command(name, a, person, window, cx),
             name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
-            "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
+            "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_zoom_out" | "canvas.pdf_zoom_reset" | "canvas.pdf_zoom_in" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
             "app.menu" => {
                 let Some(target) = crate::app_menu::popup(&self.canvas_state.doc.view, a["group"].as_str()) else {
                     return self.fail("Unknown main menu group");
@@ -3098,6 +3098,7 @@ impl AppWindow {
                 }
             }
             "panel.editor" => self.panel_editor(a, window, cx),
+            "preview.external" => self.open_in_preview(a, window, cx),
             "preview.open" => self.open_preview(a.clone(), window, cx),
             "canvas.hand" => {
                 self.canvas_state.hand = a["on"].as_bool().unwrap_or(!self.canvas_state.hand);

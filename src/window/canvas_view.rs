@@ -2,6 +2,7 @@
 use super::*;
 use crate::canvas::{self, Document, PILL_WIDTH};
 use gpui::AnimationExt as _;
+use std::path::Path;
 
 mod wire_view;
 mod keyboard;
@@ -1286,6 +1287,27 @@ impl AppWindow {
         }
         self.sync(window, cx);
         cx.notify();
+    }
+
+    /// Opens the original local document in Preview and reports launch errors.
+    pub(super) fn open_in_preview(&mut self, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        if !cfg!(target_os = "macos") { return self.fail("Preview is available on macOS"); }
+        let Some(path) = Self::owned(args, "path").filter(|p| preview_external_path(Path::new(p))) else {
+            return self.fail("Choose a local image or PDF");
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx.background_executor().spawn(async move {
+                let result = std::process::Command::new("/usr/bin/open")
+                    .args(["-b", "com.apple.Preview", &path]).output()
+                    .map_err(|e| format!("Could not open {path}: {e}"))?;
+                if result.status.success() { Ok(()) } else {
+                    Err(format!("Could not open {path}: {}", String::from_utf8_lossy(&result.stderr).trim()))
+                }
+            }).await;
+            if let Err(error) = result {
+                let _ = this.update_in(cx, |this, window, cx| this.command_error("Open in Preview", &error, window, cx));
+            }
+        }).detach();
     }
 
     /// The folder of the space last clicked on the canvas.
@@ -3885,6 +3907,11 @@ impl AppWindow {
                             .text_color(c("muted-foreground"))
                             .child(breadcrumb),
                     )
+                    .when_some(state.file_path().filter(|path| cfg!(target_os = "macos") && preview_external_path(Path::new(path))).cloned(), |d, path| {
+                        d.child(panel_button("panel-preview-external", "icons/external-link.svg", c("muted-foreground"), c("hover"))
+                            .tooltip(strip_tooltip("Open in Preview".into(), Some("preview.external")))
+                            .on_click(cx.listener(move |this, _, window, cx| this.run("preview.external", json!({"path":path}), window, cx))))
+                    })
                     // An agent transcript is read, not edited.
                     .when(state.file_path().is_some_and(|f| !f.ends_with(".jsonl")), |d| {
                         let editors = self.panel_editors();
@@ -4324,6 +4351,10 @@ fn with_message(quote: &Value, body: String) -> String {
         Some(message) => format!("{body}\n\n{message}"),
         None => body,
     }
+}
+
+fn preview_external_path(path: &Path) -> bool {
+    path.is_absolute() && matches!(canvas::file_kind(path), "pdf" | "image")
 }
 
 /// The quote body for image and PDF panes (`kind` set), after the `@path` header.

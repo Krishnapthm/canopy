@@ -1301,6 +1301,32 @@ Go to the next page in the last selected PDF pane.
 
 No arguments.
 
+## `preview.external`
+
+Open a local image or PDF in macOS Preview.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `canvas.pdf_zoom_out`
+
+Zoom out in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_zoom_reset`
+
+Reset zoom in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_zoom_in`
+
+Zoom in in the last selected PDF pane.
+
+No arguments.
+
 ## `canvas.pdf_clear`
 
 Clear all highlights in the last selected PDF pane.

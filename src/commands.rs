@@ -193,6 +193,10 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.pdf_highlight", &[], "Toggle text highlight mode in the last selected PDF pane."),
     cmd("canvas.pdf_prev", &[], "Go to the previous page in the last selected PDF pane."),
     cmd("canvas.pdf_next", &[], "Go to the next page in the last selected PDF pane."),
+    cmd("preview.external", &[req("path")], "Open a local image or PDF in macOS Preview."),
+    cmd("canvas.pdf_zoom_out", &[], "Zoom out in the last selected PDF pane."),
+    cmd("canvas.pdf_zoom_reset", &[], "Reset zoom in the last selected PDF pane."),
+    cmd("canvas.pdf_zoom_in", &[], "Zoom in in the last selected PDF pane."),
     cmd("canvas.pdf_clear", &[], "Clear all highlights in the last selected PDF pane."),
 ];
 

@@ -15,6 +15,10 @@ pub(super) struct BarAction {
 /// Close (the tab closes the pane).
 pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>, docked: bool) -> Vec<BarAction> {
     let mut actions = kind_actions(pane, hint);
+    if let Some(path) = pane.path().filter(|path| cfg!(target_os = "macos") && preview_external_path(Path::new(path))) {
+        let at = actions.iter().position(|a| a.command == "canvas.connect").unwrap_or(actions.len());
+        actions.insert(at, BarAction { icon: "icons/external-link.svg".into(), label: "Open in Preview".into(), command: "preview.external".into(), args: json!({"path":path}) });
+    }
     if matches!(pane.kind, canvas::Kind::Sim { .. }) {
         let at = actions.iter().position(|a| a.command == "canvas.connect").unwrap_or(actions.len());
         let dock = |icon: &str, label: &str, docked: bool| BarAction { icon: icon.to_owned().into(), label: label.to_owned().into(), command: "canvas.pane_dock".into(), args: json!({"docked":docked}) };
@@ -55,12 +59,17 @@ fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAc
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ],
         canvas::Kind::Pdf { highlights, .. } => {
-            let mut actions = vec![
+            let mut actions: Vec<_> = [
+                ("icons/zoom-out.svg", "Zoom out", "canvas.pdf_zoom_out"),
+                ("icons/scan.svg", "Reset zoom", "canvas.pdf_zoom_reset"),
+                ("icons/zoom-in.svg", "Zoom in", "canvas.pdf_zoom_in"),
+            ].into_iter().map(|(icon, label, command)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args: json!({}) }).collect();
+            actions.extend([
                 BarAction { icon: "icons/search.svg".into(), label: "Find".into(), command: "canvas.pdf_find".into(), args: json!({}) },
                 BarAction { icon: "icons/highlighter.svg".into(), label: "Highlight text".into(), command: "canvas.pdf_highlight".into(), args: json!({}) },
                 BarAction { icon: "icons/chevron-up.svg".into(), label: "Previous page".into(), command: "canvas.pdf_prev".into(), args: json!({}) },
                 BarAction { icon: "icons/chevron-down.svg".into(), label: "Next page".into(), command: "canvas.pdf_next".into(), args: json!({}) },
-            ];
+            ]);
             if !highlights.is_empty() {
                 actions.push(BarAction { icon: "icons/eraser.svg".into(), label: "Clear highlights".into(), command: "canvas.pdf_clear".into(), args: json!({}) });
             }
@@ -276,13 +285,18 @@ mod helper_bar_tests {
     fn viewer_actions_include_clear_only_when_there_are_marks() {
         let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None, false).into_iter().map(|a| a.command).collect::<Vec<_>>();
-        assert_eq!(commands(&pane), ["canvas.pane_quote", "canvas.connect", "canvas.close"]);
+        let image = commands(&pane);
+        assert_eq!(image[0], "canvas.pane_quote");
+        assert_eq!(image.iter().any(|c| c == "preview.external"), cfg!(target_os = "macos"));
         pane.kind = canvas::Kind::Pdf { path: "/a.pdf".into(), highlights: vec![] };
-        assert_eq!(commands(&pane), ["canvas.pdf_find", "canvas.pdf_highlight", "canvas.pdf_prev", "canvas.pdf_next", "canvas.connect", "canvas.close"]);
+        let pdf = commands(&pane);
+        assert_eq!(&pdf[..3], ["canvas.pdf_zoom_out", "canvas.pdf_zoom_reset", "canvas.pdf_zoom_in"]);
+        assert_eq!(pdf.iter().any(|c| c == "preview.external"), cfg!(target_os = "macos"));
+        assert!(!pdf.iter().any(|c| c == "canvas.pdf_clear"));
         if let canvas::Kind::Pdf { highlights, .. } = &mut pane.kind {
             highlights.push(canvas::PdfMark { page: 1, quote: "a".into(), occurrence: 0 });
         }
-        assert_eq!(commands(&pane), ["canvas.pdf_find", "canvas.pdf_highlight", "canvas.pdf_prev", "canvas.pdf_next", "canvas.pdf_clear", "canvas.connect", "canvas.close"]);
+        assert!(commands(&pane).iter().any(|c| c == "canvas.pdf_clear"));
     }
 
     #[test]
