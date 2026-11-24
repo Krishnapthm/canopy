@@ -1289,7 +1289,7 @@ impl AppWindow {
 fn annotation_text_button(label: &'static str, primary: bool) -> Stateful<Div> {
     div().id(label).role(gpui::Role::Button).aria_label(label)
         .flex().items_center().flex_none().h(px(24.)).px(px(6.)).rounded(px(ui::RADIUS_SM))
-        .text_size(px(12.)).cursor_pointer()
+        .text_size(px(12.)).cursor_pointer().child(label)
         .when(primary, |button| button.bg(c("accent")).text_color(c("accent-foreground")).hover(|d| d.opacity(0.85)))
         .when(!primary, |button| button.text_color(c("foreground")).hover(|d| d.bg(c("hover"))))
 }
