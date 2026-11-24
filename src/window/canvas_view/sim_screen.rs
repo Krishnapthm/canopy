@@ -552,6 +552,53 @@ fn local(format: &str) -> String {
     }
 }
 
+impl SimScreen {
+    /// Draws the same device frame for live content and a captured annotation still.
+    fn device_frame(&self, mut root: Div, fit: sim_live::Fit, still: Option<Arc<RenderImage>>, cx: Option<&Context<Self>>) -> Div {
+        let at = |r: [f32; 4]| div().absolute().left(px(r[0])).top(px(r[1])).w(px(r[2])).h(px(r[3]));
+        let chrome = self.info.as_ref().and_then(|i| i.chrome.as_ref());
+        // Hardware buttons sit behind the body; a press pushes one in and shows its pressed art.
+        if let Some(chrome) = chrome {
+            for button in &chrome.buttons {
+                let [bx, by, bw, bh] = button.rect;
+                let rect = [fit.body[0] + bx * fit.scale, fit.body[1] + by * fit.scale, bw * fit.scale, bh * fit.scale];
+                if let Some(cx) = cx {
+                    let push = button.press * fit.scale * if bx < 0. { 1. } else { -1. };
+                    let (page, usage, name) = (button.page, button.usage, button.name.clone());
+                    let group = SharedString::from(format!("sim-{}-{}", self.pane, button.name));
+                    root = root.child(at(rect).id(group.clone()).group(group.clone()).cursor_pointer()
+                        .tooltip(strip_tooltip(button.label.clone(), None))
+                        .child(img(button.image.clone()).size_full().group_active(group.clone(), |s| s.left(px(push))))
+                        .child(img(button.down.clone()).absolute().top_0().left(px(push)).size_full().opacity(0.).group_active(group, |s| s.opacity(1.)))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.send(Input::Button { page, usage, down: true });
+                            this.note(By::You, format!("pressed {name}"));
+                        }))
+                        .on_mouse_up(MouseButton::Left, cx.listener(move |this, _: &MouseUpEvent, _, _| this.send(Input::Button { page, usage, down: false })))
+                        .on_mouse_up_out(MouseButton::Left, cx.listener(move |this, _: &MouseUpEvent, _, _| this.send(Input::Button { page, usage, down: false }))));
+                } else {
+                    root = root.child(at(rect).child(img(button.image.clone()).size_full()));
+                }
+            }
+        }
+        // The live framebuffer, or the last screenshot while it is unavailable.
+        let screen = at(fit.screen).bg(gpui::black());
+        root = root.child(match (still, &self.surface, &self.shot) {
+            (Some(still), _, _) => screen.child(img(still).size_full()),
+            (_, Some(surface), _) if matches!(self.live, Live::On { .. }) => screen.child(gpui::surface(surface.clone()).size_full()),
+            (_, _, Some(shot)) => screen.child(img(shot.clone()).size_full()),
+            _ => screen,
+        });
+        if let Some(chrome) = chrome { root = root.child(img(chrome.body.clone()).absolute().left(px(fit.body[0])).top(px(fit.body[1])).w(px(fit.body[2])).h(px(fit.body[3]))); }
+        root
+    }
+
+    pub(super) fn frozen_frame(&self, fit: sim_live::Fit, still: Arc<RenderImage>) -> Div {
+        self.device_frame(div().absolute().size_full(), fit, Some(still), None)
+    }
+}
+
 impl Render for SimScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let measured = self.bounds.clone();
@@ -574,40 +621,11 @@ impl Render for SimScreen {
             // Before the size is known: the screenshot alone, contain-fitted.
             return root.when_some(self.shot.clone(), |d, shot| d.child(img(shot).size_full().p(px(MARGIN)).object_fit(ObjectFit::Contain)));
         };
-        let at = |r: [f32; 4]| div().absolute().left(px(r[0])).top(px(r[1])).w(px(r[2])).h(px(r[3]));
-        let chrome = self.info.as_ref().and_then(|i| i.chrome.as_ref());
-        // Hardware buttons sit behind the body; a press pushes one in and shows its pressed art.
-        if let Some(chrome) = chrome {
-            for button in &chrome.buttons {
-                let [bx, by, bw, bh] = button.rect;
-                let rect = [fit.body[0] + bx * fit.scale, fit.body[1] + by * fit.scale, bw * fit.scale, bh * fit.scale];
-                let push = button.press * fit.scale * if bx < 0. { 1. } else { -1. };
-                let (page, usage, name) = (button.page, button.usage, button.name.clone());
-                let group = SharedString::from(format!("sim-{}-{}", self.pane, button.name));
-                root = root.child(at(rect).id(group.clone()).group(group.clone()).cursor_pointer()
-                    .tooltip(strip_tooltip(button.label.clone(), None))
-                    .child(img(button.image.clone()).size_full().group_active(group.clone(), |s| s.left(px(push))))
-                    .child(img(button.down.clone()).absolute().top_0().left(px(push)).size_full().opacity(0.).group_active(group, |s| s.opacity(1.)))
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                        cx.stop_propagation();
-                        this.send(Input::Button { page, usage, down: true });
-                        this.note(By::You, format!("pressed {name}"));
-                    }))
-                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, _: &MouseUpEvent, _, _| this.send(Input::Button { page, usage, down: false })))
-                    .on_mouse_up_out(MouseButton::Left, cx.listener(move |this, _: &MouseUpEvent, _, _| this.send(Input::Button { page, usage, down: false }))));
-            }
-        }
-        // The live framebuffer, or the last screenshot while it is unavailable.
-        let screen = at(fit.screen).bg(gpui::black());
-        root = root.child(match (&self.surface, &self.shot) {
-            (Some(surface), _) if matches!(self.live, Live::On { .. }) => screen.child(gpui::surface(surface.clone()).size_full()),
-            (_, Some(shot)) => screen.child(img(shot.clone()).size_full()),
-            _ => screen,
-        });
-        if let Some(chrome) = chrome { root = root.child(img(chrome.body.clone()).absolute().left(px(fit.body[0])).top(px(fit.body[1])).w(px(fit.body[2])).h(px(fit.body[3]))); }
+        root = root.child(self.device_frame(div().absolute().size_full(), fit, None, Some(cx)));
         // Touch lands on the screen only; a drag keeps going outside it.
         let pane = self.pane.clone();
-        root = root.child(at(fit.screen).id(SharedString::from(format!("sim-{pane}-touch")))
+        let [x, y, w, h] = fit.screen;
+        root = root.child(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).id(SharedString::from(format!("sim-{pane}-touch")))
             .cursor(CursorStyle::Arrow)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::touch_down))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| this.scroll(e, cx))))

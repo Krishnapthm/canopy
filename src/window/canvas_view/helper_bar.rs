@@ -102,11 +102,19 @@ fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAc
             ("icons/picture-in-picture-2.svg", "Pop out", "canvas.sim_pop", json!({})),
             ("icons/smartphone.svg", "Choose simulator", "canvas.sim_device", json!({})),
             ("icons/external-link.svg", "Open in Device Hub", "canvas.sim_hub", json!({})),
-            ("icons/square.svg", "Shut down", "canvas.sim_shutdown", json!({"pane":pane.id})),
             ("icons/link.svg", "Connect", "canvas.connect", json!({})),
             ("icons/x.svg", "Close", "canvas.close", json!({"pane":pane.id})),
         ].into_iter().map(|(icon, label, command, args)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args }).collect(),
         canvas::Kind::Sub { .. } => vec![],
+    }
+}
+
+/// Shuts down the device belonging to this bar's pane.
+#[cfg(target_os = "macos")]
+pub(super) fn sim_shutdown_action(pane: &str) -> BarAction {
+    BarAction {
+        icon: "icons/square.svg".into(), label: "Shut down".into(),
+        command: "canvas.sim_shutdown".into(), args: json!({"pane":pane}),
     }
 }
 
@@ -268,7 +276,9 @@ mod helper_bar_tests {
         assert!(docked.contains(&("Move to canvas".to_owned(), "canvas.pane_dock".to_owned())));
         assert!(docked.iter().all(|(_, c)| c != "canvas.pane_pin" && c != "canvas.close"));
         pane.kind = canvas::Kind::Sim { udid: "U1".into() };
-        assert_eq!(commands(&pane), ["canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_pop", "canvas.sim_device", "canvas.sim_hub", "canvas.sim_shutdown", "canvas.pane_pin", "canvas.pane_dock", "canvas.connect", "canvas.close"]);
+        assert_eq!(commands(&pane), ["canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_pop", "canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.pane_dock", "canvas.connect", "canvas.close"]);
+        #[cfg(target_os = "macos")]
+        assert_eq!(super::sim_shutdown_action(&pane.id).args["pane"], pane.id);
         assert_eq!(sim_device_actions().into_iter().map(|a| a.command).collect::<Vec<_>>(),
             ["canvas.sim_home", "canvas.sim_refresh", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate"]);
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };

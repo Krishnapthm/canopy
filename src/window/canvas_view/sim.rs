@@ -11,10 +11,19 @@ use super::sim_screen::{AgentStep, By, Live, SimEvent, SimScreen};
 
 const DEFAULT_SIZE: [f32; 2] = [340., 700.];
 
+/// Space for the shared pill and its bottom margin, even when the pill is hidden.
+#[cfg(target_os = "macos")]
+pub(super) const DEVICE_BAR_ROW: f32 = 42.;
+
+#[cfg(target_os = "macos")]
+pub(super) fn device_room([w, h]: [f32; 2]) -> [f32; 2] {
+    [w, (h - DEVICE_BAR_ROW).max(1.)]
+}
+
 #[cfg(target_os = "macos")]
 fn sim_pane_size(outer: [f32; 2], scale: f32) -> [f32; 2] {
     let padding = 2. * super::sim_screen::MARGIN + 2.;
-    [outer[0] * scale + padding, outer[1] * scale + padding + canvas::HEADER]
+    [outer[0] * scale + padding, outer[1] * scale + padding + canvas::HEADER + DEVICE_BAR_ROW]
 }
 
 #[cfg(target_os = "macos")]
@@ -446,7 +455,7 @@ impl AppWindow {
         let Some(s) = self.canvas_state.sims.get(id).and_then(|v| v.live.as_ref()).map(|s| s.read(cx)) else { return };
         let Some(points) = s.points() else { return };
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
-        let room = annotate::card_body(pane, self.canvas_state.doc.camera.zoom);
+        let room = device_room(annotate::card_body(pane, self.canvas_state.doc.camera.zoom));
         let Some(fit) = s.fit(room) else { return };
         self.set_sim_size(id, sim_pane_size(s.outer_points(points), fit.scale));
         self.solve_layout(Some(id), None, cx);
@@ -541,7 +550,7 @@ impl AppWindow {
         actions
     }
 
-    /// The device bar over a live simulator on the canvas.
+    /// The shared controls below the phone in the canvas or Files panel.
     #[cfg(target_os = "macos")]
     pub(super) fn sim_bottom_bar(&self, pane: &canvas::Pane, zoom: f32, cx: &mut Context<Self>) -> Option<Div> {
         let state = &self.canvas_state;
@@ -558,9 +567,12 @@ impl AppWindow {
         if view.live.as_ref().is_some_and(|s| s.read(cx).device.udid != udid) {
             return None;
         }
-        let actions = sim_device_actions();
+        let mut actions = sim_device_actions();
+        if self.sim_device(pane).is_some_and(|device| device.booted) {
+            actions.push(super::helper_bar::sim_shutdown_action(id));
+        }
         // A pinned pane keeps its screen size, so its bar does too.
-        let s = bottom_bar_scale(if pane.pinned.is_some() { 1. } else { zoom }, pane.rect[2] * zoom - 2., actions.len())?;
+        let s = bottom_bar_scale(if pane.pinned.is_some() { 1. } else { zoom }, annotate::card_body(pane, zoom)[0], actions.len())?;
         let actions = self.sim_relabel(id, actions, cx);
         Some(self.bar(id, actions, s, false, cx).occlude())
     }
@@ -598,13 +610,26 @@ impl AppWindow {
     /// the bottom bar of device actions.
     pub(super) fn sim_card_body(&self, card: &canvas::Pane, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
         let body = self.sim_body(card, cx);
-        let body = self.annotate_body(card, body, annotate::card_body(card, camera.zoom), cx);
+        #[cfg(not(target_os = "macos"))]
+        let _ = camera;
         #[cfg(target_os = "macos")]
-        let body = div().relative().size_full().child(body)
-            .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(
-                div().absolute().bottom(px(12.)).left_0().right_0().flex().justify_center().child(bar)))
-            .into_any_element();
+        if self.has_device_row(card, cx) {
+            let body = div().absolute().top_0().left_0().right_0().bottom(px(DEVICE_BAR_ROW)).child(body);
+            let body = self.annotate_body(card, body.into_any_element(), annotate::card_body(card, camera.zoom), cx);
+            return div().relative().size_full().child(body)
+                .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(
+                    div().absolute().bottom(px(12.)).left_0().right_0().flex().justify_center().child(bar)))
+                .into_any_element();
+        }
         body
+    }
+
+    #[cfg(target_os = "macos")]
+    fn has_device_row(&self, pane: &canvas::Pane, cx: &App) -> bool {
+        self.canvas_state.annotations.contains_key(&pane.id) ||
+            self.canvas_state.sims.get(&pane.id).is_some_and(|view|
+                view.popped.is_none() && matches!(view.screen, Screen::Shot(_) | Screen::Loading) &&
+                    view.live.as_ref().is_some_and(|screen| pane.sim() == Some(screen.read(cx).device.udid.as_str())))
     }
 
     /// The body of a sim pane: its device, or what stands in for it.
@@ -768,7 +793,7 @@ impl Render for SimWindow {
 #[cfg(test)]
 #[cfg(target_os = "macos")]
 mod tests {
-    use super::{AgentStep, agent_steps, bottom_bar_scale, sim_pane_size};
+    use super::{AgentStep, agent_steps, bottom_bar_scale, device_room, sim_pane_size};
     use crate::sim_live::{Input, fit};
     use serde_json::json;
 
@@ -781,7 +806,7 @@ mod tests {
         let points = [402., 874.];
         let scale = 0.75;
         let [w, h] = sim_pane_size(points, scale);
-        let room = [w - 2., h - crate::canvas::HEADER - 2.];
+        let room = device_room([w - 2., h - crate::canvas::HEADER - 2.]);
         assert_eq!(fit(room, points, None, super::super::sim_screen::MARGIN).scale, scale);
     }
 
