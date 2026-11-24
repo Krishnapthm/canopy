@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200">
+  <defs>
+    <pattern id="grid" width="8" height="8" patternUnits="userSpaceOnUse">
+      <circle cx="4" cy="4" r="0.8" fill="#11111117"/>
+    </pattern>
+  </defs>
+  <rect width="320" height="200" fill="#FAFAFA"/>
+  <rect y="19" width="320" height="165" fill="url(#grid)"/>
+
+  <!-- Top and status strips -->
+  <path d="M0 0h320v19H0zM0 184h320v16H0z" fill="#EFEFEF"/>
+  <path d="M0 19.5h320M0 184.5h320" stroke="#11111117"/>
+  <rect x="13" y="5" width="40" height="9" rx="4.5" fill="#11111112"/>
+  <path d="M63 9.5h20m10 0h19m176 0h18M22 192.5h30m223 0h10m6 0h15" stroke="#111111A6" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="14" cy="192.5" r="2.5" fill="#0B6B3F"/>
+
+  <!-- Wires -->
+  <g fill="none" stroke-width="2.5">
+    <path d="M126 79c15 0 13-10 27-10" stroke="#2B5F9E"/>
+    <path d="M126 110c37 0 31 36 72 36h27c14 0 17-13 28-13" stroke="#0B6B3F"/>
+  </g>
+
+  <!-- Agent and terminal panes -->
+  <g fill="#EFEFEF" stroke="#11111133" stroke-width="1.5">
+    <rect x="29" y="53" width="97" height="88" rx="6"/>
+    <rect x="153" y="43" width="76" height="64" rx="6"/>
+  </g>
+  <path d="M29 72.5h97m27-12h76" stroke="#11111117"/>
+  <path d="M42 57l1.7 4.3L48 63l-4.3 1.7L42 69l-1.7-4.3L36 63l4.3-1.7z" fill="#2B5F9E"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M55 63h27m85-11h24" stroke="#111111" stroke-width="2.5"/>
+    <path d="M40 85h62m-62 9h49m-49 9h56m-56 9h35M174 72h30m-30 11h20" stroke="#666666" stroke-width="2.5"/>
+    <path d="m163 69 3 3-3 3m0 5 3 3-3 3m0 5 3 3-3 3" stroke="#0B6B3F" stroke-width="1.5"/>
+  </g>
+  <rect x="174" y="92" width="6" height="4" rx="1" fill="#0B6B3F"/>
+
+  <!-- Simulator pane -->
+  <rect x="253" y="65" width="51" height="106" rx="9" fill="#EFEFEF" stroke="#11111133" stroke-width="1.5"/>
+  <path d="M254 82.5h49" stroke="#11111117"/>
+  <path d="M270 74h17" stroke="#111111" stroke-width="2.5" stroke-linecap="round"/>
+  <rect x="260" y="88" width="37" height="75" rx="6" fill="#FFFFFF" stroke="#11111133"/>
+  <rect x="265" y="104" width="27" height="20" rx="3" fill="#0B6B3F"/>
+  <path d="M267 132h22m-22 6h16" stroke="#0B6B3F" stroke-width="2" stroke-linecap="round"/>
+  <path d="M274 92h9m-10 66h11" stroke="#111111A6" stroke-width="1.5" stroke-linecap="round"/>
+
+  <g fill="#2B5F9E">
+    <circle cx="126" cy="79" r="2.5"/>
+    <circle cx="153" cy="69" r="2.5"/>
+  </g>
+  <g fill="#0B6B3F">
+    <circle cx="126" cy="110" r="2.5"/>
+    <circle cx="253" cy="133" r="2.5"/>
+  </g>
+</svg>

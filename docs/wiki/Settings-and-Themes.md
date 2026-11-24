@@ -28,6 +28,14 @@ canopy config
 
 See [Canvas](Canvas) and [Terminals](Terminals) for their settings.
 
+## Keep Canopy running on macOS
+
+**Run in Background** keeps Canopy available while its windows are hidden, so you can leave your agents working and return to them later. It is on by default.
+
+Press `Cmd+Q` or choose **Quit Canopy** to hide the app. Click the Canopy icon in the macOS menu bar to bring it back. Right-click that icon and choose **Quit Canopy Completely** to exit, or **Show Canopy** to bring the window forward. **Quit** in the Dock also exits the app.
+
+Open **Settings** > **Look** > **App** to turn off **Run in Background**, or set `run_in_background` to `false` in `settings.json`. **Quit Canopy** then exits the app, and Canopy removes its menu bar icon.
+
 ## Alerts
 
 Use **Settings** > **Alerts** to control how Canopy gets your attention while agents work. **Desktop notifications** is on by default in the macOS app. In `settings.json`, set `desktop_notifications` to `false` to turn it off. **Play sounds** controls Canopy's alert sounds independently.

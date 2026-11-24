@@ -366,6 +366,10 @@ export default class Settings extends View {
       .children(
         names.map((name) => {
           const on = name === current;
+          const preview = this.previews[name];
+          const picture = name === "main" && preview === "layouts/main.svg" && !settings().dark
+            ? "layouts/main-light.svg"
+            : preview;
           return v_flex()
             .id(`st-l-${name}`)
             .w(124)
@@ -387,8 +391,8 @@ export default class Settings extends View {
                 .w_full()
                 .overflow_hidden()
                 .child(
-                  this.previews[name]
-                    ? image(this.previews[name]).w_full().h(62).rounded(6).border_1().border_color(t.border)
+                  picture
+                    ? image(picture).w_full().h(62).rounded(6).border_1().border_color(t.border)
                     : this.preview(t, name),
                 ),
             )
@@ -618,6 +622,13 @@ export default class Settings extends View {
       .child(this.heading(t, "Browser"))
       .child(this.row(t, "Keep cookies", "Until quit deletes cookies and site data when Canopy quits. Kept between runs on macOS 14 or later.", this.settingPicker(t, "browser_keep_cookies", [["until_quit", "Until quit"], ["forever", "Forever"]])))
       .child(this.row(t, "Open links", "Open web links clicked in terminals in a new browser tab or in the system browser.", this.settingPicker(t, "browser_open_links", [["built_in", "Built-in browser"], ["default", "Default browser"]])))
+      .when(window()?.platform === "macos", (el) => el
+        .child(this.heading(t, "App"))
+        .child(this.row(t, "Run in Background", "Keep Canopy running in the menu bar when you quit.",
+          this.toggle(t, "st-run-in-background", this.person.run_in_background !== false, (_e, cx) => this.change((p) => {
+            if (p.run_in_background === false) delete p.run_in_background;
+            else p.run_in_background = false;
+          }, cx)))))
       .child(this.heading(t, "Size and fonts"))
       .child(
         this.row(

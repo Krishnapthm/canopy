@@ -1231,7 +1231,7 @@ Open the shared primary command menu, optionally a named group.
 
 ## `app.quit`
 
-Quit (macOS).
+Quit Canopy, or hide it if Run in Background is on (macOS).
 
 No arguments.
 
