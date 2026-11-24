@@ -62,23 +62,20 @@ Your highlights stay on the PDF pane, so you can click one later to quote it aga
 
 ## An element on a web page
 
-Open your dev server in a browser pane on macOS. Click **Annotate**, then click an element and save a comment such as “This card overflows on mobile.” Click **Send** to submit the screenshot and the element details to the wired agent. Drag from text to comment on a range, or drag elsewhere to comment on an area. [Browser Pane](Browser-Pane#annotate) describes the controls.
+Open your dev server in a browser pane on macOS. Click **Annotate**, hover an element and click it. A numbered pin drops on it and a comment box opens. Type something like “This card overflows on mobile” and press `Enter` to queue the comment, or `Cmd+Enter` to send it right away. Drag from text to comment on a range, or drag elsewhere to comment on an area. [Browser Pane](Browser-Pane#annotate) describes the controls.
 
-To paste a single source reference for review, run `canvas.browser_pick` on the selected browser pane and click the element.
-
-For a React development build, Canopy finds the component and its source file, so the agent gets a direct pointer to the code:
+The agent receives the screenshot with the pins on it, and a message that points at the element rather than copying it. For a React development build it also names the component and its source file, so the agent can go straight to the code:
 
 ```text
-@http://localhost:3000/pricing <PricingCard> src/components/PricingCard.tsx:42-61 "<div class=\"card\">"
+Annotated http://localhost:3000/pricing (viewport 1280x800)
+Image 1 is the annotated screenshot; numbered blue dots mark the comments.
+
+1. This card overflows on mobile
+   Element: main > section:nth-of-type(2) > div.card <div class="card"> "Pro plan"
+   Component: PricingCard (/work/app/src/components/PricingCard.tsx:42)
 ```
 
-For other pages, it describes the element by a CSS selector and its visible text:
-
-```text
-@https://example.com/ main > section:nth-of-type(2) "Buy now"
-```
-
-**When to use it:** "this button is misaligned on mobile", "this card should show the annual price", or any UI fix where finding the right component is half the work. [Browser Pane](Browser-Pane#pick-an-element-to-quote) explains how Canopy finds the source file.
+**When to use it:** "this button is misaligned on mobile", "this card should show the annual price", or any UI fix where finding the right component is half the work. [Browser Pane](Browser-Pane#how-canopy-finds-the-source-file) explains how Canopy finds the source file.
 
 ## A spot on the simulator
 

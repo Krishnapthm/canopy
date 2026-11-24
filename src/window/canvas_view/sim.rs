@@ -530,6 +530,14 @@ impl AppWindow {
                 _ => {}
             }
         }
+        // Annotation replaces the bottom device bar, so put its picker beside Connect.
+        if let Some(name) = self.annotation_picker(id)
+            && let Some(at) = actions.iter().position(|a| a.command == "canvas.connect")
+        {
+            actions.insert(at, super::helper_bar::BarAction {
+                icon: "icons/bot.svg".into(), label: name.into(), command: "canvas.annotate_agent".into(), args: json!({}),
+            });
+        }
         actions
     }
 

@@ -44,7 +44,7 @@ canopy pane shot p2   # a PNG screenshot, saved to a temporary file
 
 `read` and `shot` wait for the page to load and work even when the pane is scrolled off screen. When the agent changes routes, it can point the same pane at another page with `canopy pane open p2 http://localhost:3000/pricing`.
 
-You, meanwhile, can click the page to use it, and quote any element back to the agent with **Pick an element to quote**. [Point Agents at Things](Point-Agents-at-Things#a-complete-loop-fix-a-ui-bug) walks through that loop.
+You, meanwhile, can click the page to use it, and point at any element and send it back to the agent with **Annotate**. [Point Agents at Things](Point-Agents-at-Things#a-complete-loop-fix-a-ui-bug) walks through that loop.
 
 ## Test the iOS app on a simulator
 

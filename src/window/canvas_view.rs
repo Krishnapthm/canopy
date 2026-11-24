@@ -2556,25 +2556,31 @@ impl AppWindow {
         }).detach();
     }
 
-    /// Opens the quote popover: agents wired to the quoted pane first, then other
-    /// running agents (the quoted file's space first).
-    fn quote_menu(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> String {
-        let path = std::path::Path::new(a["path"].as_str().unwrap_or_default());
-        let home = self.model.spaces.iter().filter(|s| path.starts_with(&s.folder)).max_by_key(|s| s.folder.len()).map(|s| s.id.as_str());
-        // Agents wired to the quoted pane come first.
-        let wired: Vec<String> = a["pane"].as_str().map(|pane| crate::wire::neighbors(&crate::wire::all(&self.canvas_state.doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned)), pane)).unwrap_or_default();
+    /// Running agents a quote or annotation of `pane` can go to, best first: wired to the pane,
+    /// then in `home`'s space, then by name. Each is (address, wired, row for the quote popover).
+    fn ranked_agents(&self, pane: Option<&str>, home: Option<&str>) -> Vec<(String, bool, Value)> {
+        let wired: Vec<String> = pane.map(|pane| crate::wire::neighbors(&crate::wire::all(&self.canvas_state.doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned)), pane)).unwrap_or_default();
         let mut rows: Vec<_> = self.live.iter().filter(|(_, rec)| canvas_agent(rec)).map(|(addr, rec)| {
             let name = self.pill_name(addr);
             let (icon, tint) = program_icon(rec);
             let elsewhere = self.model.pane_of(addr).and_then(|p| self.model.space_of(&p)).map(|s| s.id.as_str()) != home;
             let is_wired = wired.contains(addr);
-            ((!is_wired, elsewhere, name.clone(), addr.clone()), json!({"terminal":addr,"name":name,"icon":icon,"tint":tint,"wired":is_wired}))
+            ((!is_wired, elsewhere, name.clone(), addr.clone()), (addr.clone(), is_wired, json!({"terminal":addr,"name":name,"icon":icon,"tint":tint,"wired":is_wired})))
         }).collect();
         rows.sort_by(|a, b| a.0.cmp(&b.0));
+        rows.into_iter().map(|r| r.1).collect()
+    }
+
+    /// Opens the quote popover: agents wired to the quoted pane first, then other
+    /// running agents (the quoted file's space first).
+    fn quote_menu(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> String {
+        let path = std::path::Path::new(a["path"].as_str().unwrap_or_default());
+        let home = self.model.spaces.iter().filter(|s| path.starts_with(&s.folder)).max_by_key(|s| s.folder.len()).map(|s| s.id.as_str());
+        let rows = self.ranked_agents(a["pane"].as_str(), home);
         let mut quote = a.clone();
         quote.as_object_mut().unwrap().remove("point");
         let mut spec = json!({"mod":"quote","kind":"popup","width":280,
-            "props":{"quote":quote,"agents":rows.into_iter().map(|r| r.1).collect::<Vec<_>>()}});
+            "props":{"quote":quote,"agents":rows.into_iter().map(|r| r.2).collect::<Vec<_>>()}});
         if let Some(p) = a.get("point").filter(|p| p.get("x").is_some()) { spec["at"] = p.clone(); }
         let id = mods::new_overlay_id();
         self.open_overlay(id.clone(), spec, window, cx);
