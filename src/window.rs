@@ -136,6 +136,23 @@ fn launch_failure(record: &Value, output: &str) -> Option<String> {
     Some(if tail.is_empty() { format!("Exit code {code}") } else { format!("Exit code {code}\n{tail}") })
 }
 
+/// Use the current root status report for alert copy. Terminal notices and titles
+/// arrive separately and can still describe an earlier prompt.
+fn agent_alert_copy(alert: model::Alert, name: &str, report: &Value) -> (String, &'static str, Option<String>) {
+    let (suffix, level, detail) = match alert {
+        model::Alert::Blocked => match (report["state"].as_str(), report["kind"].as_str()) {
+            (Some("blocked"), Some("permission")) => ("needs your permission", "error", true),
+            (Some("blocked"), Some("question")) => ("has a question", "error", true),
+            _ => ("needs you", "error", false),
+        },
+        model::Alert::Done => ("finished", "info", report["state"] == "done" && report["kind"].is_null()),
+    };
+    let body = report["msg"].as_str().filter(|_| detail)
+        .map(|text| text.chars().filter(|c| !c.is_control()).take(200).collect::<String>().trim().to_owned())
+        .filter(|text| !text.is_empty());
+    (format!("{name} {suffix}"), level, body)
+}
+
 /// The shipped layouts (defaults/layouts): `main` is Canopy's window (spaces
 /// sidebar, tab bar).
 const LAYOUTS: &[(&str, &str)] = &[
@@ -2224,33 +2241,19 @@ impl AppWindow {
             let (p, c) = (self.model.space_of(&pane)?, self.model.tab_of(&pane)?);
             Some(format!("{} / {}", self.model.space_name(p, &self::home()), Model::tab_name(p, c)))
         });
-        let (title, level) = match alert {
-            model::Alert::Blocked => (format!("{name} needs you"), "error"),
-            model::Alert::Done => (format!("{name} finished"), "info"),
-        };
+        let report = rec.map_or(&Value::Null, |r| &r["report"]);
+        let (title, level, detail) = agent_alert_copy(alert, &name, report);
         let notification = json!({
-            "title": title, "body": place, "level": level,
+            "title": title, "body": detail.or(place), "level": level,
             "action": { "name": "agent.focus", "args": { "terminal": addr } },
         });
         #[cfg(target_os = "macos")]
         if settings::get().desktop_notifications
-            && crate::notify_mac::post(&title, || self.desktop_notice_body(addr, cx), addr, &notification, cx)
+            && crate::notify_mac::post(addr, &notification, cx)
         {
             return;
         }
         self.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": notification }), window, cx);
-    }
-
-    #[cfg(target_os = "macos")]
-    fn desktop_notice_body(&self, addr: &str, cx: &App) -> String {
-        let views = self.terminal_views(cx);
-        let views = views.iter().filter(|(address, _)| address == addr).map(|(_, view)| view.read(cx));
-        if let Some((body, _)) = views.clone().filter_map(TerminalView::recent_notice).max_by_key(|(_, at)| *at) {
-            return body;
-        }
-        let title = views.map(|view| view.title.as_str()).find(|title| !title.is_empty() && *title != addr)
-            .or_else(|| self.live.get(addr).and_then(|r| r["title"].as_str()));
-        crate::vt::notice_text(title.unwrap_or_default())
     }
 
     #[cfg(target_os = "macos")]
@@ -5668,6 +5671,28 @@ mod tests {
                 assert_eq!(run[2], expected);
             }
         }
+    }
+
+    #[test]
+    fn agent_alert_copy_follows_the_current_status_report() {
+        use super::{agent_alert_copy, model::{Alert, Model}};
+        use serde_json::json;
+
+        let name = "Claude Code";
+        let approval = json!({"state": "blocked", "kind": "permission", "msg": "approve Bash: pwd"});
+        let alert = Model::alert(Some("working"), approval["state"].as_str(), false).unwrap();
+        assert_eq!(agent_alert_copy(alert, name, &approval),
+            ("Claude Code needs your permission".into(), "error", Some("approve Bash: pwd".into())));
+
+        let completed = json!({"state": "done", "app": "claude-code", "title": "Claude needs your permission"});
+        let alert = Model::alert(approval["state"].as_str(), completed["state"].as_str(), false).unwrap();
+        assert_eq!(agent_alert_copy(alert, name, &completed), ("Claude Code finished".into(), "info", None));
+
+        let question = json!({"state": "blocked", "kind": "question", "msg": "Which folder?\x07"});
+        assert_eq!(agent_alert_copy(Alert::Blocked, name, &question),
+            ("Claude Code has a question".into(), "error", Some("Which folder?".into())));
+        let unknown = json!({"state": "blocked", "msg": "Claude needs your permission"});
+        assert_eq!(agent_alert_copy(Alert::Blocked, name, &unknown), ("Claude Code needs you".into(), "error", None));
     }
 
     #[test]

@@ -147,7 +147,6 @@ struct Shared {
     size: GhosttySizeReportSize,
     held_since: Option<Instant>,
     title_changed: bool,
-    last_notice: Option<(String, Instant)>,
     /// Replies the terminal writes back to the program (e.g. kitty graphics acks).
     replies: Vec<u8>,
     clipboard_write: bool,
@@ -644,26 +643,6 @@ unsafe extern "C" fn on_title(_t: GhosttyTerminal, userdata: *mut c_void) {
     shared.title_changed = true;
 }
 
-/// Bound terminal text before passing it to the system's notification UI.
-pub(crate) fn notice_text(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).take(200).collect::<String>().trim().to_owned()
-}
-
-unsafe extern "C" fn on_notice(_t: GhosttyTerminal, userdata: *mut c_void, notice: *const GhosttyTerminalDesktopNotification) {
-    if notice.is_null() || unsafe { (*notice).size } < std::mem::size_of::<GhosttyTerminalDesktopNotification>() {
-        return;
-    }
-    let body = unsafe { (*notice).body };
-    let shared = unsafe { &mut *(userdata as *mut Shared) };
-    shared.last_notice = if body.ptr.is_null() {
-        None
-    } else {
-        let bytes = unsafe { std::slice::from_raw_parts(body.ptr, body.len) };
-        std::str::from_utf8(bytes).ok().map(notice_text)
-            .filter(|text| !text.is_empty()).map(|text| (text, Instant::now()))
-    };
-}
-
 const SYNC_OUTPUT: GhosttyMode = 2026;
 /// On from the start, as in Ghostty: VS16 makes ✍️ two cells wide and in color.
 const GRAPHEME_CLUSTER: GhosttyMode = 2027;
@@ -698,15 +677,13 @@ impl Vt {
             ok(ghostty_mouse_event_new(std::ptr::null(), &mut mouse_event), "mouse_event_new");
 
             install_png_decoder();
-            let mut shared = Box::new(Shared { state, size: GhosttySizeReportSize { rows: rows.max(1), columns: cols.max(1), cell_width: 0, cell_height: 0 }, held_since: None, title_changed: false, last_notice: None, replies: Vec::new(), clipboard_write: true, clipboard: [None, None] });
+            let mut shared = Box::new(Shared { state, size: GhosttySizeReportSize { rows: rows.max(1), columns: cols.max(1), cell_width: 0, cell_height: 0 }, held_since: None, title_changed: false, replies: Vec::new(), clipboard_write: true, clipboard: [None, None] });
             let ud = &mut *shared as *mut Shared as *const c_void;
             ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_USERDATA, ud);
             let hold: GhosttyTerminalRenderHoldFn = Some(on_render_hold);
             ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, std::mem::transmute(hold));
             let title: GhosttyTerminalTitleChangedFn = Some(on_title);
             ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_TITLE_CHANGED, std::mem::transmute(title));
-            let notice: GhosttyTerminalDesktopNotificationFn = Some(on_notice);
-            ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION, std::mem::transmute(notice));
             let size: GhosttyTerminalSizeFn = Some(on_size);
             ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_SIZE, std::mem::transmute(size));
             let write: GhosttyTerminalWritePtyFn = Some(on_write_pty);
@@ -1311,13 +1288,6 @@ impl Vt {
         self.shared.size = GhosttySizeReportSize { rows, columns: cols, cell_width: cell_w.max(1), cell_height: cell_h.max(1) };
         unsafe { ghostty_terminal_resize(self.term, cols, rows, cell_w.max(1), cell_h.max(1)) };
         self.feed_search();
-    }
-
-    /// The last nonempty OSC 9 or 777 body, while it is still recent.
-    #[cfg(any(target_os = "macos", test))]
-    pub fn recent_notice(&self) -> Option<(&str, Instant)> {
-        let (text, at) = self.shared.last_notice.as_ref()?;
-        (at.elapsed() < Duration::from_secs(60)).then_some((text.as_str(), *at))
     }
 
     pub fn take_title(&mut self) -> Option<String> {
@@ -2787,22 +2757,6 @@ mod tests {
         vt.write(b"\x1b]52;p;\x1b\\");
         let expected = if cfg!(target_os = "linux") { Some(String::new()) } else { None };
         assert_eq!(vt.take_clipboard(), [None, expected]);
-    }
-
-    #[test]
-    fn osc_notifications_keep_only_recent_plain_text() {
-        let mut vt = Vt::new(80, 24);
-        assert_eq!(notice_text("hi\t\u{85}"), "hi");
-        let long = "界".repeat(210);
-        vt.write(format!("\x1b]9;hi{long}\x07").as_bytes());
-        let body = vt.recent_notice().unwrap().0;
-        assert_eq!(body, format!("hi{}", "界".repeat(198)));
-        vt.write(b"\x1b]777;notify;ignored title;ready\x1b\\");
-        assert_eq!(vt.recent_notice().unwrap().0, "ready");
-        vt.shared.last_notice.as_mut().unwrap().1 -= Duration::from_secs(60);
-        assert!(vt.recent_notice().is_none());
-        vt.write(b"\x1b]777;notify;ignored title; \x07");
-        assert!(vt.recent_notice().is_none());
     }
 
     #[test]

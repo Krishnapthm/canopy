@@ -28,7 +28,7 @@ Switch to your editor while an agent reviews a diff. If it finishes or needs you
 
 Manage desktop notifications and sounds in [Settings > Alerts](Settings-and-Themes#alerts). Canopy asks macOS for permission on the first background alert. Its own sounds play according to your Canopy settings.
 
-A desktop notification uses the agent's latest terminal notification message if Canopy received it in the past minute. Otherwise it uses the terminal title when available. Once you see a done agent's pane, the agent goes back to idle.
+An alert says whether the agent finished, asks a question, or needs permission when its current status reports that detail. A blocked agent that reports no reason shows **Needs you**. Canopy includes the current status message for a question, permission prompt, or completed turn when the agent sends one. Otherwise the alert shows where to find the pane. Once you see a done agent's pane, the agent goes back to idle.
 
 ## The agents list
 
