@@ -11,7 +11,7 @@ Simulator panes need macOS with Xcode and at least one simulator installed. For 
 1. Click **Simulator** at the top right of the window.
 2. Click a simulator in the list. Canopy boots it if it is shut down.
 
-The simulator opens pinned to the top right corner. It keeps its position and size while you pan and zoom the canvas. Drag its header to move it. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes. Click **Pin to screen** to pin it again.
+The simulator opens pinned to the top right corner, where it stays at the same size as you pan and zoom the canvas. Drag its header to move it or any edge or corner to resize it. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes. **Pin to screen** pins it again.
 
 The **Simulator** button shows only when Xcode's `xcrun simctl` is installed.
 
@@ -34,7 +34,7 @@ The pane header shows the iOS version and the state: **Live**, **Connecting**, *
 
 ## Resize the pane
 
-Drag the pane's resize handle. When you release it, the pane fits the device and its bezel. Use the zoom buttons on the helper bar for smaller steps, **Actual size** for the device's point size at the canvas zoom, or **Default size** to reset the pane to 340 × 700 on screen. **Actual size** is available after the live screen connects.
+Drag any edge or corner of the pane. When you release it, the pane fits the device and its bezel. Use the zoom buttons on the helper bar for smaller steps, **Actual size** for the device's point size at the canvas zoom, or **Default size** to reset the pane to 340 × 700 on screen. **Actual size** is available after the live screen connects.
 
 ## Shut down or close
 

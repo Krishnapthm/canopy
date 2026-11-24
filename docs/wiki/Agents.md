@@ -24,12 +24,11 @@ The reason to run agents in Canopy is that you can stop watching them. herdr-cor
 | Done | It finished, and you have not looked at the result yet. | **Done** in the agents list. |
 | Idle | Nothing new to see. | Nothing. |
 
-When an agent becomes blocked, or finishes while you are not looking at it, Canopy also:
+Switch to your editor while an agent reviews a diff. If it finishes or needs your input while Canopy is in the background, the installed macOS app can show a desktop notification. Click the notification to jump to the agent. In Canopy, the alert appears as a clickable toast when the agent is out of view.
 
-- shows a toast. Click it to jump to that agent.
-- plays a sound, if sounds are on in [Settings](Settings-and-Themes).
+Manage desktop notifications and sounds in [Settings > Alerts](Settings-and-Themes#alerts). Canopy asks macOS for permission on the first background alert. Its own sounds play according to your Canopy settings.
 
-"Looking at it" means its pane is on screen in the window you are using. Once you have seen a done agent, it goes back to idle.
+A desktop notification uses the agent's latest terminal notification message if Canopy received it in the past minute. Otherwise it uses the terminal title when available. Once you see a done agent's pane, the agent goes back to idle.
 
 ## The agents list
 

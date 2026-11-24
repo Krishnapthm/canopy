@@ -387,7 +387,7 @@ pub(crate) struct WaylandClientState {
     discrete_scroll_delta: Option<Point<f32>>,
     vertical_modifier: f32,
     horizontal_modifier: f32,
-    scroll_event_received: bool,
+    scroll_stopped: bool,
     enter_token: Option<()>,
     button_pressed: Option<MouseButton>,
     mouse_focused_window: Option<WaylandWindowStatePtr>,
@@ -1071,7 +1071,7 @@ impl WaylandConnection {
                 platform: false,
             },
             capslock: Capslock { on: false },
-            scroll_event_received: false,
+            scroll_stopped: false,
             axis_source: AxisSource::Wheel,
             mouse_location: None,
             continuous_scroll_delta: None,
@@ -2535,7 +2535,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                     wl_pointer::Axis::HorizontalScroll => state.horizontal_modifier,
                     _ => 1.0,
                 };
-                state.scroll_event_received = true;
                 let scroll_delta = state
                     .continuous_scroll_delta
                     .get_or_insert(point(px(0.0), px(0.0)));
@@ -2554,7 +2553,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                 axis: WEnum::Value(axis),
                 discrete,
             } => {
-                state.scroll_event_received = true;
                 let axis = if state.modifiers.shift {
                     wl_pointer::Axis::HorizontalScroll
                 } else {
@@ -2581,7 +2579,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                 axis: WEnum::Value(axis),
                 value120,
             } => {
-                state.scroll_event_received = true;
                 let axis = if state.modifiers.shift {
                     wl_pointer::Axis::HorizontalScroll
                 } else {
@@ -2605,33 +2602,37 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                     _ => unreachable!(),
                 }
             }
+            wl_pointer::Event::AxisStop { .. } => {
+                state.scroll_stopped = true;
+            }
             wl_pointer::Event::Frame => {
-                if state.scroll_event_received {
-                    state.scroll_event_received = false;
-                    let continuous = state.continuous_scroll_delta.take();
-                    let discrete = state.discrete_scroll_delta.take();
-                    if let Some(continuous) = continuous {
-                        if let Some(window) = state.mouse_focused_window.clone() {
-                            let input = PlatformInput::ScrollWheel(ScrollWheelEvent {
-                                position: state.mouse_location.unwrap(),
-                                delta: ScrollDelta::Pixels(continuous),
-                                modifiers: state.modifiers,
-                                touch_phase: TouchPhase::Moved,
-                            });
-                            drop(state);
-                            window.handle_input(input);
-                        }
-                    } else if let Some(discrete) = discrete
-                        && let Some(window) = state.mouse_focused_window.clone()
-                    {
-                        let input = PlatformInput::ScrollWheel(ScrollWheelEvent {
-                            position: state.mouse_location.unwrap(),
-                            delta: ScrollDelta::Lines(discrete),
-                            modifiers: state.modifiers,
+                let continuous = state.continuous_scroll_delta.take();
+                let discrete = state.discrete_scroll_delta.take();
+                let delta = continuous
+                    .map(ScrollDelta::Pixels)
+                    .or_else(|| discrete.map(ScrollDelta::Lines));
+                let stopped = std::mem::take(&mut state.scroll_stopped);
+                if (delta.is_some() || stopped)
+                    && let (Some(window), Some(position)) =
+                        (state.mouse_focused_window.clone(), state.mouse_location)
+                {
+                    let modifiers = state.modifiers;
+                    drop(state);
+                    if let Some(delta) = delta {
+                        window.handle_input(PlatformInput::ScrollWheel(ScrollWheelEvent {
+                            position,
+                            delta,
+                            modifiers,
                             touch_phase: TouchPhase::Moved,
-                        });
-                        drop(state);
-                        window.handle_input(input);
+                        }));
+                    }
+                    if stopped {
+                        window.handle_input(PlatformInput::ScrollWheel(ScrollWheelEvent {
+                            position,
+                            delta: ScrollDelta::Pixels(point(px(0.0), px(0.0))),
+                            modifiers,
+                            touch_phase: TouchPhase::Ended,
+                        }));
                     }
                 }
             }
