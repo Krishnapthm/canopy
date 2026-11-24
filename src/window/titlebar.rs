@@ -311,13 +311,18 @@ pub(crate) mod linux {
     }
 
     #[cfg(test)]
-    #[gpui::test]
-    fn server_decorations_leave_caption_buttons_to_the_desktop(cx: &mut TestAppContext) {
-        cx.add_window(|window, cx| {
-            assert!(matches!(window.window_decorations(), Decorations::Server));
-            assert!(caption_buttons(window, cx, |_, _| {}).iter().all(Vec::is_empty));
-            Empty
-        });
+    mod tests {
+        use super::caption_buttons;
+        use gpui::{Decorations, Empty, TestAppContext};
+
+        #[gpui::test]
+        fn server_decorations_leave_caption_buttons_to_the_desktop(cx: &mut TestAppContext) {
+            cx.add_window(|window, cx| {
+                assert!(matches!(window.window_decorations(), Decorations::Server));
+                assert!(caption_buttons(window, cx, |_, _| {}).iter().all(Vec::is_empty));
+                Empty
+            });
+        }
     }
 
     /// Adds the app header and the frame controls that the compositor leaves to us.
