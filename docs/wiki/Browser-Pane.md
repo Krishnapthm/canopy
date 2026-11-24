@@ -142,7 +142,7 @@ Hold `Space` to scroll or interact with the live page. Release it to take a fres
 
 ### Choose the agent
 
-With exactly one agent wired to the pane, **Send** goes to it and there is nothing to choose. Otherwise a button with a bot icon appears in the header next to **Annotate**, labelled **Choose agent** until you pick one. It lists agents wired to the pane first, then the other running agents. **Send** with no agent chosen asks you to choose one first.
+With exactly one agent wired to the pane, **Send** goes to it and there is nothing to choose. Otherwise a button with a bot icon appears in the header next to **Annotate**, labelled **Choose agent** until you pick one. It lists agents wired to the pane first, then the other running agents. **Send** with no agent chosen asks you to choose one first. If the recipient changes while Canopy saves the screenshot, check the agent and press **Send** again.
 
 The agent receives the annotated screenshot, then the URL, viewport and numbered comments. Element comments include the selector, visible text, a short HTML excerpt and styles. Text labels are listed with their coordinates in the message.
 

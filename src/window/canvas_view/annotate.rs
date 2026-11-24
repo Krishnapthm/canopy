@@ -1402,9 +1402,8 @@ impl AppWindow {
     /// Where Send goes: the sole wired agent, else the one picked beside Annotate.
     fn annotation_target(&self, id: &str) -> Result<String, String> {
         let agents = self.annotation_agents(id);
-        if let [(addr, ..)] = agents.iter().filter(|x| x.1).collect::<Vec<_>>().as_slice() { return Ok(addr.clone()); }
-        let chosen = self.canvas_state.annotations.get(id).and_then(|a| a.target.as_ref()).filter(|t| agents.iter().any(|x| &x.0 == *t));
-        chosen.cloned().ok_or_else(|| if agents.is_empty() { "No agent is running to send this to".into() } else { "Choose an agent next to Annotate first".into() })
+        let chosen = self.canvas_state.annotations.get(id).and_then(|a| a.target.as_deref());
+        annotation_recipient(&agents, chosen).map(str::to_owned).map_err(str::to_owned)
     }
 
     /// The menu the picker opens: wired agents first, then the others.
@@ -1420,6 +1419,14 @@ impl AppWindow {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn annotation_recipient<'a>(agents: &'a [(String, bool, Value)], chosen: Option<&str>) -> Result<&'a str, &'static str> {
+    let mut wired = agents.iter().filter(|agent| agent.1);
+    if let (Some((addr, ..)), None) = (wired.next(), wired.next()) { return Ok(addr); }
+    agents.iter().find(|agent| chosen == Some(agent.0.as_str())).map(|agent| agent.0.as_str())
+        .ok_or(if agents.is_empty() { "No agent is running to send this to" } else { "Choose an agent next to Annotate first" })
+}
+
 #[cfg(not(target_os = "macos"))]
 impl AppWindow {
     pub(super) fn annotation_picker(&self, _: &str) -> Option<String> { None }
@@ -1431,12 +1438,11 @@ impl AppWindow {
         let a = self.canvas_state.annotations.get(id).ok_or("There is no annotation to send")?;
         if a.live || a.refreshing || a.draft.is_some() { return Err("Finish the current annotation edit before sending".into()); }
         // Fail before the screenshot is saved when there is nowhere to send it.
-        self.annotation_target(id)?;
+        let addr = self.annotation_target(id)?;
         let a = self.canvas_state.annotations.get_mut(id).unwrap();
         if let Some(outgoing) = &a.outgoing {
             if outgoing.sending { return Err("The annotation is being sent".into()); }
-            self.offer_annotation(id, window, cx);
-            return Ok(());
+            return self.offer_annotation(id, addr, window, cx);
         }
         let items = a.items();
         if items.is_empty() { return Err("Add a mark or comment before sending".into()); }
@@ -1480,7 +1486,9 @@ impl AppWindow {
                 match saved {
                     Ok(()) => {
                         a.outgoing = Some(Outgoing { text, images, sending: false });
-                        this.offer_annotation(&id, window, cx);
+                        if let Err(error) = this.offer_annotation(&id, addr, window, cx) {
+                            this.annotation_error(error, window, cx);
+                        }
                     }
                     Err(error) => this.annotation_error(format!("Cannot save the annotation: {error:#}"), window, cx),
                 }
@@ -1491,14 +1499,15 @@ impl AppWindow {
         Ok(())
     }
 
-    fn offer_annotation(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(outgoing) = self.canvas_state.annotations.get(id).and_then(|a| a.outgoing.as_ref()) else { return };
-        let addr = match self.annotation_target(id) {
-            Ok(addr) => addr,
-            Err(error) => return self.annotation_error(error, window, cx),
-        };
+    fn offer_annotation(&mut self, id: &str, addr: String, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        // Saving takes time. A wire or agent change must never redirect a Send already pressed.
+        if self.annotation_target(id).as_deref() != Ok(addr.as_str()) {
+            return Err("The annotation recipient changed. Confirm the agent and press Send again".into());
+        }
+        let outgoing = self.canvas_state.annotations.get(id).and_then(|a| a.outgoing.as_ref())
+            .ok_or("The annotation changed. Press Send again")?;
         let quote = json!({"kind":"annotation","pane":id,"text":outgoing.text,"path":outgoing.images[0],"images":outgoing.images});
-        if let Err(error) = self.route_annotation(addr, &quote, window, cx) { self.annotation_error(error, window, cx); }
+        self.route_annotation(addr, &quote, window, cx)
     }
 
     pub(super) fn route_annotation(&mut self, addr: String, quote: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
@@ -1552,7 +1561,7 @@ impl AppWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Anchor, Annotate, COLORS, Comment, Host, Item, Mark, Probe, STROKES, Tool, burn, fit, message, tidy_element};
+    use super::{Action, Anchor, Annotate, COLORS, Comment, Host, Item, Mark, Probe, STROKES, Tool, annotation_recipient, burn, fit, message, tidy_element};
     use gpui::{RenderImage, TestAppContext};
     use serde_json::json;
     use std::{collections::HashMap, rc::Rc, sync::Arc};
@@ -1612,6 +1621,22 @@ mod tests {
             "Image 1 is the annotated screenshot; numbered blue dots mark the comments.\n\n",
             "1. Increase the tap target\n   Point: x 120, y 300",
         ));
+    }
+
+    #[test]
+    fn annotation_recipient_follows_the_current_wires_and_running_agents() {
+        let mut agents = [("t1".into(), true, json!(null)), ("t2".into(), false, json!(null))];
+        let sent_to = annotation_recipient(&agents, Some("t2")).unwrap().to_owned();
+        assert_eq!(sent_to, "t1");
+        agents[0].1 = false;
+        agents[1].1 = true;
+        assert_ne!(annotation_recipient(&agents, None), Ok(sent_to.as_str()));
+        agents[0].1 = true;
+        assert!(annotation_recipient(&agents, None).is_err());
+        assert_eq!(annotation_recipient(&agents, Some("t2")), Ok("t2"));
+        agents[1].1 = false;
+        assert!(annotation_recipient(&agents[1..], Some("t1")).is_err());
+        assert_eq!(annotation_recipient(&agents[1..], Some("t2")), Ok("t2"));
     }
 
     #[test]
