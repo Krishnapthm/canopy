@@ -576,7 +576,6 @@ impl AppWindow {
                 .tooltip(strip_tooltip("Send annotation to".into(), Some("canvas.annotate_agent")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener({ let pane = id.to_owned(); move |this, _, window, cx| this.run_key("canvas.annotate_agent", json!({"pane": pane}), window, cx) }))
-                .child(svg().path("icons/bot.svg").size(px(14.)))
                 .child(name)))
             .child(div().id("browser-annotate").role(gpui::Role::Button).aria_label("Annotate")
                 .flex().flex_none().items_center().gap(px(4.)).h(px(24.)).px(px(8.)).rounded(px(ui::RADIUS_SM)).border_1().border_color(c("border"))
@@ -584,7 +583,6 @@ impl AppWindow {
                 .tooltip(strip_tooltip("Annotate".into(), Some("canvas.browser_annotate")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_annotate", json!({"pane": annotate}), window, cx)))
-                .child(svg().path("icons/message-square-plus.svg").size(px(14.)))
                 .child("Annotate"));
         div().flex().flex_col().w_full().h(px(canvas::BROWSER_HEADER)).min_w_0().text_color(c("foreground"))
             .when(host == Host::Window, |d| d.bg(c("surface")).border_b_1().border_color(c("border")))
@@ -689,9 +687,19 @@ impl AppWindow {
         self.show_browser_menu(id, host, items, window, cx);
     }
 
+    /// Which window should render a menu opened by a pane command.
+    #[cfg(target_os = "macos")]
+    pub(super) fn browser_menu_host(&self, id: &str, window: &Window) -> Host {
+        if self.canvas_state.browsers.panes.get(id).and_then(|pane| pane.popped) == Some(window.window_handle()) {
+            Host::Window
+        } else {
+            Host::Pane
+        }
+    }
+
     /// Opens a menu of `[label, command, args]` rows at the pointer: the menu mod's popup in the
     /// main window, or in the pop-out the menu `pop_menu` draws.
-    fn show_browser_menu(&mut self, id: &str, host: Host, items: Vec<Value>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn show_browser_menu(&mut self, id: &str, host: Host, items: Vec<Value>, window: &mut Window, cx: &mut Context<Self>) {
         if host == Host::Window {
             self.canvas_state.browsers.panes.entry(id.to_owned()).or_default().pop_menu = Some((window.mouse_position(), items));
             return cx.notify();

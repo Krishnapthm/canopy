@@ -49,13 +49,13 @@ The bar hides while annotating. In the device's own window, the bottom bar also 
 
 ## Annotate
 
-To point out a problem on a booted simulator, click **Annotate** in the helper bar. If the device is in its own window, click **Bring back** first. The tool is the same as the one in the [Browser Pane](Browser-Pane#annotate), with the same bar at the bottom of the pane.
+To point out a problem on a booted simulator, click **Annotate** in the bar over the device screen. If the device is in its own window, click **Bring back** first. The tool is the same as the one in the [Browser Pane](Browser-Pane#annotate), with the same bar at the bottom of the pane.
 
 - With **Select**, click a point or drag over an area. A numbered blue pin drops there and a single-line comment box opens beside it. Press `Enter` to **Add** the comment, `Cmd+Enter` to **Send** everything queued, or `Shift+Enter` for a new line. Click a pin to edit its comment.
 - **Pen**, **Box** and **Text** draw on the still. Colour and stroke appear only while one of them is on. `Cmd+Z` and `Shift+Cmd+Z` undo and redo.
 - Hold `Space` to use the live simulator. Release it to capture a fresh still with your existing annotations in the same device coordinates.
 
-**Send** goes to the sole wired agent. With none or several wired, a **Send to** button appears in the helper bar next to **Stop annotating**, and lists the wired agents first, then the other running ones. The agent receives the annotated screenshot, then the device name, runtime and numbered comments with their coordinates in device points. Text labels are listed in the message.
+**Send** goes to the sole wired agent. If multiple agents are wired or only unwired agents are available, use the **Choose agent** icon beside **Connect** in the helper bar. The menu lists wired agents first. The agent receives the annotated screenshot, then the device name, runtime and numbered comments with their coordinates in device points. Text labels are listed in the message.
 
 Click **Stop annotating** or press `Esc` to leave. With marks or comments on the still, choose **Keep editing** or **Discard**.
 

@@ -1245,6 +1245,20 @@ impl AppWindow {
     fn annotation_action(&mut self, id: &str, action: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return Ok(()) };
         if a.outgoing.as_ref().is_some_and(|o| o.sending) { return Err("The annotation is being sent".into()); }
+        if let Some(addr) = action.strip_prefix("agent:") {
+            if !self.annotation_agents(id).iter().any(|agent| agent.0 == addr) {
+                return Err("That agent is no longer running".into());
+            }
+            let a = self.canvas_state.annotations.get_mut(id).unwrap();
+            a.target = Some(addr.to_owned());
+            if let Some(draft) = &a.draft {
+                draft.input.read(cx).focus_handle(cx).focus(window, cx);
+            } else if !a.live {
+                a.focus.focus(window, cx);
+            }
+            cx.notify();
+            return Ok(());
+        }
         match action {
             "discard" if a.confirming.is_some() => return self.end_annotation(id, false, window, cx),
             "close" => return self.annotation_close(id, window, cx),
@@ -1261,9 +1275,7 @@ impl AppWindow {
             "undo" => a.undo(),
             "redo" => a.redo(),
             action => {
-                if let Some(addr) = action.strip_prefix("agent:") {
-                    a.target = Some(addr.to_owned());
-                } else if let Some((_, color)) = COLORS.iter().find(|(name, _)| name.eq_ignore_ascii_case(action)) {
+                if let Some((_, color)) = COLORS.iter().find(|(name, _)| name.eq_ignore_ascii_case(action)) {
                     a.color = *color;
                 } else if let Some((_, width)) = STROKES.iter().find(|(name, _)| name.eq_ignore_ascii_case(action)) {
                     a.width = *width;
@@ -1414,7 +1426,7 @@ impl AppWindow {
             json!([label, "canvas.annotate_action", {"pane": id, "action": format!("agent:{addr}")}])
         }).collect();
         if rows.is_empty() { return Err("No agent is running to send this to".into()); }
-        self.open_menu("primary", json!({"items": rows}), Some(window.mouse_position()), window, cx);
+        self.show_browser_menu(id, self.browser_menu_host(id, window), rows, window, cx);
         Ok(())
     }
 }
