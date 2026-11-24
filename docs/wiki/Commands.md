@@ -493,12 +493,21 @@ Run a drawing tool or toolbar action in an active annotation. Used by its menus.
 
 ## `canvas.sim_zoom`
 
-Resize a simulator pane: step actual (1 point per screen pixel at the current zoom, the default), in or out. Acts on pane, else the selected simulator pane.
+Resize a simulator pane: step actual (one device point per canvas unit, requires a live frame), default (340x700 on screen), in or out. Omit step for actual. Acts on pane, else the selected simulator pane.
 
 | Argument | Required |
 |---|---|
 | `step` | no |
 | `pane` | no |
+
+## `canvas.sim_shutdown`
+
+Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `close` | no |
 
 ## `canvas.sim_pop`
 
