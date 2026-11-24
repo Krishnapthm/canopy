@@ -575,7 +575,7 @@ impl AppWindow {
                 .tooltip(strip_tooltip("Send annotation to".into(), Some("canvas.annotate_agent")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener({ let pane = id.to_owned(); move |this, _, window, cx| this.run_key("canvas.annotate_agent", json!({"pane": pane}), window, cx) }))
-                .child(name)))
+                .child(div().max_w(px(128.)).truncate().child(name))))
             .child(div().id("browser-annotate").role(gpui::Role::Button).aria_label("Annotate")
                 .flex().flex_none().items_center().gap(px(4.)).h(px(24.)).px(px(8.)).rounded(px(ui::RADIUS_SM)).border_1().border_color(c("border"))
                 .text_size(px(12.)).text_color(c("muted-foreground")).cursor_pointer().hover(|d| d.bg(c("hover")).text_color(c("foreground")))

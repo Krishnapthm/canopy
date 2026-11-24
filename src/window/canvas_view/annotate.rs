@@ -1016,8 +1016,9 @@ impl AppWindow {
                 root = root.child(self.annotation_composer(id, draft, at, [w, h], cx));
             }
         }
-        root.child(self.annotation_bar(id, a, cx))
-            .when(a.hint, |root| root.child(self.annotation_hint(id, a, w, cx)))
+        root.child(div().absolute().bottom(px(12.)).left_0().w_full().flex().flex_col().items_center().gap(px(8.))
+            .when(a.hint, |controls| controls.child(self.annotation_hint(id, a, w, cx)))
+            .child(self.annotation_bar(id, a, cx)))
             .into_any_element()
     }
 
@@ -1212,7 +1213,7 @@ impl AppWindow {
     fn annotation_composer(&self, id: &str, draft: &Draft, [x, y]: Pos, [w, h]: Pos, cx: &mut Context<Self>) -> Stateful<Div> {
         const PILL: f32 = 240.;
         const MENU: f32 = 56.;
-        let width = PILL + 34.;
+        let width = (PILL + 34.).min(w);
         let comment = matches!(draft.kind, DraftKind::Comment { .. });
         let top = (y + 14.).clamp(MENU, (h - 56.).max(MENU));
         let (add, send, enter, leave, open) = (id.to_owned(), id.to_owned(), id.to_owned(), id.to_owned(), id.to_owned());
@@ -1337,7 +1338,7 @@ impl AppWindow {
         let items = a.items();
         let can_send = !items.is_empty() && !a.live && !a.refreshing && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending);
         let gap = || div().w(px(1.)).h(px(16.)).flex_none().bg(c("border"));
-        let mut bar = super::helper_bar::bar_shell(1.).id("annotation-bar").relative().items_center().occlude()
+        let mut bar = super::helper_bar::bar_shell(1.).id("annotation-bar").relative().max_w_full().flex_wrap().items_center().justify_center().occlude()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         for (tool, action, label, icon) in TOOLS {
             bar = bar.child(annotation_button(action, icon, label, a.tool == tool).on_click(self.annotation_click(id, action, cx)));
@@ -1379,7 +1380,7 @@ impl AppWindow {
             let cover = format!("cover:annotate:{id}");
             bar = bar.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {}).absolute().size_full());
         }
-        div().absolute().bottom(px(12.)).left_0().w_full().flex().justify_center().child(bar)
+        bar
     }
 
     fn annotation_hint(&self, id: &str, a: &Annotate, width: f32, cx: &mut Context<Self>) -> Div {
@@ -1387,20 +1388,19 @@ impl AppWindow {
         let surface = if matches!(a.host, Host::Browser { .. }) { "webpage" } else { "simulator" };
         let bounds = self.bounds.clone();
         let cover = format!("cover:annotate-hint:{id}");
-        div().absolute().bottom(px(48.)).left_0().w_full().flex().justify_center()
-            .child(div().relative().w(px((width - 8.).clamp(1., 370.))).p(px(8.)).flex().flex_col().items_end().gap(px(5.))
-                .bg(c("popover")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).shadow_md()
-                .text_size(px(12.)).occlude()
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(div().w_full().child(format!("Click anywhere to comment, or drag to select an area. Hold Space to temporarily use the {surface}.")))
-                .child(div().id("annotate-hint-ok").role(gpui::Role::Button).aria_label("Got it")
-                    .px(px(8.)).py(px(3.)).rounded(px(ui::RADIUS_SM)).bg(swatch(PIN)).text_color(gpui::white()).cursor_pointer()
-                    .child("Got it").on_click(cx.listener(move |this, _, window, cx| {
-                        if let Err(error) = this.annotation_action(&target, "hint", window, cx) { this.annotation_error(error, window, cx); }
-                    })))
-                .when(a.live && matches!(a.host, Host::Browser { .. }), |d| {
-                    d.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {}).absolute().size_full())
-                }))
+        div().relative().w(px((width - 8.).clamp(1., 370.))).p(px(8.)).flex().flex_col().items_end().gap(px(5.))
+            .bg(c("popover")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).shadow_md()
+            .text_size(px(12.)).occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(div().w_full().child(format!("Click anywhere to comment, or drag to select an area. Hold Space to temporarily use the {surface}.")))
+            .child(div().id("annotate-hint-ok").role(gpui::Role::Button).aria_label("Got it")
+                .px(px(8.)).py(px(3.)).rounded(px(ui::RADIUS_SM)).bg(swatch(PIN)).text_color(gpui::white()).cursor_pointer()
+                .child("Got it").on_click(cx.listener(move |this, _, window, cx| {
+                    if let Err(error) = this.annotation_action(&target, "hint", window, cx) { this.annotation_error(error, window, cx); }
+                })))
+            .when(a.live && matches!(a.host, Host::Browser { .. }), |d| {
+                d.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {}).absolute().size_full())
+            })
     }
 
     pub(in crate::window) fn annotation_escape(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
