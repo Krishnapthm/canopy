@@ -62,7 +62,9 @@ function items(p, git, agents) {
       const colors = ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"];
       return tg.pane ? [
         ["Space color", "canvas.pane_color", { pane: tg.pane, color: null }],
-        ...colors.map(color => [color, "canvas.pane_color", { pane: tg.pane, color }]),
+        ["Suggest a color", "canvas.pane_color_next", { pane: tg.pane }],
+        ["Custom hex color", "custom-color", { pane: tg.pane, value: tg.color }],
+        ...[...colors, ...(tg.palette ?? [])].map(color => [color, "canvas.pane_color", { pane: tg.pane, color }]),
       ] : colors.map(color => [color, "canvas.space_style", { id: tg.id, color }]);
     }
     case "canvas-wire": return [["Remove", "wire.remove", { a: tg.a, b: tg.b }]];
@@ -188,6 +190,10 @@ export default class Menu extends View {
   run(it) {
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
+    else if (it[1] === "custom-color") openOverlay({ mod: "prompt", kind: "dialog", width: 380, props: {
+      title: "Pane color", label: "Hex color", value: it[2].value?.startsWith("#") ? it[2].value : "", hint: "Use #RRGGBB, for example #3a78e8.",
+      field: "color", command: { name: "canvas.pane_color", args: { pane: it[2].pane } },
+    } });
     else run(it[1], it[2]);
   }
 
@@ -218,6 +224,7 @@ export default class Menu extends View {
             .hover((s) => s.bg(t.hover))
             // Only agents carry an icon: the program's own.
             .when(it[1] === "canvas.create" && it[3]?.icon, el => el.child(it[3].tint ? svg(it[3].icon).size(14).flex_none().text_color(t.foreground) : image(it[3].icon).w(14).h(14).flex_none()))
+            .when(it[1] === "canvas.pane_color" && !!it[2].color, el => el.child(div().size(12).flex_none().rounded(6).bg(it[2].color.startsWith("#") ? it[2].color : t[`tint-${it[2].color}`])))
             .child(div().flex_1().child(it[0]))
             .when(!it[1].startsWith("sub:"), el => el.child(div().text_size(11).text_color(t.dim)
               .child(props()?.tab === "canvas-agents" && it[1] === "canvas.create"

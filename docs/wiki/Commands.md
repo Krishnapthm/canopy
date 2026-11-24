@@ -694,12 +694,20 @@ Set a space color.
 
 ## `canvas.pane_color`
 
-Set a canvas pane's hue. Pass null or omit color to inherit the space's hue.
+Set a canvas pane's hue to a named palette color or #RRGGBB. Pass null or omit color to inherit the space's hue.
 
 | Argument | Required |
 |---|---|
 | `pane` | yes |
 | `color` | no |
+
+## `canvas.pane_color_next`
+
+Assign the next unused color in the pane's space.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
 
 ## `panel.editor`
 

@@ -27,7 +27,7 @@ export default class WorkspaceStatus extends View {
     const space = spaces().find(s => s.active);
     const { shown, more } = chips(agents());
     const allPanes = panes();
-    const tint = (color) => color ? t[`tint-${color}`] : undefined;
+    const tint = (color) => color?.startsWith("#") ? color : color ? t[`tint-${color}`] : undefined;
     const spaceTint = tint(space?.color);
     const dot = { blocked: t.blocked, working: t.working, done: t.done ?? t.accent, idle: t.dim };
     const colorDot = (color) => div().size(6).rounded(3).flex_none().bg(color);

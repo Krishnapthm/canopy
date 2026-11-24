@@ -2784,6 +2784,24 @@ impl AppWindow {
         }
     }
 
+    /// A fixed-size button that shows the pane's current color and opens its choices.
+    fn pane_color_swatch(&self, id: &str, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
+        let color = self.canvas_state.doc.effective_color(id);
+        let fill = color.map_or_else(|| c("surface"), |hue| c(&hue.tint_token()));
+        let value = color.map(|hue| hue.name());
+        let palette: Vec<_> = self.canvas_state.doc.pane_palette.iter().map(|hue| hue.name()).collect();
+        let id = id.to_owned();
+        div().id(SharedString::from(format!("pane-color-{id}"))).size(px(18.)).flex_none()
+            .flex().items_center().justify_center().cursor_pointer().rounded(px(ui::RADIUS_SM))
+            .role(gpui::Role::Button).aria_label("Pane color").hover(|d| d.bg(c("hover")))
+            .child(div().size(px(12.)).rounded_full().border_1().border_color(c("muted-foreground")).bg(fill))
+            .tooltip(strip_tooltip("Pane color".into(), None))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
+                this.open_menu("canvas-colors", json!({"pane":id,"color":value,"palette":palette}), Some(e.position()), window, cx);
+            }))
+    }
+
     /// The shared saved-rect frame, header drag and resize corner for boxed panes. It occludes
     /// the panes beneath it and raises itself on a click. `header` (a browser pane's controls)
     /// replaces the icon, title and detail inside the same header.
@@ -2843,11 +2861,13 @@ impl AppWindow {
                         cx.stop_propagation();
                     }))
                     .map(|head| match header {
-                        Some(header) => head.p(px(0.)).child(header),
+                        Some(header) => head.p(px(0.))
+                            .child(div().flex_1().min_w_0().child(header)),
                         None => head
                             .child(div().flex_none().mt(px(1.)).child(svg().path(icon).size(px(16.)).text_color(c("foreground"))))
                             .child(div().min_w_0().truncate().child(title))
-                            .child(div().flex_1().min_w_0().truncate().text_color(c("muted-foreground")).child(detail)),
+                            .child(div().flex_1().min_w_0().truncate().text_color(c("muted-foreground")).child(detail))
+                            .child(self.pane_color_swatch(&card.id, cx)),
                     })))
                 .child(div().flex_1().min_h_0().overflow_hidden().child(body))
                 .children(Self::resize_zones(card, camera.zoom, cx))
@@ -3230,7 +3250,7 @@ impl AppWindow {
             let [x, y] = camera.to_screen([space.rect[0], space.rect[1]]);
             let selected = state.selected.contains(&id);
             let rename_id = id.clone();
-            let color = c(space.color.name());
+            let color = c(&space.color.name());
             // Like a Figma frame: the name sits above a rounded box tinted with the space's color.
             let name = div()
                 .id(SharedString::from(format!("space-label-{id}")))
@@ -3421,7 +3441,7 @@ impl AppWindow {
                 .child(div().flex_none().mt(px(1.)).child(icon_element(&icon, tint, px(16.), c("foreground"))));
             let text = div().flex_1().min_w_0().child(div().text_ellipsis().when(sub.done, |d| d.text_color(c("muted-foreground")))
                 .child(format!("{} · {}", sub.name, if sub.done { "done" } else { "working" })));
-            pill = pill.child(text);
+            pill = pill.child(text).child(self.pane_color_swatch(&card.id, cx));
             let click_sub = sub.clone();
             pill = pill.on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                 this.begin_layout();
@@ -3516,6 +3536,7 @@ impl AppWindow {
                         .text_color(c("muted-foreground")),
                 );
             }
+            pill = pill.child(self.pane_color_swatch(&card.id, cx));
             let menu_addr = addr.clone();
             pill = pill.capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
                 if e.keystroke.key == "escape" && this.canvas_state.rename.as_ref().is_some_and(|(t, _, _)| matches!(t, Rename::Tab(_))) {

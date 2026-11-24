@@ -2,6 +2,8 @@
 
 Canopy has two kinds of button bars. The **toolbar** at the bottom of the canvas creates panes and switches tools. The **helper bar** appears on panes with actions outside their header. Between them, nearly everything has a button, and every button shows its keyboard shortcut when you hover it.
 
+The sticky note's helper bar holds its move grip and color swatch.
+
 ## Toolbar
 
 ![The toolbar at the bottom of the canvas](images/toolbar-and-helper-bar-1.png)

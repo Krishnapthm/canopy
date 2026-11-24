@@ -583,8 +583,7 @@ pub enum View {
 }
 
 /// The palette shared by spaces, panes and wires.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Hue {
     Gray,
     Red,
@@ -594,12 +593,13 @@ pub enum Hue {
     Teal,
     Blue,
     Purple,
+    Hex(u32),
 }
 
 impl Hue {
     pub const ALL: [Self; 8] = [Self::Gray, Self::Red, Self::Orange, Self::Yellow, Self::Green, Self::Teal, Self::Blue, Self::Purple];
 
-    pub fn name(self) -> &'static str {
+    pub fn name(self) -> String {
         match self {
             Self::Gray => "gray",
             Self::Red => "red",
@@ -609,7 +609,8 @@ impl Hue {
             Self::Teal => "teal",
             Self::Blue => "blue",
             Self::Purple => "purple",
-        }
+            Self::Hex(rgb) => return format!("#{rgb:06x}"),
+        }.into()
     }
 
     /// Accept only palette names at command boundaries.
@@ -617,15 +618,34 @@ impl Hue {
         Self::ALL.into_iter().find(|hue| hue.name() == name)
     }
 
+    /// Accepts a named palette entry or an opaque CSS hex color.
+    pub fn parse(color: &str) -> Option<Self> {
+        let color = color.trim();
+        Self::from_name(color).or_else(|| {
+            let rgb = color.strip_prefix('#')?;
+            if rgb.len() != 6 || !rgb.bytes().all(|b| b.is_ascii_hexdigit()) { return None; }
+            u32::from_str_radix(rgb, 16).ok().map(Self::Hex)
+        })
+    }
+
     pub fn tint_token(self) -> String {
-        format!("tint-{}", self.name())
+        match self {
+            Self::Hex(_) => self.name(),
+            _ => format!("tint-{}", self.name()),
+        }
+    }
+}
+
+impl Serialize for Hue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.name())
     }
 }
 
 impl<'de> Deserialize<'de> for Hue {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         // Old canvas files can contain names outside the palette.
-        Ok(Self::from_name(&String::deserialize(deserializer)?).unwrap_or(Self::Gray))
+        Ok(Self::parse(&String::deserialize(deserializer)?).unwrap_or(Self::Gray))
     }
 }
 
@@ -1035,6 +1055,9 @@ pub struct Document {
     pub spaces: Vec<Space>,
     #[serde(default)]
     pub panes: Vec<Pane>,
+    /// Custom pane colors explicitly saved by the user, even after their panes close.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pane_palette: Vec<Hue>,
     /// Read from version 1 and 2 files and moved into `panes` on load;
     /// never written.
     #[serde(default, rename = "cards", skip_serializing)]
@@ -1070,6 +1093,7 @@ impl Default for Document {
             view: View::All,
             spaces: vec![],
             panes: vec![],
+            pane_palette: vec![],
             old_cards: vec![],
             panel: Panel::default(),
             old_previews: vec![],
@@ -1109,6 +1133,30 @@ impl Document {
     pub fn effective_color(&self, pane_id: &str) -> Option<Hue> {
         let pane = self.panes.iter().find(|p| p.id == pane_id)?;
         pane.color.or_else(|| self.space_color(pane.space.as_deref()?))
+    }
+
+    /// Advances through the palette without using a color already assigned in the same space.
+    /// If the palette is occupied, walks the RGB space in a fixed, non-repeating order.
+    pub fn suggest_pane_color(&self, index: usize) -> Option<Hue> {
+        let pane = &self.panes[index];
+        let inherited = pane.space.as_deref().and_then(|id| self.space_color(id));
+        let current = pane.color.or(inherited);
+        let used: std::collections::HashSet<_> = self.panes.iter()
+            .filter(|other| other.space == pane.space)
+            .filter_map(|other| other.color.or(inherited))
+            .collect();
+        let palette = Hue::ALL.into_iter().chain(self.pane_palette.iter().copied());
+        let start = palette.clone().position(|hue| Some(hue) == current).map_or(0, |i| i + 1);
+        if let Some(color) = palette.cycle().skip(start).take(Hue::ALL.len() + self.pane_palette.len()).find(|hue| !used.contains(hue)) {
+            return Some(color);
+        }
+        let seed = match current {
+            Some(Hue::Hex(rgb)) => rgb,
+            _ => 0,
+        };
+        // An odd step visits every 24-bit value before it repeats.
+        (1u32..=0x1000000).map(|i| Hue::Hex(seed.wrapping_add(i.wrapping_mul(0x9e3779)) & 0xffffff))
+            .find(|hue| !used.contains(hue))
     }
 
     /// The space a cell lives in; None for cells on Home.
@@ -1776,6 +1824,35 @@ mod tests {
         assert_eq!(doc.effective_color("missing"), None);
     }
     #[test]
+    fn pane_color_suggestions_skip_occupied_palette_and_custom_colors() {
+        let mut doc = Document::default();
+        let pane = serde_json::json!({"id":"t1","kind":"terminal","props":{},"rect":[0.0,0.0,0.0,0.0],"z":0});
+        doc.panes.push(serde_json::from_value(pane).unwrap());
+        doc.panes[0].color = Some(Hue::Red);
+        let mut other = doc.panes[0].clone();
+        other.space = Some("other".into());
+        other.color = Some(Hue::Orange);
+        doc.panes.push(other);
+        assert_eq!(doc.suggest_pane_color(0), Some(Hue::Orange));
+        for color in Hue::ALL {
+            let mut other = doc.panes[0].clone();
+            other.color = Some(color);
+            doc.panes.push(other);
+        }
+        let color = doc.suggest_pane_color(0).unwrap();
+        assert!(matches!(color, Hue::Hex(_)));
+        doc.panes[0].color = Some(color);
+        assert_ne!(doc.suggest_pane_color(0), Some(color));
+        let saved = serde_json::to_value(&doc.panes[0]).unwrap();
+        assert_eq!(saved["color"], color.name());
+        assert_eq!(serde_json::from_value::<Pane>(saved).unwrap().color, Some(color));
+        assert_eq!(Hue::parse(" #00FF0a "), Some(Hue::Hex(0x00ff0a)));
+        for invalid in ["#123", "#+12345", "#11223344", "redder"] {
+            assert_eq!(Hue::parse(invalid), None);
+        }
+    }
+
+    #[test]
     fn changes_share_one_pending_save() {
         let mut save = SaveSchedule::default();
         assert!(save.changed());
@@ -1977,6 +2054,7 @@ mod tests {
         let doc = Document {
             view: View::Agents,
             arrange_layout: "wires".into(),
+            pane_palette: vec![Hue::Hex(0x3a78e8)],
             ..Document::default()
         };
         doc.save(&path).unwrap();
@@ -1984,6 +2062,7 @@ mod tests {
         assert!(!bad);
         assert_eq!(loaded.view, View::Agents);
         assert_eq!(loaded.arrange_layout, "wires");
+        assert_eq!(loaded.pane_palette, vec![Hue::Hex(0x3a78e8)]);
         std::fs::remove_file(path).unwrap();
     }
     #[test]
