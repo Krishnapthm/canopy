@@ -575,12 +575,60 @@ pub enum View {
     All,
     Terminals,
 }
+
+/// The palette shared by spaces, panes and wires.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Hue {
+    Gray,
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Teal,
+    Blue,
+    Purple,
+}
+
+impl Hue {
+    pub const ALL: [Self; 8] = [Self::Gray, Self::Red, Self::Orange, Self::Yellow, Self::Green, Self::Teal, Self::Blue, Self::Purple];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Gray => "gray",
+            Self::Red => "red",
+            Self::Orange => "orange",
+            Self::Yellow => "yellow",
+            Self::Green => "green",
+            Self::Teal => "teal",
+            Self::Blue => "blue",
+            Self::Purple => "purple",
+        }
+    }
+
+    /// Accept only palette names at command boundaries.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|hue| hue.name() == name)
+    }
+
+    pub fn tint_token(self) -> String {
+        format!("tint-{}", self.name())
+    }
+}
+
+impl<'de> Deserialize<'de> for Hue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Old canvas files can contain names outside the palette.
+        Ok(Self::from_name(&String::deserialize(deserializer)?).unwrap_or(Self::Gray))
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Space {
     pub space: String,
     /// Its card on Home ([`SPACE_CARD`] in size); the cells inside keep their own coordinates.
     pub rect: Rect,
-    pub color: String,
+    pub color: Hue,
     /// Kept so older files load; spaces have no frame since they became rooms.
     #[serde(default)]
     pub frame: bool,
@@ -615,6 +663,9 @@ pub struct Pane {
     /// The space (room) it lives in; None for Home.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub space: Option<String>,
+    /// The pane's own hue, or none to inherit the space's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<Hue>,
     /// Pinned: its screen rect in the canvas area (px). It stays there while the camera moves;
     /// `rect` follows it each frame (see `Document::pin`), so hit tests and wires need nothing special.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -886,8 +937,44 @@ impl Pane {
     }
 }
 
+/// A tab in the Files panel: a file, or a pane docked there. Saved as the file's absolute
+/// path, or `pane:<id>` for a pane (an absolute path never starts with "pane:").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PanelTab {
+    File(String),
+    Pane(String),
+}
+impl Serialize for PanelTab {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            PanelTab::File(path) => s.serialize_str(path),
+            PanelTab::Pane(id) => s.serialize_str(&format!("pane:{id}")),
+        }
+    }
+}
+impl<'de> Deserialize<'de> for PanelTab {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        Ok(match text.strip_prefix("pane:") {
+            Some(id) => PanelTab::Pane(id.to_owned()),
+            None => PanelTab::File(text),
+        })
+    }
+}
+impl PanelTab {
+    pub fn file(&self) -> Option<&String> {
+        match self { PanelTab::File(path) => Some(path), PanelTab::Pane(_) => None }
+    }
+    pub fn pane(&self) -> Option<&String> {
+        match self { PanelTab::Pane(id) => Some(id), PanelTab::File(_) => None }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Panel {
+    /// Open tabs. A pane is docked exactly when a `Pane` tab names it.
+    #[serde(default)]
+    pub tabs: Vec<PanelTab>,
     #[serde(default)]
     pub tree_hidden: bool,
     #[serde(default)]
@@ -1006,10 +1093,44 @@ impl Wire {
 }
 
 impl Document {
+    /// The hue inherited from a space. Gray spaces give their panes no color.
+    pub fn space_color(&self, space_id: &str) -> Option<Hue> {
+        self.spaces.iter().find(|s| s.space == space_id).map(|s| s.color).filter(|hue| *hue != Hue::Gray)
+    }
+
+    /// A pane's own hue, then its space's hue, or none. Gray counts as a color
+    /// only as a pane override. A gray space gives its panes no color.
+    pub fn effective_color(&self, pane_id: &str) -> Option<Hue> {
+        let pane = self.panes.iter().find(|p| p.id == pane_id)?;
+        pane.color.or_else(|| self.space_color(pane.space.as_deref()?))
+    }
+
     /// The space a cell lives in; None for cells on Home.
     pub fn space_of(&self, key: &str) -> Option<&Space> {
         let id = self.panes.iter().find(|c| c.id == key)?.space.as_ref()?;
         self.spaces.iter().find(|s| &s.space == id)
+    }
+    /// Whether a pane is docked in the Files panel (it has no place on the canvas).
+    pub fn docked(&self, id: &str) -> bool {
+        self.panel.tabs.iter().any(|t| t.pane().is_some_and(|p| p == id))
+    }
+    /// Whether the canvas draws this pane: it is in the current place and not docked.
+    pub fn shown(&self, pane: &Pane) -> bool {
+        self.shows(pane.space.as_ref()) && !self.docked(&pane.id)
+    }
+    /// Docks a pane as a panel tab. Its rect is kept for `undock`.
+    pub fn dock(&mut self, id: &str) {
+        if let Some(p) = self.panes.iter_mut().find(|p| p.id == id) { p.pinned = None; }
+        open_panel_tab(&mut self.panel.tabs, &PanelTab::Pane(id.to_owned()));
+    }
+    /// Puts a docked pane back on the canvas at its saved rect, or centered on `center` when it
+    /// never had one (an empty rect).
+    pub fn undock(&mut self, id: &str, center: Point) {
+        self.panel.tabs.retain(|t| t.pane().is_none_or(|p| p != id));
+        if let Some(p) = self.panes.iter_mut().find(|p| p.id == id).filter(|p| p.rect[2] <= 0. || p.rect[3] <= 0.) {
+            let [w, h] = [560., 420.];
+            p.rect = [center[0] - w / 2., center[1] - h / 2., w, h];
+        }
     }
     /// Whether a pane in `space` is shown in the current place.
     pub fn shows(&self, space: Option<&String>) -> bool {
@@ -1028,7 +1149,8 @@ impl Document {
         has(a) && has(b) && self.space_of(a).map(|s| &s.space) == self.space_of(b).map(|s| &s.space)
     }
     /// Draws an edge between two panes of one space, at least one of
-    /// them a terminal or sub-agent cell; false when it exists or is refused.
+    /// them a terminal or sub-agent cell. The start `a` supplies the color.
+    /// Returns false when the edge exists or is refused.
     pub fn connect(&mut self, a: &str, b: &str) -> bool {
         if a == b || !self.same_space(a, b) || self.wires.iter().any(|w| w.joins(a, b)) { return false; }
         if [a, b].iter().all(|k| self.panes.iter().any(|p| p.id == *k && p.boxed())) { return false; }
@@ -1088,6 +1210,7 @@ impl Document {
                 rect: [point[0], point[1], size[0], size[1]],
                 z,
                 space: self.room.clone(),
+                color: None,
                 pinned: None,
             });
         }
@@ -1112,7 +1235,7 @@ impl Document {
                 let z = self.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
                 let child = child_position(rect, &siblings, [PILL_WIDTH, 36.]);
                 // The cell belongs to its parent's space.
-                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child, z, space: space.clone(), pinned: None });
+                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child, z, space: space.clone(), color: None, pinned: None });
                 changed = true;
             }
         }
@@ -1173,12 +1296,12 @@ impl Document {
                 (None, _) => (terminal, Kind::Terminal { size }),
                 _ => continue,
             };
-            self.panes.push(Pane { id, kind, rect, z, space, pinned: None });
+            self.panes.push(Pane { id, kind, rect, z, space, color: None, pinned: None });
         }
         let max_z = self.panes.iter().map(|p| p.z).max().unwrap_or(0);
         self.file_ids = self.old_previews.len() as u64;
         for (i, Preview { path, rect, space }) in self.old_previews.drain(..).enumerate() {
-            self.panes.push(Pane { id: format!("p{}", i + 1), kind: Kind::File { path }, rect, z: max_z + 1 + i as u64, space, pinned: None });
+            self.panes.push(Pane { id: format!("p{}", i + 1), kind: Kind::File { path }, rect, z: max_z + 1 + i as u64, space, color: None, pinned: None });
         }
         self.version = 3;
     }
@@ -1201,17 +1324,13 @@ pub fn edge_visible(camera: Camera, path: &[Point], viewport: Point) -> bool {
     let rects: Vec<Rect> = path.iter().map(|p| [p[0] - 3., p[1] - 3., 6., 6.]).collect();
     union(&rects).is_some_and(|r| visible(camera, r, viewport))
 }
-pub const COLORS: [&str; 8] = [
-    "gray", "red", "orange", "yellow", "green", "teal", "blue", "purple",
-];
-
-pub fn unused_color(spaces: &[Space], seed: usize) -> &'static str {
-    let unused: Vec<_> = COLORS
+pub fn unused_color(spaces: &[Space], seed: usize) -> Hue {
+    let unused: Vec<_> = Hue::ALL
         .into_iter()
         .filter(|c| !spaces.iter().any(|s| s.color == *c))
         .collect();
     if unused.is_empty() {
-        COLORS[seed % COLORS.len()]
+        Hue::ALL[seed % Hue::ALL.len()]
     } else {
         unused[seed % unused.len()]
     }
@@ -1282,7 +1401,7 @@ mod tests {
     fn stack_raises_one_pane_to_the_front() {
         let mut doc = Document::default();
         for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
-            doc.panes.push(Pane { id: id.into(), kind: Kind::Terminal { size: None }, rect: [0.; 4], z: i as u64, space: None, pinned: None });
+            doc.panes.push(Pane { id: id.into(), kind: Kind::Terminal { size: None }, rect: [0.; 4], z: i as u64, space: None, color: None, pinned: None });
         }
         assert!(doc.stack(&["a".into()], true));
         assert_eq!(doc.panes.iter().find(|p| p.id == "a").unwrap().z, 2);
@@ -1292,7 +1411,7 @@ mod tests {
     #[test]
     fn next_file_id_counts_mod_panes() {
         let mut doc = Document::default();
-        doc.panes.push(Pane { id: "p5".into(), kind: Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None, pinned: None });
+        doc.panes.push(Pane { id: "p5".into(), kind: Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None });
         assert_eq!(doc.next_file_id(), "p6");
     }
 
@@ -1308,7 +1427,7 @@ mod tests {
 
     #[test]
     fn pane_kinds_and_verbs() {
-        let mut pane = Pane { id: "p1".into(), kind: Kind::File { path: "/a.md".into() }, rect: [0.; 4], z: 0, space: None, pinned: None };
+        let mut pane = Pane { id: "p1".into(), kind: Kind::File { path: "/a.md".into() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None };
         assert_eq!(pane.kind_name(), "file");
         assert_eq!(pane.verbs(), ["read", "shot", "close"]);
         pane.kind = Kind::Terminal { size: None };
@@ -1395,12 +1514,12 @@ mod tests {
         let mut doc = Document::default();
         let id = doc.next_file_id();
         assert_eq!(id, "p1");
-        doc.panes.push(Pane { id, kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, pinned: None });
+        doc.panes.push(Pane { id, kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, color: None, pinned: None });
         doc.panes.remove(0);
         assert_eq!(doc.next_file_id(), "p2");
         let mut doc = Document::default();
         for id in ["p1", "p3"] {
-            doc.panes.push(Pane { id: id.into(), kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, pinned: None });
+            doc.panes.push(Pane { id: id.into(), kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, color: None, pinned: None });
         }
         assert_eq!(doc.next_file_id(), "p4");
     }
@@ -1480,8 +1599,8 @@ mod tests {
     fn undo_restores_geometry_without_resurrecting_deleted_cells() {
         let mut doc = Document::default();
         doc.place("a",[0.,0.],[100.,50.]);
-        doc.spaces.push(Space { space:"s".into(),rect:[0.,0.,200.,200.],color:"blue".into(),frame:true });
-        doc.panes.push(Pane { id: "p1".into(), kind: Kind::File { path: "/tmp/plan.md".into() }, rect: [24.,24.,100.,80.], z: 2, space: None, pinned: None });
+        doc.spaces.push(Space { space:"s".into(),rect:[0.,0.,200.,200.],color:Hue::Blue,frame:true });
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::File { path: "/tmp/plan.md".into() }, rect: [24.,24.,100.,80.], z: 2, space: None, color: None, pinned: None });
         let rest = Rest::capture(&doc);
         doc.spaces[0].rect = [500.,500.,900.,900.];
         doc.panes[1].rect[0] = 600.;
@@ -1540,7 +1659,7 @@ mod tests {
 
     #[test]
     fn undo_keeps_each_sub_agent_cell_apart() {
-        let sub = |id: &str, x| Pane { id: format!("sub:t1:{id}"), kind: Kind::Sub { parent: "t1".into(), sub: id.into() }, rect: [x, 0., 100., 36.], z: 0, space: None, pinned: None };
+        let sub = |id: &str, x| Pane { id: format!("sub:t1:{id}"), kind: Kind::Sub { parent: "t1".into(), sub: id.into() }, rect: [x, 0., 100., 36.], z: 0, space: None, color: None, pinned: None };
         let mut doc = Document { panes: vec![sub("a", 0.), sub("b", 200.)], ..Document::default() };
         let rest = Rest::capture(&doc);
         doc.panes[0].rect[0] = 50.;
@@ -1561,7 +1680,7 @@ mod tests {
 
     #[test]
     fn space_at_picks_the_topmost_space_holding_the_point() {
-        let space = |id: &str, rect| Space { space: id.into(), rect, color: "red".into(), frame: true };
+        let space = |id: &str, rect| Space { space: id.into(), rect, color: Hue::Red, frame: true };
         let spaces = [space("a", [0., 0., 100., 100.]), space("b", [50., 50., 100., 100.])];
         assert_eq!(space_at(&spaces, [10., 10.]).unwrap().space, "a");
         assert_eq!(space_at(&spaces, [60., 60.]).unwrap().space, "b");
@@ -1601,7 +1720,7 @@ mod tests {
         let space = |x| Space {
             space: "s".into(),
             rect: [x, 0., 960., 640.],
-            color: "blue".into(),
+            color: Hue::Blue,
             frame: true,
         };
         assert_eq!(new_space_rect(&[])[0], 0.);
@@ -1613,18 +1732,42 @@ mod tests {
     
     #[test]
     fn random_color_uses_unused_palette_entries() {
-        let spaces: Vec<_> = COLORS[..7]
+        let spaces: Vec<_> = Hue::ALL[..7]
             .iter()
             .map(|c| Space {
-                space: c.to_string(),
+                space: c.name().into(),
                 rect: [0., 0., 960., 640.],
-                color: c.to_string(),
+                color: *c,
                 frame: true,
             })
             .collect();
         for seed in 0..32 {
-            assert_eq!(unused_color(&spaces, seed), "purple");
+            assert_eq!(unused_color(&spaces, seed), Hue::Purple);
         }
+    }
+
+    #[test]
+    fn pane_colors_inherit_and_old_documents_keep_their_shape() {
+        let mut doc = Document::default();
+        let space = serde_json::json!({"space":"s1","rect":[0.0,0.0,960.0,640.0],"color":"teal","frame":true});
+        let pane = serde_json::json!({"id":"t1","kind":"terminal","props":{},"rect":[0.0,0.0,0.0,0.0],"z":0,"space":"s1"});
+        doc.spaces.push(serde_json::from_value(space.clone()).unwrap());
+        doc.panes.push(serde_json::from_value(pane.clone()).unwrap());
+        assert_eq!(serde_json::to_value(&doc.spaces[0]).unwrap(), space);
+        assert!(serde_json::to_value(&doc.panes[0]).unwrap().get("color").is_none());
+        assert_eq!(doc.effective_color("t1"), Some(Hue::Teal));
+
+        doc.spaces[0].color = serde_json::from_value(serde_json::json!("old-hue")).unwrap();
+        assert_eq!(doc.effective_color("t1"), None);
+
+        doc.panes[0].color = Some(Hue::Gray);
+        assert_eq!(doc.effective_color("t1"), Some(Hue::Gray));
+        assert_eq!(serde_json::to_value(&doc.panes[0]).unwrap()["color"], "gray");
+
+        doc.panes[0].color = None;
+        doc.panes[0].space = None;
+        assert_eq!(doc.effective_color("t1"), None);
+        assert_eq!(doc.effective_color("missing"), None);
     }
     #[test]
     fn changes_share_one_pending_save() {
@@ -1670,7 +1813,7 @@ mod tests {
     #[test]
     fn pinned_panes_follow_the_camera_and_stay_in_view() {
         let mut doc = Document::default();
-        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [0.; 4], z: 0, space: None, pinned: Some([600., 16., 340., 700.]) });
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: Some([600., 16., 340., 700.]) });
         let camera = Camera { x: 100., y: -50., zoom: 2. };
         doc.pin(camera, [1000., 800.]);
         assert_eq!(doc.panes[0].rect, [400., -42., 170., 350.]);
@@ -1884,17 +2027,17 @@ mod tests {
     }
 }
 
-pub fn open_panel_tab(tabs: &mut Vec<String>, item: &str) {
-    if !tabs.iter().any(|t| t == item) {
-        tabs.push(item.to_owned());
+pub fn open_panel_tab(tabs: &mut Vec<PanelTab>, item: &PanelTab) {
+    if !tabs.contains(item) {
+        tabs.push(item.clone());
     }
 }
 
-pub fn close_panel_tab(tabs: &mut Vec<String>, active: Option<&str>, item: &str) -> Option<String> {
+pub fn close_panel_tab(tabs: &mut Vec<PanelTab>, active: Option<&PanelTab>, item: &PanelTab) -> Option<PanelTab> {
     tabs.retain(|t| t != item);
     active
-        .filter(|a| *a != item && tabs.iter().any(|t| t == a))
-        .map(str::to_owned)
+        .filter(|a| *a != item && tabs.contains(a))
+        .cloned()
         .or_else(|| tabs.last().cloned())
 }
 
@@ -1922,18 +2065,38 @@ mod panel_tests {
     #[test]
     fn tabs_activate_without_duplicates_and_close_to_neighbor() {
         let mut tabs = vec![];
-        open_panel_tab(&mut tabs, "/tmp/b.rs");
-        open_panel_tab(&mut tabs, "/tmp/a.rs");
-        open_panel_tab(&mut tabs, "/tmp/b.rs");
-        assert_eq!(tabs, ["/tmp/b.rs", "/tmp/a.rs"]);
-        assert_eq!(
-            close_panel_tab(&mut tabs, Some("/tmp/a.rs"), "/tmp/b.rs").as_deref(),
-            Some("/tmp/a.rs")
-        );
-        assert_eq!(
-            close_panel_tab(&mut tabs, Some("/tmp/a.rs"), "/tmp/a.rs"),
-            None
-        );
+        let [a, b] = ["/tmp/a.rs", "/tmp/b.rs"].map(|p| PanelTab::File(p.into()));
+        open_panel_tab(&mut tabs, &b);
+        open_panel_tab(&mut tabs, &a);
+        open_panel_tab(&mut tabs, &b);
+        assert_eq!(tabs, [b.clone(), a.clone()]);
+        assert_eq!(close_panel_tab(&mut tabs, Some(&a), &b), Some(a.clone()));
+        assert_eq!(close_panel_tab(&mut tabs, Some(&a), &a), None);
+    }
+    #[test]
+    fn panel_tabs_keep_the_old_string_form() {
+        let tabs: Vec<PanelTab> = serde_json::from_str(r#"["/tmp/a.rs","pane:p3"]"#).unwrap();
+        assert_eq!(tabs, [PanelTab::File("/tmp/a.rs".into()), PanelTab::Pane("p3".into())]);
+        assert_eq!(serde_json::to_string(&tabs).unwrap(), r#"["/tmp/a.rs","pane:p3"]"#);
+        // A document saved before panel tabs existed still loads.
+        let panel: Panel = serde_json::from_str(r#"{"width":null}"#).unwrap();
+        assert!(panel.tabs.is_empty());
+    }
+    #[test]
+    fn docking_keeps_the_rect_and_hides_the_pane_from_the_canvas() {
+        let mut doc = Document::default();
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [10., 20., 300., 400.], z: 0, space: None, color: None, pinned: Some([1., 1., 2., 2.]) });
+        doc.dock("p1");
+        assert!(doc.docked("p1") && !doc.shown(&doc.panes[0]) && doc.panes[0].pinned.is_none());
+        doc.dock("p1");
+        assert_eq!(doc.panel.tabs.len(), 1);
+        doc.undock("p1", [500., 500.]);
+        assert!(!doc.docked("p1") && doc.shown(&doc.panes[0]));
+        assert_eq!(doc.panes[0].rect, [10., 20., 300., 400.]);
+        doc.panes[0].rect = [0.; 4];
+        doc.dock("p1");
+        doc.undock("p1", [500., 500.]);
+        assert_eq!(doc.panes[0].rect, [220., 290., 560., 420.]);
     }
     #[test]
     fn breadcrumbs_respect_directory_boundaries() {
@@ -1989,7 +2152,7 @@ mod cell_tests {
         doc.into_panes();
         assert_eq!(doc.panes[0].id, "t1");
         let mut subs = HashMap::from([("t1".into(), vec![crate::subs::Sub { id:"a".into(), name:"task".into(), program:serde_json::Value::Null, transcript:None, done:false }])]);
-        doc.spaces.push(Space { space: "s".into(), rect: [-24., -24., 368., 84.], color: "gray".into(), frame: true });
+        doc.spaces.push(Space { space: "s".into(), rect: [-24., -24., 368., 84.], color: Hue::Gray, frame: true });
         assert!(doc.sync_subs(&subs));
         assert_eq!(doc.panes.len(), 2);
         assert_eq!(doc.panes[1].space, doc.panes[0].space, "a sub cell lives in its parent's space");

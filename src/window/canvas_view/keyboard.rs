@@ -37,6 +37,11 @@ impl AppWindow {
             } else { window.dispatch_action(action, cx); }
             return true;
         }
+        // The Linux Main Menu has a regular GPUI binding so users can override it.
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        if key.key == "f10" && !key.modifiers.modified() {
+            return false;
+        }
         let m = key.modifiers;
         !(m.control || m.alt || m.platform)
     }
@@ -50,7 +55,7 @@ impl AppWindow {
     /// What the keyboard can select in the current place: its cells and previews, and on Home the space cards.
     pub(super) fn keyboard_cells(&self, cx: &App) -> Vec<(String, canvas::Rect)> {
         let doc = &self.canvas_state.doc;
-        doc.panes.iter().filter(|c| doc.shows(c.space.as_ref()) && (c.boxed() || canvas::view_allows(&doc.view, matches!(c.kind, canvas::Kind::Sub { .. }) || self.live.get(&c.id).is_some_and(canvas_agent))))
+        doc.panes.iter().filter(|c| doc.shown(c) && (c.boxed() || canvas::view_allows(&doc.view, matches!(c.kind, canvas::Kind::Sub { .. }) || self.live.get(&c.id).is_some_and(canvas_agent))))
             .map(|c| (c.id.clone(), self.pill_rect(c, cx)))
             .chain(doc.spaces.iter().filter(|_| doc.room.is_none()).map(|s| (s.space.clone(), s.rect))).collect()
     }
@@ -103,7 +108,7 @@ impl AppWindow {
             "canvas.select_all" => {
                 if !self.focus.is_focused(window) { return; }
                 let doc = &self.canvas_state.doc;
-                self.canvas_state.selected = doc.panes.iter().filter(|c| c.terminal().is_some() && doc.shows(c.space.as_ref())).map(|c| c.id.clone()).collect();
+                self.canvas_state.selected = doc.panes.iter().filter(|c| c.terminal().is_some() && doc.shown(c)).map(|c| c.id.clone()).collect();
             }
             "canvas.enter" => {
                 if let Some(from) = self.canvas_state.connecting.clone() {
@@ -200,7 +205,7 @@ impl AppWindow {
                     let camera = self.canvas_state.doc.camera;
                     let (a, b) = (camera.to_world([0., 0.]), camera.to_world([w, h]));
                     let doc = &self.canvas_state.doc;
-                    let taken: Vec<_> = doc.panes.iter().filter(|c| !c.boxed() && doc.shows(c.space.as_ref())).map(|c| [c.rect[0], c.rect[1]]).collect();
+                    let taken: Vec<_> = doc.panes.iter().filter(|c| !c.boxed() && doc.shown(c)).map(|c| [c.rect[0], c.rect[1]]).collect();
                     let last = self.canvas_state.cascade.as_ref().filter(|(room, _)| *room == space).map(|(_, p)| *p);
                     let point = canvas::cascade(last, [a[0], a[1], b[0] - a[0], b[1] - a[1]], self.default_pane_size(window), &taken, CASCADE_STEP);
                     self.canvas_state.cascade = Some((space.clone(), point));

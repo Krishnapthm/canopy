@@ -51,6 +51,8 @@ The bar across the top of the window, from left to right:
 - Double-click a card's name on Home to rename it. Press `Enter` or click elsewhere to save, or `Esc` to cancel.
 - Right-click a card for **Rename**, **Color** or **Delete space**.
 
+Give a space a color to recognize its panes at a glance. For example, choose **teal** for a worktree space to tint its panes and the branch dot in the status strip. Choosing **gray** leaves panes without an inherited tint. A [pane's own color](Panes#color-a-pane) takes priority.
+
 > **Warning:** Deleting a space ends all of its terminals and agents. You cannot undo it.
 
 Select **Delete space** (or click **Close space** on its tab), then click **Delete** in the confirmation dialog.

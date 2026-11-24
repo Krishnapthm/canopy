@@ -398,11 +398,11 @@ pub struct Fit {
 /// Fits a device of `screen_points` (with its bezel, if any) into `room` pixels with `margin`
 /// on every side.
 pub fn fit(room: [f32; 2], screen_points: [f32; 2], chrome: Option<&Chrome>, margin: f32) -> Fit {
-    let (size, screen, pad) = match chrome {
-        Some(c) => (c.size, c.screen, c.pad),
-        None => (screen_points, [0., 0., screen_points[0], screen_points[1]], 0.),
+    let (size, screen) = match chrome {
+        Some(c) => (c.size, c.screen),
+        None => (screen_points, [0., 0., screen_points[0], screen_points[1]]),
     };
-    let outer = [size[0] + 2. * pad, size[1]];
+    let outer = outer_size(screen_points, chrome);
     let scale = ((room[0] - 2. * margin) / outer[0]).min((room[1] - 2. * margin) / outer[1]).max(0.01);
     let x = (room[0] - size[0] * scale) / 2.;
     let y = (room[1] - size[1] * scale) / 2.;
@@ -411,6 +411,11 @@ pub fn fit(room: [f32; 2], screen_points: [f32; 2], chrome: Option<&Chrome>, mar
         body: [x, y, size[0] * scale, size[1] * scale],
         screen: [x + screen[0] * scale, y + screen[1] * scale, screen[2] * scale, screen[3] * scale],
     }
+}
+
+/// The full span in device points, including the bezel and buttons when available.
+pub fn outer_size(screen_points: [f32; 2], chrome: Option<&Chrome>) -> [f32; 2] {
+    chrome.map_or(screen_points, |c| [c.size[0] + 2. * c.pad, c.size[1]])
 }
 
 impl Fit {

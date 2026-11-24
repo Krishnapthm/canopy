@@ -25,6 +25,8 @@ pub(super) enum SimEvent {
     Changed,
     /// Live failed: show a fresh screenshot instead.
     Fallback,
+    /// Escape returns keyboard input to the canvas, including from a pop-out.
+    FocusCanvas,
 }
 
 /// The live state.
@@ -92,7 +94,7 @@ impl SimScreen {
         let fill = ((bg.r * 255.).round() as u32) << 16 | ((bg.g * 255.).round() as u32) << 8 | (bg.b * 255.).round() as u32;
         let info = cx.spawn(async move |this, cx| {
             let info = cx.background_executor().spawn(async move { sim_live::device_info(&device_type, 3., fill) }).await;
-            let _ = this.update(cx, |this, cx| { this.info = info; cx.notify(); });
+            let _ = this.update(cx, |this, cx| { this.info = info; cx.emit(SimEvent::Changed); cx.notify(); });
         });
         Self {
             pane, device, info: None, shot: None, surface: None, helper: None, live: Live::Off, shown: false, agent_until: None,
@@ -162,7 +164,7 @@ impl SimScreen {
         cx.emit(SimEvent::Changed);
     }
 
-    fn stop(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn stop(&mut self, cx: &mut Context<Self>) {
         // Dropping the helper closes its stdin and it exits; its last events go nowhere.
         self.helper = None;
         self._pump = None;
@@ -235,7 +237,19 @@ impl SimScreen {
         self.info.as_ref().map(|i| i.points).or_else(|| self.surface.as_ref().map(|s| [s.get_width() as f32 / 3., s.get_height() as f32 / 3.]))
     }
 
-    fn fit(&self, room: [f32; 2]) -> Option<sim_live::Fit> {
+    /// The current live frame's pixel dimensions divided by the device scale.
+    pub(super) fn live_points(&self) -> Option<[f32; 2]> {
+        let surface = self.surface.as_ref()?;
+        let scale = self.info.as_ref()?.scale;
+        if !matches!(self.live, Live::On { .. }) || !scale.is_finite() || scale <= 0. { return None; }
+        Some([surface.get_width() as f32 / scale, surface.get_height() as f32 / scale])
+    }
+
+    pub(super) fn outer_points(&self, points: [f32; 2]) -> [f32; 2] {
+        sim_live::outer_size(points, self.info.as_ref().and_then(|i| i.chrome.as_ref()))
+    }
+
+    pub(super) fn fit(&self, room: [f32; 2]) -> Option<sim_live::Fit> {
         let points = self.points()?;
         Some(sim_live::fit(room, points, self.info.as_ref().and_then(|i| i.chrome.as_ref()), MARGIN))
     }
@@ -328,10 +342,10 @@ impl SimScreen {
         }
     }
 
-    fn key_down(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn key_down(&mut self, e: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         if k.key == "escape" && !k.modifiers.modified() {
-            window.blur(cx);
+            cx.emit(SimEvent::FocusCanvas);
             return cx.stop_propagation();
         }
         if !self.input_ready() { return; }
@@ -442,19 +456,11 @@ impl SimScreen {
     /// Starts recording the screen to the Desktop with `simctl io recordVideo`, or stops and
     /// saves a running recording.
     pub fn record(&mut self, by: By, cx: &mut Context<Self>) -> Result<Option<PathBuf>, String> {
-        if let Some(mut recording) = self.recording.take() {
-            recording.stdin = None;
-            let path = recording.path.clone();
-            let elapsed = recording.started.elapsed().as_secs();
-            self.note(by, format!("recorded {}:{:02} to {}", elapsed / 60, elapsed % 60, path.display()));
+        if let Some(saved) = self.finish_recording(by, cx) {
             self._tasks.push(cx.spawn(async move |this, cx| {
-                let done = cx.background_executor().spawn(async move { recording.child.wait().map(|s| s.success()) }).await;
-                let _ = this.update(cx, |_, cx| match done {
-                    Ok(true) => cx.emit(SimEvent::Saved { title: "Saved a screen recording".into(), path }),
-                    _ => cx.emit(SimEvent::Toast("The screen recording could not be saved".into())),
-                });
+                let event = saved.await;
+                let _ = this.update(cx, |_, cx| cx.emit(event));
             }));
-            cx.emit(SimEvent::Changed);
             return Ok(None);
         }
         if !self.device.booted { return Err("Boot the simulator to record it".into()); }
@@ -476,6 +482,22 @@ impl SimScreen {
         self.note(by, format!("started recording to {}", path.display()));
         cx.emit(SimEvent::Changed);
         Ok(Some(path))
+    }
+
+    /// Stops capture and waits off-thread for simctl to finish writing the movie.
+    pub(super) fn finish_recording(&mut self, by: By, cx: &mut Context<Self>) -> Option<Task<SimEvent>> {
+        let Recording { mut child, stdin, path, started, .. } = self.recording.take()?;
+        drop(stdin);
+        let elapsed = started.elapsed().as_secs();
+        self.note(by, format!("recorded {}:{:02} to {}", elapsed / 60, elapsed % 60, path.display()));
+        cx.emit(SimEvent::Changed);
+        Some(cx.background_executor().spawn(async move {
+            if child.wait().is_ok_and(|status| status.success()) {
+                SimEvent::Saved { title: "Saved a screen recording".into(), path }
+            } else {
+                SimEvent::Toast("The screen recording could not be saved".into())
+            }
+        }))
     }
 
     /// Copies the live framebuffer in RGBA for the shared annotation layer.

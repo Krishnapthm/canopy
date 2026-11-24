@@ -4,10 +4,10 @@ A browser pane keeps web pages in tabs on the canvas, right next to the agent wo
 
 ## Open a page
 
-1. Click **Browser** at the top right of the window. A **New tab** pane opens with the address field focused.
+1. Click **Browser** at the top right of the window. A **New tab** page opens in the [files panel](Files-Panel) with the address field focused.
 2. Type an address such as `localhost:3000` and press Enter.
 
-The pane opens pinned to the top right corner of the window, where it stays while you pan and zoom the canvas. Click **Move to canvas** on its helper bar to put it on the canvas with your other panes, or **Pin to screen** to pin it again.
+The browser opens docked in the files panel, as a tab. Click **Move to canvas** on its helper bar to put it on the canvas with your other panes. On the canvas, **Open in panel** docks it again, and **Pin to screen** pins it to the top right corner of the window, where it stays while you pan and zoom (**Unpin** puts it back).
 
 Only `http` and `https` pages open. A bare local address like `localhost:3000` gets `http://`, and other bare hosts get `https://`.
 
@@ -15,6 +15,7 @@ Agents can open a browser pane too, usually wired to themselves:
 
 ```sh
 canopy pane new browser localhost:3000 --wire
+canopy pane new browser localhost:3000 --place canvas  # on the canvas, not in the panel
 canopy pane open p2 http://localhost:3000/pricing  # point an existing pane at another page
 ```
 

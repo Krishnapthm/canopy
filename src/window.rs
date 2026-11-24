@@ -5,7 +5,7 @@
 //! terminal is a mod. Commands (commands.rs) are the one way to change
 //! anything: keys, mods, menus and agents all run them.
 
-use crate::hc::Core;
+use crate::{canvas, hc::Core};
 mod floats;
 mod canvas_view;
 pub(crate) use canvas_view::browser::forget_browser_data_if_until_quit;
@@ -13,7 +13,7 @@ mod ui;
 mod movable;
 mod pane_drag;
 mod pane_size;
-mod titlebar;
+pub(crate) mod titlebar;
 
 use crate::layout::{Axis, Background as Paint, Content, Fit, HeaderContent, Kind, Line, Node, PaneFrame, Size as Span};
 use crate::model::{self, Tab, Model};
@@ -146,7 +146,10 @@ const LAYOUTS: &[(&str, &str)] = &[
 ];
 
 /// Pictures shipped layouts name as their `preview`, written beside them.
-const LAYOUT_PREVIEWS: &[(&str, &str)] = &[("win98.svg", include_str!("../defaults/layouts/win98.svg"))];
+const LAYOUT_PREVIEWS: &[(&str, &str)] = &[
+    ("main.svg", include_str!("../defaults/layouts/main.svg")),
+    ("win98.svg", include_str!("../defaults/layouts/win98.svg")),
+];
 
 pub fn shipped_layouts() -> Vec<&'static str> {
     LAYOUTS.iter().map(|(n, _)| *n).collect()
@@ -437,6 +440,8 @@ pub struct AppWindow {
     /// Core's terminal records by address.
     live: HashMap<String, Value>,
     listed_once: bool,
+    #[cfg(target_os = "macos")]
+    notification_focus: Option<String>,
     /// Live folders by address (from the shell process).
     cwds: HashMap<String, String>,
     /// When each terminal's repo and branch were last read, and what it was doing.
@@ -538,6 +543,8 @@ impl AppWindow {
             watched: Watched::default(),
             live: HashMap::new(),
             listed_once: false,
+            #[cfg(target_os = "macos")]
+            notification_focus: None,
             cwds: HashMap::new(),
             folders_checked: HashMap::new(),
             born: RefCell::new(HashMap::new()),
@@ -593,6 +600,8 @@ impl AppWindow {
                 this.place_write = Some(t);
             }
         }));
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        window.observe_button_layout_changed(|window, _| window.refresh()).detach();
         let closing = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
             // macOS: the red button hides the app instead, so alerts keep ringing;
@@ -603,8 +612,7 @@ impl AppWindow {
             }
             let _ = closing.update(cx, |this, cx| {
                 this.close_pop_outs(cx);
-                this.drain_documents(window, cx);
-                this.close_mods_now(std::time::Instant::now() + Duration::from_millis(250), window, cx);
+                this.prepare_close(window, cx);
             });
             crate::place::save(window, cx);
             true
@@ -1418,9 +1426,9 @@ impl AppWindow {
 
     /// Creates what's visible, drops what isn't, publishes state, saves, focuses.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.canvas_state.editing != self.canvas_state.file { self.canvas_state.editing = None; }
+        if self.canvas_state.editing.as_ref() != self.canvas_state.file_path() { self.canvas_state.editing = None; }
         // The picker finds open file tabs by this; set_shared is a no-op when unchanged.
-        mods::set_shared("canvas.files".into(), json!(self.canvas_state.tabs));
+        mods::set_shared("canvas.files".into(), json!(self.canvas_state.doc.panel.tabs.iter().filter_map(crate::canvas::PanelTab::file).collect::<Vec<_>>()));
         self.sync_canvas(window,cx);
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
@@ -1493,7 +1501,7 @@ impl AppWindow {
         }
         self.publish_shown_copies();
         if let Some(copy) = self.copies.get("canvas-tree") {
-            mods::send_command_to(copy.id, &json!({"selected":self.canvas_state.file}).to_string());
+            mods::send_command_to(copy.id, &json!({"selected":self.canvas_state.file_path()}).to_string());
         }
 
         // Keyboard to the focused pane when it changes (never steal it from an open dialog).
@@ -1745,6 +1753,7 @@ impl AppWindow {
     /// Tells mods what changed (they re-render only if something did).
     fn publish(&mut self, cx: &mut Context<Self>) {
         let m = &self.model;
+        let doc = &self.canvas_state.doc;
         let home = home();
         let spaces: Vec<Value> = m
             .spaces
@@ -1754,7 +1763,9 @@ impl AppWindow {
                 // The branch of the terminal the space shows first.
                 let first = p.active_tab().and_then(|c| c.focused_pane()).and_then(|pane| m.address_of(&pane));
                 let branch = first.and_then(|a| m.folder_info.get(&a)).and_then(|f| f.branch.clone());
-                model::space_json(m, p, i, branch.as_deref(), &home)
+                let mut space = model::space_json(m, p, i, branch.as_deref(), &home);
+                space["color"] = json!(doc.space_color(&p.id));
+                space
             })
             .collect();
         // A window's terminal with the keyboard first, then a layout terminal block.
@@ -1770,7 +1781,7 @@ impl AppWindow {
                     let zoomed = ctx.zoomed.as_deref() == Some(p.id.as_str());
                     // A mod pane: what it shows, no terminal.
                     if let Some(Content::Mod { name, .. }) = p.content() {
-                        panes.push(json!({ "pane": p.id, "terminal": null, "mod": name, "tab": ctx.id, "title": name, "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id) }));
+                        panes.push(json!({ "pane": p.id, "terminal": null, "mod": name, "tab": ctx.id, "title": name, "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id), "color": null }));
                         continue;
                     }
                     let Some(addr) = p.terminal() else { continue };
@@ -1780,6 +1791,7 @@ impl AppWindow {
                     });
                     panes.push(json!({
                         "pane": p.id, "terminal": addr, "tab": ctx.id, "name": ctx.name, "title": title.clone().unwrap_or_default(),
+                        "color": doc.effective_color(addr),
                         "cwd": self.cwds.get(addr), "branch": m.folder_info.get(addr).and_then(|f| f.branch.clone()),
                         "status": m.status(addr), "app": a.and_then(|a| a.app.clone()), "program": self.program(addr),
                         "focused": focused, "zoomed": zoomed, "movable": self.pane_movable(&p.id),
@@ -2178,11 +2190,14 @@ impl AppWindow {
         } else if listed {
             self.publish(cx);
         }
+        #[cfg(target_os = "macos")]
+        if let Some(address) = self.notification_focus.take() {
+            self.focus_notification(address, window, cx);
+        }
     }
 
     /// Tells the person an agent needs them or finished: Canopy's sounds, and a
-    /// toast (drawn by the `toast` mod; click it to go there) unless they're
-    /// looking at that agent.
+    /// clickable toast or macOS notification unless they're looking at that agent.
     fn alert(&mut self, addr: &str, alert: model::Alert, looking: bool, window: &mut Window, cx: &mut Context<Self>) {
         if settings::get().sounds.enabled {
             crate::sound::play(if alert == model::Alert::Blocked { "blocked" } else { "done" });
@@ -2217,7 +2232,37 @@ impl AppWindow {
             "title": title, "body": place, "level": level,
             "action": { "name": "agent.focus", "args": { "terminal": addr } },
         });
+        #[cfg(target_os = "macos")]
+        if settings::get().desktop_notifications
+            && crate::notify_mac::post(&title, || self.desktop_notice_body(addr, cx), addr, &notification, cx)
+        {
+            return;
+        }
         self.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": notification }), window, cx);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn desktop_notice_body(&self, addr: &str, cx: &App) -> String {
+        let views = self.terminal_views(cx);
+        let views = views.iter().filter(|(address, _)| address == addr).map(|(_, view)| view.read(cx));
+        if let Some((body, _)) = views.clone().filter_map(TerminalView::recent_notice).max_by_key(|(_, at)| *at) {
+            return body;
+        }
+        let title = views.map(|view| view.title.as_str()).find(|title| !title.is_empty() && *title != addr)
+            .or_else(|| self.live.get(addr).and_then(|r| r["title"].as_str()));
+        crate::vt::notice_text(title.unwrap_or_default())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn focus_notification(&mut self, address: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.listed_once {
+            // Clicking a notification can start Canopy before its first terminal listing.
+            self.notification_focus = Some(address);
+            return;
+        }
+        cx.activate(true);
+        window.activate_window();
+        self.run("agent.focus", json!({"terminal": address}), window, cx);
     }
 
     /// Keeps the model true to core, on every listing: drops panes whose terminal
@@ -3017,7 +3062,7 @@ impl AppWindow {
             "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
-            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" => self.pane_command(name, a, window, cx),
+            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" | "canvas.pane_dock" => self.pane_command(name, a, window, cx),
             "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" | "canvas.annotate_agent" => self.annotation_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
             | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
@@ -3027,15 +3072,14 @@ impl AppWindow {
             "canvas.pane_quote" => self.quote_image(window, cx),
             "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
             "app.menu" => {
-                let groups = crate::app_menu::groups(&self.canvas_state.doc.view);
-                let rows: Vec<Value> = if let Some(group) = a["group"].as_str() {
-                    groups.into_iter().find(|(name, _)| *name == group).map(|(_, rows)| rows.into_iter().filter(|row| !row.is_null()).map(|mut row| {
-                        if row[3] == true { row[0] = json!(format!("✓ {}", row[0].as_str().unwrap())); }
-                        row.as_array_mut().unwrap().truncate(3);
-                        row
-                    }).collect()).unwrap_or_default()
-                } else { groups.into_iter().map(|(name, _)| json!([format!("{name} >"), "app.menu", {"group":name}])).collect() };
-                self.open_menu("primary", json!({"items":rows}), None, window, cx);
+                let Some(target) = crate::app_menu::popup(&self.canvas_state.doc.view, a["group"].as_str()) else {
+                    return self.fail("Unknown main menu group");
+                };
+                #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                let anchor = self.main_menu_anchor();
+                #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+                let anchor = None;
+                self.open_menu("primary", target, anchor, window, cx);
             }
             "quote.menu" | "quote.send" => self.quote_command(name, a, window, cx),
             "panel.open" => {
@@ -3061,12 +3105,21 @@ impl AppWindow {
                 self.create_canvas(a.clone(), window, cx);
             }
             "canvas.space_style" => {
-                if a.get("color").is_some() && !Self::arg(a, "color").is_some_and(|c| crate::canvas::COLORS.contains(&c)) { return self.fail("invalid space color"); }
-                if let Some(space) = Self::arg(a, "id").and_then(|id| self.canvas_state.doc.spaces.iter_mut().find(|s| s.space == id)) {
-                    let Some(color) = Self::arg(a, "color").filter(|c| crate::canvas::COLORS.contains(c)) else { return self.fail("pick a space color") };
-                    space.color = color.into();
-                    self.canvas_changed(cx);
-                }
+                let Some(color) = Self::arg(a, "color").and_then(canvas::Hue::from_name) else { return self.fail("invalid space color") };
+                let Some(space) = Self::arg(a, "id").and_then(|id| self.canvas_state.doc.spaces.iter_mut().find(|s| s.space == id)) else { return self.fail("no such canvas space") };
+                space.color = color;
+                self.canvas_changed(cx);
+            }
+            "canvas.pane_color" => {
+                let color = if a["color"].is_null() {
+                    None
+                } else {
+                    let Some(color) = Self::arg(a, "color").and_then(canvas::Hue::from_name) else { return self.fail("invalid pane color") };
+                    Some(color)
+                };
+                let Some(pane) = Self::arg(a, "pane").and_then(|id| self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id)) else { return self.fail("no such canvas pane") };
+                pane.color = color;
+                self.canvas_changed(cx);
             }
             // ---- spaces
             "space.new" => {
@@ -3704,8 +3757,24 @@ impl AppWindow {
             "menu"
         };
         let defaults = self.folders.get(name).map(|f| mod_overlay(&f.dir)).unwrap_or_else(|| json!({}));
-        let spec = terminal_menu_spec(name, &defaults, tab, target);
-        self.open_overlay(mods::new_overlay_id(), spec, window, cx);
+        let home = target["group"].is_null();
+        let mut spec = terminal_menu_spec(name, &defaults, tab, target);
+        let id = if tab == "primary" {
+            const ID: &str = "main-menu";
+            if name == "menu" {
+                spec["width"] = json!(220);
+            }
+            if self.overlays.iter().any(|o| o.id == ID) {
+                self.close_overlay(ID, window, cx);
+                if home {
+                    return;
+                }
+            }
+            ID.into()
+        } else {
+            mods::new_overlay_id()
+        };
+        self.open_overlay(id, spec, window, cx);
     }
 
     /// The layout's notification mod (`"toast"` on the root), else the shipped `toast`.
@@ -3934,6 +4003,12 @@ impl AppWindow {
             Request::OpenOverlay { id, spec } => self.open_overlay(id, spec, window, cx),
             Request::CloseOverlay { id } => self.close_overlay(&id, window, cx),
             Request::Refresh => self.refresh_mods(cx),
+            #[cfg(target_os = "macos")]
+            Request::FocusNotification { address } => self.focus_notification(address, window, cx),
+            #[cfg(target_os = "macos")]
+            Request::NotificationToast { notification } => {
+                self.open_overlay(mods::new_overlay_id(), json!({"kind": "toast", "notification": notification}), window, cx);
+            }
             Request::Control { cmd, reply } => {
                 self.held_reply = Some(reply);
                 let answer = self.control(cmd, window, cx);
@@ -3997,6 +4072,7 @@ impl AppWindow {
     /// under the terminal that started them.
     fn world(&self) -> Value {
         let m = &self.model;
+        let doc = &self.canvas_state.doc;
         let children = |addr: &str| -> Vec<String> {
             let mut out: Vec<String> = self
                 .live
@@ -4010,7 +4086,7 @@ impl AppWindow {
         let terminal = |pane: &str, addr: &str| {
             let rec = self.live.get(addr);
             json!({
-                "terminal": addr, "pane": pane, "status": m.status(addr),
+                "terminal": addr, "pane": pane, "status": m.status(addr), "color": doc.effective_color(addr),
                 "app": m.agents.get(addr).and_then(|a| a.app.clone()),
                 "name": rec.and_then(|r| r.get("name")).cloned(),
                 "sub_agents": children(addr),
@@ -4029,7 +4105,7 @@ impl AppWindow {
                         json!({ "id": c.id, "name": Model::tab_name(p, c), "active": Some(&c.id) == active.as_ref(), "settled": c.settled.is_some(), "terminals": terms })
                     })
                     .collect();
-                json!({ "id": p.id, "name": m.space_name(p, &home()), "folder": p.folder, "machine": p.machine, "active": m.active.as_deref() == Some(&p.id), "tabs": tabs })
+                json!({ "id": p.id, "name": m.space_name(p, &home()), "folder": p.folder, "machine": p.machine, "active": m.active.as_deref() == Some(&p.id), "color": doc.space_color(&p.id), "tabs": tabs })
             })
             .collect();
         json!({ "spaces": spaces, "recent": m.recent })
@@ -5964,6 +6040,14 @@ export default class Probe extends View {
             assert!(!this.canvas_key(&gpui::Keystroke::parse("ctrl-alt-shift-escape").unwrap(), window, cx), "modified keys reach the keymap");
         }));
         cx.simulate_keystrokes("q l");
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        {
+            cx.simulate_keystrokes("f10");
+            assert!(view.update(cx, |this, _| this.overlays.iter().any(|o| o.id == "main-menu")));
+            cx.simulate_keystrokes("f10");
+            assert!(view.update(cx, |this, _| this.overlays.iter().all(|o| o.id != "main-menu")));
+            assert!(cx.update(|window, cx| view.read(cx).focus.is_focused(window)));
+        }
         cx.update(|window, cx| view.update(cx, |this, cx| {
             assert_eq!(this.canvas_state.selected, ["t2"]);
             assert!(!this.overlays.iter().any(|o| o.kind.modal_keys()), "global close did not take the mode key");

@@ -69,6 +69,16 @@ test("a drawn wire can be removed", () => {
   expect(items({ tab: "canvas-wire", target: { a: "t1", b: "t2" } })).toEqual([["Remove", "wire.remove", { a: "t1", b: "t2" }]]);
 });
 
+test("pane colors use the canvas pane ID and can restore inheritance", () => {
+  const color = items({ tab: "canvas-card", target: { terminal: "t1", id: "tab1" } }).find(([label]) => label === "Color");
+  expect(color).toEqual(["Color", "sub:canvas-colors", { pane: "t1" }]);
+  const paneColors = items({ tab: "canvas-colors", target: color![2] });
+  expect(paneColors[0]).toEqual(["Space color", "canvas.pane_color", { pane: "t1", color: null }]);
+  expect(paneColors.slice(1).map(([label, command, args]) => [label, command, args])).toEqual(
+    items({ tab: "canvas-colors", target: { id: "s1" } }).map(([label]) => [label, "canvas.pane_color", { pane: "t1", color: label }])
+  );
+});
+
 test("arrange picker lists the four layouts and preserves its space target", () => {
   expect(items({ tab: "canvas-arrange", target: { space: "s1" } }).map(([,command,args])=>[command,args])).toEqual(
     ["tidy","row","column","wires"].map(layout=>["canvas.arrange",{space:"s1",layout}])
@@ -195,4 +205,35 @@ test("canvas-agents numbers installed rows and starts the numbered agent", () =>
   keydown!({ key: "1", modifiers: { shift: true } }, cx);
   expect(sent).toHaveLength(1);
   expect(stopped).toBe(2);
+});
+
+test("the primary menu follows keyboard navigation without opening another overlay", () => {
+  const sent: unknown[] = [];
+  let closed = 0;
+  let keydown: (event: { key: string }, cx: unknown) => void;
+  const element: any = new Proxy({}, { get: (_, name) => (...args: any[]) => {
+    if (name === "on_key_down") keydown = args[0];
+    return element;
+  } });
+  const home = [["File", "app.menu", { group: "File" }], ["Settings", "app.settings", {}]];
+  const file = [["Back", "app.menu", {}], ["New Terminal", "canvas.create", {}]];
+  const current = { tab: "primary", target: { home, groups: { File: file } } };
+  const Menu = new Function("View", "div", "h_flex", "v_flex", "props", "theme", "ui", "keys", "closeOverlay", "run", `${source}; return Menu;`)(
+    class {}, () => element, () => element, () => element, () => current,
+    () => ({}), { size: {} }, () => [], () => closed++, (...args: unknown[]) => sent.push(args));
+  const menu = new Menu();
+  menu.at = 0;
+  const cx = { notify() {} };
+  menu.render(cx);
+  keydown!({ key: "right" }, cx);
+  menu.render(cx);
+  expect(menu.list).toEqual(file);
+  keydown!({ key: "left" }, cx);
+  menu.render(cx);
+  expect(menu.list).toEqual(home);
+  expect(closed).toBe(0);
+  keydown!({ key: "down" }, cx);
+  keydown!({ key: "enter" }, cx);
+  expect(closed).toBe(1);
+  expect(sent).toEqual([["app.settings", {}]]);
 });

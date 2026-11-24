@@ -465,10 +465,10 @@ impl AppWindow {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).cloned().ok_or("The pane closed")?;
         // A popped-out page is annotated in its own window, whatever space the canvas shows.
         let popped = self.browser_popped(id);
-        if !popped && !self.canvas_state.doc.shows(pane.space.as_ref()) { return Err("Go to the pane's space to annotate it".into()); }
+        if !popped && !self.canvas_state.shows_pane(&pane) { return Err("Bring the pane into view to annotate it".into()); }
         let zoom = self.canvas_state.doc.camera.zoom;
         let width = pane.pinned.map_or(pane.rect[2] * zoom, |p| p[2]) - 2.;
-        let needs_room = width < 520. || zoom < 0.75;
+        let needs_room = !self.canvas_state.doc.docked(id) && (width < 520. || zoom < 0.75);
         let url = pane.url().unwrap_or_default().to_owned();
         match pane.kind {
             canvas::Kind::Browser { viewport, .. } => {
@@ -1411,7 +1411,7 @@ impl AppWindow {
         let a = self.canvas_state.annotations.get(id)?;
         // A popped page's annotation takes the keyboard in its own window.
         if self.browser_popped(id) { return None; }
-        if a.live || a.outgoing.as_ref().is_some_and(|o| o.sending) || !self.canvas_state.doc.panes.iter().any(|p| &p.id == id && self.canvas_state.doc.shows(p.space.as_ref())) { return None; }
+        if a.live || a.outgoing.as_ref().is_some_and(|o| o.sending) || !self.canvas_state.doc.panes.iter().any(|p| &p.id == id && self.canvas_state.shows_pane(p)) { return None; }
         Some(a.draft.as_ref().map_or_else(|| a.focus.clone(), |d| d.input.read(cx).focus_handle(cx)))
     }
 

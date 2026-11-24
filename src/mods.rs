@@ -392,6 +392,10 @@ pub enum Request {
     OpenOverlay { id: String, spec: Value },
     CloseOverlay { id: String },
     Refresh,
+    #[cfg(target_os = "macos")]
+    FocusNotification { address: String },
+    #[cfg(target_os = "macos")]
+    NotificationToast { notification: Value },
     /// From `canopy do` / `canopy status` (control.rs); answer on `reply`.
     Control { cmd: Value, reply: std::sync::mpsc::Sender<Value> },
 }

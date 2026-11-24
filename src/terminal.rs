@@ -559,6 +559,11 @@ impl TerminalView {
         g.refresh_theme(&vt::theme(), cell);
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn recent_notice(&self) -> Option<(String, Instant)> {
+        self.grid.borrow().vt.recent_notice().map(|(text, at)| (text.to_owned(), at))
+    }
+
     /// Its title as shown (see `shown_title`); news only when that changed.
     fn set_title(&mut self, title: &str, cx: &mut Context<Self>) {
         let shown = shown_title(title);
@@ -4127,11 +4132,12 @@ mod tests {
         let many = vec![std::path::PathBuf::from("/a.png"), std::path::PathBuf::from("/b.png")];
         assert!(stage_temporary_screenshot(&many).is_none());
         // A file that is not an image is not staged either.
-        let notes = std::env::temp_dir().join("T/TemporaryItems/NSIRD_x/notes.txt");
+        let root = std::env::temp_dir().join(format!("herdr-other-drop-test-{}", std::process::id()));
+        let notes = root.join("T/TemporaryItems/NSIRD_x/notes.txt");
         std::fs::create_dir_all(notes.parent().unwrap()).unwrap();
         std::fs::write(&notes, b"hello").unwrap();
         assert!(stage_temporary_screenshot(std::slice::from_ref(&notes)).is_none());
-        std::fs::remove_dir_all(notes.parent().unwrap().parent().unwrap()).ok();
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

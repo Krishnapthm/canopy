@@ -8,8 +8,8 @@
 //! With `system`, the app draws an empty strip for the window buttons; with
 //! `none`, they sit over the layout where it says (`traffic_lights`).
 //! Linux: decorations are asked for live; when the compositor leaves them to
-//! us (GNOME always does), the app resizes from the window's edges and mods
-//! draw the buttons (`window()`).
+//! us (as on GNOME Wayland), the app draws resize edges and system title bars.
+//! Custom title bars draw their own buttons (`window()`).
 //! Windows: the system's title bar is always hidden. With `system`, the app
 //! draws a strip in the theme with Windows' own buttons (snap layouts work);
 //! with `none`, mods draw the buttons, as on Linux.
@@ -82,7 +82,8 @@ impl AppWindow {
         let buttons = if cfg!(windows) {
             self.titlebar() == Titlebar::Layout
         } else {
-            !cfg!(target_os = "macos") && matches!(window.window_decorations(), Decorations::Client { .. })
+            !cfg!(target_os = "macos") && self.titlebar() == Titlebar::Layout
+                && matches!(window.window_decorations(), Decorations::Client { .. })
         };
         json!({
             "platform": platform,
@@ -136,7 +137,7 @@ impl AppWindow {
 
     /// Wraps the layout in what the window itself needs: on macOS a strip for the
     /// window buttons (system title bar), on Linux resize edges (client decorations).
-    pub(super) fn window_frame(&self, tree: AnyElement, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn window_frame(&self, tree: AnyElement, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         #[cfg(target_os = "macos")]
         {
             let _ = window;
@@ -154,74 +155,54 @@ impl AppWindow {
             let strip = win::strip(window.is_maximized(), cx);
             div().size_full().flex().flex_col().child(strip).child(div().flex_1().min_h_0().flex().child(tree)).into_any_element()
         }
-        #[cfg(not(any(target_os = "macos", windows)))]
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         {
-            let tree = if self.has_canvas() {
-                let button = gpui_base::Button::new("primary-menu").accessibility_label("Primary menu").w(px(36.)).h(px(32.)).flex().items_center().justify_center()
-                    .hover(|s| s.bg(c("hover"))).child(svg().path("icons/menu.svg").size(px(16.)).text_color(c("foreground")))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .on_click(cx.listener(|this, e: &ClickEvent, window, cx| {
-                        this.pointer = e.position();
+            let system = self.titlebar() == Titlebar::System;
+            let menu = system.then(|| {
+                let bounds = self.bounds.clone();
+                let measure = canvas(move |b, _, _| {
+                    bounds.borrow_mut().insert("main-menu-trigger".into(), b);
+                }, |_, _, _, _| {}).absolute().size_full();
+                let button = gpui_base::Button::new("primary-menu")
+                    .accessibility_label("Main Menu").size(px(32.)).rounded(px(6.))
+                    .hover(|s| s.bg(c("hover")))
+                    .tooltip(canvas_view::strip_tooltip("Main Menu".into(), Some("app.menu")))
+                    .child(svg().path("icons/menu.svg").size(px(16.)).text_color(c("foreground")))
+                    .on_click(cx.listener(|this, _, window, cx| {
                         this.dispatch("app.menu", &json!({}), true, window, cx);
                     }));
-                let strip = self.window_drag(div().flex().flex_none().h(px(32.)).w_full().child(button), cx);
-                div().size_full().flex().flex_col().child(strip).child(div().flex_1().min_h_0().flex().child(tree)).into_any_element()
-            } else { tree };
-            let Decorations::Client { tiling } = window.window_decorations() else { return tree };
-            if window.is_maximized() || window.is_fullscreen() {
-                return tree;
-            }
-            let e = px(EDGE);
-            let grip = |id: &'static str, edge: ResizeEdge, cursor: CursorStyle| {
-                div()
-                    .id(id)
-                    .absolute()
-                    .occlude()
-                    .cursor(cursor)
-                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                        cx.stop_propagation();
-                        window.start_window_resize(edge);
-                    })
-            };
-            let mut grips: Vec<AnyElement> = Vec::new();
-            let (top, bottom, left, right) = (!tiling.top, !tiling.bottom, !tiling.left, !tiling.right);
-            if top {
-                grips.push(grip("rz-t", ResizeEdge::Top, CursorStyle::ResizeUpDown).top_0().left(e).right(e).h(e).into_any_element());
-            }
-            if bottom {
-                grips.push(grip("rz-b", ResizeEdge::Bottom, CursorStyle::ResizeUpDown).bottom_0().left(e).right(e).h(e).into_any_element());
-            }
-            if left {
-                grips.push(grip("rz-l", ResizeEdge::Left, CursorStyle::ResizeLeftRight).left_0().top(e).bottom(e).w(e).into_any_element());
-            }
-            if right {
-                grips.push(grip("rz-r", ResizeEdge::Right, CursorStyle::ResizeLeftRight).right_0().top(e).bottom(e).w(e).into_any_element());
-            }
-            let corner = |id, edge, cursor| grip(id, edge, cursor).w(e * 2.).h(e * 2.);
-            if top && left {
-                grips.push(corner("rz-tl", ResizeEdge::TopLeft, CursorStyle::ResizeUpLeftDownRight).top_0().left_0().into_any_element());
-            }
-            if top && right {
-                grips.push(corner("rz-tr", ResizeEdge::TopRight, CursorStyle::ResizeUpRightDownLeft).top_0().right_0().into_any_element());
-            }
-            if bottom && left {
-                grips.push(corner("rz-bl", ResizeEdge::BottomLeft, CursorStyle::ResizeUpRightDownLeft).bottom_0().left_0().into_any_element());
-            }
-            if bottom && right {
-                grips.push(corner("rz-br", ResizeEdge::BottomRight, CursorStyle::ResizeUpLeftDownRight).bottom_0().right_0().into_any_element());
-            }
-            div().size_full().relative().flex().child(tree).children(grips).into_any_element()
+                div().relative().flex_none().child(measure).child(button).into_any_element()
+            });
+            let close = cx.listener(|this, _: &(), window, cx| this.close_window(window, cx));
+            linux::frame(tree, "Canopy".into(), system, menu, window, cx, move |window, cx| close(&(), window, cx))
         }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    pub(super) fn main_menu_anchor(&self) -> Option<Point<Pixels>> {
+        if self.titlebar() != Titlebar::System {
+            return None;
+        }
+        self.bounds.borrow().get("main-menu-trigger").map(Bounds::bottom_left)
+    }
+
+    /// Flushes state for both system and client close buttons.
+    pub(super) fn prepare_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.drain_documents(window, cx);
+        self.close_mods_now(std::time::Instant::now() + Duration::from_millis(250), window, cx);
+    }
+
+    fn close_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        self.close_pop_outs(cx);
+        self.prepare_close(window, cx);
+        crate::place::save(window, cx);
+        window.remove_window();
     }
 
     pub(super) fn window_command(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         match name {
-            "window.close" => {
-                self.drain_documents(window, cx);
-                self.close_mods_now(std::time::Instant::now() + Duration::from_millis(250), window, cx);
-                crate::place::save(window, cx);
-                window.remove_window();
-            }
+            "window.close" => self.close_window(window, cx),
             "window.minimize" => window.minimize_window(),
             #[cfg(windows)]
             "window.maximize" => win::toggle_maximize(window),
@@ -229,6 +210,161 @@ impl AppWindow {
             "window.maximize" => window.zoom_window(),
             _ => {}
         }
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+pub(crate) mod linux {
+    use super::*;
+
+    /// Adds the app header and the frame controls that the compositor leaves to us.
+    pub(crate) fn frame(
+        tree: AnyElement,
+        title: SharedString,
+        system: bool,
+        menu: Option<AnyElement>,
+        window: &mut Window,
+        cx: &mut App,
+        close: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        let client = matches!(window.window_decorations(), Decorations::Client { .. });
+        let client_header = system && client && !window.is_fullscreen();
+        let tree = if client_header || menu.is_some() {
+            let close = std::rc::Rc::new(close);
+            let controls = window.window_controls();
+            let maximized = window.is_maximized();
+            let layout = cx.button_layout().unwrap_or_else(WindowButtonLayout::linux_default);
+            let buttons = |side: [Option<WindowButton>; MAX_BUTTONS_PER_SIDE]| {
+                let close = close.clone();
+                side.into_iter().flatten().filter_map(move |button| {
+                    let (label, icon): (_, &[u8]) = match button {
+                        WindowButton::Minimize if controls.minimize =>
+                            ("Minimize", include_bytes!("../../defaults/mods/tabs/win-min.svg")),
+                        WindowButton::Maximize if controls.maximize && maximized =>
+                            ("Restore", include_bytes!("../../defaults/mods/tabs/win-restore.svg")),
+                        WindowButton::Maximize if controls.maximize =>
+                            ("Maximize", include_bytes!("../../defaults/mods/tabs/win-max.svg")),
+                        WindowButton::Close =>
+                            ("Close Window", include_bytes!("../../defaults/mods/tabs/win-close.svg")),
+                        _ => return None,
+                    };
+                    let close = close.clone();
+                    Some(gpui_base::Button::new((ElementId::from("linux-caption"), button.id()))
+                        .flex_none().size(px(28.)).rounded(px(14.)).accessibility_label(label)
+                        .tooltip(canvas_view::strip_tooltip(label.into(), None))
+                        .hover(|s| s.bg(c("hover")))
+                        .child(svg().data(icon).size(px(14.)).text_color(c("foreground")))
+                        .on_click(move |_, window, cx| match button {
+                            WindowButton::Minimize => window.minimize_window(),
+                            WindowButton::Maximize => window.zoom_window(),
+                            WindowButton::Close => close(window, cx),
+                        }))
+                })
+            };
+            let press = window.use_state(cx, |_, _| std::cell::Cell::new(None::<Point<Pixels>>));
+            let center = div().flex_1().min_w_0().h_full().flex().items_center()
+                .justify_center().overflow_hidden()
+                .when(client_header, |bar| bar.child(div().truncate().text_size(px(13.)).child(title)));
+            let header = div().flex().flex_none().h(px(36.)).w_full().items_center()
+                .px(px(8.)).gap(px(4.)).bg(c("chrome"))
+                .when(client_header, |bar| bar.children(buttons(layout.left)))
+                .child(drag_region(center, press.clone()))
+                .children(menu)
+                .when(client_header, |bar| bar.children(buttons(layout.right)));
+            div().size_full().flex().flex_col()
+                .on_mouse_move(move |event, window, cx| {
+                    let press = press.read(cx);
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        press.set(None);
+                    } else if let Some(from) = press.get() {
+                        let delta = event.position - from;
+                        if delta.x.abs() > px(DRAG_START) || delta.y.abs() > px(DRAG_START) {
+                            press.set(None);
+                            window.start_window_move();
+                        }
+                    }
+                })
+                .child(header)
+                .child(div().flex_1().min_h_0().flex().child(tree))
+                .into_any_element()
+        } else {
+            tree
+        };
+        resize_grips(tree, window)
+    }
+
+    fn drag_region(region: Div, press: Entity<std::cell::Cell<Option<Point<Pixels>>>>) -> Div {
+        region
+            .on_mouse_down(MouseButton::Left, {
+                let press = press.clone();
+                move |event, window, cx| {
+                    if event.click_count == 2 {
+                        press.read(cx).set(None);
+                        if window.window_controls().maximize {
+                            window.zoom_window();
+                        }
+                    } else {
+                        press.read(cx).set(Some(event.position));
+                    }
+                }
+            })
+            .on_mouse_up(MouseButton::Left, {
+                let press = press.clone();
+                move |_, _, cx| press.read(cx).set(None)
+            })
+            .on_mouse_up_out(MouseButton::Left, move |_, _, cx| press.read(cx).set(None))
+            .on_mouse_down(MouseButton::Right, |event, window, _| {
+                if window.window_controls().window_menu {
+                    window.show_window_menu(event.position);
+                }
+            })
+    }
+
+    fn resize_grips(tree: AnyElement, window: &Window) -> AnyElement {
+    let Decorations::Client { tiling } = window.window_decorations() else { return tree };
+    if window.is_maximized() || window.is_fullscreen() {
+        return tree;
+    }
+    let e = px(EDGE);
+    let grip = |id: &'static str, edge: ResizeEdge, cursor: CursorStyle| {
+        div()
+            .id(id)
+            .absolute()
+            .occlude()
+            .cursor(cursor)
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                cx.stop_propagation();
+                window.start_window_resize(edge);
+            })
+    };
+    let mut grips: Vec<AnyElement> = Vec::new();
+    let (top, bottom, left, right) = (!tiling.top, !tiling.bottom, !tiling.left, !tiling.right);
+    if top {
+        grips.push(grip("rz-t", ResizeEdge::Top, CursorStyle::ResizeUpDown).top_0().left(e).right(e).h(e).into_any_element());
+    }
+    if bottom {
+        grips.push(grip("rz-b", ResizeEdge::Bottom, CursorStyle::ResizeUpDown).bottom_0().left(e).right(e).h(e).into_any_element());
+    }
+    if left {
+        grips.push(grip("rz-l", ResizeEdge::Left, CursorStyle::ResizeLeftRight).left_0().top(e).bottom(e).w(e).into_any_element());
+    }
+    if right {
+        grips.push(grip("rz-r", ResizeEdge::Right, CursorStyle::ResizeLeftRight).right_0().top(e).bottom(e).w(e).into_any_element());
+    }
+    let corner = |id, edge, cursor| grip(id, edge, cursor).w(e * 2.).h(e * 2.);
+    if top && left {
+        grips.push(corner("rz-tl", ResizeEdge::TopLeft, CursorStyle::ResizeUpLeftDownRight).top_0().left_0().into_any_element());
+    }
+    if top && right {
+        grips.push(corner("rz-tr", ResizeEdge::TopRight, CursorStyle::ResizeUpRightDownLeft).top_0().right_0().into_any_element());
+    }
+    if bottom && left {
+        grips.push(corner("rz-bl", ResizeEdge::BottomLeft, CursorStyle::ResizeUpRightDownLeft).bottom_0().left_0().into_any_element());
+    }
+    if bottom && right {
+        grips.push(corner("rz-br", ResizeEdge::BottomRight, CursorStyle::ResizeUpLeftDownRight).bottom_0().right_0().into_any_element());
+    }
+    div().size_full().relative().flex().child(tree).children(grips).into_any_element()
     }
 }
 

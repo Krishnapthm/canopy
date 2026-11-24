@@ -18,7 +18,7 @@ The toolbar sits at the bottom center of the canvas layout. From left to right:
 | Mod pane kinds, such as **Note** | Opens that kind of pane. Each installed [mod pane kind](Layouts-and-Mods#mod-panes) gets a button. |
 | **Connect (select a pane first)** | Starts a wire from the selected pane. Select a pane before you click it. |
 
-**Browser** and **Simulator** sit in the bar at the top right of the window, beside **Tile view** and **Files**. They open the pane pinned: it stays in the top right corner while you pan and zoom the canvas. Click **Move to canvas** on its helper bar to place it on the canvas like any pane, and **Pin to screen** to pin it again. **Browser** shows on macOS only, and **Simulator** only on a Mac where Xcode's `xcrun simctl` is installed.
+**Browser** and **Simulator** sit in the bar at the top right of the window, beside **Tile view** and **Files**. They open the pane docked as a tab in the [files panel](Files-Panel). Click **Move to canvas** on its helper bar to place it on the canvas like any pane. On the canvas, **Open in panel** docks it again, and **Pin to screen** pins it to the top right corner while you pan and zoom (**Unpin** undoes it). **Browser** shows on macOS only, and **Simulator** only on a Mac where Xcode's `xcrun simctl` is installed.
 
 To wire from the toolbar: select a pane, click **Connect**, use the arrow keys to choose the other pane, and press `Enter` (or `Esc` to cancel). Dragging a pane's **+** handle does the same with the mouse. See [Wiring](Wiring).
 
@@ -28,7 +28,7 @@ The first time you open a space for a local project folder, the toolbar opens **
 
 ![A helper bar above a terminal pane](images/toolbar-and-helper-bar-2.png)
 
-Hover or select a pane, and its helper bar appears just above the pane's top-left corner, outside the content so it never covers what you are reading. It hides while you drag, resize, draw a selection box or select an image region, so it does not get in the way.
+Hover or select a pane to see its helper bar above the top-left corner. When there is too little room above the pane, the bar moves inside its top edge. It hides while you drag, resize, draw a selection box or select an image region.
 
 Every pane kind's bar ends with the same two buttons:
 

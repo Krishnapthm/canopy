@@ -61,3 +61,4 @@
 - [Troubleshooting](Troubleshooting)
 - [Security and Privacy](Security-and-Privacy)
 - [Build from Source](Build-from-Source)
+- [Linux Desktop](Linux-Desktop)

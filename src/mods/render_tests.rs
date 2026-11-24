@@ -203,6 +203,7 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
             })
         });
     }
+    module = module.async_function("exec", |_| Ok(async { Ok(to_host(&json!({"code": 0, "stdout": "", "stderr": ""}))) }));
     module = module.async_function("knownAgents", |_| Ok(async { Ok(HostValue::Array(vec![])) }));
     module = module.async_function("pickFolder", |_| Ok(async { Ok(HostValue::Null) }));
     module = module.async_function("nextCommand", |_| Ok(std::future::pending::<gpui_shell::HostResult>()));
@@ -838,6 +839,22 @@ fn option_key_settings_are_only_shown_on_macos(cx: &mut TestAppContext) {
             assert_eq!(tree.contains(&format!("st-option-{value}")), platform == "macos", "{platform}: {tree}");
         }
         assert_eq!(tree.contains("st-s-keyboard"), platform == "macos", "{platform}: {tree}");
+    }
+}
+
+#[gpui::test]
+fn desktop_notification_controls_are_only_shown_on_macos(cx: &mut TestAppContext) {
+    cx.update(gpui_shell::init);
+    let staged = Staged::new();
+    for platform in ["linux", "windows", "macos"] {
+        let mut p = props();
+        p["section"] = json!("alerts");
+        let mut values = fixture(true, p);
+        values.insert("window".into(), json!({"platform":platform}));
+        let tree = describe_with_values(cx, &staged, "frame/settings", values, None).unwrap();
+        assert_eq!(tree.contains("st-desktop-notifications"), platform == "macos", "{tree}");
+        assert_eq!(tree.contains("st-notification-style"), platform == "macos", "{tree}");
+        assert!(tree.contains("st-sounds"), "{tree}");
     }
 }
 

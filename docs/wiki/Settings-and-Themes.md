@@ -4,7 +4,9 @@ Canopy has two places for preferences. The **Settings** window covers the common
 
 ## Open settings
 
-Press `Cmd+,` (`Ctrl+,` on Linux and Windows).
+On macOS, choose **Settings** in the **Canopy** menu or press **Cmd+,**.
+On Linux, choose **Settings** in the [Main Menu](Linux-Desktop) or press **Ctrl+,**.
+On Windows, press **Ctrl+,**.
 Changes save immediately.
 
 ![The Settings window](images/settings-and-themes-1.png)
@@ -25,6 +27,14 @@ canopy config
 ```
 
 See [Canvas](Canvas) and [Terminals](Terminals) for their settings.
+
+## Alerts
+
+Use **Settings** > **Alerts** to control how Canopy gets your attention while agents work. **Desktop notifications** is on by default in the macOS app. In `settings.json`, set `desktop_notifications` to `false` to turn it off. **Play sounds** controls Canopy's alert sounds independently.
+
+Click **Notification style** to open macOS notification settings. Choose **Banners** for notifications that disappear automatically or **Alerts** for notifications that stay until you dismiss them.
+
+To include an agent's message, enable terminal notifications in that agent's own settings. See [Agents](Agents#know-when-an-agent-needs-you) for when Canopy alerts you and where a click takes you.
 
 ## Browser
 
