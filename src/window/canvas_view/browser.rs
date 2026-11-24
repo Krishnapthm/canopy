@@ -2203,6 +2203,7 @@ impl AppWindow {
         self.require_browser_url(id)?;
         self.ensure_view(id, window, cx)
     }
+    pub(super) fn rest_live_browser(&mut self, _: &str, _: &mut Context<Self>) {}
     pub(super) fn rest_browser(&mut self, _: &str, _: &mut Context<Self>) {}
     fn rest_page(&mut self, _: &str, _: &mut Context<Self>) {}
     pub(super) fn collapse_browser(&mut self, _: &mut Window, _: &mut Context<Self>) {}
