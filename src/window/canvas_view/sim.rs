@@ -415,6 +415,14 @@ impl AppWindow {
                 _ => {}
             }
         }
+        // The agent picker sits beside Annotate while annotating needs a choice.
+        if let Some(name) = self.annotation_picker(id)
+            && let Some(at) = actions.iter().position(|a| a.command == "canvas.sim_annotate")
+        {
+            actions.insert(at + 1, super::helper_bar::BarAction {
+                icon: "icons/bot.svg".into(), label: format!("Send to {name}").into(), command: "canvas.annotate_agent".into(), args: json!({}),
+            });
+        }
         actions
     }
 
