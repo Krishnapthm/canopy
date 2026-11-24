@@ -43,8 +43,11 @@ The bar across the top of the window, from left to right:
 - **Home** opens Home. It cannot be closed.
 - **Space tabs**, one per space, with a folder icon and the name. A dot marks a space with an agent working or waiting for you. The active tab, and any tab you hover, shows a **Close space** button.
 - **+** opens **New space**.
-- The **grid** button turns on [tile view](Canvas#tile-view).
-- The **folder** button, **Files**, opens or closes the [Files panel](Files-Panel).
+- **Browser** and **Simulator**, when available, open a pane in the [Files panel](Files-Panel).
+- **Tile view** turns on [tile view](Canvas#tile-view).
+- **Files** opens or closes the [Files panel](Files-Panel).
+
+On Linux, the strip also holds [Main Menu and any window controls Canopy draws](Linux-Desktop).
 
 ## Rename, recolor or delete a space
 

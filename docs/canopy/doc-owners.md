@@ -69,7 +69,6 @@ Guides tell the story and link to feature pages for each control.
 | Labels | The `herdr.seen` and `herdr.pinned` label protocol for core clients. |
 | herdr-core | What the core is, installing, updating and checking it. |
 | Glossary | One meaning per Canopy word. |
-| Linux-Desktop | Linux window decorations, the Main Menu and desktop launcher grouping. |
 | Troubleshooting | Symptoms that span features, and how to report a bug. Feature-specific problems stay on the feature page. |
 | Security-and-Privacy | Mod trust, the control socket, untrusted pane content, network rules, installer checks. |
 | Build-from-Source | Building, testing and the isolated development window. |
