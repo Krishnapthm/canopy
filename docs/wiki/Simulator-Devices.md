@@ -11,7 +11,7 @@ Simulator panes need macOS with Xcode and at least one simulator installed. For 
 1. Click **Simulator** at the top right of the window.
 2. Click a simulator in the list. Canopy boots it if it is shut down.
 
-The simulator opens pinned to the top right corner: it stays there, at the same size, while you pan and zoom the canvas. Drag its header to move it and its corner to resize it. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes; **Pin to screen** pins it again.
+The simulator opens pinned to the top right corner, where it stays at the same size as you pan and zoom the canvas. Drag its header to move it or any edge or corner to resize it. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes. **Pin to screen** pins it again.
 
 The **Simulator** button shows only when Xcode's `xcrun simctl` is installed.
 
@@ -30,7 +30,7 @@ canopy pane new sim <udid>           # a specific simulator
 - Press `Esc` to give the keyboard back to the canvas.
 - Click the bezel's side buttons to press them.
 
-A simulator pane scales with the canvas like every pane. Zooming in stops before the biggest pane would leave the window, so the device always stays whole on screen. Resize it with its corner handle or the zoom buttons below.
+A simulator pane scales with the canvas when unpinned. Zooming in stops before the biggest pane would leave the window, so the device always stays whole on screen. Resize it with an edge, a corner or the zoom buttons below.
 
 The pane header shows the iOS version and the state: **Live**, **Connecting**, **Screenshot** or **Recording**.
 
