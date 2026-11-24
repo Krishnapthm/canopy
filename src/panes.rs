@@ -28,7 +28,7 @@ fn request(args: &[String], caller: Option<&str>) -> Result<(&'static str, Value
 }
 
 fn plain_request(words: &[&str], caller: Option<&str>) -> Result<(&'static str, Value), String> {
-    let absolute = |path| std::path::absolute(path).map(|p| p.to_string_lossy().into_owned()).map_err(|e| format!("cannot resolve path: {e}"));
+    let absolute = |path: &str| std::path::absolute(path).map(|p| p.to_string_lossy().into_owned()).map_err(|e| format!("cannot resolve path: {e}"));
     let browser_target = |target: &str| {
         if target.starts_with("./") || target.starts_with("../") { absolute(target) } else { Ok(target.to_owned()) }
     };

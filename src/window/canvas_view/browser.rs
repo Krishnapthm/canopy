@@ -2312,7 +2312,9 @@ impl AppWindow {
 #[cfg(test)]
 mod tests {
     // Explicit: a glob would bring gpui's own `test` attribute in.
-    use super::{GRAB_REQUESTS, PRESETS, REACT_GRAB, file_url, format_quote, menu_items, open_in, page_script, page_zoom, parse_viewport, resolve_source, web_url};
+    #[cfg(target_os = "macos")]
+    use super::browser_target_url;
+    use super::{GRAB_REQUESTS, PRESETS, REACT_GRAB, format_quote, menu_items, open_in, page_script, page_zoom, parse_viewport, permits_navigation, resolve_source, web_url};
     use crate::canvas::{Camera, Kind, Pane};
     use crate::settings::{KeepCookies, OpenLinks};
     use serde_json::json;
