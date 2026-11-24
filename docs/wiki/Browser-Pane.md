@@ -35,9 +35,10 @@ until you close the tab, navigate to a different address or quit. Local pages
 load their assets from disk and block network resources. To follow a link to
 another page, enter its address yourself.
 
-The browser accepts HTML (`.html`, `.htm`), SVG, plain text (`.txt`), PDF and
-images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`, `.ico`, `.bmp`, `.tiff`).
-The native picker shows HTML files. Commands also take local targets:
+The browser opens any file WebKit can display, including HTML, SVG, text, PDF
+and images. If WebKit cannot display a format, Canopy shows a toast and blocks
+the download. The native picker shows only HTML files. Commands also take local
+targets:
 
 ```sh
 canopy pane new browser ./dist/index.html

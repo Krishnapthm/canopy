@@ -110,13 +110,13 @@ fn menu_items(id: &str, viewport: Option<[f32; 2]>, keep: settings::KeepCookies,
     items
 }
 
-/// The `file:` URL of a path the person picked: every byte outside the unreserved set is
-/// percent-encoded. Web-initiated navigation never uses this helper.
-fn file_url(path: &std::path::Path) -> String {
-    let encoded: String = path.as_os_str().as_encoded_bytes().iter().copied()
-        .map(|b| if b.is_ascii_alphanumeric() || b"/-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
-        .collect();
-    format!("file://{encoded}")
+/// Use the same file URL spelling for saved addresses and WebKit navigation decisions.
+#[cfg(target_os = "macos")]
+fn file_url(path: &std::path::Path) -> Result<String, String> {
+    objc2_foundation::NSURL::from_file_path(path)
+        .and_then(|url| url.absoluteString())
+        .map(|url| url.to_string())
+        .ok_or_else(|| format!("Invalid browser file path: {}", path.display()))
 }
 
 /// Classifies an explicit address. Web pages never call this entry point.
@@ -128,7 +128,7 @@ pub(super) fn browser_target_url(input: &str) -> Result<String, String> {
     {
         let path = if file_scheme { file_path(input)? } else { input.into() };
         let path = checked_file(&path)?;
-        Ok(file_url(&path))
+        file_url(&path)
     }
     #[cfg(not(target_os = "macos"))]
     Err("browser panes run on macOS only".into())
@@ -150,9 +150,8 @@ fn file_path(url: &str) -> Result<std::path::PathBuf, String> {
 #[cfg(target_os = "macos")]
 fn checked_file(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let path = path.canonicalize().map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
-    let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or_default().to_ascii_lowercase();
-    if !path.is_file() || !matches!(extension.as_str(), "html" | "htm" | "svg" | "txt" | "pdf" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "ico" | "bmp" | "tiff") {
-        return Err(format!("Unsupported browser file: {}", path.display()));
+    if !path.is_file() {
+        return Err(format!("Choose a regular file: {}", path.display()));
     }
     Ok(path)
 }
@@ -1270,7 +1269,12 @@ impl AppWindow {
                     cx.spawn_in(window, async move |this, cx| {
                         let Ok(Some(path)) = picked.recv().await else { return };
                         let _ = this.update_in(cx, |this, window, cx| {
-                            let result = checked_file(&path).and_then(|path| this.new_browser_tab(&id, file_url(&path), true, window, cx));
+                            let is_html = path.extension().and_then(|ext| ext.to_str())
+                                .is_some_and(|ext| ext.eq_ignore_ascii_case("html") || ext.eq_ignore_ascii_case("htm"));
+                            let result = if is_html {
+                                checked_file(&path).and_then(|path| file_url(&path))
+                                    .and_then(|url| this.new_browser_tab(&id, url, true, window, cx))
+                            } else { Err("Choose an .html or .htm file".into()) };
                             if let Err(e) = result { this.command_error("Open HTML file", &e, window, cx); }
                         });
                     }).detach();
@@ -1640,7 +1644,7 @@ impl AppWindow {
             let folder = self.canvas_state.browsers.pages.get(&key).and_then(|page| page.local_folder.as_ref())
                 .filter(|(granted_url, folder)| granted_url == &url && path.starts_with(folder))
                 .and_then(|(_, folder)| folder.canonicalize().ok().filter(|current| current == folder));
-            let address = file_url(&path);
+            let address = file_url(&path)?;
             Some((address, path, folder))
         } else { None };
         let popped = self.canvas_state.browsers.panes.get(id).and_then(|ui| ui.popped);
@@ -1658,7 +1662,9 @@ impl AppWindow {
             let (open_tx, open_key) = (tx.clone(), key.clone());
             let (nav_tx, nav_key) = (tx.clone(), key.clone());
             let local_url = local.as_ref().map(|(address, _, _)| address.clone());
-            let builder = if local.is_some() {
+            let is_local = local.is_some();
+            let download_error = send(Event::LoadError);
+            let builder = if is_local {
                 wry::WebViewBuilder::new().with_incognito(true)
             } else {
                 browser_store(wry::WebViewBuilder::new()).with_url(url)
@@ -1685,7 +1691,10 @@ impl AppWindow {
                     wry::NewWindowResponse::Deny
                 })
                 // No downloads: a pane shows pages, it does not save files.
-                .with_download_started_handler(|_, _| false)
+                .with_download_started_handler(move |_, _| {
+                    if is_local { download_error("WebKit cannot display this file format".into()); }
+                    false
+                })
                 .build_as_child(window)
                 .map_err(|e| format!("cannot make the web view: {e}"))?;
             let local_load = if let Some((_, path, folder)) = local {
@@ -2350,15 +2359,11 @@ mod tests {
         assert!(url.ends_with("/web%20page%20%231.html"));
         assert_eq!(browser_target_url(&url), Ok(url));
         assert!(browser_target_url("file://other-host/tmp/page.html").is_err());
-        let binary = root.join("file.exe");
-        std::fs::write(&binary, "").unwrap();
-        assert!(browser_target_url(binary.to_str().unwrap()).unwrap_err().contains("Unsupported"));
+        let extensionless = root.join("README");
+        std::fs::write(&extensionless, "plain text").unwrap();
+        assert!(browser_target_url(extensionless.to_str().unwrap()).is_ok());
+        assert!(browser_target_url(root.to_str().unwrap()).is_err());
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn picked_files_become_encoded_file_urls() {
-        assert_eq!(file_url(std::path::Path::new("/tmp/a b#1/é.html")), "file:///tmp/a%20b%231/%C3%A9.html");
     }
 
     #[test]
