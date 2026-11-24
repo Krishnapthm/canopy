@@ -92,38 +92,25 @@ impl AppWindow {
         // shortcut: GPUI tooltips lack cover bounds, measure them if they need to overlap live pages.
         // shortcut: rectangular holes leave square corners, use pane-shaped paths if the corners matter.
         let [x, y, w, h] = screen_rect(page, page.rect, camera);
-        let corner = PANE_RESIZE_CORNER * camera.zoom;
-        let grip = [x + w - 1. - corner, y + h - 1. - corner, corner, corner];
-        std::iter::once(grip)
+        let (edge, corner) = resize_zone_sizes(camera.zoom);
+        let (x, y, w, h) = (x + 1., y + 1., w - 2., h - 2.);
+        // WebKit's native hit test also needs to leave the GPUI resize zones exposed.
+        let grips = [
+            [x + corner, y, w - 2. * corner, edge],
+            [x + corner, y + h - edge, w - 2. * corner, edge],
+            [x, y + corner, edge, h - 2. * corner],
+            [x + w - edge, y + corner, edge, h - 2. * corner],
+            [x, y, corner, corner],
+            [x + w - corner, y, corner, corner],
+            [x, y + h - corner, corner, corner],
+            [x + w - corner, y + h - corner, corner, corner],
+        ];
+        grips.into_iter()
             .chain(
                 doc.panes
                     .iter()
                     .filter(|p| doc.shows(p.space.as_ref()) && paint_order(p) > paint_order(page))
-                    .filter_map(|p| {
-                        match &p.kind {
-                            canvas::Kind::File { path } if !state.previews.contains_key(path) => {
-                                return None;
-                            }
-                            canvas::Kind::Pdf { .. } if !state.pdfs.contains_key(&p.id) => {
-                                return None;
-                            }
-                            canvas::Kind::Sub { parent, sub }
-                                if !state
-                                    .subs
-                                    .get(parent)
-                                    .is_some_and(|subs| subs.iter().any(|s| &s.id == sub)) =>
-                            {
-                                return None;
-                            }
-                            _ => {}
-                        }
-                        let world = if p.boxed() {
-                            p.rect
-                        } else {
-                            self.wire_cell(doc, &p.id)?
-                        };
-                        Some(screen_rect(p, world, camera))
-                    }),
+                    .filter_map(|p| self.wire_cell_rect(p).map(|world| screen_rect(p, world, camera))),
             )
             .collect()
     }
