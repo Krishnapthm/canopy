@@ -3700,13 +3700,14 @@ impl AppWindow {
             .aria_label("Tile view").tooltip(strip_tooltip("Tile view".into(), Some("canvas.tile")))
             .on_click(cx.listener(|this, _, window, cx| this.tile_canvas(true, window, cx))))
             .child(tabs);
-        let mut bar = self.window_drag(div().flex().flex_none().items_center().justify_between().w_full().h(px(BAR))
+        let bar = self.window_drag(div().flex().flex_none().items_center().justify_between().w_full().h(px(BAR))
             .pl(px(bar_inset(cfg!(target_os = "macos"), self.fullscreen)))
             .bg(c(strip)), cx);
-        if !expanded {
-            // Like Claude's header, the canvas controls sit at the right end, beside the panel.
-            bar = bar.child(crumbs.child(div().flex_1().h_full())).child(tabs.flex_none().px(px(8.)));
-        }
+        let controls = (!expanded).then(|| (crumbs.child(div().flex_1().h_full()), tabs.flex_none().px(px(8.))));
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let bar = self.canvas_strip(bar, controls, cx);
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        let bar = bar.when_some(controls, |row, (crumbs, actions)| row.child(crumbs).child(actions));
         if self.connect_hint() {
             area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(32.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -3718,7 +3719,7 @@ impl AppWindow {
             .w_full()
             .flex()
             .when(!expanded, |d| d.child(match self.expanded_browser(c(bg)) { Some(page) => page, None => area.into_any_element() }));
-        // The panel's border and resize grip run the whole window height, over the bar too.
+        // On Linux the caption buttons and menu share the strip, so the grip begins below it.
         let mut grip = None;
         if state.file.is_some() || state.files {
             let full_width = self
@@ -3743,17 +3744,16 @@ impl AppWindow {
                 .flex()
                 .flex_col()
                 .bg(c(bg));
-            // The panel's left border: a 1 px line from the window top to bottom, in a 6 px
-            // grab area; it lights up on hover or drag.
+            // The panel's left border is a 1 px line in a 6 px grab area.
             grip = (!expanded).then(||
                 div()
                     .id("canvas-panel-resize")
                     .group("canvas-panel-resize")
                     .absolute()
                     .right(px(width - 3.))
-                    .top_0()
+                    .top(px(if cfg!(any(target_os = "linux", target_os = "freebsd")) { BAR } else { 0. }))
+                    .bottom_0()
                     .w(px(6.))
-                    .h_full()
                     .flex()
                     .justify_center()
                     .cursor(CursorStyle::ResizeLeftRight)
