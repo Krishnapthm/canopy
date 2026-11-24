@@ -81,6 +81,10 @@ Canopy saves the wires you draw in `canvas.json`. Wires from parents to their he
 
 The wire from a parent glows briefly whenever a child changes state, so you can see activity spread across a team of agents.
 
+A wire takes the color of the pane where you started it, or the parent's color if it appeared automatically. Its end dots use that color too. Wires without a source color use the theme's neutral color.
+
+Wires run behind panes. Select the wire or both of the panes it connects to bring it above the others. While you draw a wire, it follows the pointer above the panes.
+
 ## See also
 
 - [Pair Agents](Pair-Agents): a writer and reviewer working through a wire.

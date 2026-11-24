@@ -69,6 +69,16 @@ test("a drawn wire can be removed", () => {
   expect(items({ tab: "canvas-wire", target: { a: "t1", b: "t2" } })).toEqual([["Remove", "wire.remove", { a: "t1", b: "t2" }]]);
 });
 
+test("pane colors use the canvas pane ID and can restore inheritance", () => {
+  const color = items({ tab: "canvas-card", target: { terminal: "t1", id: "tab1" } }).find(([label]) => label === "Color");
+  expect(color).toEqual(["Color", "sub:canvas-colors", { pane: "t1" }]);
+  const paneColors = items({ tab: "canvas-colors", target: color![2] });
+  expect(paneColors[0]).toEqual(["Space color", "canvas.pane_color", { pane: "t1", color: null }]);
+  expect(paneColors.slice(1).map(([label, command, args]) => [label, command, args])).toEqual(
+    items({ tab: "canvas-colors", target: { id: "s1" } }).map(([label]) => [label, "canvas.pane_color", { pane: "t1", color: label }])
+  );
+});
+
 test("arrange picker lists the four layouts and preserves its space target", () => {
   expect(items({ tab: "canvas-arrange", target: { space: "s1" } }).map(([,command,args])=>[command,args])).toEqual(
     ["tidy","row","column","wires"].map(layout=>["canvas.arrange",{space:"s1",layout}])

@@ -1257,6 +1257,11 @@ Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", pat
 or `booted`), `canvas.close {pane}`. Mods read `canvasPanes()` and `paneKinds()`; `panes()` is
 the tab layouts' panes. `canvas.pane_set {pane, props}` shallow-merges an object
 into a mod pane's saved props (at most 1 MiB); a note's `props.text` is its read text.
+Use `canvas.pane_color {pane, color}` to set a canvas pane's hue. Pass `null` or omit
+`color` to inherit the space's hue. Each `canvasPanes()` entry has an optional `color`
+override. A `panes()` entry reports its terminal's effective canvas hue or `null`.
+Each `spaces()` entry reports the inherited canvas hue or `null` for gray spaces
+and spaces without a canvas card. Use `theme()["tint-" + color]` to draw a hue.
 `canvas.hand {on?}` sets or toggles left-drag panning, as with Space held.
 
 ### Browser panes

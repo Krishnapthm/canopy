@@ -28,7 +28,7 @@ pub(in crate::window) struct WireUi {
 }
 
 /// One edge as drawn: its cells in the order stored (a is the parent of a born edge), and its curve.
-struct Edge {
+pub(super) struct Edge {
     key: (String, String),
     born: bool,
     path: Vec<canvas::Point>,
@@ -98,7 +98,7 @@ impl AppWindow {
     }
 
     /// Every edge between shown cells: drawn wires, and born ones (sub-agents, `hc run` children).
-    fn wire_edges(&self) -> Vec<Edge> {
+    pub(super) fn wire_edges(&self) -> Vec<Edge> {
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
         let mut out: Vec<Edge> = vec![];
         let all = wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
@@ -327,30 +327,37 @@ impl AppWindow {
         out
     }
 
-    /// The edges themselves, a paint layer under the cells. Animation frames are asked for only
-    /// while a glow runs.
-    pub(in crate::window) fn wire_layer(&self, viewport: canvas::Point) -> AnyElement {
+    /// Resting edges paint under panes. A selected wire, a wire with both panes selected,
+    /// and a wire being drawn paint above them. Only an active glow requests animation frames.
+    pub(super) fn wire_layer(&self, viewport: canvas::Point, above: bool, edges: &[Edge]) -> AnyElement {
         let state = &self.canvas_state;
         let camera = state.doc.camera;
-        let mut paint: Vec<(Vec<canvas::Point>, bool, bool, Option<Instant>)> = vec![];
-        for edge in self.wire_edges().into_iter().filter(|e| canvas::edge_visible(camera, &e.path, viewport)) {
+        let mut paint = vec![];
+        for edge in edges {
             let selected = state.wire.selected.as_ref() == Some(&edge.key);
+            let both_ends_selected = state.selected.contains(&edge.key.0) && state.selected.contains(&edge.key.1);
+            if above != (selected || both_ends_selected) || !canvas::edge_visible(camera, &edge.path, viewport) { continue; }
             let pulse = state.wire.pulses.get(&edge.key).copied().filter(|t| t.elapsed() < PULSE);
-            paint.push((edge.path.clone(), edge.born, selected, pulse));
+            let tint = state.doc.effective_color(&edge.key.0).map(|hue| c(&hue.tint_token()).opacity(if selected { 1. } else { 0.6 }));
+            let muted = c("muted-foreground");
+            let color = tint.unwrap_or_else(|| if selected { c("foreground").opacity(0.7) } else { muted.opacity(if edge.born { 0.5 } else { 0.7 }) });
+            paint.push((edge.path.clone(), edge.born, color, tint.unwrap_or(muted), pulse));
         }
-        // A wire being drawn follows the pointer, and the cell it would join lights up.
-        let live = state.wire.drag.as_ref().map(|(_, start, pointer)| (*start, camera.to_world(self.wire_local(*pointer))));
-        let target = state.wire.drag.as_ref().and_then(|(from, _, pointer)| self.wire_cell_at(*pointer, 0.).filter(|k| k != from))
+        let drag = state.wire.drag.as_ref().filter(|_| above);
+        let live = drag.map(|(from, start, pointer)| {
+            let color = state.doc.effective_color(from).map_or_else(|| c("ring"), |hue| c(&hue.tint_token()));
+            (*start, camera.to_world(self.wire_local(*pointer)), color)
+        });
+        let target = drag.and_then(|(from, _, pointer)| self.wire_cell_at(*pointer, 0.).filter(|k| k != from))
             .and_then(|k| self.wire_cell(state.shown.as_ref().unwrap_or(&state.doc), &k));
         canvas(|_, _, _| {}, move |b, _, window, cx| {
             let p = |v: [f32; 2]| point(b.origin.x + px(v[0]), b.origin.y + px(v[1]));
             let mut animating = false;
-            for (path, born, strong, pulse) in &paint {
+            for (path, born, color, dot_color, pulse) in &paint {
                 let screen: Vec<_> = path.iter().map(|v| camera.to_screen(*v)).collect();
                 let glow = pulse.map(|t| 1. - t.elapsed().as_secs_f32() / PULSE.as_secs_f32()).filter(|g| *g > 0.);
                 animating |= glow.is_some();
-                // Foreground, not `ring`: themes give `ring` a low alpha, which reads dimmer than a resting edge.
-                let color = if glow.is_some() { c("foreground") } else if *strong { c("foreground").opacity(0.7) } else { c("muted-foreground").opacity(if *born { 0.5 } else { 0.7 }) };
+                let color = if glow.is_some() { c("foreground") } else { *color };
                 let width = if glow.is_some() { 2.5 } else if *born { 1. } else { 1.5 };
                 // The sampled curve (canvas::curve).
                 let mut line = PathBuilder::stroke(px(width));
@@ -358,17 +365,17 @@ impl AppWindow {
                 line.move_to(p(*first));
                 for v in rest { line.line_to(p(*v)); }
                 if let Ok(line) = line.build() { window.paint_path(line, color); }
-                let dot = |window: &mut Window, v: [f32; 2], r: f32| window.paint_quad(fill(Bounds::new(p([v[0] - r, v[1] - r]), size(px(2. * r), px(2. * r))), c("muted-foreground")).corner_radii(px(r)));
+                let dot = |window: &mut Window, v: [f32; 2], r: f32| window.paint_quad(fill(Bounds::new(p([v[0] - r, v[1] - r]), size(px(2. * r), px(2. * r))), *dot_color).corner_radii(px(r)));
                 if let Some(end) = screen.last() { dot(window, *end, 3.); }
                 if !*born && let Some(start) = screen.first() { dot(window, *start, 3.); }
             }
-            if let Some((start, world)) = live {
+            if let Some((start, world, color)) = live {
                 let (sa, sz) = (camera.to_screen(start), camera.to_screen(world));
                 let mut path = PathBuilder::stroke(px(1.5));
                 path.move_to(p(sa));
                 let [c1, c2] = bezier(sa, sz);
                 path.cubic_bezier_to(p(sz), p(c1), p(c2));
-                if let Ok(path) = path.build() { window.paint_path(path, c("ring")); }
+                if let Ok(path) = path.build() { window.paint_path(path, color); }
             }
             if let Some(r) = target {
                 let [x, y] = camera.to_screen([r[0], r[1]]);
