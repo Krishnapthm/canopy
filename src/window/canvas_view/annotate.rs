@@ -92,6 +92,26 @@ enum Probe {
     Idle,
     Asking,
     Queued(Pos),
+    /// The pointer left while a query was in flight. Its response is stale.
+    Away,
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl Probe {
+    /// Requests a hover query, or queues the point behind the in-flight query.
+    fn request(&mut self, point: Pos) -> bool {
+        if matches!(self, Self::Idle) {
+            *self = Self::Asking;
+            true
+        } else {
+            *self = Self::Queued(point);
+            false
+        }
+    }
+
+    fn leave(&mut self) {
+        if !matches!(self, Self::Idle) { *self = Self::Away; }
+    }
 }
 
 struct Gesture {
@@ -641,6 +661,8 @@ impl AppWindow {
         }
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return Ok(()) };
         a.drag = None;
+        a.probe.leave();
+        a.hover = None;
         a.live = true;
         a.held = Some(held);
         let id = id.to_owned();
@@ -904,7 +926,7 @@ impl AppWindow {
                 .on_hover(cx.listener(move |this, over: &bool, _, cx| {
                     if *over { return; }
                     if let Some(a) = this.canvas_state.annotations.get_mut(&leaving) {
-                        a.probe = Probe::Idle;
+                        a.probe.leave();
                         if a.hover.take().is_some() { cx.notify(); }
                     }
                 }))
@@ -1017,15 +1039,11 @@ impl AppWindow {
         if !matches!(a.host, Host::Browser { .. }) || a.tool != Tool::Select || a.draft.is_some() || a.drag.is_some()
             || a.refreshing || a.live || a.outgoing.as_ref().is_some_and(|o| o.sending) { return; }
         let Some((point, _)) = annotation_point(body, a.page_size, at, false) else {
+            a.probe.leave();
             if a.hover.take().is_some() { cx.notify(); }
             return;
         };
-        if !matches!(a.probe, Probe::Idle) {
-            a.probe = Probe::Queued(point);
-            return;
-        }
-        a.probe = Probe::Asking;
-        self.annotation_probe(id, point, window, cx);
+        if a.probe.request(point) { self.annotation_probe(id, point, window, cx); }
     }
 
     fn annotation_probe(&mut self, id: &str, [x, y]: Pos, window: &mut Window, cx: &mut Context<Self>) {
@@ -1038,18 +1056,17 @@ impl AppWindow {
             let _ = this.update_in(cx, |this, window, cx| {
                 if !this.annotation_is(&id, &session) { return; }
                 let a = this.canvas_state.annotations.get_mut(&id).unwrap();
-                // Idle here means the pointer left the still while the page was answering.
-                let next = match std::mem::replace(&mut a.probe, Probe::Idle) {
-                    Probe::Idle => return,
-                    Probe::Asking => None,
-                    Probe::Queued(point) => Some(point),
-                };
-                a.hover = value.and_then(|v| Some((numbers::<4>(&v["rect"])?, page_string(&v["label"], 60))));
-                if let Some(point) = next {
-                    a.probe = Probe::Asking;
-                    this.annotation_probe(&id, point, window, cx);
+                match std::mem::replace(&mut a.probe, Probe::Idle) {
+                    Probe::Idle | Probe::Away => {}
+                    Probe::Asking => {
+                        a.hover = value.and_then(|v| Some((numbers::<4>(&v["rect"])?, page_string(&v["label"], 60))));
+                        cx.notify();
+                    }
+                    Probe::Queued(point) => {
+                        a.probe = Probe::Asking;
+                        this.annotation_probe(&id, point, window, cx);
+                    }
                 }
-                cx.notify();
             });
         }).detach();
     }
@@ -1089,6 +1106,7 @@ impl AppWindow {
             }
             Tool::Select if browser => {
                 a.refreshing = true;
+                a.probe.leave();
                 a.hover = None;
                 let [x, y] = drag.start;
                 let [ex, ey] = end;
@@ -1281,6 +1299,7 @@ impl AppWindow {
                     a.width = *width;
                 } else if let Some((tool, ..)) = TOOLS.iter().find(|(_, token, _, _)| *token == action) {
                     a.tool = *tool;
+                    a.probe.leave();
                     a.hover = None;
                 } else {
                     return Err("Unknown annotation action".into());
@@ -1649,6 +1668,16 @@ mod tests {
         agents[1].1 = false;
         assert!(annotation_recipient(&agents[1..], Some("t1")).is_err());
         assert_eq!(annotation_recipient(&agents[1..], Some("t2")), Ok("t2"));
+    }
+
+    #[test]
+    fn browser_hover_does_not_start_another_query_after_pointer_reentry() {
+        let mut probe = Probe::Idle;
+        assert!(probe.request([10., 20.]));
+        probe.leave();
+        assert!(!probe.request([30., 40.]));
+        assert!(!probe.request([50., 60.]));
+        assert!(matches!(probe, Probe::Queued([50., 60.])));
     }
 
     #[test]
