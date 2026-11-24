@@ -96,7 +96,7 @@ A browser pane's header has two rows. The pop-out window draws the same header.
 - The **address field**. Type an address and press Enter to open it (`localhost:3000` gets `http://`); this also sets the pane's **Home**. Press Escape to put the current address back. While you are not typing, the field follows the page.
 - **Annotate** (`canvas.browser_annotate`), a button with its label that starts annotating the page.
 
-Drag the pane by the empty part of row 1. Browser actions are in the header. A docked browser uses its Files panel tab to close and **Expand panel** to fill the window.
+Drag the pane by the empty part of row 1. Browser actions are in the header. A docked browser shows its web tabs along the top of the Files panel, with the address field and **Annotate** below. Choose **Close browser pane** from **⋯** to close the whole browser, or **Expand panel** to fill the window.
 
 ### The ⋯ menu
 

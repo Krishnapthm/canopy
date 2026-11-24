@@ -3846,11 +3846,21 @@ impl AppWindow {
                         .group_hover("canvas-panel-resize", |d| d.bg(c("ring")))
                         .when(state.resizing, |d| d.bg(c("ring")))),
             );
-            let mut tabs = div().id("canvas-tabs").role(gpui::Role::TabList).flex().flex_1().min_w_0().h_full().overflow_x_scroll()
+            let mut browser_actions = None;
+            let mut tabs = div().id("canvas-tabs").role(gpui::Role::TabList).flex().flex_1().min_w_0().h_full().items_center().overflow_x_scroll()
                 .when(!expanded, |d| d.pl(px(TAB_INSET)));
             for tab in &state.doc.panel.tabs {
                 let tab = tab.clone();
                 let active = state.file.as_ref() == Some(&tab);
+                if active && let Some(id) = tab.pane()
+                    && let Some(browser_tabs) = self.browser_tabs(id, browser::Host::Pane, cx)
+                {
+                    tabs = tabs.child(browser_tabs);
+                    browser_actions = Some(div().flex().flex_none().items_center().gap(px(4.))
+                        .child(self.browser_tab_add(id, cx))
+                        .child(self.browser_tab_actions(id, browser::Host::Pane, cx)));
+                    continue;
+                }
                 let dirty = tab.file().is_some_and(|path| state.dirty.as_ref() == Some(path));
                 // A pane tab: its kind's icon, its title, and a dot while it is wired.
                 let (icon, label, tint, tip) = match &tab {
@@ -3893,6 +3903,7 @@ impl AppWindow {
                 .pr(px(8.)).gap(px(4.))
                 .bg(c(bg)).border_b_1().border_color(c("border"))
                 .child(tabs)
+                .children(browser_actions)
                 .child(panel_button("panel-expand", if expanded { "mods/pane/unzoom.svg" } else { "mods/pane/zoom.svg" }, c("muted-foreground"), c("hover"))
                     .aria_label("Expand or restore panel").tooltip(strip_tooltip(if expanded { "Restore panel" } else { "Expand panel" }.into(), None))
                     .on_click(cx.listener(move |this, _, window, cx| {
