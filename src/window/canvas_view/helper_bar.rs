@@ -9,13 +9,13 @@ pub(super) struct BarAction {
     pub args: Value,
 }
 
-/// The helper bar buttons for a pane, left to right. Sub-agent cells have none. Browser and
-/// sim panes also pin to the screen (or unpin), and dock in the Files panel, before Connect.
+/// The helper bar buttons for a pane, left to right. Sub-agent cells have none. Sim
+/// panes also pin to the screen (or unpin), and dock in the Files panel, before Connect.
 /// Docked, the bar is the panel header's: it offers Move to canvas, and leaves out Expand and
 /// Close (the tab closes the pane).
 pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>, docked: bool) -> Vec<BarAction> {
     let mut actions = kind_actions(pane, hint);
-    if matches!(pane.kind, canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. }) {
+    if matches!(pane.kind, canvas::Kind::Sim { .. }) {
         let at = actions.iter().position(|a| a.command == "canvas.connect").unwrap_or(actions.len());
         let dock = |icon: &str, label: &str, docked: bool| BarAction { icon: icon.to_owned().into(), label: label.to_owned().into(), command: "canvas.pane_dock".into(), args: json!({"docked":docked}) };
         let extra = if docked {
@@ -26,7 +26,7 @@ pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>, d
         };
         actions.splice(at..at, extra);
         if docked {
-            actions.retain(|a| !matches!(a.command.as_str(), "canvas.browser_expand" | "canvas.sim_zoom" | "canvas.close"));
+            actions.retain(|a| !matches!(a.command.as_str(), "canvas.sim_zoom" | "canvas.close"));
         }
     }
     actions
@@ -76,18 +76,6 @@ fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAc
             BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ]).collect(),
-        canvas::Kind::Browser { .. } => [
-            ("icons/arrow-left.svg", "Back".to_owned(), "canvas.browser_back"),
-            ("icons/rotate-cw.svg", "Reload".to_owned(), "canvas.browser_reload"),
-            ("icons/house.svg", "Home".to_owned(), "canvas.browser_home"),
-            ("icons/pencil.svg", "Annotate".to_owned(), "canvas.browser_annotate"),
-            ("icons/camera.svg", "Screenshot".to_owned(), "canvas.browser_shot"),
-            ("icons/external-link.svg", super::browser::open_in_label(), "canvas.browser_external"),
-            ("icons/maximize-2.svg", "Expand".to_owned(), "canvas.browser_expand"),
-            ("icons/picture-in-picture-2.svg", "Pop out".to_owned(), "canvas.browser_pop"),
-            ("icons/link.svg", "Connect".to_owned(), "canvas.connect"),
-            ("icons/x.svg", "Close".to_owned(), "canvas.close"),
-        ].into_iter().map(|(icon, label, command)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args: json!({}) }).collect(),
         canvas::Kind::Sim { udid } if udid.is_empty() => vec![
             BarAction { icon: "icons/smartphone.svg".into(), label: "Choose simulator".into(), command: "canvas.sim_device".into(), args: json!({}) },
             BarAction { icon: "icons/external-link.svg".into(), label: "Open in Device Hub".into(), command: "canvas.sim_hub".into(), args: json!({}) },
@@ -105,7 +93,7 @@ fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAc
             ("icons/link.svg", "Connect", "canvas.connect", json!({})),
             ("icons/x.svg", "Close", "canvas.close", json!({"pane":pane.id})),
         ].into_iter().map(|(icon, label, command, args)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args }).collect(),
-        canvas::Kind::Sub { .. } => vec![],
+        canvas::Kind::Browser { .. } | canvas::Kind::Sub { .. } => vec![],
     }
 }
 
@@ -182,7 +170,6 @@ impl AppWindow {
             };
             #[cfg(target_os = "macos")]
             let actions = self.sim_relabel(&id, actions, cx);
-            let actions = self.browser_relabel(&id, actions);
             let [x, y] = doc.camera.to_screen([rect[0], rect[1]]);
             let top = y - 8. - bar_height;
             let top = if top < 0. && y + rect[3] * doc.camera.zoom > 0. { y.max(0.) + 3. } else { top };
@@ -262,7 +249,8 @@ mod helper_bar_tests {
         assert_eq!(pane_actions(&pane, Some(&hint), false).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = serde_json::from_value(json!({"kind":"browser","props":{"url":"http://localhost:3000","home":"http://localhost:3000"}})).unwrap();
-        assert_eq!(commands(&pane), ["canvas.browser_back", "canvas.browser_reload", "canvas.browser_home", "canvas.browser_annotate", "canvas.browser_shot", "canvas.browser_external", "canvas.browser_expand", "canvas.browser_pop", "canvas.pane_pin", "canvas.pane_dock", "canvas.connect", "canvas.close"]);
+        assert!(commands(&pane).is_empty());
+        assert!(pane_actions(&pane, None, true).is_empty());
         pane.kind = canvas::Kind::Sim { udid: String::new() };
         assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.pane_dock", "canvas.connect", "canvas.close"]);
         // Pinned, the same button unpins it.

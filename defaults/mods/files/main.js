@@ -2,7 +2,7 @@
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, nextCommand } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, nextCommand } from "herdr";
 
 function location() {
   if (props()?.canvas) return { cwd: props().root, on: null };
@@ -234,6 +234,11 @@ export default class Files extends View {
     const tone = mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : mark ? t.blocked : null;
     return h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover)).when((this.file === path || this.selected === `${this.root}/${path}`), el => el.bg(t.hover))
       .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : props()?.canvas ? (this.selected = `${this.root}/${path}`, run("preview.open", { path: `${this.root}/${path}` }), cx.notify()) : this.show(path, cx))
+      .when(!entry.dir && Boolean(props()?.canvas) && window().platform === "macos", el => el.on_mouse_down("right", (_e, cx) => {
+        cx.stop_propagation();
+        openOverlay({ mod: "menu", kind: "popup", width: 220, frame: "none",
+          props: { tab: "primary", target: { items: [["Open in Canopy browser", "canvas.pane_new", { kind: "browser", url: `${this.root}/${path}` }]] } } });
+      }))
       .child(entry.dir ? svg(`mods/files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
       .child(svg(`mods/files/${icon(entry)}.svg`).size(14).flex_none().text_color(t.muted))
       .child(div().min_w(0).truncate().text_color(tone ?? t.foreground).child(entry.name))

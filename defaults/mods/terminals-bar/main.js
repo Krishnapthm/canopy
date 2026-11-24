@@ -139,7 +139,7 @@ export default class TerminalsBar extends View {
       .gap(8)
       .items_center()
       // macOS: the window buttons sit here (the layout's traffic_lights).
-      .when(w.platform === "macos" && w.titlebar === "none" && !w.fullscreen, (el) => el.pl(72))
+      .pl(w.platform === "macos" && w.titlebar === "none" && !w.fullscreen ? 76 : 12)
       .child(
         own(h_flex())
           .id("tm-space")

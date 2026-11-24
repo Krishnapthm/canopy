@@ -179,7 +179,7 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 
 ## `canvas.pane_new`
 
-Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
+Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
 
 | Argument | Required |
 |---|---|
@@ -246,7 +246,7 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a browser or simulator pane at a target. A browser loads the URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
+Point a browser or simulator pane at a target. A browser loads an HTTP(S) address, an absolute local path or a file URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
 
 | Argument | Required |
 |---|---|
@@ -256,7 +256,7 @@ Point a browser or simulator pane at a target. A browser loads the URL in its ac
 
 ## `canvas.browser_tab_new`
 
-Open a new tab in a browser pane. Pass a URL to load it, or omit url for an empty tab. Replies with pane and tab. With no pane and no single browser pane selected, runs canvas.new.
+Open a new tab in a browser pane. Pass an HTTP(S) address, an absolute local path or a file URL, or omit url for an empty tab. Replies with pane and tab. With no pane and no single browser pane selected, runs canvas.new.
 
 | Argument | Required |
 |---|---|
@@ -395,9 +395,17 @@ Set where HTTP and HTTPS links clicked in terminals open: built_in (a browser ta
 |---|---|
 | `open` | yes |
 
+## `canvas.browser_allow_folder`
+
+Ask the person at the window to pick a directory containing the open local file. WebKit can then load assets from that folder for this tab.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
 ## `canvas.browser_open_file`
 
-Pick an .html or .htm file and open it in a new tab of a browser pane (pane, else the selected pane). The only way a file: page loads: the address field and agents are refused file: URLs.
+Pick an .html or .htm file and open it in a new tab of a browser pane (pane, else the selected pane). Opens a native picker for the person at the window.
 
 | Argument | Required |
 |---|---|

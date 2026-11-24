@@ -6,7 +6,7 @@
 
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new browser <url> [--wire] [--place panel|canvas|pinned] | new mod:<name> [--wire] | new sim [<udid>|booted] [--wire] [--place panel|canvas|pinned] | read <pane> | shot <pane> [file.png] | open <pane> <target> | tap <pane> <x> <y> | swipe <pane> <x1> <y1> <x2> <y2> [ms] | type <pane> <text> | press <pane> <button> | close <pane>";
+const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new browser <url|path> [--wire] [--place panel|canvas|pinned] | new mod:<name> [--wire] | new sim [<udid>|booted] [--wire] [--place panel|canvas|pinned] | read <pane> | shot <pane> [file.png] | open <pane> <target> | tap <pane> <x> <y> | swipe <pane> <x1> <y1> <x2> <y2> [ms] | type <pane> <text> | press <pane> <button> | close <pane>";
 
 /// The app command and its arguments for `canopy pane <args>`; `caller` is
 /// `$HC_TERMINAL_ID`, which `--wire` needs.
@@ -29,6 +29,9 @@ fn request(args: &[String], caller: Option<&str>) -> Result<(&'static str, Value
 
 fn plain_request(words: &[&str], caller: Option<&str>) -> Result<(&'static str, Value), String> {
     let absolute = |path| std::path::absolute(path).map(|p| p.to_string_lossy().into_owned()).map_err(|e| format!("cannot resolve path: {e}"));
+    let browser_target = |target: &str| {
+        if target.starts_with("./") || target.starts_with("../") { absolute(target) } else { Ok(target.to_owned()) }
+    };
     match words {
         ["new", kind, rest @ ..] if kind.starts_with("mod:") && (rest.is_empty() || *rest == ["--wire"]) => {
             let mut a = json!({"kind":kind});
@@ -46,8 +49,8 @@ fn plain_request(words: &[&str], caller: Option<&str>) -> Result<(&'static str, 
             Ok(("canvas.pane_new", a))
         }
         ["new", kind, target] | ["new", kind, target, "--wire"] => {
-            // A browser pane's target is a URL, checked by the window; a file's is a path.
-            let mut a = if *kind == "browser" { json!({"kind":kind,"url":target}) } else { json!({"kind":kind,"path":absolute(target)?}) };
+            // The window validates browser addresses and local paths.
+            let mut a = if *kind == "browser" { json!({"kind":kind,"url":browser_target(target)?}) } else { json!({"kind":kind,"path":absolute(target)?}) };
             if words.len() == 4 {
                 a["wire"] = json!(caller.filter(|s| !s.is_empty()).ok_or("--wire works only inside a Canopy terminal ($HC_TERMINAL_ID is not set)")?);
             }
@@ -59,7 +62,7 @@ fn plain_request(words: &[&str], caller: Option<&str>) -> Result<(&'static str, 
             if std::path::Path::new(file).extension().is_none_or(|ext| !ext.eq_ignore_ascii_case("png")) { return Err("the shot path must end in .png".into()); }
             Ok(("canvas.pane_shot", json!({"pane":pane,"path":absolute(file)?})))
         }
-        ["open", pane, target] => Ok(("canvas.pane_open", json!({"pane":pane,"target":target}))),
+        ["open", pane, target] => Ok(("canvas.pane_open", json!({"pane":pane,"target":browser_target(target)?}))),
         ["tap", pane, x, y] => Ok(("canvas.sim_input", json!({"pane":pane,"action":"tap","x":number(x)?,"y":number(y)?}))),
         ["swipe", pane, x1, y1, x2, y2, ms @ ..] if ms.len() <= 1 => {
             let mut a = json!({"pane":pane,"action":"swipe","x1":number(x1)?,"y1":number(y1)?,"x2":number(x2)?,"y2":number(y2)?});

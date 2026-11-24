@@ -20,7 +20,7 @@ In the classic layout, the tree follows the focused pane's folder, or the active
 
 1. Click a folder to expand or collapse it.
 2. Type in **Search files** to filter the list.
-3. Click a file to preview it.
+3. Click a file to preview it. On macOS, right-click a file in the canvas tree and choose **Open in Canopy browser** to render it. [Supported browser formats](Browser-Pane#open-a-local-file)
 
 - On the canvas, file tabs appear in the top strip above the panel.
 - Click a tab to select it. Hover for its full path. Click its X to close it.
@@ -34,11 +34,11 @@ In the classic layout, the tree follows the focused pane's folder, or the active
 A browser or simulator opens as a tab in this panel, so it sits beside your work without taking canvas space. Click **Browser** or **Simulator** in the [top strip](Spaces#the-top-strip), or let an agent run `canopy pane new browser localhost:3000`. If you have an unsaved edit, the pane opens in a background tab and your editor stays active.
 
 - A docked pane's tab shows its kind's icon and its title (the page title or the device name). A pane wired to an agent adds a small dot in the agent's pane or inherited space color.
-- The panel header holds the pane's [helper bar](Toolbar-and-Helper-Bar). Click **Move to canvas** to show the pane at its saved spot in its space. A pane without a saved spot opens in the middle of the view.
-- Click **Connect** in the header and drop the wire on an agent to wire the pane. A docked pane has no place on the canvas, so no line is drawn. The header reads "Wired to" and the agent's name instead, and the dot marks the tab.
+- Choose **Move to canvas** from the browser’s **⋯** menu or on the simulator’s [helper bar](Toolbar-and-Helper-Bar) to show the pane at its saved spot in its space. A pane without a saved spot opens in the middle of the view.
+- Click **Connect** in the header and drop the wire on an agent to wire the pane. A docked pane has no place on the canvas, so no line is drawn. A dot marks the tab, and the simulator header also shows the agent’s name.
 - Click the tab's X to close the pane. Closing the panel only hides the tabs.
 
-A docked pane is not on the canvas: layout, tiling and wire lines skip it. Canopy remembers docked panes between runs. On the canvas, **Open in panel** on a browser or simulator's helper bar docks it. The pages themselves work as described in [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices).
+A docked pane is not on the canvas: layout, tiling and wire lines skip it. Canopy remembers docked panes between runs. On the canvas, use **Open in panel** from the browser’s **⋯** menu or its equivalent on the simulator’s helper bar. The pages themselves work as described in [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices).
 
 ## Edit a file
 
