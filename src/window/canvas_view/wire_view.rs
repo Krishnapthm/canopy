@@ -28,7 +28,7 @@ pub(in crate::window) struct WireUi {
 }
 
 /// One edge as drawn: its cells in the order stored (a is the parent of a born edge), and its curve.
-struct Edge {
+pub(super) struct Edge {
     key: (String, String),
     born: bool,
     path: Vec<canvas::Point>,
@@ -61,16 +61,26 @@ impl AppWindow {
     /// The drawn rect of a pane the current view shows.
     pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
         let card = doc.panes.iter().find(|c| c.id == key && doc.shows(c.space.as_ref()))?;
-        if card.boxed() { return Some(card.rect); }
-        let view = &self.canvas_state.doc.view;
-        if matches!(card.kind, canvas::Kind::Sub { .. }) {
-            return (*view != canvas::View::Terminals).then_some(card.rect);
+        self.wire_cell_rect(card)
+    }
+
+    pub(super) fn wire_cell_rect(&self, card: &canvas::Pane) -> Option<canvas::Rect> {
+        let state = &self.canvas_state;
+        match &card.kind {
+            canvas::Kind::File { path } => return state.previews.contains_key(path).then_some(card.rect),
+            canvas::Kind::Pdf { .. } => return state.pdfs.contains_key(&card.id).then_some(card.rect),
+            canvas::Kind::Sub { parent, sub } => return (state.doc.view != canvas::View::Terminals
+                && state.subs.get(parent).is_some_and(|subs| subs.iter().any(|item| &item.id == sub)))
+                .then_some(card.rect),
+            canvas::Kind::Image { .. } | canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. }
+            | canvas::Kind::Mod { .. } => return Some(card.rect),
+            canvas::Kind::Terminal { .. } => {}
         }
-        if !canvas::view_allows(view, self.live.get(&card.id).is_some_and(canvas_agent)) { return None; }
+        if !canvas::view_allows(&state.doc.view, self.live.get(&card.id).is_some_and(canvas_agent)) { return None; }
         // Match the drawn cell: an expanded one has its own size, a pill its measured one.
         let size = match card.size() {
             Some(_) => [card.rect[2].max(canvas::PILL_WIDTH), card.rect[3].max(canvas::HEADER)],
-            None => self.canvas_state.pill_sizes.borrow().get(&card.id).map(|v| v.3).unwrap_or([240., 36.]),
+            None => state.pill_sizes.borrow().get(&card.id).map(|v| v.3).unwrap_or([240., 36.]),
         };
         Some([card.rect[0], card.rect[1], size[0], size[1]])
     }
@@ -88,7 +98,7 @@ impl AppWindow {
     }
 
     /// Every edge between shown cells: drawn wires, and born ones (sub-agents, `hc run` children).
-    fn wire_edges(&self) -> Vec<Edge> {
+    pub(super) fn wire_edges(&self) -> Vec<Edge> {
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
         let mut out: Vec<Edge> = vec![];
         let all = wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
@@ -108,13 +118,14 @@ impl AppWindow {
     }
 
     /// The topmost shown cell under a window position, with `slop` extra screen pixels around it.
-    fn wire_cell_at(&self, position: Point<Pixels>, slop: f32) -> Option<String> {
+    pub(super) fn wire_cell_at(&self, position: Point<Pixels>, slop: f32) -> Option<String> {
+        if !self.bounds.borrow().get("canopy-canvas")?.contains(&position) || self.canvas_overlay_at(position) { return None; }
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
-        let camera = doc.camera;
+        let camera = self.canvas_state.doc.camera;
         let p = camera.to_world(self.wire_local(position));
         let s = slop / camera.zoom;
-        doc.panes.iter().filter(|c| {
-            self.wire_cell(doc, &c.id).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
+        doc.panes.iter().filter(|c| doc.shows(c.space.as_ref())).filter(|c| {
+            self.wire_cell_rect(c).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
         }).max_by_key(|c| super::paint_order(c)).map(|c| c.id.clone())
     }
 
@@ -146,11 +157,11 @@ impl AppWindow {
         let bar_hover = if busy { None } else {
             doc.panes.iter().filter(|p| doc.shows(p.space.as_ref()) && !matches!(p.kind, canvas::Kind::Sub { .. }))
                 .filter(|p| {
-                    let rect = if p.boxed() { Some(p.rect) } else { self.wire_cell(doc, &p.id) };
-                    rect.is_some_and(|r| {
-                        let [x, y] = doc.camera.to_screen([r[0], r[1]]);
-                        point[0] >= x && point[0] <= x + r[2] * doc.camera.zoom
-                            && point[1] >= y - 8. - bar_height && point[1] <= y + r[3] * doc.camera.zoom
+                    self.wire_cell_rect(p).is_some_and(|r| {
+                        let camera = self.canvas_state.doc.camera;
+                        let [x, y] = camera.to_screen([r[0], r[1]]);
+                        point[0] >= x && point[0] <= x + r[2] * camera.zoom
+                            && point[1] >= y - 8. - bar_height && point[1] <= y + r[3] * camera.zoom
                     })
                 // Topmost as drawn: every pane kind paints in one z order.
                 }).max_by_key(|p| super::paint_order(p)).map(|p| p.id.clone())
@@ -316,30 +327,37 @@ impl AppWindow {
         out
     }
 
-    /// The edges themselves, a paint layer under the cells. Animation frames are asked for only
-    /// while a glow runs.
-    pub(in crate::window) fn wire_layer(&self, viewport: canvas::Point) -> AnyElement {
+    /// Resting edges paint under panes. A selected wire, a wire with both panes selected,
+    /// and a wire being drawn paint above them. Only an active glow requests animation frames.
+    pub(super) fn wire_layer(&self, viewport: canvas::Point, above: bool, edges: &[Edge]) -> AnyElement {
         let state = &self.canvas_state;
         let camera = state.doc.camera;
-        let mut paint: Vec<(Vec<canvas::Point>, bool, bool, Option<Instant>)> = vec![];
-        for edge in self.wire_edges().into_iter().filter(|e| canvas::edge_visible(camera, &e.path, viewport)) {
+        let mut paint = vec![];
+        for edge in edges {
             let selected = state.wire.selected.as_ref() == Some(&edge.key);
+            let both_ends_selected = state.selected.contains(&edge.key.0) && state.selected.contains(&edge.key.1);
+            if above != (selected || both_ends_selected) || !canvas::edge_visible(camera, &edge.path, viewport) { continue; }
             let pulse = state.wire.pulses.get(&edge.key).copied().filter(|t| t.elapsed() < PULSE);
-            paint.push((edge.path.clone(), edge.born, selected, pulse));
+            let tint = state.doc.effective_color(&edge.key.0).map(|hue| c(&hue.tint_token()).opacity(if selected { 1. } else { 0.6 }));
+            let muted = c("muted-foreground");
+            let color = tint.unwrap_or_else(|| if selected { c("foreground").opacity(0.7) } else { muted.opacity(if edge.born { 0.5 } else { 0.7 }) });
+            paint.push((edge.path.clone(), edge.born, color, tint.unwrap_or(muted), pulse));
         }
-        // A wire being drawn follows the pointer, and the cell it would join lights up.
-        let live = state.wire.drag.as_ref().map(|(_, start, pointer)| (*start, camera.to_world(self.wire_local(*pointer))));
-        let target = state.wire.drag.as_ref().and_then(|(from, _, pointer)| self.wire_cell_at(*pointer, 0.).filter(|k| k != from))
+        let drag = state.wire.drag.as_ref().filter(|_| above);
+        let live = drag.map(|(from, start, pointer)| {
+            let color = state.doc.effective_color(from).map_or_else(|| c("ring"), |hue| c(&hue.tint_token()));
+            (*start, camera.to_world(self.wire_local(*pointer)), color)
+        });
+        let target = drag.and_then(|(from, _, pointer)| self.wire_cell_at(*pointer, 0.).filter(|k| k != from))
             .and_then(|k| self.wire_cell(state.shown.as_ref().unwrap_or(&state.doc), &k));
         canvas(|_, _, _| {}, move |b, _, window, cx| {
             let p = |v: [f32; 2]| point(b.origin.x + px(v[0]), b.origin.y + px(v[1]));
             let mut animating = false;
-            for (path, born, strong, pulse) in &paint {
+            for (path, born, color, dot_color, pulse) in &paint {
                 let screen: Vec<_> = path.iter().map(|v| camera.to_screen(*v)).collect();
                 let glow = pulse.map(|t| 1. - t.elapsed().as_secs_f32() / PULSE.as_secs_f32()).filter(|g| *g > 0.);
                 animating |= glow.is_some();
-                // Foreground, not `ring`: themes give `ring` a low alpha, which reads dimmer than a resting edge.
-                let color = if glow.is_some() { c("foreground") } else if *strong { c("foreground").opacity(0.7) } else { c("muted-foreground").opacity(if *born { 0.5 } else { 0.7 }) };
+                let color = if glow.is_some() { c("foreground") } else { *color };
                 let width = if glow.is_some() { 2.5 } else if *born { 1. } else { 1.5 };
                 // The sampled curve (canvas::curve).
                 let mut line = PathBuilder::stroke(px(width));
@@ -347,17 +365,17 @@ impl AppWindow {
                 line.move_to(p(*first));
                 for v in rest { line.line_to(p(*v)); }
                 if let Ok(line) = line.build() { window.paint_path(line, color); }
-                let dot = |window: &mut Window, v: [f32; 2], r: f32| window.paint_quad(fill(Bounds::new(p([v[0] - r, v[1] - r]), size(px(2. * r), px(2. * r))), c("muted-foreground")).corner_radii(px(r)));
+                let dot = |window: &mut Window, v: [f32; 2], r: f32| window.paint_quad(fill(Bounds::new(p([v[0] - r, v[1] - r]), size(px(2. * r), px(2. * r))), *dot_color).corner_radii(px(r)));
                 if let Some(end) = screen.last() { dot(window, *end, 3.); }
                 if !*born && let Some(start) = screen.first() { dot(window, *start, 3.); }
             }
-            if let Some((start, world)) = live {
+            if let Some((start, world, color)) = live {
                 let (sa, sz) = (camera.to_screen(start), camera.to_screen(world));
                 let mut path = PathBuilder::stroke(px(1.5));
                 path.move_to(p(sa));
                 let [c1, c2] = bezier(sa, sz);
                 path.cubic_bezier_to(p(sz), p(c1), p(c2));
-                if let Ok(path) = path.build() { window.paint_path(path, c("ring")); }
+                if let Ok(path) = path.build() { window.paint_path(path, color); }
             }
             if let Some(r) = target {
                 let [x, y] = camera.to_screen([r[0], r[1]]);
@@ -370,7 +388,7 @@ impl AppWindow {
 
 #[cfg(test)]
 mod sticky_tests {
-    use super::{AppWindow, MouseMoveEvent, TestAppContext, json, point, px};
+    use super::{Modifiers, MouseButton, TestAppContext, json, point, px};
     use crate::window::tests::{in_own_process, open_window, running_alone};
     const TEST: &str = "window::canvas_view::wire_view::sticky_tests::sticky_wire";
 
@@ -380,45 +398,43 @@ mod sticky_tests {
     #[gpui::test]
     fn sticky_wire(cx: &mut TestAppContext) {
         if !running_alone(TEST) { return; }
-        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
+        let (view, cx) = open_window(cx, "wire-input", "", json!({"id":"root","type":"canvas"}));
+        cx.run_until_parked();
         view.update_in(cx, |this, window, cx| {
+            this.model.add_space("root", "Canvas", &crate::window::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
+            this.model.space_mut("root").unwrap().tabs.push(crate::model::Tab::new("tab2", "", "pane2", "t2"));
             this.canvas_state.doc.panes = serde_json::from_value(json!([
-                {"id":"t1","kind":"terminal","props":{"size":[200,100]},"rect":[0,0,200,100],"z":0},
-                {"id":"t2","kind":"terminal","props":{"size":[200,100]},"rect":[400,0,200,100],"z":1}
+                {"id":"t1","kind":"terminal","props":{"size":[260,160]},"rect":[100,120,260,160],"z":0},
+                {"id":"t2","kind":"terminal","props":{"size":[260,160]},"rect":[450,120,260,160],"z":1},
+                {"id":"p1","kind":"image","props":{"path":"/missing.png"},"rect":[450,350,300,180],"z":2}
             ])).unwrap();
-            for t in ["t1", "t2"] { this.live.insert(t.into(), json!({})); }
-            let (down, over_t2) = (point(px(200.), px(50.)), point(px(450.), px(50.)));
-            let start = |this: &mut AppWindow| {
-                this.canvas_state.wire.drag = Some(("t1".into(), [200., 50.], down));
-                this.canvas_state.wire.down = down;
-            };
-            // A release where the press was keeps the wire, and it follows the pointer.
-            start(this);
-            assert!(this.wire_release(down, window, cx));
-            assert!(this.canvas_state.wire.sticky);
-            let moved = MouseMoveEvent { position: over_t2, pressed_button: None, modifiers: Default::default() };
-            assert!(this.wire_pointer(&moved, cx));
-            assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| d.2), Some(over_t2));
-            // Escape drops it.
-            assert!(this.wire_cancel(window, cx));
-            assert!(this.canvas_state.wire.drag.is_none() && this.canvas_state.doc.wires.is_empty());
-            // The next click on a cell connects.
-            start(this);
-            this.wire_release(down, window, cx);
-            assert!(this.wire_pick(over_t2, window, cx));
-            assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
-            assert_eq!(this.canvas_state.doc.wires.len(), 1);
-            // A drag released on empty canvas still just drops.
-            start(this);
-            assert!(this.wire_release(point(px(900.), px(900.)), window, cx));
-            assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
-            // The helper bar's Connect starts the same pointer wire, from the pane's right side.
-            this.wire_start("t2", over_t2, window, cx);
-            assert!(this.canvas_state.wire.sticky);
-            let r = this.wire_cell(&this.canvas_state.doc, "t2").unwrap();
-            assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| (d.0.as_str(), d.1)), Some(("t2", [r[0] + r[2], r[1] + r[3] / 2.])));
-            assert!(this.connect_hint());
+            for t in ["t1", "t2"] { this.live.insert(t.into(), json!({"state":"live", "pid":1})); }
+            this.sync(window, cx);
+            cx.notify();
         });
+        cx.run_until_parked();
+
+        let origin = view.update(cx, |this, _| this.bounds.borrow()["canopy-canvas"].origin);
+        let at = |x, y| origin + point(px(x), px(y));
+        let (handle, terminal, image) = (at(360., 200.), at(550., 205.), at(550., 410.));
+        let none = Modifiers::default();
+        let left = MouseButton::Left;
+
+        cx.simulate_mouse_move(at(230., 190.), None, none);
+        cx.simulate_click(handle, none);
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wire.sticky));
+        cx.simulate_mouse_move(terminal, None, none);
+        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.wire.drag.as_ref().map(|d| d.2)), Some(terminal));
+        cx.simulate_click(terminal, none);
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wire.drag.is_none() && !this.canvas_state.wire.sticky));
+        assert!(view.read_with(cx, |this, _| this.canvas_state.doc.wires.iter().any(|w| w.a == "t1" && w.b == "t2")));
+
+        cx.simulate_mouse_move(at(230., 190.), None, none);
+        cx.simulate_mouse_down(handle, left, none);
+        cx.simulate_mouse_move(image, left, none);
+        cx.simulate_mouse_up(image, left, none);
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wire.drag.is_none()));
+        assert!(view.read_with(cx, |this, _| this.canvas_state.doc.wires.iter().any(|w| w.a == "t1" && w.b == "p1")));
     }
 }
 

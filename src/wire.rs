@@ -376,7 +376,7 @@ mod tests {
     fn file_panes_wire_to_terminals_and_round_trip() {
         let mut d = doc(serde_json::json!({}));
         for id in ["p1", "p2"] {
-            d.panes.push(crate::canvas::Pane { id: id.into(), kind: crate::canvas::Kind::File { path: format!("/tmp/{id}.md") }, rect: [0., 0., 560., 420.], z: 0, space: None, pinned: None });
+            d.panes.push(crate::canvas::Pane { id: id.into(), kind: crate::canvas::Kind::File { path: format!("/tmp/{id}.md") }, rect: [0., 0., 560., 420.], z: 0, space: None, color: None, pinned: None });
         }
         assert!(d.connect("t1", "p1"));
         assert!(!d.connect("p1", "p2"));
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn file_peers_describe_their_verbs() {
         let mut d = doc(serde_json::json!({}));
-        d.panes.push(crate::canvas::Pane { id: "p1".into(), kind: crate::canvas::Kind::File { path: "/tmp/a.md".into() }, rect: [0.; 4], z: 0, space: None, pinned: None });
+        d.panes.push(crate::canvas::Pane { id: "p1".into(), kind: crate::canvas::Kind::File { path: "/tmp/a.md".into() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None });
         let peer = Peer::new("p1", &d);
         assert_eq!(peer.name, "a.md");
         assert!(peer.rec.is_none());
@@ -403,7 +403,7 @@ mod tests {
     #[test]
     fn mod_peers_describe_their_verbs() {
         let mut d = doc(serde_json::json!({}));
-        d.panes.push(crate::canvas::Pane { id: "p2".into(), kind: crate::canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None, pinned: None });
+        d.panes.push(crate::canvas::Pane { id: "p2".into(), kind: crate::canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None });
         let peer = Peer::new("p2", &d);
         assert_eq!(peer.name, "mod:note");
         assert!(peer.rec.is_none());
@@ -428,7 +428,7 @@ mod tests {
         wires.push(Wire { a: "t3".into(), b: "t1".into(), born: false });
         assert_eq!(neighbors(&wires, "t1"), ["t2", "t3"]);
         assert_eq!(neighbors(&wires, "t2"), ["t1"]);
-        d.panes.push(crate::canvas::Pane { id: "sub:t1:a".into(), kind: crate::canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() }, rect: [0., 100., 220., 36.], z: 4, space: None, pinned: None });
+        d.panes.push(crate::canvas::Pane { id: "sub:t1:a".into(), kind: crate::canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() }, rect: [0., 100., 220., 36.], z: 4, space: None, color: None, pinned: None });
         let edges = born(&d, |k| (k == "t3").then(|| "t2".to_owned()));
         assert_eq!(edges, [Wire { a: "t2".into(), b: "t3".into(), born: true }, Wire { a: "t1".into(), b: "sub:t1:a".into(), born: true }]);
         // Closing a cell removes its wires.

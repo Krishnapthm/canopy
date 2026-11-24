@@ -81,17 +81,19 @@ fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAc
             BarAction { icon: "icons/smartphone.svg".into(), label: "Choose simulator".into(), command: "canvas.sim_device".into(), args: json!({}) },
             BarAction { icon: "icons/external-link.svg".into(), label: "Open in Device Hub".into(), command: "canvas.sim_hub".into(), args: json!({}) },
             BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
-            BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
+            BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({"pane":pane.id}) },
         ],
         canvas::Kind::Sim { .. } => [
             ("icons/zoom-out.svg", "Zoom out", "canvas.sim_zoom", json!({"step":"out"})),
             ("icons/scan.svg", "Actual size", "canvas.sim_zoom", json!({"step":"actual"})),
             ("icons/zoom-in.svg", "Zoom in", "canvas.sim_zoom", json!({"step":"in"})),
+            ("icons/rotate-cw.svg", "Default size", "canvas.sim_zoom", json!({"step":"default"})),
             ("icons/picture-in-picture-2.svg", "Pop out", "canvas.sim_pop", json!({})),
             ("icons/smartphone.svg", "Choose simulator", "canvas.sim_device", json!({})),
             ("icons/external-link.svg", "Open in Device Hub", "canvas.sim_hub", json!({})),
+            ("icons/square.svg", "Shut down", "canvas.sim_shutdown", json!({"pane":pane.id})),
             ("icons/link.svg", "Connect", "canvas.connect", json!({})),
-            ("icons/x.svg", "Close", "canvas.close", json!({})),
+            ("icons/x.svg", "Close", "canvas.close", json!({"pane":pane.id})),
         ].into_iter().map(|(icon, label, command, args)| BarAction { icon: icon.into(), label: label.into(), command: command.into(), args }).collect(),
         canvas::Kind::Sub { .. } => vec![],
     }
@@ -130,7 +132,7 @@ impl AppWindow {
     }
 
     /// Helper bars for the hovered pane and every selected pane of the shown
-    /// place: a pill of icon buttons above each pane's top-left corner.
+    /// place: a pill above the top-left corner, or inside the top edge when clipped.
     pub(super) fn helper_bars(&self, doc: &Document, cx: &mut Context<Self>) -> Vec<AnyElement> {
         #[cfg(target_os = "macos")]
         self.bounds.borrow_mut().retain(|k, _| !k.starts_with("cover:bar:") && !k.starts_with("cover:annotate"));
@@ -163,8 +165,10 @@ impl AppWindow {
             let actions = self.sim_relabel(&id, actions, cx);
             let actions = self.browser_relabel(&id, actions);
             let [x, y] = doc.camera.to_screen([rect[0], rect[1]]);
+            let top = y - 8. - bar_height;
+            let top = if top < 0. && y + rect[3] * doc.camera.zoom > 0. { y.max(0.) + 3. } else { top };
             let bar = self.bar(&id, actions, s, connect_active(&id, wiring, &edges), cx)
-                .absolute().left(px(x)).top(px(y - 8. - bar_height));
+                .absolute().left(px(x)).top(px(top));
             #[cfg(target_os = "macos")]
             let bar = {
                 let bounds = self.bounds.clone();
@@ -183,6 +187,12 @@ impl AppWindow {
         let mut bar = bar_shell(s);
         for BarAction { icon, label, command, args } in actions {
             let active = connected && command == "canvas.connect";
+            let enabled = if command == "canvas.sim_zoom" && args["step"] == "actual" {
+                #[cfg(target_os = "macos")]
+                { state.sims.get(id).and_then(|v| v.live.as_ref()).is_some_and(|s| s.read(cx).live_points().is_some()) }
+                #[cfg(not(target_os = "macos"))]
+                { false }
+            } else { true };
             let target = id.to_owned();
             let group = SharedString::from(format!("bar-{id}-{command}-{label}"));
             let hint = state.actions.as_ref().and_then(|keys| keys.iter()
@@ -190,14 +200,17 @@ impl AppWindow {
                 .map(|(_, key, _)| key.clone())).unwrap_or_default();
             bar = bar.child(div().id(group.clone()).group(group.clone()).role(gpui::Role::Button).aria_label(label.clone())
                 .h(px(24. * s)).min_w(px(24. * s)).when(hint.is_empty(), |d| d.w(px(24. * s)))
-                .flex().items_center().justify_center().gap(px(2. * s)).rounded(px(ui::RADIUS_SM)).cursor_pointer()
-                .hover(|d| d.bg(c("hover"))).when(active, |d| d.bg(c("hover")))
+                .flex().items_center().justify_center().gap(px(2. * s)).rounded(px(ui::RADIUS_SM))
+                .when(enabled, |d| d.cursor_pointer().hover(|d| d.bg(c("hover"))))
+                .when(!enabled, |d| d.opacity(0.5).aria_description("Available when the simulator is live"))
+                .when(active, |d| d.bg(c("hover")))
                 .child(svg().path(icon).size(px(14. * s)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
-                    .group_hover(group, |d| d.text_color(c("foreground"))))
+                    .when(enabled, |d| d.group_hover(group, |d| d.text_color(c("foreground")))))
                 .when(!hint.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("muted-foreground")).child(hint)))
                 .tooltip(strip_tooltip(label.to_string(), Some(&command)))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
+                    if !enabled { return; }
                     // Connect draws a wire with the pointer; the keyboard's `c` runs canvas.connect.
                     if command == "canvas.connect" { return this.wire_start(&target, e.position(), window, cx); }
                     this.focus.focus(window, cx);
@@ -217,7 +230,7 @@ mod helper_bar_tests {
 
     #[test]
     fn actions_follow_the_pane_kind() {
-        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.], z: 1, space: None, pinned: None };
+        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.], z: 1, space: None, color: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.enter", "canvas.expand", "canvas.connect", "canvas.close"]);
         *pane.size_mut().unwrap() = Some([800., 500.]);
@@ -240,7 +253,7 @@ mod helper_bar_tests {
         assert_eq!(pin(&pane), ("Move to canvas".into(), json!({"pinned":false})));
         pane.pinned = None;
         pane.kind = canvas::Kind::Sim { udid: "U1".into() };
-        assert_eq!(commands(&pane), ["canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_pop", "canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
+        assert_eq!(commands(&pane), ["canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_zoom", "canvas.sim_pop", "canvas.sim_device", "canvas.sim_hub", "canvas.sim_shutdown", "canvas.pane_pin", "canvas.connect", "canvas.close"]);
         assert_eq!(sim_device_actions().into_iter().map(|a| a.command).collect::<Vec<_>>(),
             ["canvas.sim_home", "canvas.sim_refresh", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate"]);
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
@@ -248,7 +261,7 @@ mod helper_bar_tests {
     }
     #[test]
     fn viewer_actions_include_clear_only_when_there_are_marks() {
-        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None, pinned: None };
+        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.pane_quote", "canvas.connect", "canvas.close"]);
         pane.kind = canvas::Kind::Pdf { path: "/a.pdf".into(), highlights: vec![] };

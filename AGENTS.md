@@ -47,6 +47,10 @@ Read AGENTS.local.md too when present.
   exactly what it says), then smoothness, then the smallest design that works.
 - Idle costs nothing: no polling, periodic timers or token spend while nothing
   happens. A timer may exist only while work is pending.
+- Mouse and trackpad behave the same on every OS: wheel/two-finger pans,
+  pinch and Cmd/Ctrl+wheel zoom, over empty canvas and over any pane that is
+  not entered. Platform code may differ only in the modifier key (Cmd on macOS,
+  Ctrl elsewhere).
 - Agent output is untrusted. Render it as text, never as markup or commands.
 - Every error a user causes or can see reaches them as a toast
   (defaults/mods/toast), never only in a log. See Toasts below.

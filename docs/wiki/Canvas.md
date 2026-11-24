@@ -15,7 +15,7 @@ An empty space (or Home with no spaces) shows shortcut hints for new terminal, n
 - **Zoom limits:** zooming in stops while the biggest pane still fits the window with a margin, so no pane ever runs off screen. Zooming out stops once everything fits (or at 100% if everything already fits). Past either limit the zoom gives a little, then springs back.
 - **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
 
-Scrolling over a terminal you have not entered pans the canvas. Scrolling inside the terminal you have entered scrolls its output.
+Pan and zoom work over empty canvas and over any pane you have not entered. An entered terminal keeps plain scroll for its output. Pinch and `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) still zoom the canvas over a terminal.
 
 Each space, and Home, remembers its own pan and zoom.
 
@@ -27,6 +27,8 @@ In canvas mode, a click on a pane selects it. Selection is how you tell Canopy w
 - Drag on empty canvas to draw a selection box. Hold `Shift` to add to the selection. Click empty canvas to clear it.
 - Drag a selected pane to move the whole selection.
 - Arrow keys nudge the selected pane by one gap. `h`, `j`, `k` and `l` (or `Tab` and `Shift+Tab`) move the selection to the nearest pane in that direction.
+
+Drag any edge or corner to resize an expanded terminal or a pane such as a PDF, browser or simulator. Hold a drag near the edge of the canvas to pan and reach more room. The canvas pans faster as you approach the edge, and stops when you move back toward the middle or release.
 
 When you drag a pane into others, the neighbors step aside and slide back once you have passed, so panes never end up stacked by accident. The `canvas_push` setting changes this (see [Settings](#settings-that-change-the-canvas)).
 A drag follows the pointer even across other panes. The canvas uses the latest pointer position for each frame and applies any remaining movement when you release. Dragging a selected group moves it together while neighbors slide aside.
@@ -53,7 +55,7 @@ After the first time, **Arrange** repeats your last choice, and `Shift+A` in can
 
 Arrange works on the selected panes if you have selected some, otherwise on the whole space. A space card's menu always arranges that whole space. Pane sizes are kept.
 
-Changed your mind? Click **Undo layout** in the canvas or space menu, or press `Cmd+Z` (`Ctrl+Shift+U` on Linux and Windows). Undo reverses the last move, arrange or file pane resize. It keeps one step, until the window closes. It does not bring back closed panes, and it cannot undo resizing a terminal by its corner.
+Changed your mind? Click **Undo layout** in the canvas or space menu, or press `Cmd+Z` (`Ctrl+Shift+U` on Linux and Windows). Undo reverses the last move, arrange or file pane resize. It keeps one step, until the window closes. Closed panes and terminal sizes stay as they are.
 
 ## Tile view
 
@@ -107,6 +109,8 @@ Edit these in `settings.json` (see [Settings and Themes](Settings-and-Themes)).
 ## The status strip
 
 A 24px strip under the canvas shows the branch of the open space (when it has one) and one chip per agent: a status dot and the agent's name, agents that need you first. Click a chip to go to that agent's space and type into it right away. With more than six agents, a final **+N** chip opens the picker. The palette key sits at the right.
+
+The dot beside the branch uses the [space's color](Spaces#rename-recolor-or-delete-a-space). An agent's name uses its [pane color](Panes#color-a-pane), and its status dot shows its current state.
 
 ## How it works
 

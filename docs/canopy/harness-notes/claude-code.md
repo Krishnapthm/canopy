@@ -92,3 +92,17 @@ Not checked: the live pill repro in the app (folded into the phase 1 hand check)
   `.claude/skills/`. Canopy writes `~/.claude/skills/canopy/SKILL.md` (programs.json
   `skills`); a person who sets `CLAUDE_CONFIG_DIR` gets no skill from Canopy yet.
 - Listing and loading it in a live session is not checked here (that needs a paid session).
+
+## Terminal notifications, 2026-11-24 (2.1.322)
+
+The installed executable's embedded JavaScript maps `preferredNotifChannel`
+values `iterm2` and `iterm2_with_bell` to iTerm2 notifications (OSC 9).
+`ghostty` maps to Ghostty notifications (OSC 777). The embedded settings
+screen labels both OSC values explicitly. `auto` picks the corresponding
+channel for a detected iTerm2 or Ghostty terminal. Canopy's launch environment
+advertises `TERM_PROGRAM=herdr`, so use an explicit OSC channel when checking
+message capture in Canopy. The terminal bell, Kitty OSC 99 and disabled
+channels supply no OSC 9/777 text.
+
+Checked with `claude --version` and the installed binary's strings. Live PTY
+output at turn completion or a permission prompt still needs a session.

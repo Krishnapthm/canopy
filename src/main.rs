@@ -36,6 +36,8 @@ mod programs;
 mod remote_shell;
 mod settings;
 mod setup;
+#[cfg(target_os = "macos")]
+mod notify_mac;
 mod sound;
 mod spawn;
 mod sprites;
@@ -217,6 +219,8 @@ fn main() {
                 }
             }
             let requests = mods::install_policy();
+            #[cfg(target_os = "macos")]
+            notify_mac::init(cx);
             if let Some(tx) = mods::request_sender() {
                 control::listen(tx);
             }

@@ -57,11 +57,18 @@ function items(p, git, agents) {
       ["Delete space", "space.close", { id: tg.id }],
     ];
     case "canvas-arrange": return [["Tidy", "tidy"], ["Row", "row"], ["Column", "column"], ["By wires", "wires"]].map(([name, layout]) => [name, "canvas.arrange", { ...tg, layout }]);
-    case "canvas-colors": return ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"].map(color => [color, "canvas.space_style", { id: tg.id, color }]);
+    case "canvas-colors": {
+      const colors = ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"];
+      return tg.pane ? [
+        ["Space color", "canvas.pane_color", { pane: tg.pane, color: null }],
+        ...colors.map(color => [color, "canvas.pane_color", { pane: tg.pane, color }]),
+      ] : colors.map(color => [color, "canvas.space_style", { id: tg.id, color }]);
+    }
     case "canvas-wire": return [["Remove", "wire.remove", { a: tg.a, b: tg.b }]];
     // A cell's own menu: a pill or header right-click, or a right-click inside its terminal.
     case "canvas-card": return [
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
+      ["Color", "sub:canvas-colors", { pane: tg.terminal }],
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],
       ...(!tg.popped ? [[tg.expanded ? "Collapse" : "Expand", "canvas.expand", { terminal: tg.terminal }]] : []),
       ...(tg.finished ? [["Clear finished", "canvas.clear_finished", { terminal: tg.terminal }]] : []),
