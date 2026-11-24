@@ -1,5 +1,5 @@
 //! iOS Simulator access for sim panes through Xcode's public `xcrun simctl`:
-//! the device list, boot and screenshots. Blocking calls; run them off the UI
+//! device lists, boot, shutdown and screenshots. Blocking calls; run them off the UI
 //! thread. See docs/wiki/Simulator-Devices.md and docs/canopy/harness-notes/xcode-simctl.md.
 use std::process::{Command, Stdio};
 
@@ -37,6 +37,17 @@ pub fn boot(udid: &str) -> Result<(), String> {
     simctl(&["bootstatus", udid, "-b"]).map(drop)
 }
 
+/// Shuts down one device. An already stopped device succeeds too.
+pub fn shutdown(udid: &str) -> Result<(), String> {
+    // simctl also accepts aliases such as `all` and `booted`. Only address the pane's device.
+    if udid.len() != 36 || !udid.bytes().enumerate().all(|(i, b)| {
+        if matches!(i, 8 | 13 | 18 | 23) { b == b'-' } else { b.is_ascii_hexdigit() }
+    }) {
+        return Err(format!("Invalid device: {udid}"));
+    }
+    simctl(&["shutdown", udid]).map(drop)
+}
+
 /// Saves the device's screen to `path` as a PNG with transparent rounded corners.
 /// The device must be booted: on a shut down one simctl waits 60 s, then fails.
 pub fn screenshot(udid: &str, path: &std::path::Path) -> Result<(), String> {
@@ -65,7 +76,14 @@ pub fn open_device_hub() -> Result<(), String> {
 fn simctl(args: &[&str]) -> Result<Vec<u8>, String> {
     let out = Command::new("xcrun").arg("simctl").args(args).stdin(Stdio::null()).output()
         .map_err(|e| format!("Can't run xcrun simctl: {e}"))?;
-    if out.status.success() { Ok(out.stdout) } else { Err(format!("simctl {}: {}", args[0], last_line(&out.stderr))) }
+    if out.status.success() { return Ok(out.stdout); }
+    let reason = last_line(&out.stderr);
+    if args[0] == "shutdown" && already_shutdown(out.status.code(), &reason) { return Ok(out.stdout); }
+    Err(format!("simctl {}: {reason}", args[0]))
+}
+
+fn already_shutdown(code: Option<i32>, reason: &str) -> bool {
+    code == Some(149) && reason == "Unable to shutdown device in current state: Shutdown"
 }
 
 /// simctl's reason is its last non-empty stderr line.
@@ -128,5 +146,14 @@ mod tests {
     fn simctl_reason_is_the_last_line() {
         assert_eq!(last_line(b"An error was encountered (code=405):\nUnable to boot device in current state: Booted\n\n"), "Unable to boot device in current state: Booted");
         assert_eq!(last_line(b""), "failed");
+    }
+
+    #[test]
+    fn shutdown_only_accepts_the_confirmed_off_state() {
+        let off = "Unable to shutdown device in current state: Shutdown";
+        assert!(already_shutdown(Some(149), off));
+        assert!(!already_shutdown(Some(148), off));
+        assert!(!already_shutdown(Some(149), "Unable to shutdown device in current state: Shutting Down"));
+        assert!(shutdown("all").is_err());
     }
 }

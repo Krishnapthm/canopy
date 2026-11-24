@@ -46,6 +46,8 @@ pub(super) struct State {
     sub_watches: HashMap<String, Task<()>>,
     previews: HashMap<String, (Entity<gpui_base::TextViewState>, Task<()>)>,
     sims: HashMap<String, sim::SimView>,
+    /// A shutdown owns its device across panes until simctl replies.
+    shutting_down_sims: HashSet<String>,
     bar_hover: Option<String>,
     // The starting size is present for a corner resize.
     preview_drag: Option<(String, Option<canvas::Point>, Point<Pixels>)>,
@@ -191,6 +193,7 @@ impl State {
             sub_watches: HashMap::new(),
             previews: HashMap::new(),
             sims: HashMap::new(),
+            shutting_down_sims: HashSet::new(),
             bar_hover: None,
             preview_drag: None,
             file: None,
@@ -461,15 +464,17 @@ impl AppWindow {
 
     fn end_canvas_drag(&mut self, cx: &mut Context<Self>) {
         self.apply_canvas_move(cx);
-        if let Some((pin, space)) = self.canvas_state.pending_layout.take() {
-            self.solve_layout_now(pin.as_deref(), space.as_deref(), cx);
-        }
         let resize = self.canvas_state.preview_drag.as_ref().and_then(|(id, before, _)| {
             let before = (*before)?;
             let pane = self.canvas_state.doc.panes.iter().find(|p| &p.id == id)?;
             let [_, _, w, h] = pane.pinned.unwrap_or(pane.rect);
             (before != [w, h]).then(|| id.clone())
         });
+        #[cfg(target_os = "macos")]
+        if let Some(id) = &resize { self.snap_sim_size(id, cx); }
+        if let Some((pin, space)) = self.canvas_state.pending_layout.take() {
+            self.solve_layout_now(pin.as_deref(), space.as_deref(), cx);
+        }
         self.canvas_state.end_drag();
         if let Some(id) = resize { self.resize_resting_browser(&id, cx); }
     }
@@ -2584,6 +2589,7 @@ impl AppWindow {
         let resize = drag.clone();
         let [_, _, width, height] = card.pinned.unwrap_or(card.rect);
         let raise = drag.clone();
+        let sim_menu = card.sim().map(|udid| (card.id.clone(), !udid.is_empty() && !self.canvas_state.shutting_down_sims.contains(udid)));
         let browser = card.url().is_some();
         #[cfg(target_os = "macos")]
         let rest = card.id.clone();
@@ -2591,15 +2597,25 @@ impl AppWindow {
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
                 .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).overflow_hidden()
                 .occlude()
-                // Capture phase: the header and corner stop propagation, and a click anywhere raises.
-                .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                // Select before the body handles input and can take focus for itself.
+                .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     if e.button != MouseButton::Left { return; }
                     this.raise_pane(&raise, cx);
-                    if browser {
-                        this.select_browser_pane(&raise);
-                        cx.notify();
-                    }
+                    this.focus.focus(window, cx);
+                    this.canvas_state.selected = vec![raise.clone()];
+                    this.canvas_state.wire.selected = None;
+                    if browser { this.select_browser_pane(&raise); }
+                    cx.notify();
                 }))
+                .when_some(sim_menu, |d, (id, can_shutdown)| d.on_mouse_down(MouseButton::Right,
+                    cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                        let mut items = vec![json!(["Close", "canvas.close", {"pane":id}])];
+                        if can_shutdown {
+                            items.push(json!(["Shut down and close", "canvas.sim_shutdown", {"pane":id,"close":true}]));
+                        }
+                        this.open_menu("primary", json!({"items":items}), Some(e.position), window, cx);
+                        cx.stop_propagation();
+                    })))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         #[cfg(target_os = "macos")]
         let card_element = card_element.when(card.url().is_some(), |d| d.on_mouse_down_out(
@@ -2616,7 +2632,6 @@ impl AppWindow {
                 .child(Self::pane_header().h(px(canvas::header_height(&card.kind))).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                         this.begin_layout();
-                        this.canvas_state.selected = vec![drag.clone()];
                         this.canvas_state.shown = Some(this.canvas_state.doc.clone());
                         this.canvas_state.preview_drag = Some((drag.clone(), None, e.position)); cx.stop_propagation();
                     }))
@@ -3796,7 +3811,10 @@ impl AppWindow {
         }
         div().relative().size_full().flex().flex_col().child(bar).child(row).children(grip)
             .capture_any_mouse_up(cx.listener(|this, e: &MouseUpEvent, _, cx| {
-                if e.button == MouseButton::Left && this.canvas_state.move_pointer().is_some() {
+                if e.button == MouseButton::Left
+                    && (this.canvas_state.move_pointer().is_some()
+                        || matches!(this.canvas_state.preview_drag, Some((_, Some(_), _))))
+                {
                     this.end_canvas_drag(cx);
                     this.canvas_changed(cx);
                     cx.notify();
@@ -4575,6 +4593,7 @@ mod pane_action_tests {
         cx.simulate_click(at(650., 300.), none);
         cx.run_until_parked();
         assert_eq!(front(cx), "p1", "a click on the pane's own part raises it");
+        view.update(cx, |this, _| assert_eq!(this.canvas_state.selected, ["p1"], "a click on the boxed pane body selects it"));
 
         cx.simulate_click(at(450., 250.), none);
         cx.run_until_parked();

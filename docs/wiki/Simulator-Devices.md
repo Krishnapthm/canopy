@@ -11,7 +11,7 @@ Simulator panes need macOS with Xcode and at least one simulator installed. For 
 1. Click **Simulator** at the top right of the window.
 2. Click a simulator in the list. Canopy boots it if it is shut down.
 
-The simulator opens pinned to the top right corner: it stays there, at the same size, while you pan and zoom the canvas. Drag its header to move it and its corner to resize it. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes; **Pin to screen** pins it again.
+The simulator opens pinned to the top right corner. It keeps its position and size while you pan and zoom the canvas. Drag its header to move it. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes. Click **Pin to screen** to pin it again.
 
 The **Simulator** button shows only when Xcode's `xcrun simctl` is installed.
 
@@ -30,9 +30,17 @@ canopy pane new sim <udid>           # a specific simulator
 - Press `Esc` to give the keyboard back to the canvas.
 - Click the bezel's side buttons to press them.
 
-A simulator pane scales with the canvas like every pane. Zooming in stops before the biggest pane would leave the window, so the device always stays whole on screen. Resize it with its corner handle or the zoom buttons below.
-
 The pane header shows the iOS version and the state: **Live**, **Connecting**, **Screenshot** or **Recording**.
+
+## Resize the pane
+
+Drag the pane's resize handle. When you release it, the pane fits the device and its bezel. Use the zoom buttons on the helper bar for smaller steps, **Actual size** for the device's point size at the canvas zoom, or **Default size** to reset the pane to 340 × 700 on screen. **Actual size** is available after the live screen connects.
+
+## Shut down or close
+
+- Click **Shut down** on the helper bar to turn off the device and return to the device picker. A toast confirms when Xcode finishes.
+- Right-click the pane and choose **Shut down and close** to turn off the device and remove the pane in one step.
+- Click **Close** to remove the pane and leave the device running. To close a selected pane from the keyboard, press `Delete`. If the simulator has keyboard focus, press `Esc` first.
 
 ## Bottom bar
 
@@ -64,13 +72,15 @@ Click **Stop annotating** or press `Esc` to leave. With marks or comments on the
 
 | Button | What it does |
 |---|---|
-| **Zoom out**, **Actual size**, **Zoom in** | Changes the device size. **Actual size** is 1 point per screen pixel at the current zoom. |
+| **Zoom out**, **Zoom in** | Scales the device down by 0.8 or up by 1.25. |
+| **Actual size**, **Default size** | Fits the live device at its point size or resets the pane to its opening size. |
 | **Pop out** | Moves the device to its own window. **Bring back** returns it. |
 | **Choose simulator** | Shows every simulator. Xcode's version is at the top. |
 | **Open in Device Hub** | Opens Xcode's Device Hub. |
 | **Pin to screen** or **Move to canvas** | Switches between a fixed screen position and moving with the canvas. |
 | **Connect** | Starts a wire from the pane. |
-| **Close** | Closes the pane. |
+| **Shut down** | Turns off the device and shows the device picker. |
+| **Close** | Removes the pane and leaves the device running. |
 
 ## Agents drive the device
 

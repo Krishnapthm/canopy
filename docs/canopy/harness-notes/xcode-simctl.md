@@ -73,3 +73,14 @@ iPhone 17, iOS 26.5), with a probe and then `canopy --sim-helper` under its sand
   `xcrun simctl list -j devicetypes` gives each type's `bundlePath`.
 - `simctl io <udid> recordVideo --codec=h264 --force <file>` records until SIGINT, then writes
   the movie and exits 0.
+
+Verified by the orchestrator for P3 on Xcode 27.2 (27B52), `xcrun` version 72.
+
+- `xcrun simctl shutdown <udid>` on an already stopped device exits 149. Stderr starts with
+  `An error was encountered processing the command (domain=com.apple.CoreSimulator.SimError, code=405):`
+  and ends with `Unable to shutdown device in current state: Shutdown`. Canopy treats that result as success.
+- `xcrun simctl shutdown <unknown udid>` exits 148 with `Invalid device: <udid>` on stderr.
+  Canopy reports this as an error.
+- `xcrun simctl list devicetypes -j` and the device type's `profile.plist` have no screen size.
+  **Actual size** uses the live framebuffer dimensions divided by the device scale from
+  `capabilities.plist`. The action is disabled before the live frame and scale are available.
