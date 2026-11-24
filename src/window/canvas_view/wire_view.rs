@@ -61,16 +61,26 @@ impl AppWindow {
     /// The drawn rect of a pane the current view shows.
     pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
         let card = doc.panes.iter().find(|c| c.id == key && doc.shows(c.space.as_ref()))?;
-        if card.boxed() { return Some(card.rect); }
-        let view = &self.canvas_state.doc.view;
-        if matches!(card.kind, canvas::Kind::Sub { .. }) {
-            return (*view != canvas::View::Terminals).then_some(card.rect);
+        self.wire_cell_rect(card)
+    }
+
+    pub(super) fn wire_cell_rect(&self, card: &canvas::Pane) -> Option<canvas::Rect> {
+        let state = &self.canvas_state;
+        match &card.kind {
+            canvas::Kind::File { path } => return state.previews.contains_key(path).then_some(card.rect),
+            canvas::Kind::Pdf { .. } => return state.pdfs.contains_key(&card.id).then_some(card.rect),
+            canvas::Kind::Sub { parent, sub } => return (state.doc.view != canvas::View::Terminals
+                && state.subs.get(parent).is_some_and(|subs| subs.iter().any(|item| &item.id == sub)))
+                .then_some(card.rect),
+            canvas::Kind::Image { .. } | canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. }
+            | canvas::Kind::Mod { .. } => return Some(card.rect),
+            canvas::Kind::Terminal { .. } => {}
         }
-        if !canvas::view_allows(view, self.live.get(&card.id).is_some_and(canvas_agent)) { return None; }
+        if !canvas::view_allows(&state.doc.view, self.live.get(&card.id).is_some_and(canvas_agent)) { return None; }
         // Match the drawn cell: an expanded one has its own size, a pill its measured one.
         let size = match card.size() {
             Some(_) => [card.rect[2].max(canvas::PILL_WIDTH), card.rect[3].max(canvas::HEADER)],
-            None => self.canvas_state.pill_sizes.borrow().get(&card.id).map(|v| v.3).unwrap_or([240., 36.]),
+            None => state.pill_sizes.borrow().get(&card.id).map(|v| v.3).unwrap_or([240., 36.]),
         };
         Some([card.rect[0], card.rect[1], size[0], size[1]])
     }
@@ -108,13 +118,14 @@ impl AppWindow {
     }
 
     /// The topmost shown cell under a window position, with `slop` extra screen pixels around it.
-    fn wire_cell_at(&self, position: Point<Pixels>, slop: f32) -> Option<String> {
+    pub(super) fn wire_cell_at(&self, position: Point<Pixels>, slop: f32) -> Option<String> {
+        if !self.bounds.borrow().get("canopy-canvas")?.contains(&position) || self.canvas_overlay_at(position) { return None; }
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
-        let camera = doc.camera;
+        let camera = self.canvas_state.doc.camera;
         let p = camera.to_world(self.wire_local(position));
         let s = slop / camera.zoom;
-        doc.panes.iter().filter(|c| {
-            self.wire_cell(doc, &c.id).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
+        doc.panes.iter().filter(|c| doc.shows(c.space.as_ref())).filter(|c| {
+            self.wire_cell_rect(c).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
         }).max_by_key(|c| super::paint_order(c)).map(|c| c.id.clone())
     }
 
@@ -146,11 +157,11 @@ impl AppWindow {
         let bar_hover = if busy { None } else {
             doc.panes.iter().filter(|p| doc.shows(p.space.as_ref()) && !matches!(p.kind, canvas::Kind::Sub { .. }))
                 .filter(|p| {
-                    let rect = if p.boxed() { Some(p.rect) } else { self.wire_cell(doc, &p.id) };
-                    rect.is_some_and(|r| {
-                        let [x, y] = doc.camera.to_screen([r[0], r[1]]);
-                        point[0] >= x && point[0] <= x + r[2] * doc.camera.zoom
-                            && point[1] >= y - 8. - bar_height && point[1] <= y + r[3] * doc.camera.zoom
+                    self.wire_cell_rect(p).is_some_and(|r| {
+                        let camera = self.canvas_state.doc.camera;
+                        let [x, y] = camera.to_screen([r[0], r[1]]);
+                        point[0] >= x && point[0] <= x + r[2] * camera.zoom
+                            && point[1] >= y - 8. - bar_height && point[1] <= y + r[3] * camera.zoom
                     })
                 // Topmost as drawn: every pane kind paints in one z order.
                 }).max_by_key(|p| super::paint_order(p)).map(|p| p.id.clone())
@@ -370,7 +381,7 @@ impl AppWindow {
 
 #[cfg(test)]
 mod sticky_tests {
-    use super::{AppWindow, MouseMoveEvent, TestAppContext, json, point, px};
+    use super::{Modifiers, MouseButton, TestAppContext, json, point, px};
     use crate::window::tests::{in_own_process, open_window, running_alone};
     const TEST: &str = "window::canvas_view::wire_view::sticky_tests::sticky_wire";
 
@@ -380,45 +391,43 @@ mod sticky_tests {
     #[gpui::test]
     fn sticky_wire(cx: &mut TestAppContext) {
         if !running_alone(TEST) { return; }
-        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
+        let (view, cx) = open_window(cx, "wire-input", "", json!({"id":"root","type":"canvas"}));
+        cx.run_until_parked();
         view.update_in(cx, |this, window, cx| {
+            this.model.add_space("root", "Canvas", &crate::window::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
+            this.model.space_mut("root").unwrap().tabs.push(crate::model::Tab::new("tab2", "", "pane2", "t2"));
             this.canvas_state.doc.panes = serde_json::from_value(json!([
-                {"id":"t1","kind":"terminal","props":{"size":[200,100]},"rect":[0,0,200,100],"z":0},
-                {"id":"t2","kind":"terminal","props":{"size":[200,100]},"rect":[400,0,200,100],"z":1}
+                {"id":"t1","kind":"terminal","props":{"size":[260,160]},"rect":[100,120,260,160],"z":0},
+                {"id":"t2","kind":"terminal","props":{"size":[260,160]},"rect":[450,120,260,160],"z":1},
+                {"id":"p1","kind":"image","props":{"path":"/missing.png"},"rect":[450,350,300,180],"z":2}
             ])).unwrap();
-            for t in ["t1", "t2"] { this.live.insert(t.into(), json!({})); }
-            let (down, over_t2) = (point(px(200.), px(50.)), point(px(450.), px(50.)));
-            let start = |this: &mut AppWindow| {
-                this.canvas_state.wire.drag = Some(("t1".into(), [200., 50.], down));
-                this.canvas_state.wire.down = down;
-            };
-            // A release where the press was keeps the wire, and it follows the pointer.
-            start(this);
-            assert!(this.wire_release(down, window, cx));
-            assert!(this.canvas_state.wire.sticky);
-            let moved = MouseMoveEvent { position: over_t2, pressed_button: None, modifiers: Default::default() };
-            assert!(this.wire_pointer(&moved, cx));
-            assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| d.2), Some(over_t2));
-            // Escape drops it.
-            assert!(this.wire_cancel(window, cx));
-            assert!(this.canvas_state.wire.drag.is_none() && this.canvas_state.doc.wires.is_empty());
-            // The next click on a cell connects.
-            start(this);
-            this.wire_release(down, window, cx);
-            assert!(this.wire_pick(over_t2, window, cx));
-            assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
-            assert_eq!(this.canvas_state.doc.wires.len(), 1);
-            // A drag released on empty canvas still just drops.
-            start(this);
-            assert!(this.wire_release(point(px(900.), px(900.)), window, cx));
-            assert!(!this.canvas_state.wire.sticky && this.canvas_state.wire.drag.is_none());
-            // The helper bar's Connect starts the same pointer wire, from the pane's right side.
-            this.wire_start("t2", over_t2, window, cx);
-            assert!(this.canvas_state.wire.sticky);
-            let r = this.wire_cell(&this.canvas_state.doc, "t2").unwrap();
-            assert_eq!(this.canvas_state.wire.drag.as_ref().map(|d| (d.0.as_str(), d.1)), Some(("t2", [r[0] + r[2], r[1] + r[3] / 2.])));
-            assert!(this.connect_hint());
+            for t in ["t1", "t2"] { this.live.insert(t.into(), json!({"state":"live", "pid":1})); }
+            this.sync(window, cx);
+            cx.notify();
         });
+        cx.run_until_parked();
+
+        let origin = view.update(cx, |this, _| this.bounds.borrow()["canopy-canvas"].origin);
+        let at = |x, y| origin + point(px(x), px(y));
+        let (handle, terminal, image) = (at(360., 200.), at(550., 205.), at(550., 410.));
+        let none = Modifiers::default();
+        let left = MouseButton::Left;
+
+        cx.simulate_mouse_move(at(230., 190.), None, none);
+        cx.simulate_click(handle, none);
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wire.sticky));
+        cx.simulate_mouse_move(terminal, None, none);
+        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.wire.drag.as_ref().map(|d| d.2)), Some(terminal));
+        cx.simulate_click(terminal, none);
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wire.drag.is_none() && !this.canvas_state.wire.sticky));
+        assert!(view.read_with(cx, |this, _| this.canvas_state.doc.wires.iter().any(|w| w.a == "t1" && w.b == "t2")));
+
+        cx.simulate_mouse_move(at(230., 190.), None, none);
+        cx.simulate_mouse_down(handle, left, none);
+        cx.simulate_mouse_move(image, left, none);
+        cx.simulate_mouse_up(image, left, none);
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wire.drag.is_none()));
+        assert!(view.read_with(cx, |this, _| this.canvas_state.doc.wires.iter().any(|w| w.a == "t1" && w.b == "p1")));
     }
 }
 
