@@ -649,6 +649,15 @@ Set a space color.
 | `id` | yes |
 | `color` | yes |
 
+## `canvas.pane_color`
+
+Set a canvas pane's hue. Pass null or omit color to inherit the space's hue.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+| `color` | no |
+
 ## `panel.editor`
 
 Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state.
