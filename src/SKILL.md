@@ -25,6 +25,11 @@ prints the built-in command list even without an open window. Do not launch bare
 signal or restart the person's app or core. A window closing does not kill
 its terminals.
 
+On macOS, Canopy can include your recent terminal notification message in a
+background agent alert if your harness emits OSC 9 or OSC 777. The person
+controls this in **Settings > Alerts** (`desktop_notifications` in
+`settings.json`) and macOS System Settings.
+
 ## Helpers the person can see
 
 When the person asks for sub-agents, helpers, a team or peers, start each one

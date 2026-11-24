@@ -81,3 +81,16 @@ runs inside Codex's `workspace-write` sandbox without escalation.
   "Available skills" with aliased roots `r0` (`$CODEX_HOME/skills`) and `r1`
   (`~/.agents/skills`). Canopy writes `~/.agents/skills/canopy/SKILL.md`, which does not
   depend on `CODEX_HOME` and is the shared folder other harnesses may read too.
+
+## Terminal notifications, 2026-11-24 (0.171.0)
+
+The installed executable contains `tui.notifications`,
+`tui.notification_method` variants `auto`, `osc9`, `osc777` and `bel`, and
+`tui.notification_condition` variants `unfocused` and `always`. Enable
+`tui.notifications` and choose `osc9` or `osc777` explicitly to check message
+capture in Canopy. `tui.notification_condition = "always"` removes the
+terminal-focus condition when checking. The top-level `notify` setting runs a
+command and is separate from terminal notifications.
+
+Checked with `codex --version` and the installed binary's strings. Live PTY
+output and this version's automatic method selection were not exercised.

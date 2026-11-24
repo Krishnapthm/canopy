@@ -50,6 +50,7 @@ codesign --verify --deep --strict "$app"
 signature=$(codesign -dvv "$app" 2>&1)
 [[ $signature == *"Authority=Developer ID Application:"* ]] || { echo 'DMG requires a Developer ID signed app' >&2; exit 1; }
 mkdir "$work/source"
+# Preserve the signed bundle and the notification style set by scripts/package.
 ditto "$app" "$work/source/Canopy.app"
 tiffutil -cathidpicheck "$root/distribution/macos/dmg/background.png" \
   "$root/distribution/macos/dmg/background@2x.png" -out "$work/background.tiff"

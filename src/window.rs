@@ -437,6 +437,8 @@ pub struct AppWindow {
     /// Core's terminal records by address.
     live: HashMap<String, Value>,
     listed_once: bool,
+    #[cfg(target_os = "macos")]
+    notification_focus: Option<String>,
     /// Live folders by address (from the shell process).
     cwds: HashMap<String, String>,
     /// When each terminal's repo and branch were last read, and what it was doing.
@@ -538,6 +540,8 @@ impl AppWindow {
             watched: Watched::default(),
             live: HashMap::new(),
             listed_once: false,
+            #[cfg(target_os = "macos")]
+            notification_focus: None,
             cwds: HashMap::new(),
             folders_checked: HashMap::new(),
             born: RefCell::new(HashMap::new()),
@@ -2178,11 +2182,14 @@ impl AppWindow {
         } else if listed {
             self.publish(cx);
         }
+        #[cfg(target_os = "macos")]
+        if let Some(address) = self.notification_focus.take() {
+            self.focus_notification(address, window, cx);
+        }
     }
 
     /// Tells the person an agent needs them or finished: Canopy's sounds, and a
-    /// toast (drawn by the `toast` mod; click it to go there) unless they're
-    /// looking at that agent.
+    /// clickable toast or macOS notification unless they're looking at that agent.
     fn alert(&mut self, addr: &str, alert: model::Alert, looking: bool, window: &mut Window, cx: &mut Context<Self>) {
         if settings::get().sounds.enabled {
             crate::sound::play(if alert == model::Alert::Blocked { "blocked" } else { "done" });
@@ -2217,7 +2224,37 @@ impl AppWindow {
             "title": title, "body": place, "level": level,
             "action": { "name": "agent.focus", "args": { "terminal": addr } },
         });
+        #[cfg(target_os = "macos")]
+        if settings::get().desktop_notifications
+            && crate::notify_mac::post(&title, || self.desktop_notice_body(addr, cx), addr, &notification, cx)
+        {
+            return;
+        }
         self.open_overlay(mods::new_overlay_id(), json!({ "kind": "toast", "notification": notification }), window, cx);
+    }
+
+    #[cfg(target_os = "macos")]
+    fn desktop_notice_body(&self, addr: &str, cx: &App) -> String {
+        let views = self.terminal_views(cx);
+        let views = views.iter().filter(|(address, _)| address == addr).map(|(_, view)| view.read(cx));
+        if let Some((body, _)) = views.clone().filter_map(TerminalView::recent_notice).max_by_key(|(_, at)| *at) {
+            return body;
+        }
+        let title = views.map(|view| view.title.as_str()).find(|title| !title.is_empty() && *title != addr)
+            .or_else(|| self.live.get(addr).and_then(|r| r["title"].as_str()));
+        crate::vt::notice_text(title.unwrap_or_default())
+    }
+
+    #[cfg(target_os = "macos")]
+    fn focus_notification(&mut self, address: String, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.listed_once {
+            // Clicking a notification can start Canopy before its first terminal listing.
+            self.notification_focus = Some(address);
+            return;
+        }
+        cx.activate(true);
+        window.activate_window();
+        self.run("agent.focus", json!({"terminal": address}), window, cx);
     }
 
     /// Keeps the model true to core, on every listing: drops panes whose terminal
@@ -3934,6 +3971,12 @@ impl AppWindow {
             Request::OpenOverlay { id, spec } => self.open_overlay(id, spec, window, cx),
             Request::CloseOverlay { id } => self.close_overlay(&id, window, cx),
             Request::Refresh => self.refresh_mods(cx),
+            #[cfg(target_os = "macos")]
+            Request::FocusNotification { address } => self.focus_notification(address, window, cx),
+            #[cfg(target_os = "macos")]
+            Request::NotificationToast { notification } => {
+                self.open_overlay(mods::new_overlay_id(), json!({"kind": "toast", "notification": notification}), window, cx);
+            }
             Request::Control { cmd, reply } => {
                 self.held_reply = Some(reply);
                 let answer = self.control(cmd, window, cx);
