@@ -464,8 +464,9 @@ buttons, even while a terminal has focus. Sub-agent cells have no bar.
 `canvas.sync` turns sync input on for the selected panes (typing in one reaches all) or off.
 `canvas.equalize` gives the selected panes (else the focused one) the standard `terminal_size`; `canvas.new` opens a full terminal pane, cascading from the last one.
 
-Views are in the macOS View menu or the Linux titlebar's primary menu
-(`app.menu`, optionally with a `group`);
+Views are in the macOS View menu or the Linux Main Menu (F10).
+The Main Menu also opens Settings, Keyboard Shortcuts and Welcome.
+Use `app.menu` to open it or pass a `group` to open a page;
 the active view is checked. `view.agents`, `view.all`, `view.terminals` and
 their keys still work. The canvas bar (top of the window) has file, focus-fit and tile buttons.
 

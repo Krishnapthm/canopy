@@ -363,6 +363,8 @@ pub fn install(bindings: Vec<KeyBinding>, cx: &mut App) {
     let kit = cx.global::<KitKeys>().0.clone();
     cx.clear_key_bindings();
     cx.bind_keys(kit);
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    cx.bind_keys([KeyBinding::new("f10", ShellAction::new("app.menu"), Some("Canopy"))]);
     let (mode, bindings): (Vec<_>, Vec<_>) = bindings.into_iter().partition(is_canvas);
     cx.set_global(CanvasKeys(mode));
     cx.bind_keys(bindings);

@@ -206,3 +206,34 @@ test("canvas-agents numbers installed rows and starts the numbered agent", () =>
   expect(sent).toHaveLength(1);
   expect(stopped).toBe(2);
 });
+
+test("the primary menu follows keyboard navigation without opening another overlay", () => {
+  const sent: unknown[] = [];
+  let closed = 0;
+  let keydown: (event: { key: string }, cx: unknown) => void;
+  const element: any = new Proxy({}, { get: (_, name) => (...args: any[]) => {
+    if (name === "on_key_down") keydown = args[0];
+    return element;
+  } });
+  const home = [["File", "app.menu", { group: "File" }], ["Settings", "app.settings", {}]];
+  const file = [["Back", "app.menu", {}], ["New Terminal", "canvas.create", {}]];
+  const current = { tab: "primary", target: { home, groups: { File: file } } };
+  const Menu = new Function("View", "div", "h_flex", "v_flex", "props", "theme", "ui", "keys", "closeOverlay", "run", `${source}; return Menu;`)(
+    class {}, () => element, () => element, () => element, () => current,
+    () => ({}), { size: {} }, () => [], () => closed++, (...args: unknown[]) => sent.push(args));
+  const menu = new Menu();
+  menu.at = 0;
+  const cx = { notify() {} };
+  menu.render(cx);
+  keydown!({ key: "right" }, cx);
+  menu.render(cx);
+  expect(menu.list).toEqual(file);
+  keydown!({ key: "left" }, cx);
+  menu.render(cx);
+  expect(menu.list).toEqual(home);
+  expect(closed).toBe(0);
+  keydown!({ key: "down" }, cx);
+  keydown!({ key: "enter" }, cx);
+  expect(closed).toBe(1);
+  expect(sent).toEqual([["app.settings", {}]]);
+});
