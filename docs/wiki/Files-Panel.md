@@ -31,10 +31,10 @@ In the classic layout, the tree follows the focused pane's folder, or the active
 
 ## Browsers and simulators in the panel
 
-A browser or simulator opens as a tab in this panel, so it sits beside your work without taking canvas space. Click **Browser** or **Simulator** in the [top strip](Spaces#the-top-strip), or let an agent run `canopy pane new browser localhost:3000`.
+A browser or simulator opens as a tab in this panel, so it sits beside your work without taking canvas space. Click **Browser** or **Simulator** in the [top strip](Spaces#the-top-strip), or let an agent run `canopy pane new browser localhost:3000`. If you have an unsaved edit, the pane opens in a background tab and your editor stays active.
 
-- A docked pane's tab shows its kind's icon and its title (the page title or the device name). A wired pane adds a small dot.
-- The panel header holds the pane's [helper bar](Toolbar-and-Helper-Bar). Click **Move to canvas** to put the pane back on the canvas where it was, or in the middle of the view if it never had a place there.
+- A docked pane's tab shows its kind's icon and its title (the page title or the device name). A pane wired to an agent adds a small dot in the agent's pane or inherited space color.
+- The panel header holds the pane's [helper bar](Toolbar-and-Helper-Bar). Click **Move to canvas** to show the pane at its saved spot in its space. A pane without a saved spot opens in the middle of the view.
 - Click **Connect** in the header and drop the wire on an agent to wire the pane. A docked pane has no place on the canvas, so no line is drawn. The header reads "Wired to" and the agent's name instead, and the dot marks the tab.
 - Click the tab's X to close the pane. Closing the panel only hides the tabs.
 

@@ -34,7 +34,7 @@ The pane header shows the iOS version and the state: **Live**, **Connecting**, *
 
 ## Resize the pane
 
-Drag any edge or corner of the pane. When you release it, the pane fits the device and its bezel. Use the zoom buttons on the helper bar for smaller steps, **Actual size** for the device's point size at the canvas zoom, or **Default size** to reset the pane to 340 × 700 on screen. **Actual size** is available after the live screen connects.
+For a docked simulator, drag the Files panel's edge to change the available width. Use **Move to canvas** to resize the pane directly. Drag any edge or corner of the canvas pane. When you release it, the pane fits the device and its bezel. Use the zoom buttons on the helper bar for smaller steps, **Actual size** for the device's point size at the canvas zoom, or **Default size** to reset the pane to 340 × 700 on screen. **Actual size** is available after the live screen connects.
 
 ## Shut down or close
 
