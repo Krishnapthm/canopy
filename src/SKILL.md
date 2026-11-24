@@ -392,11 +392,13 @@ spaces grow to hold them and push other spaces.
 Empty-canvas left-drag, middle-mouse and side-button drag also pan; an empty click focuses the canvas.
 Focused terminals still receive Space. Right-click keeps the canvas menus.
 Canvas space labels drag the space and its cards; bottom-right handles resize with card padding.
-Space label menus offer Rename, Color, Show frame and confirmed Delete space.
+Space label menus offer Rename, Color and confirmed Delete space.
 Empty-canvas menus create terminals in the space folder or home, installed agents,
 and root spaces through the Choose space dialog (previously used space folders, or Open space: name, optional folder, recent folders). `canvas.create` takes an optional world
 `point` (default: the middle of the view), optional `space` (default: the space under the point, else the root), `argv`, or `kind: "space"`; `canvas.space_style` takes
-`id` and optional palette `color` (without color it toggles the frame).
+`id` and a palette `color`: `gray`, `red`, `orange`, `yellow`, `green`, `teal`, `blue`, or `purple`.
+Use `canopy do canvas.pane_color '{"pane":"t1","color":"teal"}'` to override a pane's hue.
+Pass `null` or omit `color` to inherit the space's hue. A gray space adds no tint to its panes.
 `view.agents`, `view.all`, `view.terminals` select the saved canvas view, bound to
 Cmd+Shift+1/2/3 on macOS and Ctrl+Shift+1/2/3 elsewhere. Hidden cards are deselected.
 `panel.pop_out` takes an optional `terminal` (defaults to the last selected cell); `panel.bring_back`

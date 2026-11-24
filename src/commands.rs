@@ -106,6 +106,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("view.all", &[], "Show all cards."),
     cmd("view.terminals", &[], "Show terminal cards."),
     cmd("canvas.space_style", &[req("id"), req("color")], "Set a space color."),
+    cmd("canvas.pane_color", &[req("pane"), opt("color")], "Set a canvas pane's hue. Pass null or omit color to inherit the space's hue."),
     cmd("panel.editor", &[opt("choice"), opt("done"), opt("path"), opt("dirty")], "Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state."),
     cmd("preview.open", &[opt("path"), opt("point"), opt("place")], "Open a file tab, or choose a file; place canvas or point pins a canvas card."),
     cmd("canvas.create", &[opt("point"), opt("kind"), opt("space"), opt("argv"), opt("name"), opt("folder")], "Create a canvas terminal or space at a world point (default: the middle of the view); a space with a folder (empty: the root) is made directly, without one the Choose space dialog opens."),

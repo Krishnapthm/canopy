@@ -1416,7 +1416,7 @@ impl AppWindow {
         } else {
             let id = doc.next_file_id();
             let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-            let pane = canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], size[0], size[1]], z, space, pinned: None };
+            let pane = canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], size[0], size[1]], z, space, color: None, pinned: None };
             let kind_name = pane.kind_name().to_owned();
             doc.panes.push(pane);
             (id, kind_name)
@@ -1432,7 +1432,7 @@ impl AppWindow {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Mod { kind, props: serde_json::Map::new() }, rect: [point[0], point[1], 320., 240.], z, space, pinned: None });
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Mod { kind, props: serde_json::Map::new() }, rect: [point[0], point[1], 320., 240.], z, space, color: None, pinned: None });
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
@@ -1821,7 +1821,7 @@ impl AppWindow {
             canvas::remember_folder(&mut self.canvas_state.doc.recent_folders, &folder);
             let color = canvas::unused_color(&self.canvas_state.doc.spaces, self.canvas_state.doc.spaces.len());
             // A new space is a card on Home; you go straight inside it.
-            self.canvas_state.doc.spaces.push(canvas::Space { space: id.clone(), rect: [point[0], point[1], canvas::SPACE_CARD[0], canvas::SPACE_CARD[1]], color: color.into(), frame: true });
+            self.canvas_state.doc.spaces.push(canvas::Space { space: id.clone(), rect: [point[0], point[1], canvas::SPACE_CARD[0], canvas::SPACE_CARD[1]], color, frame: true });
             self.canvas_state.untile();
             self.canvas_state.doc.go(Some(id));
             self.canvas_changed(cx);
@@ -1994,7 +1994,7 @@ impl AppWindow {
             .cloned()
             .unwrap_or(canvas::Pane { id: terminal.into(), kind: canvas::Kind::Terminal { size: None },
                 rect: [point[0], point[1], 240., 36.],
-                z: 0, space: None, pinned: None,
+                z: 0, space: None, color: None, pinned: None,
             });
         let mut r = self.pill_rect(&card, cx);
         r[0] = point[0];
@@ -2081,7 +2081,7 @@ impl AppWindow {
                 let r = self.pill_rect(
                     &canvas::Pane { id: a.clone(), kind: canvas::Kind::Terminal { size: None },
                         rect: [0., 0., 240., 36.],
-                        z: 0, space: None, pinned: None,
+                        z: 0, space: None, color: None, pinned: None,
                     },
                     cx,
                 );
@@ -2122,7 +2122,7 @@ impl AppWindow {
                 state.doc.spaces.push(canvas::Space {
                     space: space.id.clone(),
                     rect,
-                    color: "blue".into(),
+                    color: canvas::Hue::Blue,
                     frame: true,
                 });
                 changed = true;
@@ -2574,6 +2574,16 @@ impl AppWindow {
             .text_color(c("foreground")).overflow_hidden()
     }
 
+    /// Unselected panes show their effective tint in the frame.
+    fn pane_frame_color(&self, id: &str) -> Hsla {
+        let state = &self.canvas_state;
+        if state.selected.iter().any(|key| key == id) {
+            c("ring")
+        } else {
+            state.doc.effective_color(id).map_or_else(|| c("border"), |hue| c(&hue.tint_token()))
+        }
+    }
+
     /// The shared saved-rect frame, header drag and resize corner for boxed panes. It occludes
     /// the panes beneath it and raises itself on a click. `header` (a browser pane's controls)
     /// replaces the icon, title and detail inside the same header.
@@ -2582,6 +2592,7 @@ impl AppWindow {
         let p = camera.to_screen([card.rect[0], card.rect[1]]);
         let drag = card.id.clone();
         let resize = drag.clone();
+        let color_menu = drag.clone();
         let [_, _, width, height] = card.pinned.unwrap_or(card.rect);
         let raise = drag.clone();
         let browser = card.url().is_some();
@@ -2589,7 +2600,7 @@ impl AppWindow {
         let rest = card.id.clone();
         let card_element = div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
                 .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
-                .flex().flex_col().bg(c("surface")).border_1().border_color(c("border")).rounded(px(ui::RADIUS)).overflow_hidden()
+                .flex().flex_col().bg(c("surface")).border_1().border_color(self.pane_frame_color(&card.id)).rounded(px(ui::RADIUS)).overflow_hidden()
                 .occlude()
                 // Capture phase: the header and corner stop propagation, and a click anywhere raises.
                 .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -2614,6 +2625,10 @@ impl AppWindow {
         ));
         card_element
                 .child(Self::pane_header().h(px(canvas::header_height(&card.kind))).flex_none().border_b_1().border_color(c("border"))
+                    .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                        this.open_menu("canvas-colors", json!({"pane":color_menu}), Some(e.position), window, cx);
+                        cx.stop_propagation();
+                    }))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                         this.begin_layout();
                         this.canvas_state.selected = vec![drag.clone()];
@@ -2684,6 +2699,7 @@ impl AppWindow {
         let bg = self.person.canvas_color.as_deref().unwrap_or("canvas");
         let panning = matches!(state.drag, Some((None, _)));
         let view = cx.entity();
+        let edges = self.wire_edges();
         let mut area = div()
             .id("canopy-canvas")
             .relative()
@@ -2762,6 +2778,7 @@ impl AppWindow {
                 .absolute()
                 .size_full(),
             )
+            .child(self.wire_layer(viewport, false, &edges))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 let origin = this
                     .bounds
@@ -2980,7 +2997,7 @@ impl AppWindow {
             let [x, y] = camera.to_screen([space.rect[0], space.rect[1]]);
             let selected = state.selected.contains(&id);
             let rename_id = id.clone();
-            let color = c(&space.color);
+            let color = c(space.color.name());
             // Like a Figma frame: the name sits above a rounded box tinted with the space's color.
             let name = div()
                 .id(SharedString::from(format!("space-label-{id}")))
@@ -3161,16 +3178,16 @@ impl AppWindow {
                 if canvas::visible(camera, card.rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), card.clone())); }
             }
         }
-        let edge_layer = self.wire_layer(viewport);
         for (parent, sub, card) in sub_pills {
             let rect = card.rect;
             let key = card.id.clone();
+            let color_menu = key.clone();
             let [x, y] = camera.to_screen([rect[0], rect[1]]);
             let z = camera.zoom;
             let (icon, tint) = program_icon(&json!({"program":sub.program}));
             let mut pill = Self::pane_header().id(SharedString::from(format!("canvas-sub-{parent}-{}", sub.id)))
                 .absolute().left(px(x)).top(px(y)).w(px(rect[2] * z)).h(px(rect[3] * z))
-                .rounded(px(ui::RADIUS * z)).border_1().border_color(c(if state.selected.contains(&key) { "ring" } else { "border" })).bg(c("surface"))
+                .rounded(px(ui::RADIUS * z)).border_1().border_color(self.pane_frame_color(&key)).bg(c("surface"))
                 .when(sub.done, |d| d.opacity(0.5)).occlude()
                 .child(div().flex_none().mt(px(1.)).child(icon_element(&icon, tint, px(16.), c("foreground"))));
             let text = div().flex_1().min_w_0().child(div().text_ellipsis().when(sub.done, |d| d.text_color(c("muted-foreground")))
@@ -3188,7 +3205,10 @@ impl AppWindow {
                 cx.notify();
                 cx.stop_propagation();
             }));
-            pill = pill.on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
+            pill = pill.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                this.open_menu("canvas-colors", json!({"pane":color_menu}), Some(e.position), window, cx);
+                cx.stop_propagation();
+            }));
             pills.push((paint_order(&card), pill.into_any_element()));
         }
         let mut shown = shown;
@@ -3205,7 +3225,7 @@ impl AppWindow {
             let expanded = card.size().is_some();
             let [cw, ch] = [card.rect[2], card.rect[3]];
             let is_synced = synced.contains(&addr);
-            let frame_color = c(if is_synced { "accent" } else if state.selected.contains(&addr) { "ring" } else { "border" });
+            let frame_color = if is_synced { c("accent") } else { self.pane_frame_color(&addr) };
             // A collapsed pill is a box at world size; its header contents keep their screen size, clipped.
             let mut pill = Self::pane_header()
                 .id(SharedString::from(format!("canvas-{addr}")))
@@ -3442,8 +3462,7 @@ impl AppWindow {
         {
             area = area.children(self.empty_hints());
         }
-        // Edges paint above cells: they route around them, and stay visible when they cannot.
-        area = area.child(edge_layer).children(self.wire_handles(cx));
+        area = area.child(self.wire_layer(viewport, true, &edges)).children(self.wire_handles(cx));
         if let Some((a, b, _)) = &state.marquee {
             let (a, b) = (self.wire_local(*a), self.wire_local(*b));
             area = area.child(div().absolute().left(px(a[0].min(b[0]))).top(px(a[1].min(b[1])))

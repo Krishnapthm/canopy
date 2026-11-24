@@ -357,6 +357,15 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
     for (k, v) in overrides {
         t.insert(k.clone(), v.clone());
     }
+    let (toward, amount) = if light { (0, 0.12) } else { (0xffffff, 0.45) };
+    for hue in crate::canvas::Hue::ALL {
+        let key = hue.tint_token();
+        if !t.contains_key(&key) {
+            let Rgb(r, g, b) = rgb(&t[hue.name()]);
+            let base = u32::from_be_bytes([0, r, g, b]);
+            t.insert(key, hex(mix(base, toward, amount)));
+        }
+    }
     t
 }
 
@@ -998,6 +1007,9 @@ mod tests {
             for bg in ["canvas", "surface"] {
                 pairs.push(("muted".to_string(), bg, 4.5));
                 pairs.push(("accent".to_string(), bg, 3.0));
+            }
+            if [DEFAULT_DARK, DEFAULT_LIGHT].contains(&name) {
+                pairs.extend(crate::canvas::Hue::ALL.map(|hue| (hue.tint_token(), "canvas", 3.0)));
             }
             for i in 0..16 { pairs.push((format!("ansi{i}"), "background", if [4,5,12,13].contains(&i) { 3.0 } else { 4.5 })); }
             for (fg, bg, min) in pairs {
