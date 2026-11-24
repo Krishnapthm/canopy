@@ -181,7 +181,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("app.zoom_out", &[], "Make everything smaller."),
     cmd("app.zoom_reset", &[], "Back to normal size."),
     cmd("app.menu", &[opt("group")], "Open the shared primary command menu, optionally a named group."),
-    cmd("app.quit", &[], "Quit (macOS)."),
+    cmd("app.quit", &[], "Quit Canopy, or hide it if Run in Background is on (macOS)."),
     cmd("app.hide", &[], "Hide the app (macOS)."),
     cmd("app.hide_others", &[], "Hide other apps (macOS)."),
     cmd("app.show_all", &[], "Show all apps (macOS)."),

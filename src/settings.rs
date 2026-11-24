@@ -406,6 +406,8 @@ person_settings! {
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
     zoom: f32 = 1.0 => "Whole app scale (0.5..3).";
+    #[serde(skip_serializing_if = "is_true")]
+    run_in_background: bool = true => "On macOS, hide Canopy on Quit and keep it running in the menu bar.";
     desktop_notifications: bool = true => "Show macOS notifications for agent alerts when Canopy is in the background.";
     sounds: Sounds = Sounds::default() => "Attention sounds: enabled, done and blocked file overrides.";
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1194,6 +1196,15 @@ mod tests {
             assert!(!help.is_empty());
             parse_person(&format!("{{\"{key}\":{default}}}")).unwrap();
         }
+    }
+
+    #[test]
+    fn background_mode_defaults_on_and_preserves_opt_out() {
+        assert!(parse_person(r#"{"zoom":1.5}"#).unwrap().run_in_background);
+        let disabled = parse_person(r#"{"run_in_background":false}"#).unwrap();
+        assert!(!disabled.run_in_background);
+        assert_eq!(serde_json::to_value(disabled).unwrap()["run_in_background"], false);
+        assert!(parse_person(r#"{"run_in_background":"false"}"#).is_err());
     }
 
     /// The guide agents read (written to the home folder) explains every

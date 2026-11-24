@@ -165,6 +165,7 @@ const LAYOUTS: &[(&str, &str)] = &[
 /// Pictures shipped layouts name as their `preview`, written beside them.
 const LAYOUT_PREVIEWS: &[(&str, &str)] = &[
     ("main.svg", include_str!("../defaults/layouts/main.svg")),
+    ("main-light.svg", include_str!("../defaults/layouts/main-light.svg")),
     ("win98.svg", include_str!("../defaults/layouts/win98.svg")),
 ];
 
@@ -622,7 +623,7 @@ impl AppWindow {
         let closing = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
             // macOS: the red button hides the app instead, so alerts keep ringing;
-            // the Dock icon or a new launch brings it back, Cmd+Q quits.
+            // the Dock icon or a new launch brings it back.
             if cfg!(target_os = "macos") {
                 cx.hide();
                 return false;
@@ -876,6 +877,8 @@ impl AppWindow {
         if settings::load_home_fonts(cx) {
             mods::note_fonts(cx);
         }
+        #[cfg(target_os = "macos")]
+        crate::macos::set_background_enabled(self.person.run_in_background, cx);
         let s = settings::Settings::compose(&self.person, &self.chrome.look, self.system_dark);
         let problems = s.problems();
         if !problems.is_empty() {
@@ -3653,7 +3656,12 @@ impl AppWindow {
                 });
                 self.write_person(|p| p.zoom = zoom, window, cx);
             }
-            "app.quit" => cx.quit(),
+            "app.quit" => {
+                #[cfg(target_os = "macos")]
+                crate::macos::quit_or_hide(cx);
+                #[cfg(not(target_os = "macos"))]
+                cx.quit();
+            }
             "window.close" | "window.minimize" | "window.maximize" => return self.window_command(name, window, cx),
             // Hiding apps is macOS's (bound natively there).
             "app.hide" | "app.hide_others" | "app.show_all" => return,

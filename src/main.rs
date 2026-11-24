@@ -211,7 +211,7 @@ fn main() {
             })
             .detach();
             #[cfg(target_os = "macos")]
-            macos::init(cx);
+            macos::init(cx, person.as_ref().map_or(true, |p| p.run_in_background));
             if fresh {
                 let width = cx.primary_display().map(|d| f32::from(d.bounds().size.width));
                 let zoom = settings::first_zoom(width);
