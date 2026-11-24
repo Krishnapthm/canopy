@@ -23,6 +23,7 @@ Everything on the canvas is a pane: a terminal, an agent, a file, a note, an ima
 - Press `Cmd+O` (`Ctrl+O` on Linux and Windows) in canvas mode to pick a file. Canopy opens text files as file panes, PNG, JPEG, GIF and WebP files as image panes, and PDFs as PDF panes.
 - Drag a file from your file manager onto the canvas to open it where you drop it.
 - Ask an agent. Agents open panes with [`canopy pane new`](Agent-Pane-Commands), usually wired to themselves so you both see the same thing.
+- Browsers and simulators open docked in the [files panel](Files-Panel), not on the canvas. A docked pane is a tab there. **Move to canvas** on its helper bar puts it on the canvas, and **Open in panel** docks it again.
 
 ## The helper bar
 
@@ -36,7 +37,7 @@ The tint appears in the frame when you deselect the pane. Selection and sync inp
 
 ## Close panes
 
-Select one or more panes in canvas mode and press `Backspace` or `Delete`, or click **Close** in a pane's helper bar.
+Select one or more panes in canvas mode and press `Backspace` or `Delete`, or click **Close** in a pane's helper bar. A docked pane closes with its tab's X.
 
 What happens next depends on the kind:
 

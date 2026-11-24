@@ -1,11 +1,10 @@
 // Canopy's page script for browser panes (docs/wiki/Browser-Pane.md), injected at document
-// start after the bundled react-grab, whose own start is turned off. Pick starts react-grab
-// with telemetry off; the picked element goes to Canopy as {pick: {...}} over wry's IPC.
+// start after the bundled react-grab, whose own start is turned off. Annotate asks it what
+// is under a point (hit, at) and for the element's source; react-grab starts only for that,
+// with telemetry and its own toolbar off.
 // Agent-facing data only: no source or HTML leaves the page beyond what Canopy cuts.
 (() => {
   if (window.__canopy) return;
-  const post = (message) => window.ipc.postMessage(JSON.stringify(message));
-
   // The shortest CSS path, from the element up, that matches only this element.
   const selector = (el) => {
     const steps = [];
@@ -31,9 +30,9 @@
   let api = null;
   function grab() {
     if (!api) {
-      api = globalThis.__REACT_GRAB_MODULE__.init({ telemetry: false });
-      // Returning true keeps react-grab from copying the element to the clipboard.
-      api.registerPlugin({ name: "canopy", hooks: { onElementSelect: (el) => { picked(el); return true; } } });
+      // react-grab keeps its toolbar's state in localStorage; clear it so no old toolbar returns.
+      try { localStorage.removeItem("react-grab-toolbar-state"); } catch {}
+      api = globalThis.__REACT_GRAB_MODULE__.init({ telemetry: false, toolbar: { enabled: false } });
     }
     return api;
   }
@@ -51,34 +50,33 @@
   const rect = ({ x, y, width, height }) => [x, y, width, height];
   const caret = (x, y) => document.caretRangeFromPoint(x, y);
   const styleNames = ["display", "position", "width", "height", "margin", "padding", "font-size", "font-weight", "text-align", "color", "background-color"];
-  // The only properties restyle() applies, whatever the list says.
-  const adjustable = new Set(["font-size", "font-weight", "text-align", "color", "background-color", "padding", "margin"]);
-  const originals = new Map();
   const useful = "img, svg, picture, video, canvas, a, button, input, select, textarea, label, [role=button]";
 
-  async function picked(el) {
-    const where = await source(el);
-    api.deactivate();
-    post({ pick: { url: location.href, ...where, tag: openTag(el), selector: selector(el), text: text(el, 400) } });
+  // The element a click at (x, y) means: an svg as a whole, and a bare wrapper div or span gives way to its parent.
+  function target(x, y) {
+    let el = document.elementFromPoint(x, y);
+    if (!el) return null;
+    el = el.closest("svg") ?? el;
+    while (el.parentElement && el.matches("div, span") && !el.matches(useful)
+      && el.childElementCount === 1
+      && ![...el.childNodes].some(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim())) {
+      el = el.parentElement;
+    }
+    return el;
   }
 
   window.__canopy = {
-    pick() {
-      try {
-        grab().activate();
-      } catch (error) {
-        post({ error: `The picker did not start: ${error}` });
-      }
+    // The box and short name Annotate draws while the pointer moves over the still.
+    hit(x, y) {
+      const el = target(x, y);
+      if (!el) return null;
+      const id = el.id ? `#${CSS.escape(el.id)}` : "";
+      const cls = !id && typeof el.className === "string" && el.className.trim() ? `.${CSS.escape(el.className.trim().split(/\s+/)[0])}` : "";
+      return { rect: rect(el.getBoundingClientRect()), label: cut(`${el.localName}${id}${cls}`, 60) };
     },
     async at(x, y) {
-      let el = document.elementFromPoint(x, y);
+      const el = target(x, y);
       if (!el) return null;
-      el = el.closest("svg") ?? el;
-      while (el.parentElement && el.matches("div, span") && !el.matches(useful)
-        && el.childElementCount === 1
-        && ![...el.childNodes].some(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim())) {
-        el = el.parentElement;
-      }
       const style = getComputedStyle(el);
       return {
         selector: selector(el), tag: cut(openTag(el), 80), text: text(el, 120),
@@ -113,25 +111,6 @@
           return el ? rect(el.getBoundingClientRect()) : null;
         } catch { return null; }
       });
-    },
-    // Applies [{selector, styles}] as inline styles, first undoing the previous call. Returns the elements styled.
-    restyle(list) {
-      for (const [el, style] of originals) {
-        if (style === null) el.removeAttribute("style"); else el.setAttribute("style", style);
-      }
-      originals.clear();
-      let count = 0;
-      for (const { selector, styles } of list) {
-        let el = null;
-        try { el = document.querySelector(selector); } catch {}
-        if (!el) continue;
-        if (!originals.has(el)) originals.set(el, el.getAttribute("style"));
-        for (const [name, value] of Object.entries(styles)) {
-          if (adjustable.has(name)) el.style.setProperty(name, value, "important");
-        }
-        count++;
-      }
-      return count;
     },
     size: () => [innerWidth, innerHeight],
   };

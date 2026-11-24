@@ -125,7 +125,6 @@ impl AppWindow {
         let size = DEFAULT_SIZE;
         let zoom = doc.camera.zoom;
         doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], size[0] / zoom, size[1] / zoom], z, space, color: None, pinned: None });
-        self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         self.refresh_sim(&id, true, window, cx);
         id
@@ -417,6 +416,7 @@ impl AppWindow {
     /// Resets the pane or sizes its device in canvas points. In and out step the drawn scale.
     #[cfg(target_os = "macos")]
     fn zoom_sim(&mut self, id: &str, step: &str, cx: &mut Context<Self>) -> Result<Value, String> {
+        if self.canvas_state.doc.docked(id) { return Err("Move the simulator to the canvas to change its size".into()); }
         let (size, result) = if step == "default" {
             (DEFAULT_SIZE, json!({}))
         } else {
@@ -530,6 +530,14 @@ impl AppWindow {
                 _ => {}
             }
         }
+        // Annotation replaces the bottom device bar, so put its picker beside Connect.
+        if let Some(name) = self.annotation_picker(id)
+            && let Some(at) = actions.iter().position(|a| a.command == "canvas.connect")
+        {
+            actions.insert(at, super::helper_bar::BarAction {
+                icon: "icons/bot.svg".into(), label: name.into(), command: "canvas.annotate_agent".into(), args: json!({}),
+            });
+        }
         actions
     }
 
@@ -563,7 +571,7 @@ impl AppWindow {
         self.canvas_state.sims.get(id)?.live.as_ref()?;
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
         let mut actions = sim_device_actions();
-        actions.push(pane_actions(pane, None).into_iter().find(|a| a.command == "canvas.sim_pop")?);
+        actions.push(pane_actions(pane, None, false).into_iter().find(|a| a.command == "canvas.sim_pop")?);
         let actions = self.sim_relabel(id, actions, cx);
         Some(self.bar(id, actions, 1., false, cx).into_any_element())
     }
@@ -584,6 +592,19 @@ impl AppWindow {
             let _ = window;
             self.answer(Ok(json!({})));
         }
+    }
+
+    /// A sim pane's whole body as the canvas card and the panel draw it: the device, Annotate, and
+    /// the bottom bar of device actions.
+    pub(super) fn sim_card_body(&self, card: &canvas::Pane, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
+        let body = self.sim_body(card, cx);
+        let body = self.annotate_body(card, body, annotate::card_body(card, camera.zoom), cx);
+        #[cfg(target_os = "macos")]
+        let body = div().relative().size_full().child(body)
+            .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(
+                div().absolute().bottom(px(12.)).left_0().right_0().flex().justify_center().child(bar)))
+            .into_any_element();
+        body
     }
 
     /// The body of a sim pane: its device, or what stands in for it.

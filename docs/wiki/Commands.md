@@ -179,7 +179,7 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 
 ## `canvas.pane_new`
 
-Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. The pane opens at point (the middle of the view by default) or at the top right when pinned is true. Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
+Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
 
 | Argument | Required |
 |---|---|
@@ -189,7 +189,17 @@ Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files requi
 | `udid` | no |
 | `wire` | no |
 | `point` | no |
+| `place` | no |
 | `pinned` | no |
+
+## `canvas.pane_dock`
+
+Dock a browser or sim pane as a tab in the Files panel, or with docked false move it back onto the canvas at its saved place. Without docked it toggles. Acts on pane, else the selected pane. Replies with pane and docked.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `docked` | no |
 
 ## `canvas.pane_pin`
 
@@ -305,7 +315,7 @@ Load the URL a browser pane was last opened with (pane, else the selected pane).
 
 ## `canvas.browser_pick`
 
-Make a browser pane live and pick an element on its page; the pick opens the quote popover (pane, else the selected pane).
+Start annotating a browser page with the Select tool: click an element to pin a comment on it (pane, else the selected pane).
 
 | Argument | Required |
 |---|---|
@@ -313,7 +323,7 @@ Make a browser pane live and pick an element on its page; the pick opens the quo
 
 ## `canvas.browser_annotate`
 
-Start or stop annotating a still of a browser page. Acts on pane, else the selected browser pane.
+Start or stop annotating a browser page: select elements, draw, and send comments to an agent. Acts on pane, else the selected browser pane.
 
 | Argument | Required |
 |---|---|
@@ -466,7 +476,7 @@ Start or stop annotating a still of a simulator screen. Acts on pane, else the s
 
 ## `canvas.annotate_send`
 
-Submit the annotated screenshot and comments to the wired agent, or open the agent picker. Acts on pane, else the selected annotation.
+Submit the annotated screenshot and comments to the sole wired agent, or the one chosen with canvas.annotate_agent. Acts on pane, else the selected annotation.
 
 | Argument | Required |
 |---|---|
@@ -474,21 +484,38 @@ Submit the annotated screenshot and comments to the wired agent, or open the age
 
 ## `canvas.annotate_action`
 
-Run a drawing tool or toolbar action in an active annotation. Used by its menus.
+Run a tool, colour, stroke, undo or redo in an active annotation, or choose its target agent with `agent:<terminal>`. Used by its menus.
 
 | Argument | Required |
 |---|---|
 | `pane` | yes |
 | `action` | yes |
 
+## `canvas.annotate_agent`
+
+Open the menu that chooses which agent an annotation is sent to (wired agents first). Acts on pane, else the selected annotation.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
 ## `canvas.sim_zoom`
 
-Resize a simulator pane: step actual (1 point per screen pixel at the current zoom, the default), in or out. Acts on pane, else the selected simulator pane.
+Resize a simulator pane: step actual (one device point per canvas unit, requires a live frame), default (340x700 on screen), in or out. Omit step for actual. Acts on pane, else the selected simulator pane.
 
 | Argument | Required |
 |---|---|
 | `step` | no |
 | `pane` | no |
+
+## `canvas.sim_shutdown`
+
+Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `close` | no |
 
 ## `canvas.sim_pop`
 

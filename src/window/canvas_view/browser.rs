@@ -140,6 +140,7 @@ const ENTER_URL: &str = "type a URL in the address field first";
 const TAG_CUT: usize = 80;
 const TEXT_CUT: usize = 200;
 
+
 /// Browser state that is not saved: native views, snapshots and waiting replies.
 #[derive(Default)]
 pub(in crate::window) struct Browsers {
@@ -171,11 +172,6 @@ struct Page {
     loading: bool,
     /// Replies held until the page finishes loading.
     waiting: Vec<Ask>,
-    /// Pick mode starts once the page is live and loaded.
-    pick: bool,
-    /// The person started a pick: only then is a `{pick}` or `{error}` from the page taken,
-    /// since any script on the page can post to Canopy.
-    picking: bool,
     /// Counts loads, so a load's time limit leaves later loads alone.
     loads: u64,
     /// Identifies callbacks from this view even if a closed tab's id is used again.
@@ -230,8 +226,6 @@ pub(in crate::window) enum Event {
     Started,
     Loaded,
     Title(String),
-    /// A message from browser.js.
-    Message(String),
     /// A link asked for a new window: it opens in this pane instead.
     Open(String),
     /// The snapshot taken when the page rested (None: it failed).
@@ -281,6 +275,36 @@ pub(in crate::window) fn web_url(input: &str) -> Result<String, String> {
     Ok(format!("{}://{url}", if local { "http" } else { "https" }))
 }
 
+/// Cuts text to `max` characters, marking the cut with `…`.
+fn cut(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) { Some((at, _)) => format!("{}…", &text[..at]), None => text.to_owned() }
+}
+
+/// Formats a `quote.send` browser pointer as a URL and its element or source reference.
+pub(in crate::window) fn format_quote(quote: &Value, cwd: Option<&str>) -> String {
+    let source = &quote["source"];
+    let s = |k: &str| source[k].as_str().or(quote[k].as_str()).unwrap_or_default();
+    let mut out = format!("@{}", s("url"));
+    if let Some(file) = source["file"].as_str() {
+        let path = std::path::Path::new(file);
+        let file = cwd.and_then(|cwd| path.strip_prefix(cwd).ok()).unwrap_or(path).display().to_string();
+        if !s("component").is_empty() { out.push_str(&format!(" <{}>", s("component"))); }
+        out.push_str(&format!(" {file}"));
+        if let Some(start) = quote["start"].as_u64() {
+            out.push_str(&format!(":{start}"));
+            if let Some(end) = quote["end"].as_u64().filter(|e| *e != start) { out.push_str(&format!("-{end}")); }
+        }
+        out.push_str(&format!(" {}", serde_json::to_string(&cut(s("tag"), TAG_CUT)).unwrap()));
+    } else {
+        out.push_str(&format!(" {}", s("selector")));
+        if !s("text").is_empty() { out.push_str(&format!(" {}", serde_json::to_string(&cut(s("text"), TEXT_CUT)).unwrap())); }
+    }
+    match quote["message"].as_str().map(str::trim).filter(|m| !m.is_empty()) {
+        Some(message) => format!("{out}\n\n{message}"),
+        None => out,
+    }
+}
+
 /// The file react-grab named (a path, a dev-server URL, a bundler URL or, from Vite's source
 /// maps, a bare file name), found on disk: as an absolute path, else under each root,
 /// dropping leading parts one at a time, else by searching each root for a file ending in it.
@@ -320,126 +344,6 @@ fn find_suffix(root: &std::path::Path, tail: &std::path::Path) -> Option<std::pa
     None
 }
 
-/// The lines (1-based, inclusive) of the JSX element at `line`:`col`: the first element
-/// that starts there or after it, which for a component's definition (where React's stack
-/// points) is the root element it returns. None when none is found, the position is past
-/// the end, or the element runs past 400 lines. A hand scanner: strings, comments,
-/// template literals and `{}` expressions are skipped; regex literals are not understood.
-pub(in crate::window) fn jsx_lines(src: &str, line: usize, col: usize) -> Option<(usize, usize)> {
-    let start_of_line = src.split_inclusive('\n').take(line.checked_sub(1)?).map(str::len).sum::<usize>();
-    let row_len = src.get(start_of_line..)?.split('\n').next()?.len();
-    let b = src.as_bytes();
-    let line_at = |i: usize| src[..i].matches('\n').count() + 1;
-    // An element starts at `<` + a name or `>`, after `(`, `=`, `?`, `:`, `,`, `{`, `[`, `&`,
-    // `|`, `>` or `return`: not a comparison like `a < b`.
-    let starts_jsx = |i: usize| {
-        let before = src[..i].trim_end();
-        before.is_empty() || before.ends_with("return") || before.ends_with(['(', '=', '?', ':', ',', '{', '[', '&', '|', '>'])
-    };
-    // Byte offset where line `n` (1-based) starts, or the end: the 400-line limits.
-    let line_start = |n: usize| if n <= 1 { 0 } else { src.match_indices('\n').nth(n - 2).map_or(src.len(), |(at, _)| at + 1) };
-    let from = start_of_line + col.saturating_sub(1).min(row_len);
-    let tag = |i: usize| b[i] == b'<' && b.get(i + 1).is_some_and(|c| c.is_ascii_alphabetic() || *c == b'>');
-    // A tag on the start line is the element; past it, only one in an element position.
-    let mut i = (from..start_of_line + row_len).find(|&i| tag(i))
-        .or_else(|| (from..line_start(line + 401)).find(|&i| tag(i) && starts_jsx(i)))?;
-    let first = line_at(i);
-    let limit = line_start(first + 401);
-    let mut depth = 0usize;
-    loop {
-        if i >= limit { return None; }
-        match *b.get(i)? {
-            b'{' => i = skip_braces(b, i)?,
-            b'<' if b.get(i + 1) == Some(&b'/') => {
-                i = i + b[i..].iter().position(|&c| c == b'>')? + 1;
-                depth = depth.checked_sub(1)?;
-                if depth == 0 { return Some((first, line_at(i - 1))); }
-            }
-            b'<' => {
-                // An opening tag: its attributes, to `>` or `/>`.
-                i += 1;
-                loop {
-                    match *b.get(i)? {
-                        b'{' => i = skip_braces(b, i)?,
-                        q @ (b'"' | b'\'') => i = i + 1 + b[i + 1..].iter().position(|&c| c == q)? + 1,
-                        b'/' if b.get(i + 1) == Some(&b'>') => {
-                            if depth == 0 { return Some((first, line_at(i))); }
-                            i += 2;
-                            break;
-                        }
-                        b'>' => { depth += 1; i += 1; break; }
-                        _ => i += 1,
-                    }
-                }
-            }
-            _ => i += 1,
-        }
-    }
-}
-
-/// From a `{` to just past its `}`, skipping strings, template literals and comments.
-fn skip_braces(b: &[u8], mut i: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    loop {
-        match *b.get(i)? {
-            b'{' => depth += 1,
-            b'}' => { depth -= 1; if depth == 0 { return Some(i + 1); } }
-            q @ (b'"' | b'\'') => {
-                i += 1;
-                while *b.get(i)? != q { if b[i] == b'\\' { i += 1; } i += 1; }
-            }
-            b'`' => {
-                i += 1;
-                while *b.get(i)? != b'`' {
-                    match b[i] {
-                        b'\\' => i += 2,
-                        b'$' if b.get(i + 1) == Some(&b'{') => i = skip_braces(b, i + 1)?,
-                        _ => i += 1,
-                    }
-                }
-            }
-            b'/' if b.get(i + 1) == Some(&b'/') => i += b[i..].iter().position(|&c| c == b'\n')?,
-            b'/' if b.get(i + 1) == Some(&b'*') => i += 2 + b[i + 2..].windows(2).position(|w| w == b"*/")? + 1,
-            _ => {}
-        }
-        i += 1;
-    }
-}
-
-/// Cuts text to `max` characters, marking the cut with `…`.
-fn cut(text: &str, max: usize) -> String {
-    match text.char_indices().nth(max) { Some((at, _)) => format!("{}…", &text[..at]), None => text.to_owned() }
-}
-
-/// What a browser pick pastes into an agent: a pointer to the element, never its source
-/// (docs/canopy/canvas-items-plan.md section 8). With React source:
-/// `@<url> <Component> src/File.tsx:42-61 "<div class=card>"`; otherwise
-/// `@<url> <css selector> "<visible text>"`. `cwd` shortens the file path. The quote:
-/// `{kind: "browser", start?, end?, text, message?, source: {url, component?, file?, selector, tag}}`.
-pub(in crate::window) fn format_quote(quote: &Value, cwd: Option<&str>) -> String {
-    let source = &quote["source"];
-    let s = |k: &str| source[k].as_str().or(quote[k].as_str()).unwrap_or_default();
-    let mut out = format!("@{}", s("url"));
-    if let Some(file) = source["file"].as_str() {
-        let path = std::path::Path::new(file);
-        let file = cwd.and_then(|cwd| path.strip_prefix(cwd).ok()).unwrap_or(path).display().to_string();
-        if !s("component").is_empty() { out.push_str(&format!(" <{}>", s("component"))); }
-        out.push_str(&format!(" {file}"));
-        if let Some(start) = quote["start"].as_u64() {
-            out.push_str(&format!(":{start}"));
-            if let Some(end) = quote["end"].as_u64().filter(|e| *e != start) { out.push_str(&format!("-{end}")); }
-        }
-        out.push_str(&format!(" {}", serde_json::to_string(&cut(s("tag"), TAG_CUT)).unwrap()));
-    } else {
-        out.push_str(&format!(" {}", s("selector")));
-        if !s("text").is_empty() { out.push_str(&format!(" {}", serde_json::to_string(&cut(s("text"), TEXT_CUT)).unwrap())); }
-    }
-    match quote["message"].as_str().map(str::trim).filter(|m| !m.is_empty()) {
-        Some(message) => format!("{out}\n\n{message}"),
-        None => out,
-    }
-}
-
 impl AppWindow {
     /// Adds a browser pane at `point` in `space`. An empty URL focuses its New tab field.
     pub(super) fn add_browser_pane(&mut self, url: String, point: canvas::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
@@ -453,7 +357,6 @@ impl AppWindow {
         doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], SIZE[0], SIZE[1]], z, space, color: None, pinned: None });
         self.canvas_state.last_browser = Some(id.clone());
         if empty { self.canvas_state.browsers.panes.entry(id.clone()).or_default().focus_url = true; }
-        self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
         id
@@ -687,6 +590,7 @@ impl AppWindow {
         let field = ui.and_then(|ui| if host == Host::Pane { ui.url_input.as_ref() } else { ui.pop_input.as_ref() }).map(|(input, _)| input.clone());
         let reset = id.to_owned();
         let annotate = id.to_owned();
+        let picker = self.annotation_picker(id);
         let row2 = div().flex().items_center().h(px(32.)).px(px(8.)).gap(px(4.))
             .child(button("browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
             .child(button("browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
@@ -699,13 +603,19 @@ impl AppWindow {
                     if e.keystroke.key == "escape" { this.reset_url(&reset, host, window, cx); cx.stop_propagation(); }
                 }))
                 .children(field.map(|input| gpui_base::Input::new(&input))))
+            .children(picker.map(|name| div().id("browser-annotate-agent").role(gpui::Role::Button).aria_label("Send annotation to")
+                .flex().flex_none().items_center().gap(px(4.)).h(px(24.)).px(px(8.)).rounded(px(ui::RADIUS_SM)).border_1().border_color(c("border"))
+                .text_size(px(12.)).text_color(c("foreground")).cursor_pointer().hover(|d| d.bg(c("hover")))
+                .tooltip(strip_tooltip("Send annotation to".into(), Some("canvas.annotate_agent")))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener({ let pane = id.to_owned(); move |this, _, window, cx| this.run_key("canvas.annotate_agent", json!({"pane": pane}), window, cx) }))
+                .child(div().max_w(px(128.)).truncate().child(name))))
             .child(div().id("browser-annotate").role(gpui::Role::Button).aria_label("Annotate")
                 .flex().flex_none().items_center().gap(px(4.)).h(px(24.)).px(px(8.)).rounded(px(ui::RADIUS_SM)).border_1().border_color(c("border"))
                 .text_size(px(12.)).text_color(c("muted-foreground")).cursor_pointer().hover(|d| d.bg(c("hover")).text_color(c("foreground")))
                 .tooltip(strip_tooltip("Annotate".into(), Some("canvas.browser_annotate")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_annotate", json!({"pane": annotate}), window, cx)))
-                .child(svg().path("icons/message-square-plus.svg").size(px(14.)))
                 .child("Annotate"));
         div().flex().flex_col().w_full().h(px(canvas::BROWSER_HEADER)).min_w_0().text_color(c("foreground"))
             .when(host == Host::Window, |d| d.bg(c("surface")).border_b_1().border_color(c("border")))
@@ -739,7 +649,7 @@ impl AppWindow {
     /// `localhost:3000` a URL and refuses non-web schemes). Runs from `render`, which has a window.
     pub(in crate::window) fn sync_browser_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let doc = &self.canvas_state.doc;
-        let urls: Vec<_> = doc.panes.iter().filter(|p| p.url().is_some()).map(|p| (p.id.clone(), doc.shows(p.space.as_ref()))).collect();
+        let urls: Vec<_> = doc.panes.iter().filter(|p| p.url().is_some()).map(|p| (p.id.clone(), self.canvas_state.shows_pane(p))).collect();
         // The page events task belongs to this window: a pop-out window must not be the one to start it.
         #[cfg(target_os = "macos")]
         if !urls.is_empty() { self.browser_events(window, cx); }
@@ -810,9 +720,19 @@ impl AppWindow {
         self.show_browser_menu(id, host, items, window, cx);
     }
 
+    /// Which window should render a menu opened by a pane command.
+    #[cfg(target_os = "macos")]
+    pub(super) fn browser_menu_host(&self, id: &str, window: &Window) -> Host {
+        if self.canvas_state.browsers.panes.get(id).and_then(|pane| pane.popped) == Some(window.window_handle()) {
+            Host::Window
+        } else {
+            Host::Pane
+        }
+    }
+
     /// Opens a menu of `[label, command, args]` rows at the pointer: the menu mod's popup in the
     /// main window, or in the pop-out the menu `pop_menu` draws.
-    fn show_browser_menu(&mut self, id: &str, host: Host, items: Vec<Value>, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn show_browser_menu(&mut self, id: &str, host: Host, items: Vec<Value>, window: &mut Window, cx: &mut Context<Self>) {
         if host == Host::Window {
             self.canvas_state.browsers.panes.entry(id.to_owned()).or_default().pop_menu = Some((window.mouse_position(), items));
             return cx.notify();
@@ -897,7 +817,6 @@ impl AppWindow {
     /// Answers page events from the web views.
     fn browser_event(&mut self, key: String, view: u64, event: Event, window: &mut Window, cx: &mut Context<Self>) {
         let Some((id, tab)) = key.split_once('/') else { return };
-        let active = self.page_key(id).as_deref() == Some(key.as_str());
         let Some(page) = self.canvas_state.browsers.pages.get_mut(&key).filter(|p| p.view_id == view && p.has_view()) else { return };
         match event {
             // A navigation inside the page (a link) committed.
@@ -952,18 +871,6 @@ impl AppWindow {
                     .unwrap_or_else(|| id.to_owned());
                 self.toast(Toast { title: format!("{title} is still playing"), body: None, level: Level::Info, action: Some(("pane.focus".into(), json!({"pane": id}))) }, window, cx);
             }
-            Event::Message(body) => {
-                if !page.picking || !active { return; }
-                // Only a pick or its error ends the pick: other page messages leave it waiting.
-                let Ok(message) = serde_json::from_str::<Value>(&body) else { return };
-                if message["error"].is_string() || message["pick"].is_object() { page.picking = false; } else { return; }
-                if let Some(error) = message["error"].as_str() {
-                    tracing::warn!("browser pane {id}: {error}");
-                    self.toast(Toast { title: "Pick failed".into(), body: Some(error.into()), level: Level::Error, action: None }, window, cx);
-                } else if message["pick"].is_object() {
-                    self.browser_picked(id, &message["pick"], window, cx);
-                }
-            }
         }
         cx.notify();
     }
@@ -991,13 +898,9 @@ impl AppWindow {
         let Some(page) = self.canvas_state.browsers.pages.get_mut(key).filter(|p| p.view_id == view && p.has_view()) else { return };
         page.loading = false;
         let waiting = std::mem::take(&mut page.waiting);
-        let pick = std::mem::take(&mut page.pick) && page.live.is_some();
         let resting = page.live.is_none();
         self.note_browser_url(key, cx);
         for ask in waiting { self.answer_browser(key, ask); }
-        if let Some((id, _)) = key.split_once('/') && pick && self.page_key(id).as_deref() == Some(key) {
-            self.eval_browser(id, "window.__canopy && window.__canopy.pick()");
-        }
         if resting { self.rest_page(key, cx); }
         cx.notify();
     }
@@ -1023,52 +926,6 @@ impl AppWindow {
         let _ = (key, cx);
     }
 
-    /// A picked element becomes a quote. The page rests and the quote popover opens.
-    fn browser_picked(&mut self, id: &str, pick: &Value, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id).cloned() else { return };
-        // The page wrote this: keep each field one bounded line, so it cannot add lines to an agent's prompt.
-        let field = |key: &str, max: usize| pick[key].as_str()
-            .map(|v| Value::String(v.chars().filter(|c| !c.is_control()).take(max).collect()));
-        let pick = &json!({
-            "url": field("url", 2048), "selector": field("selector", 1024), "tag": field("tag", 300), "text": field("text", 400),
-            "component": field("component", 200), "file": field("file", 1024), "line": pick["line"].as_u64(), "column": pick["column"].as_u64(),
-        });
-        // Where the source may live: the folders of agents wired to this pane, its space's
-        // folder, then every space's folder.
-        let wires = crate::wire::all(&self.canvas_state.doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
-        let mut roots: Vec<std::path::PathBuf> = crate::wire::neighbors(&wires, id).iter().filter_map(|t| self.cwds.get(t)).map(std::path::PathBuf::from).collect();
-        if let Some(space) = pane.space.as_deref().and_then(|s| self.model.space(s)) { roots.push(space.folder.clone().into()); }
-        roots.extend(self.model.spaces.iter().map(|s| std::path::PathBuf::from(&s.folder)));
-        let text = pick["text"].as_str().unwrap_or_default();
-        let mut quote = json!({"kind":"browser","pane":id,"text":text,"path":pick["url"],
-            "source":{"url":pick["url"],"selector":pick["selector"],"tag":pick["tag"]}});
-        if let (Some(file), Some(line)) = (pick["file"].as_str(), pick["line"].as_u64()) {
-            quote["source"]["component"] = pick["component"].clone();
-            quote["start"] = json!(line);
-            match resolve_source(file, &roots) {
-                Some(path) => {
-                    let col = pick["column"].as_u64().unwrap_or(1) as usize;
-                    // A file over 512 KiB is not scanned: the quote keeps the start line only.
-                    let range = std::fs::metadata(&path).ok().filter(|m| m.len() <= 512 * 1024)
-                        .and_then(|_| std::fs::read_to_string(&path).ok())
-                        .and_then(|src| jsx_lines(&src, line as usize, col));
-                    if let Some((start, end)) = range { quote["start"] = json!(start); quote["end"] = json!(end); }
-                    quote["source"]["file"] = json!(path);
-                    quote["path"] = json!(path);
-                }
-                None => quote["source"]["file"] = json!(file),
-            }
-        }
-        // Return to the pane before placing the quote popover.
-        if self.canvas_state.browser_tab.as_deref() == Some(id) { self.collapse_browser(window, cx); } else { self.rest_browser(id, cx); }
-        let camera = self.canvas_state.doc.camera;
-        let origin = self.bounds.borrow().get("canopy-canvas").map(|b| b.origin).unwrap_or_default();
-        let [x, y] = camera.to_screen([pane.rect[0] + 16., pane.rect[1] + canvas::header_height(&pane.kind) / camera.zoom]);
-        quote["point"] = json!({"x": f32::from(origin.x) + x, "y": f32::from(origin.y) + y});
-        tracing::debug!("browser pick in {id}: {}", format_quote(&quote, None));
-        self.quote_menu(&quote, window, cx);
-    }
-
     /// The browser pane a `canvas.browser_*` command acts on: `pane`, else the one selected.
     fn browser_target(&self, a: &Value) -> Result<String, String> {
         let doc = &self.canvas_state.doc;
@@ -1090,7 +947,7 @@ impl AppWindow {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no browser pane {id}"))?;
         let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return Err(format!("no browser pane {id}")); };
         let next = tabs.iter().position(|t| t.id == tab).ok_or_else(|| format!("no tab {tab} in browser pane {id}"))?;
-        let shown = self.canvas_state.doc.shows(pane.space.as_ref());
+        let shown = self.canvas_state.shows_pane(pane);
         if next == *active {
             if shown { self.select_browser_pane(id); }
             if self.browser_url(id)? == "" { self.focus_browser_url(id, cx)?; }
@@ -1189,7 +1046,7 @@ impl AppWindow {
             Err(e) => return self.command_error("Open link", &e, window, cx),
         };
         let doc = &self.canvas_state.doc;
-        let shown = doc.panes.iter().filter(|pane| pane.url().is_some() && doc.shows(pane.space.as_ref())).map(|p| p.id.as_str());
+        let shown = doc.panes.iter().filter(|pane| pane.url().is_some() && self.canvas_state.shows_pane(pane)).map(|p| p.id.as_str());
         let last = link_target(self.canvas_state.last_browser.as_deref(), shown);
         let id = last.unwrap_or_else(|| {
             let doc = &self.canvas_state.doc;
@@ -1200,7 +1057,9 @@ impl AppWindow {
                     ([x - SIZE[0] / 2., y - SIZE[1] / 2.], doc.room.clone())
                 }
             };
-            self.add_browser_pane(String::new(), at, space, cx)
+            let id = self.add_browser_pane(String::new(), at, space, cx);
+            self.solve_layout(Some(&id), None, cx);
+            id
         });
         if self.canvas_state.browser_tab.as_deref().is_some_and(|expanded| expanded != id) {
             self.collapse_browser(window, cx);
@@ -1322,15 +1181,10 @@ impl AppWindow {
                 if let Err(e) = self.clear_browsing_data(window, cx) { self.fail(e); }
             }
             "canvas.browser_pick" => {
-                // Another page expanded gives way; the expanded page itself is already live.
-                if self.canvas_state.browser_tab.as_deref() != Some(id.as_str()) {
-                    self.collapse_browser(window, cx);
-                    if let Err(e) = self.wake_browser_result(&id, window, cx) { return self.fail(e); }
-                }
-                let key = self.page_key(&id).unwrap();
-                let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
-                page.picking = true;
-                if page.loading { page.pick = true; } else { self.eval_browser(&id, "window.__canopy && window.__canopy.pick()"); }
+                #[cfg(target_os = "macos")]
+                if let Err(e) = self.annotation_pick(&id, window, cx) { self.fail(e); }
+                #[cfg(not(target_os = "macos"))]
+                self.fail("browser panes run on macOS only for now");
             }
             _ => {
                 // canvas.browser_shot: the person gets the path in a toast.
@@ -1590,14 +1444,12 @@ impl AppWindow {
             };
             let (load_tx, load_key) = (tx.clone(), key.clone());
             let (open_tx, open_key) = (tx.clone(), key.clone());
-            let ipc = send(Event::Message);
             let webview = browser_store(wry::WebViewBuilder::new())
                 .with_url(url)
                 .with_devtools(true)
                 .with_visible(false)
                 .with_accept_first_mouse(true)
                 .with_initialization_script_for_main_only(page_script(), true)
-                .with_ipc_handler(move |request| ipc(request.body().clone()))
                 .with_document_title_changed_handler(send(Event::Title))
                 .with_on_page_load_handler(move |event, _| {
                     let event = match event { wry::PageLoadEvent::Started => Event::Started, wry::PageLoadEvent::Finished => Event::Loaded };
@@ -1638,6 +1490,7 @@ impl AppWindow {
     /// another space.
     fn expand_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).cloned().ok_or_else(|| format!("no pane {id}"))?;
+        if self.canvas_state.doc.docked(id) { return Err("Use Expand panel for a browser in the Files panel".into()); }
         if !self.canvas_state.doc.shows(pane.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
         if self.browser_popped(id) { return Err(format!("pane {id} is popped out: bring it back first")); }
         self.require_browser_url(id)?;
@@ -1754,7 +1607,7 @@ impl AppWindow {
         self.canvas_state.browsers.last_masks.borrow_mut().remove(key);
         let Some(page) = self.canvas_state.browsers.pages.get_mut(key) else { return };
         if let Some(native) = page.native.take() { destroy(native); }
-        (page.live, page.picking, page.pick, page.loading, page.watch) = (None, false, false, false, false);
+        (page.live, page.loading, page.watch) = (None, false, false);
         for ask in std::mem::take(&mut page.waiting) {
             let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
             let _ = tx.send(json!({"error": why}));
@@ -1844,10 +1697,14 @@ impl AppWindow {
         if self.browser_popped(id) { return Err(format!("pane {id} is popped out: bring it back first")); }
         let doc = &self.canvas_state.doc;
         let saved = doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
-        let pane = self.canvas_state.shown.as_ref().and_then(|shown| shown.panes.iter().find(|p| p.id == id)).unwrap_or(saved).clone();
-        if !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
-        let frame = self.body_rect(&pane).ok_or("the canvas is not shown")?;
-        let camera = self.canvas_state.doc.camera;
+        // A docked page is placed by the panel body, not the canvas camera.
+        let docked = self.docked_view(id);
+        let (pane, camera) = match docked {
+            Some((view, _)) => (view, canvas::Camera::default()),
+            None => (self.canvas_state.shown.as_ref().and_then(|shown| shown.panes.iter().find(|p| p.id == id)).unwrap_or(saved).clone(), self.canvas_state.doc.camera),
+        };
+        if !doc.docked(id) && !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
+        let frame = self.body_rect(saved).ok_or("the canvas is not shown")?;
         let [_, _, width, height] = pane_body(&pane, camera);
         let zoom = page_zoom(&pane, camera, [width, height]);
         self.ensure_view(id, window, cx)?;
@@ -1883,8 +1740,6 @@ impl AppWindow {
         let view_id = page.view_id;
         let was_live = page.live.take().is_some();
         self.canvas_state.browsers.last_masks.borrow_mut().remove(key);
-        page.picking = false;
-        page.pick = false;
         page.watch = true;
         let Some(tx) = self.canvas_state.browsers.events.clone() else { return };
         let owned = key.to_owned();
@@ -1967,8 +1822,6 @@ impl AppWindow {
         let Some(view) = page.native.as_ref().map(|n| n.view.clone()) else { return done(self, None, cx) };
         let view_id = page.view_id;
         page.live = None;
-        page.pick = false;
-        page.picking = false;
         page.watch = !popped;
         self.canvas_state.browsers.last_masks.borrow_mut().remove(&key);
         let events = self.canvas_state.browsers.events.clone();
@@ -2037,6 +1890,7 @@ impl AppWindow {
 
     /// Give an unpinned browser room to work at 100%, or fit it with a margin.
     pub(super) fn snap_usable(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.canvas_state.doc.docked(id) { return; }
         let Some(bounds) = self.bounds.borrow().get("canopy-canvas").copied() else { return };
         let [w, h] = [f32::from(bounds.size.width), f32::from(bounds.size.height)];
         if w <= 0. || h <= 0. { return; }
@@ -2055,7 +1909,7 @@ impl AppWindow {
     fn inspect_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         let popped = self.browser_popped(id);
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
-        if !popped && !self.canvas_state.doc.shows(pane.space.as_ref()) {
+        if !popped && !self.canvas_state.shows_pane(pane) {
             return Err(format!("pane {id} is in another space: go there first"));
         }
         self.ensure_view(id, window, cx)?;
@@ -2196,6 +2050,7 @@ impl AppWindow {
         self.require_browser_url(id)?;
         self.ensure_view(id, window, cx)
     }
+    pub(super) fn rest_live_browser(&mut self, _: &str, _: &mut Context<Self>) {}
     pub(super) fn rest_browser(&mut self, _: &str, _: &mut Context<Self>) {}
     fn rest_page(&mut self, _: &str, _: &mut Context<Self>) {}
     pub(super) fn collapse_browser(&mut self, _: &mut Window, _: &mut Context<Self>) {}
@@ -2217,7 +2072,7 @@ impl AppWindow {
 #[cfg(test)]
 mod tests {
     // Explicit: a glob would bring gpui's own `test` attribute in.
-    use super::{GRAB_REQUESTS, PRESETS, REACT_GRAB, file_url, format_quote, jsx_lines, menu_items, open_in, page_script, page_zoom, parse_viewport, resolve_source, web_url};
+    use super::{GRAB_REQUESTS, PRESETS, REACT_GRAB, file_url, format_quote, menu_items, open_in, page_script, page_zoom, parse_viewport, resolve_source, web_url};
     use crate::canvas::{Camera, Kind, Pane};
     use crate::settings::{KeepCookies, OpenLinks};
     use serde_json::json;
@@ -2330,24 +2185,6 @@ mod tests {
     }
 
     #[test]
-    fn jsx_ranges() {
-        let src = "export function Card() {\n  return (\n    <div className=\"card\" onClick={() => a > b}>\n      {/* a } comment */}\n      <Card.Title title={`x ${y} }`}>hi</Card.Title>\n      <br />\n      <div>\n        <div>nested</div>\n      </div>\n    </div>\n  );\n}\n";
-        assert_eq!(jsx_lines(src, 3, 5), Some((3, 10)), "the whole card, over braces, strings and a comment");
-        assert_eq!(jsx_lines(src, 3, 1), Some((3, 10)), "a column before the tag finds it");
-        assert_eq!(jsx_lines(src, 1, 22), Some((3, 10)), "a component's definition finds the element it returns");
-        assert_eq!(jsx_lines("f();\nif (a < b) {}\nconst x = <p>hi</p>;\n", 1, 1), Some((3, 3)), "a comparison is not an element");
-        assert_eq!(jsx_lines(src, 5, 7), Some((5, 5)));
-        assert_eq!(jsx_lines(src, 6, 7), Some((6, 6)), "self-closing");
-        assert_eq!(jsx_lines(src, 7, 7), Some((7, 9)), "same-name nesting");
-        assert_eq!(jsx_lines("<>\n  <A />\n</>\n", 1, 1), Some((1, 3)), "fragments");
-        assert_eq!(jsx_lines("const f = <T,>(x: T) => x;\n", 1, 11), None, "a generic is not an element");
-        assert_eq!(jsx_lines(&format!("<div>\n{}</div>\n", "x\n".repeat(500)), 1, 1), None, "past 400 lines");
-        assert_eq!(jsx_lines("no tag here\n", 1, 1), None);
-        assert_eq!(jsx_lines("<div>\n", 1, 9), None, "an unclosed element");
-        assert_eq!(jsx_lines("<div>\n", 9, 1), None, "line past the end");
-    }
-
-    #[test]
     fn quotes_point_not_copy() {
         let react = json!({"start":42,"end":61,"source":{"url":"http://localhost:3000/pricing","component":"PricingCard","file":"/w/src/PricingCard.tsx","tag":format!("<div class=\"card {}\">", "x".repeat(100))}});
         let quote = format_quote(&react, Some("/w"));
@@ -2355,8 +2192,8 @@ mod tests {
         assert!(quote.ends_with("…\""), "the tag is cut: {quote}");
         let dom = json!({"text":"Buy now","message":" fix this ","source":{"url":"https://x.dev/","selector":"main > section:nth-of-type(2)"}});
         assert_eq!(format_quote(&dom, None), "@https://x.dev/ main > section:nth-of-type(2) \"Buy now\"\n\nfix this");
-        let one = json!({"start":3,"end":3,"source":{"url":"u","component":"A","file":"/x/A.tsx","tag":"<a>"}});
-        assert_eq!(format_quote(&one, Some("/w")), "@u <A> /x/A.tsx:3 \"<a>\"");
+        let one = json!({"kind":"browser","path":"u","text":"","start":3,"end":3,"source":{"url":"u","component":"A","file":"/x/A.tsx","tag":"<a>"}});
+        assert_eq!(super::super::format_quote(&one, Some("/w")), "@u <A> /x/A.tsx:3 \"<a>\"");
     }
 }
 
@@ -2380,7 +2217,7 @@ fn pane_body(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
 
 /// A fixed viewport fits inside the body at its original aspect ratio.
 #[cfg(target_os = "macos")]
-fn viewport_rect(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
+pub(super) fn viewport_rect(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
     let [x, y, w, h] = pane_body(pane, camera);
     let Some([css_w, css_h]) = fixed_viewport(pane) else { return [x, y, w, h] };
     let zoom = page_zoom(pane, camera, [w, h]);
@@ -2403,6 +2240,11 @@ fn show_view(view: &mut gpui_wry::WebView, frame: Bounds<Pixels>, zoom: f64) {
 impl AppWindow {
     /// Window-space bounds of the live element, including the viewport's centering offset.
     pub(super) fn body_rect(&self, pane: &canvas::Pane) -> Option<Bounds<Pixels>> {
+        if self.canvas_state.doc.docked(&pane.id) {
+            let (view, panel) = self.docked_view(&pane.id)?;
+            let [x, y, w, h] = viewport_rect(&view, canvas::Camera::default());
+            return Some(Bounds::new(panel.origin + point(px(x), px(y)), size(px(w), px(h))));
+        }
         let origin = self.bounds.borrow().get("canopy-canvas")?.origin;
         let [x, y, w, h] = viewport_rect(pane, self.canvas_state.doc.camera);
         Some(Bounds::new(origin + point(px(x), px(y)), size(px(w), px(h))))

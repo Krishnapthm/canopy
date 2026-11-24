@@ -1426,9 +1426,9 @@ impl AppWindow {
 
     /// Creates what's visible, drops what isn't, publishes state, saves, focuses.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.canvas_state.editing != self.canvas_state.file { self.canvas_state.editing = None; }
+        if self.canvas_state.editing.as_ref() != self.canvas_state.file_path() { self.canvas_state.editing = None; }
         // The picker finds open file tabs by this; set_shared is a no-op when unchanged.
-        mods::set_shared("canvas.files".into(), json!(self.canvas_state.tabs));
+        mods::set_shared("canvas.files".into(), json!(self.canvas_state.doc.panel.tabs.iter().filter_map(crate::canvas::PanelTab::file).collect::<Vec<_>>()));
         self.sync_canvas(window,cx);
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
@@ -1501,7 +1501,7 @@ impl AppWindow {
         }
         self.publish_shown_copies();
         if let Some(copy) = self.copies.get("canvas-tree") {
-            mods::send_command_to(copy.id, &json!({"selected":self.canvas_state.file}).to_string());
+            mods::send_command_to(copy.id, &json!({"selected":self.canvas_state.file_path()}).to_string());
         }
 
         // Keyboard to the focused pane when it changes (never steal it from an open dialog).
@@ -3062,8 +3062,8 @@ impl AppWindow {
             "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
-            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" => self.pane_command(name, a, window, cx),
-            "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" => self.annotation_command(name, a, window, cx),
+            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" | "canvas.pane_dock" => self.pane_command(name, a, window, cx),
+            "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" | "canvas.annotate_agent" => self.annotation_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
             | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
             | "canvas.browser_cookies" | "canvas.browser_links" | "canvas.browser_clear" | "canvas.browser_inspect" | "canvas.browser_open_file"

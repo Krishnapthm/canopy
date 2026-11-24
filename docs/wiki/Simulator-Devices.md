@@ -8,10 +8,10 @@ Simulator panes need macOS with Xcode and at least one simulator installed. For 
 
 ## Open a simulator
 
-1. Click **Simulator** at the top right of the window.
+1. Click **Simulator** at the top right of the window. It opens as a tab in the [files panel](Files-Panel).
 2. Click a simulator in the list. Canopy boots it if it is shut down.
 
-The simulator opens pinned to the top right corner, where it stays at the same size as you pan and zoom the canvas. Drag its header to move it or any edge or corner to resize it. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes. **Pin to screen** pins it again.
+The simulator opens docked in the files panel. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes. On the canvas, **Open in panel** docks it again, and **Pin to screen** pins it to the top right corner at the same size while you pan and zoom (**Unpin** puts it back). Drag a pinned or canvas simulator's header to move it and any edge or corner to resize it.
 
 The **Simulator** button shows only when Xcode's `xcrun simctl` is installed.
 
@@ -34,7 +34,7 @@ The pane header shows the iOS version and the state: **Live**, **Connecting**, *
 
 ## Resize the pane
 
-Drag any edge or corner of the pane. When you release it, the pane fits the device and its bezel. Use the zoom buttons on the helper bar for smaller steps, **Actual size** for the device's point size at the canvas zoom, or **Default size** to reset the pane to 340 × 700 on screen. **Actual size** is available after the live screen connects.
+For a docked simulator, drag the Files panel's edge to change the available width. Use **Move to canvas** to resize the pane directly. Drag any edge or corner of the canvas pane. When you release it, the pane fits the device and its bezel. Use the zoom buttons on the helper bar for smaller steps, **Actual size** for the device's point size at the canvas zoom, or **Default size** to reset the pane to 340 × 700 on screen. **Actual size** is available after the live screen connects.
 
 ## Shut down or close
 
@@ -53,18 +53,17 @@ The bar hides while annotating. In the device's own window, the bottom bar also 
 | **Refresh** | Tries the live view again. |
 | **Screenshot** | Saves a PNG to the Desktop. The toast shows the file. |
 | **Record** | Records a video to the Desktop. Click **Stop recording** to stop. |
-| **Annotate** | Freezes the screen for marks and comments. |
+| **Annotate** | Freezes the screen so you can pin comments and draw. |
 
 ## Annotate
 
-To point out a problem on a booted simulator, click **Annotate** in the bottom bar. If the device is in its own window, click **Bring back** first.
+To point out a problem on a booted simulator, click **Annotate** in the bar over the device screen. If the device is in its own window, click **Bring back** first. The tool is the same as the one in the [Browser Pane](Browser-Pane#annotate), with the same bar at the bottom of the pane.
 
-- With **Select**, click a point or drag over an area, add a comment, then click **Save**. Click its numbered pin to edit or delete it.
-- Draw with **Pen**, **Arrow**, or **Box**. To place a **Text** label, click, type the label, then press `Enter`. Choose a colour and width, or use **Undo** and **Redo**. On narrow panes, open **Drawing tools** for these controls.
-- Use **Area screenshot** to attach a crop to an area comment. Use **Hide marks** to see the still beneath them, or **Trash** to clear all marks and comments in one undoable step.
+- With **Select**, click a point or drag over an area. A numbered blue pin drops there and a single-line comment box opens beside it. Press `Enter` to **Add** the comment, `Cmd+Enter` to **Send** everything queued, or `Shift+Enter` for a new line. Click a pin to edit its comment.
+- **Pen**, **Box** and **Text** draw on the still. Colour and stroke appear only while one of them is on. `Cmd+Z` and `Shift+Cmd+Z` undo and redo.
 - Hold `Space` to use the live simulator. Release it to capture a fresh still with your existing annotations in the same device coordinates.
 
-Click **Send** to submit to the sole wired agent. With multiple wired agents or none, choose an agent from the quote menu. The agent receives the annotated screenshot, any crops, then the device name, runtime, and numbered comments with their coordinates in device points. Text labels are listed in the message.
+**Send** goes to the sole wired agent. If multiple agents are wired or only unwired agents are available, use the **Choose agent** icon beside **Connect** in the helper bar. The menu lists wired agents first. The agent receives the annotated screenshot, then the device name, runtime and numbered comments with their coordinates in device points. Text labels are listed in the message.
 
 Click **Stop annotating** or press `Esc` to leave. With marks or comments on the still, choose **Keep editing** or **Discard**.
 

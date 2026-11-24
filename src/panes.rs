@@ -6,14 +6,30 @@
 
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new browser <url> [--wire] | new mod:<name> [--wire] | new sim [<udid>|booted] [--wire] | read <pane> | shot <pane> [file.png] | open <pane> <target> | tap <pane> <x> <y> | swipe <pane> <x1> <y1> <x2> <y2> [ms] | type <pane> <text> | press <pane> <button> | close <pane>";
+const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new browser <url> [--wire] [--place panel|canvas|pinned] | new mod:<name> [--wire] | new sim [<udid>|booted] [--wire] [--place panel|canvas|pinned] | read <pane> | shot <pane> [file.png] | open <pane> <target> | tap <pane> <x> <y> | swipe <pane> <x1> <y1> <x2> <y2> [ms] | type <pane> <text> | press <pane> <button> | close <pane>";
 
 /// The app command and its arguments for `canopy pane <args>`; `caller` is
 /// `$HC_TERMINAL_ID`, which `--wire` needs.
 fn request(args: &[String], caller: Option<&str>) -> Result<(&'static str, Value), String> {
-    let words: Vec<_> = args.iter().map(String::as_str).collect();
+    let mut words: Vec<_> = args.iter().map(String::as_str).collect();
+    // `--place` works anywhere after `new`; the window checks the kind accepts it.
+    let flag = if words.first() == Some(&"new") { words.iter().position(|w| *w == "--place") } else { None };
+    let place = match flag {
+        Some(i) => {
+            let place = words.get(i + 1).copied().filter(|p| matches!(*p, "panel" | "canvas" | "pinned")).ok_or("--place is panel, canvas or pinned")?;
+            words.drain(i..=i + 1);
+            Some(place)
+        }
+        None => None,
+    };
+    let (name, mut a) = plain_request(&words, caller)?;
+    if let Some(place) = place { a["place"] = json!(place); }
+    Ok((name, a))
+}
+
+fn plain_request(words: &[&str], caller: Option<&str>) -> Result<(&'static str, Value), String> {
     let absolute = |path| std::path::absolute(path).map(|p| p.to_string_lossy().into_owned()).map_err(|e| format!("cannot resolve path: {e}"));
-    match words.as_slice() {
+    match words {
         ["new", kind, rest @ ..] if kind.starts_with("mod:") && (rest.is_empty() || *rest == ["--wire"]) => {
             let mut a = json!({"kind":kind});
             if !rest.is_empty() {
@@ -114,6 +130,10 @@ mod tests {
         assert_eq!(req(&["shot", "p1", "a.PNG"], None).unwrap(), ("canvas.pane_shot", json!({"pane":"p1","path":std::path::absolute("a.PNG").unwrap()})));
         assert_eq!(req(&["shot", "p1", "a.jpg"], None).unwrap_err(), "the shot path must end in .png");
         assert_eq!(req(&["new", "sim"], None).unwrap(), ("canvas.pane_new", json!({"kind":"sim"})));
+        assert_eq!(req(&["new", "browser", "localhost:3000", "--place", "canvas"], None).unwrap(), ("canvas.pane_new", json!({"kind":"browser","url":"localhost:3000","place":"canvas"})));
+        assert_eq!(req(&["new", "sim", "--place", "pinned", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"sim","wire":"t1","place":"pinned"})));
+        assert!(req(&["new", "sim", "--place", "dock"], None).is_err() && req(&["close", "p1", "--place", "panel"], None).is_err());
+        assert_eq!(req(&["type", "p1", "--place"], None).unwrap(), ("canvas.sim_input", json!({"pane":"p1","action":"type","text":"--place"})));
         assert_eq!(req(&["new", "sim", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"sim","wire":"t1"})));
         assert_eq!(req(&["new", "sim", "booted", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"sim","udid":"booted","wire":"t1"})));
         assert!(req(&["new", "sim", "a", "b"], None).is_err());
