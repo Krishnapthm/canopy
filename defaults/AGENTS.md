@@ -709,6 +709,9 @@ What's about the user, never a look:
   goes there when clicked. `done` / `blocked` replace the bundled MP3s
   (path absolute or relative to `~/.config/canopy`). Changes apply live,
   including the Play buttons in Settings > Alerts.
+- On macOS, Settings > Alerts toggles `desktop_notifications` (default `true`).
+  Background agent alerts can use a recent OSC 9 or 777 message from the
+  terminal. Native notifications are silent and open the agent on click.
 - `core`: the herdr-core binary to use, when it isn't where Canopy looks
   (PATH, the login shell's PATH, `~/.local/bin`, Homebrew, mise, Nix,
   cargo). Read at start.
@@ -1093,8 +1096,10 @@ expanded cell's header name it renames the tab in place instead). Clicking
 empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. Holding Cmd (Ctrl elsewhere) alone for 0.4 s
 shows keys on the toolbar and helper bars, even while a terminal has focus. Expanded cells are
 100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
-neighbours back. Drag the bottom-right corner to resize; the terminal is resized on release. Several
-can be open. The wheel scrolls a focused expanded terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
+neighbours back. Drag any edge or corner of an expanded terminal or boxed pane to resize it.
+The terminal grid refits on release. Holding a move or resize near a canvas edge pans the canvas.
+Wheel or two-finger scroll pans over the canvas and unentered panes, while an entered terminal
+keeps plain scroll. Pinch and Cmd+scroll (Ctrl+scroll elsewhere) zoom the canvas. `canvas.expand {terminal?}` toggles
 the named or last selected cell; `panel.open {terminal}` only expands. An expanded cell keeps its size at every
 zoom; below 0.5 zoom it shows a flat stand-in instead of live text. The side panel shows files and sub-agent transcripts only.
 

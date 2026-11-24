@@ -69,7 +69,7 @@ Commands and wires name panes by ID. You see these in `canopy wire`, `canopy pan
 - Sub-agents use `sub:<parent>:<id>`.
 - Every other pane uses `p<N>`, such as `p1`. Canopy never reuses a number, so an old ID cannot point at a new pane.
 
-Pane headers keep their screen size at any zoom. Resize a pane by dragging its edges or corners; there are no visible handles.
+Pane headers keep their screen size at any zoom. Resize a pane by dragging an edge or corner. The pointer shows the resize direction when it is over a resize area.
 
 ## See also
 

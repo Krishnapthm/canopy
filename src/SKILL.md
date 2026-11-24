@@ -25,6 +25,11 @@ prints the built-in command list even without an open window. Do not launch bare
 signal or restart the person's app or core. A window closing does not kill
 its terminals.
 
+On macOS, Canopy can include your recent terminal notification message in a
+background agent alert if your harness emits OSC 9 or OSC 777. The person
+controls this in **Settings > Alerts** (`desktop_notifications` in
+`settings.json`) and macOS System Settings.
+
 ## Helpers the person can see
 
 When the person asks for sub-agents, helpers, a team or peers, start each one
@@ -55,10 +60,10 @@ its sub-agent labels. These cells describe work, not terminal processes.
 
 ## Wire
 
-Wire is the set of edges between cells. The person draws an edge between two
-cells of one space (hover a cell, drag from a side "+" to another cell, or click
-the "+" and then the other cell); the edge is an introduction: it says who may be
-talked to. Sub-agents and spawned helpers are wired to their parent already.
+A wire introduces two panes in the same space so their agents can find each
+other. To draw one, hover a pane and drag a side "+" onto the other pane, or
+click the "+" and then click the other pane. Sub-agents and spawned helpers are
+wired to their parent already.
 Canopy carries no messages: agents use the core's own commands, and a message
 arrives as `<hc from="tN name">...</hc>`.
 
