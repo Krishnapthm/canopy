@@ -1844,10 +1844,14 @@ impl AppWindow {
         if self.browser_popped(id) { return Err(format!("pane {id} is popped out: bring it back first")); }
         let doc = &self.canvas_state.doc;
         let saved = doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
-        let pane = self.canvas_state.shown.as_ref().and_then(|shown| shown.panes.iter().find(|p| p.id == id)).unwrap_or(saved).clone();
-        if !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
-        let frame = self.body_rect(&pane).ok_or("the canvas is not shown")?;
-        let camera = self.canvas_state.doc.camera;
+        // A docked page is placed by the panel body, not the canvas camera.
+        let docked = self.docked_view(id);
+        let (pane, camera) = match docked {
+            Some((view, _)) => (view, canvas::Camera::default()),
+            None => (self.canvas_state.shown.as_ref().and_then(|shown| shown.panes.iter().find(|p| p.id == id)).unwrap_or(saved).clone(), self.canvas_state.doc.camera),
+        };
+        if !doc.docked(id) && !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
+        let frame = self.body_rect(saved).ok_or("the canvas is not shown")?;
         let [_, _, width, height] = pane_body(&pane, camera);
         let zoom = page_zoom(&pane, camera, [width, height]);
         self.ensure_view(id, window, cx)?;
@@ -2403,6 +2407,11 @@ fn show_view(view: &mut gpui_wry::WebView, frame: Bounds<Pixels>, zoom: f64) {
 impl AppWindow {
     /// Window-space bounds of the live element, including the viewport's centering offset.
     pub(super) fn body_rect(&self, pane: &canvas::Pane) -> Option<Bounds<Pixels>> {
+        if self.canvas_state.doc.docked(&pane.id) {
+            let (view, panel) = self.docked_view(&pane.id)?;
+            let [x, y, w, h] = viewport_rect(&view, canvas::Camera::default());
+            return Some(Bounds::new(panel.origin + point(px(x), px(y)), size(px(w), px(h))));
+        }
         let origin = self.bounds.borrow().get("canopy-canvas")?.origin;
         let [x, y, w, h] = viewport_rect(pane, self.canvas_state.doc.camera);
         Some(Bounds::new(origin + point(px(x), px(y)), size(px(w), px(h))))

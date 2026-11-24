@@ -60,7 +60,7 @@ impl AppWindow {
 
     /// The drawn rect of a pane the current view shows.
     pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
-        let card = doc.panes.iter().find(|c| c.id == key && doc.shows(c.space.as_ref()))?;
+        let card = doc.panes.iter().find(|c| c.id == key && doc.shown(c))?;
         if card.boxed() { return Some(card.rect); }
         let view = &self.canvas_state.doc.view;
         if matches!(card.kind, canvas::Kind::Sub { .. }) {
@@ -144,7 +144,7 @@ impl AppWindow {
         let point = self.wire_local(e.position);
         let bar_height = 28. * doc.camera.zoom.clamp(0.75, 1.0) + 2.;
         let bar_hover = if busy { None } else {
-            doc.panes.iter().filter(|p| doc.shows(p.space.as_ref()) && !matches!(p.kind, canvas::Kind::Sub { .. }))
+            doc.panes.iter().filter(|p| doc.shown(p) && !matches!(p.kind, canvas::Kind::Sub { .. }))
                 .filter(|p| {
                     let rect = if p.boxed() { Some(p.rect) } else { self.wire_cell(doc, &p.id) };
                     rect.is_some_and(|r| {
@@ -237,12 +237,17 @@ impl AppWindow {
     /// and follows the pointer until a click picks a pane (`wire_pick`) or Escape drops it.
     pub(super) fn wire_start(&mut self, key: &str, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
-        let Some(r) = self.wire_cell(doc, key) else { return };
+        // A docked pane has no cell: its wire starts where the Connect button was clicked.
+        let anchor = match self.wire_cell(doc, key) {
+            Some(r) => [r[0] + r[2], r[1] + r[3] / 2.],
+            None if doc.docked(key) => doc.camera.to_world(self.wire_local(position)),
+            None => return,
+        };
         self.canvas_state.selected.clear();
         // The canvas takes the keyboard so Escape can cancel.
         self.canvas_state.mode = true;
         self.focus.focus(window, cx);
-        self.canvas_state.wire.drag = Some((key.to_owned(), [r[0] + r[2], r[1] + r[3] / 2.], position));
+        self.canvas_state.wire.drag = Some((key.to_owned(), anchor, position));
         self.canvas_state.wire.sticky = true;
         self.sync(window, cx);
         cx.notify();

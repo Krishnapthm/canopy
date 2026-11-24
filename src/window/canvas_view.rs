@@ -6,6 +6,7 @@ use gpui::AnimationExt as _;
 mod wire_view;
 mod keyboard;
 mod helper_bar;
+mod dock;
 mod pane_commands;
 pub(super) mod browser;
 mod browser_mask;
@@ -49,14 +50,14 @@ pub(super) struct State {
     bar_hover: Option<String>,
     // The starting size is present for a corner resize.
     preview_drag: Option<(String, Option<canvas::Point>, Point<Pixels>)>,
-    pub file: Option<String>,
+    /// The panel's active tab (its tabs are `doc.panel.tabs`).
+    pub file: Option<canvas::PanelTab>,
     pub(super) editing: Option<String>,
     /// The Files editor reports transitions between saved and unsaved text.
     dirty: Option<String>,
     /// The file panel fills the window (like Claude's expanded side panel); not saved.
     panel_expanded: bool,
     editors: Vec<crate::programs::Editor>,
-    pub tabs: Vec<String>,
     /// Space ids, most recently entered first, for ctrl-tab (memory only).
     recent: Vec<String>,
     /// The folder button opened the panel for the file tree, with no tab needed.
@@ -84,8 +85,8 @@ pub(super) struct State {
     /// A finished selection waiting behind a small quote icon: the quote (with its
     /// window `point`) and the TextView it came from, None for the Files code viewer.
     quote_chip: Option<(Value, Option<Entity<gpui_base::TextViewState>>)>,
-    /// The panel's file and tabs when it was closed, for the folder button to bring back.
-    closed: Option<(Option<String>, Vec<String>)>,
+    /// The panel's active tab when it was closed, for the folder button to bring back.
+    closed: Option<canvas::PanelTab>,
     /// Per expanded cell: the layout before it grew, and what growing moved. Collapse puts those back.
     moves: HashMap<String, (canvas::Rest, canvas::Rest)>,
     /// The expanded cell's corner being dragged, and the pointer where it was last seen.
@@ -158,6 +159,10 @@ struct Motion {
     frame: bool,
 }
 impl State {
+    /// The file open in the panel, when its active tab is a file.
+    pub(super) fn file_path(&self) -> Option<&String> {
+        self.file.as_ref().and_then(canvas::PanelTab::file)
+    }
     pub fn load() -> Self {
         let (doc, error, writable) = match Document::load(&file("canvas.json")) {
             Ok((doc, bad)) => (
@@ -171,6 +176,11 @@ impl State {
                 false,
             ),
         };
+        let mut doc = doc;
+        let panes: Vec<_> = doc.panes.iter().map(|p| p.id.clone()).collect();
+        doc.panel.tabs.retain(|t| t.pane().is_none_or(|id| panes.contains(id)));
+        // A docked pane lives only in the panel, so the panel opens on it.
+        let file = doc.panel.tabs.iter().find(|t| t.pane().is_some()).cloned();
         Self {
             doc,
             // The canvas has the keyboard until a cell is entered (double-click or Enter).
@@ -193,12 +203,11 @@ impl State {
             sims: HashMap::new(),
             bar_hover: None,
             preview_drag: None,
-            file: None,
+            file,
             editing: None,
             dirty: None,
             panel_expanded: false,
             editors: Vec::new(),
-            tabs: Vec::new(),
             recent: Vec::new(),
             files: false,
             popped: HashMap::new(),
@@ -519,7 +528,9 @@ impl AppWindow {
             .collect();
         // The pinned cell, and the rest of a dragged selection, stay where they were put.
         let carried = |i: usize| state.group.contains(&doc.panes[i].id);
-        for i in (0..cells.len()).filter(|i| Some(*i) == pinned || carried(*i)) {
+        // A docked pane keeps its saved rect and takes no part in the solve.
+        let docked = |i: usize| doc.docked(&doc.panes[i].id);
+        for i in (0..cells.len()).filter(|i| Some(*i) == pinned || carried(*i) || docked(*i)) {
             cells[i] = current[i];
             cells[i][2] = sizes[i][2];
             cells[i][3] = sizes[i][3];
@@ -527,7 +538,7 @@ impl AppWindow {
         // Push off lets cells overlap; spaces and root cells on Home still separate below.
         if let (Some(i), false) = (pinned, self.person.canvas_push == settings::CanvasPush::Off) {
             let indices: Vec<_> = (0..cells.len())
-                .filter(|j| members[*j] == members[i] && doc.panes[*j].pinned.is_none())
+                .filter(|j| members[*j] == members[i] && doc.panes[*j].pinned.is_none() && !docked(*j))
                 .collect();
             let rects: Vec<_> = indices.iter().map(|j| cells[*j]).collect();
             let solved = canvas::solve(
@@ -543,7 +554,7 @@ impl AppWindow {
         }
         let active = space_pin.or_else(|| pinned.and_then(|i| members[i].as_deref()));
         // On Home, root cells and space cards share one level, so neither covers the other.
-        let roots: Vec<_> = (0..cells.len()).filter(|i|members[*i].is_none() && doc.panes[*i].pinned.is_none()).collect();
+        let roots: Vec<_> = (0..cells.len()).filter(|i|members[*i].is_none() && doc.panes[*i].pinned.is_none() && !docked(*i)).collect();
         let rects: Vec<_> = doc.spaces.iter().map(|s|s.rect).chain(roots.iter().map(|i|cells[*i])).collect();
         let top_pin = doc.spaces.iter().position(|s|Some(s.space.as_str())==active)
             .or_else(||pinned.and_then(|i|roots.iter().position(|j|*j==i)).map(|i|doc.spaces.len()+i));
@@ -789,7 +800,7 @@ impl AppWindow {
         let area = self.canvas_state.tile.as_ref().map_or(camera, |t| t.camera);
         let area = [area.x, area.y];
         // What the place shows: expanded cells and previews tile; pills (and space cards on Home) line up.
-        let shown = |c: &canvas::Pane| doc.shows(c.space.as_ref()) && c.pinned.is_none()
+        let shown = |c: &canvas::Pane| doc.shown(c) && c.pinned.is_none()
             && (c.boxed() || matches!(c.kind, canvas::Kind::Sub { .. }) || canvas::view_allows(&doc.view, self.live.get(&c.id).is_some_and(canvas_agent)));
         let cards: Vec<usize> = (0..doc.panes.len()).filter(|i| shown(&doc.panes[*i])).collect();
         let (tiled, pilled): (Vec<usize>, Vec<usize>) = cards.into_iter().partition(|i| doc.panes[*i].boxed() || doc.panes[*i].size().is_some());
@@ -932,11 +943,15 @@ impl AppWindow {
         let state = &mut self.canvas_state;
         let paths: Vec<_> = state.doc.panes.iter().filter(|p| ids.contains(&p.id)).filter_map(|p| p.file().map(str::to_owned)).collect();
         state.doc.panes.retain(|p| !ids.contains(&p.id));
+        state.doc.panel.tabs.retain(|t| t.pane().is_none_or(|id| !ids.contains(id)));
+        if state.file.as_ref().and_then(canvas::PanelTab::pane).is_some_and(|id| ids.contains(id)) {
+            state.file = state.doc.panel.tabs.last().cloned();
+        }
         state.selected.retain(|id| !ids.contains(id));
         self.forget_sims(ids, cx);
         let state = &mut self.canvas_state;
         for path in paths {
-            if state.file.as_ref() != Some(&path) && !state.doc.panes.iter().any(|p| p.file() == Some(path.as_str())) {
+            if state.file_path() != Some(&path) && !state.doc.panes.iter().any(|p| p.file() == Some(path.as_str())) {
                 state.previews.remove(&path);
             }
         }
@@ -972,7 +987,7 @@ impl AppWindow {
             None => {
                 if !self.focus.is_focused(window) { return; }
                 let state = &self.canvas_state;
-                let (written, files): (Vec<_>, Vec<_>) = state.doc.panes.iter().filter(|p| state.selected.contains(&p.id) && state.doc.shows(p.space.as_ref()) && p.boxed()).partition(|p| p.text().is_some());
+                let (written, files): (Vec<_>, Vec<_>) = state.doc.panes.iter().filter(|p| state.selected.contains(&p.id) && state.doc.shown(p) && p.boxed()).partition(|p| p.text().is_some());
                 let written: Vec<_> = written.into_iter().map(|p| p.id.clone()).collect();
                 let files: Vec<_> = files.into_iter().map(|p| p.id.clone()).collect();
                 if !files.is_empty() {
@@ -1123,7 +1138,7 @@ impl AppWindow {
     }
 
     pub(super) fn panel_editor(&mut self, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = self.canvas_state.file.clone() else { return };
+        let Some(path) = self.canvas_state.file_path().cloned() else { return };
         if args["path"].as_str().is_some_and(|p| p != path) { return; }
         if let Some(dirty) = args["dirty"].as_bool() {
             if self.canvas_state.editing.as_ref() == Some(&path) {
@@ -1259,7 +1274,7 @@ impl AppWindow {
             slots.push(("canvas-keys".into(), Instance { name: "canvas-keys".into(), props: json!({"pointer":true}) }));
         }
         for pane in &self.canvas_state.doc.panes {
-            if !self.canvas_state.doc.shows(pane.space.as_ref()) { continue; }
+            if !self.canvas_state.doc.shown(pane) { continue; }
             if let Some(name) = pane.mod_name().filter(|name| self.folders.get(*name).is_some_and(|f| f.hint.pane.is_some())) {
                 slots.push((format!("pane:{}", pane.id), Instance { name: name.into(), props: json!({"pane":pane.id}) }));
             }
@@ -1275,7 +1290,7 @@ impl AppWindow {
                 },
             ));
         }
-        if let Some(path) = &self.canvas_state.file {
+        if let Some(path) = self.canvas_state.file_path() {
             if self.canvas_state.editing.as_ref() == Some(path) || !rendered(path)
             {
                 slots.push(("canvas-file".into(), Instance { name: "files".into(), props: json!({"canvas":"viewer","editing":self.canvas_state.editing.as_ref() == Some(path),"root":std::path::Path::new(path).parent(),"file":std::path::Path::new(path).file_name().map(|p|p.to_string_lossy())}) }));
@@ -1325,9 +1340,10 @@ impl AppWindow {
                 .unwrap_or_else(|_| path.to_owned())
                 .to_string_lossy()
                 .into_owned();
-            canvas::open_panel_tab(&mut self.canvas_state.tabs, &path);
-            if self.canvas_state.file.as_ref() != Some(&path) { self.canvas_state.dirty = None; }
-            self.canvas_state.file = Some(path);
+            let tab = canvas::PanelTab::File(path);
+            canvas::open_panel_tab(&mut self.canvas_state.doc.panel.tabs, &tab);
+            if self.canvas_state.file.as_ref() != Some(&tab) { self.canvas_state.dirty = None; }
+            self.canvas_state.file = Some(tab);
             self.focus.focus(window, cx);
             self.sync(window, cx);
             cx.notify();
@@ -1343,7 +1359,7 @@ impl AppWindow {
     /// Pinned panes float over the camera, so zoom limits and fits leave them out.
     fn place_rects(&self, pick: impl Fn(&String) -> bool, cx: &App) -> Vec<canvas::Rect> {
         let doc = &self.canvas_state.doc;
-        doc.panes.iter().filter(|c| doc.shows(c.space.as_ref()) && c.pinned.is_none() && pick(&c.id)).map(|c| self.pill_rect(c, cx))
+        doc.panes.iter().filter(|c| doc.shown(c) && c.pinned.is_none() && pick(&c.id)).map(|c| self.pill_rect(c, cx))
             .chain(doc.spaces.iter().filter(|s| doc.room.is_none() && pick(&s.space)).map(|s| s.rect))
             .collect()
     }
@@ -1444,7 +1460,7 @@ impl AppWindow {
         self.sync_pdf_views(window, cx);
         self.sync_image_sizes(window, cx);
         let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
-        if let Some(path) = &self.canvas_state.file {
+        if let Some(path) = self.canvas_state.file_path() {
             if rendered(path) { paths.push(path.clone()); }
         }
         self.canvas_state.previews.retain(|path, _| paths.contains(path));
@@ -2518,10 +2534,8 @@ impl AppWindow {
             }
             "panel.close" => {
                 state.dirty = None;
-                if !state.tabs.is_empty() {
-                    state.closed = Some((state.file.take(), std::mem::take(&mut state.tabs)));
-                }
-                state.file = None;
+                // The tabs stay (a docked pane lives in them); the folder button reopens on this one.
+                state.closed = state.file.take();
                 state.files = false;
                 state.panel_expanded = false;
                 self.focus.focus(window, cx);
@@ -3071,7 +3085,7 @@ impl AppWindow {
         let mut drawn_sims = vec![];
         let mut drawn_pages = vec![];
         // An expanded browser fills the canvas area: no other pane is drawn.
-        for card in shown_doc.panes.iter().filter(|p| state.browser_tab.is_none() && shown_doc.shows(p.space.as_ref()) && canvas::visible(camera, p.rect, viewport)) {
+        for card in shown_doc.panes.iter().filter(|p| state.browser_tab.is_none() && shown_doc.shown(p) && canvas::visible(camera, p.rect, viewport)) {
             let element = match &card.kind {
                 // Drawn by the terminal path below.
                 canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } => continue,
@@ -3102,18 +3116,14 @@ impl AppWindow {
                 canvas::Kind::Sim { .. } => {
                     drawn_sims.push(card.id.clone());
                     let (title, detail) = self.sim_title(card, cx);
-                    let body = self.sim_body(card, cx);
-                    let body = self.annotate_body(card, body, annotate::card_body(card, camera.zoom), cx);
-                    #[cfg(target_os = "macos")]
-                    let body = div().relative().size_full().child(body)
-                        .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(
-                            div().absolute().bottom(px(12.)).left_0().right_0().flex().justify_center().child(bar)))
-                        .into_any_element();
+                    let body = self.sim_card_body(card, camera, cx);
                     self.pane_card(card, "icons/smartphone.svg".into(), title, detail, None, body, camera, cx)
                 }
             };
             pills.push((paint_order(card), element));
         }
+        // A docked simulator is drawn while its tab is the panel's active one.
+        drawn_sims.extend(state.file.as_ref().and_then(canvas::PanelTab::pane).filter(|id| state.doc.panes.iter().any(|p| p.id == **id && p.sim().is_some())).cloned());
         // A live simulator streams only while its pane is drawn.
         #[cfg(target_os = "macos")]
         self.show_sims(&drawn_sims, cx);
@@ -3123,7 +3133,7 @@ impl AppWindow {
             .panes
             .iter()
             .filter(|card| {
-                card.terminal().is_some() && shown_doc.shows(card.space.as_ref()) && canvas::view_allows(
+                card.terminal().is_some() && shown_doc.shown(card) && canvas::view_allows(
                     &state.doc.view,
                     self.live
                         .get(&card.id)
@@ -3155,7 +3165,7 @@ impl AppWindow {
             .collect();
         let mut sub_pills = Vec::new();
         if state.doc.view != canvas::View::Terminals {
-            for card in state.doc.panes.iter().filter(|c| matches!(c.kind, canvas::Kind::Sub { .. }) && state.doc.shows(c.space.as_ref())) {
+            for card in state.doc.panes.iter().filter(|c| matches!(c.kind, canvas::Kind::Sub { .. }) && state.doc.shown(c)) {
                 let canvas::Kind::Sub { parent, sub: sub_id } = &card.kind else { continue };
                 let Some(sub) = state.subs.get(parent).into_iter().flatten().find(|s| &s.id == sub_id) else { continue };
                 if canvas::visible(camera, card.rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), card.clone())); }
@@ -3437,7 +3447,7 @@ impl AppWindow {
         }
         pills.sort_by_key(|(z, _)| *z);
         for (_, pill) in pills { area = area.child(pill); }
-        if !shown_doc.panes.iter().any(|p| shown_doc.shows(p.space.as_ref()))
+        if !shown_doc.panes.iter().any(|p| shown_doc.shown(p))
             && (state.doc.room.is_some() || self.model.spaces.iter().all(|s| root_space(s)))
         {
             area = area.children(self.empty_hints());
@@ -3514,20 +3524,19 @@ impl AppWindow {
                         this.canvas_state.files = true;
                         this.canvas_state.doc.panel.tree_hidden = false;
                         // Bring back the tabs it closed with; files and terminals closed since are gone.
-                        if let Some((file, tabs)) = this.canvas_state.closed.take() {
-                            this.canvas_state.tabs = tabs;
-                            this.canvas_state.file = file;
+                        if let Some(tab) = this.canvas_state.closed.take().filter(|t| this.canvas_state.doc.panel.tabs.contains(t)) {
+                            this.canvas_state.file = Some(tab);
                         }
                         this.sync(window, cx);
                         cx.notify();
                     }
                 })),
         );
-        // Browser (the macOS web view) and simulator (a Mac with Xcode) open pinned at the top
-        // right, beside this bar; their helper bar moves them onto the canvas.
+        // Browser (the macOS web view) and simulator (a Mac with Xcode) open docked in the Files
+        // panel; their helper bar moves them onto the canvas.
         let pinned_new = |id: &'static str, icon: &'static str, label: &'static str, kind: &'static str| panel_button(id, icon, c("muted-foreground"), c("hover"))
             .aria_label(label).tooltip(strip_tooltip(label.into(), None))
-            .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.pane_new", json!({"kind":kind,"pinned":true}), window, cx)));
+            .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.pane_new", json!({"kind":kind}), window, cx)));
         tabs = control()
             .when(cfg!(target_os = "macos"), |d| d.child(pinned_new("canvas-browser", "icons/globe.svg", "Browser", "browser")))
             .when(crate::sim::available(), |d| d.child(pinned_new("canvas-sim", "icons/smartphone.svg", "Simulator", "sim")))
@@ -3604,19 +3613,24 @@ impl AppWindow {
                         .when(state.resizing, |d| d.bg(c("ring")))),
             );
             let mut tabs = div().id("canvas-tabs").role(gpui::Role::TabList).flex().flex_1().min_w_0().h_full().overflow_x_scroll();
-            for tab in &state.tabs {
+            for tab in &state.doc.panel.tabs {
                 let tab = tab.clone();
                 let active = state.file.as_ref() == Some(&tab);
-                let dirty = state.dirty.as_ref() == Some(&tab);
-                let label = crate::subs::transcript_title(&tab).unwrap_or_else(|| std::path::Path::new(&tab).file_name().unwrap_or_default().to_string_lossy().into_owned());
+                let dirty = tab.file().is_some_and(|path| state.dirty.as_ref() == Some(path));
+                // A pane tab: its kind's icon, its title, and a dot while it is wired.
+                let (icon, label, wired, tip) = match &tab {
+                    canvas::PanelTab::File(path) => ("mods/files/file.svg", crate::subs::transcript_title(path).unwrap_or_else(|| std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy().into_owned()), false, path.clone()),
+                    canvas::PanelTab::Pane(id) => { let (icon, title, wired) = self.docked_tab(id, cx); (icon, title.clone(), wired, title) }
+                };
+                let key = match &tab { canvas::PanelTab::File(path) => path.clone(), canvas::PanelTab::Pane(id) => format!("pane:{id}") };
                 let activate = tab.clone();
                 let close = tab.clone();
-                let group = SharedString::from(format!("panel-tab-{tab}"));
+                let group = SharedString::from(format!("panel-tab-{key}"));
                 tabs = tabs.child(strip_tab(group.clone(), active, c("hover"), c(bg)).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(label.clone()).flex().items_center().h_full()
                     .w(px(180.)).min_w(px(96.)).px(px(12.)).gap(px(6.))
                     .text_size(px(12.)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
                     .hover(|d| d.text_color(c("foreground"))).cursor_pointer()
-                    .tooltip(strip_tooltip(tab, None))
+                    .tooltip(strip_tooltip(tip, None))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
                         if this.canvas_state.file.as_ref() == Some(&activate) { return; }
@@ -3626,20 +3640,18 @@ impl AppWindow {
                         this.sync(window, cx);
                         cx.notify();
                     }))
-                    .child(svg().path("mods/files/file.svg").flex_none().size(px(14.)).text_color(c(if active { "foreground" } else { "muted-foreground" })).group_hover(group.clone(), |s| s.text_color(c("foreground"))))
+                    .child(svg().path(icon).flex_none().size(px(14.)).text_color(c(if active { "foreground" } else { "muted-foreground" })).group_hover(group.clone(), |s| s.text_color(c("foreground"))))
                     .child(div().flex_1().min_w_0().truncate().child(label))
+                    // The wire's color (P2's effective_color later); the foreground until then.
+                    .when(wired, |d| d.child(div().flex_none().size(px(6.)).rounded_full().bg(c("foreground"))))
                     .child(div().relative().flex_none().size(px(24.)).flex().items_center().justify_center()
                         .when(dirty, |d| d.child(div().absolute().size(px(6.)).rounded_full().bg(c("foreground"))
                             .group_hover(group.clone(), |d| d.opacity(0.))))
                         .child(panel_button("tab-close", "mods/pane/close.svg", c("muted-foreground"), c("hover"))
-                            .aria_label("Close file").when(dirty || !active, |d| d.opacity(0.).group_hover(group, |d| d.opacity(1.)))
+                            .aria_label("Close tab").when(dirty || !active, |d| d.opacity(0.).group_hover(group, |d| d.opacity(1.)))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
-                                if this.canvas_state.dirty.as_ref() == Some(&close) { this.canvas_state.dirty = None; }
-                                this.canvas_state.file = canvas::close_panel_tab(
-                                    &mut this.canvas_state.tabs, this.canvas_state.file.as_deref(), &close);
-                                this.sync(window, cx);
-                                cx.notify();
+                                this.close_panel_tab(&close, window, cx);
                             })))));
             }
             // The panel's part of the bar shares its color, like Claude's side panel header.
@@ -3657,8 +3669,12 @@ impl AppWindow {
                 .child(panel_button("canvas-panel-close", "mods/pane/close.svg", c("muted-foreground"), c("hover"))
                     .aria_label("Close panel").tooltip(strip_tooltip("Close panel".into(), Some("panel.close")))
                     .on_click(cx.listener(|this, _, window, cx| this.canvas_command("panel.close", window, cx)))));
+            let docked = state.file.as_ref().and_then(canvas::PanelTab::pane).and_then(|id| self.docked_panel(id, cx));
+            if let Some((header, body)) = docked {
+                panel = panel.child(header).child(body);
+            } else {
             let root = self.panel_root();
-            let path = state.file.as_deref().or(root.as_deref()).unwrap_or("");
+            let path = state.file_path().map(String::as_str).or(root.as_deref()).unwrap_or("");
             // Outside the tree's folder, paths read from home.
             // A sub-agent reads as itself, not as a file in its agent's data folder.
             let breadcrumb = match crate::subs::transcript_title(path) {
@@ -3685,7 +3701,7 @@ impl AppWindow {
                             .child(breadcrumb),
                     )
                     // An agent transcript is read, not edited.
-                    .when(state.file.as_ref().is_some_and(|f| !f.ends_with(".jsonl")), |d| {
+                    .when(state.file_path().is_some_and(|f| !f.ends_with(".jsonl")), |d| {
                         let editors = self.panel_editors();
                         let choice = state.doc.panel.editor.as_deref()
                             .filter(|key| *key == "here" || editors.iter().any(|e| e.key == *key))
@@ -3695,7 +3711,7 @@ impl AppWindow {
                         let icon = editor.map(|e| e.icon.clone()).unwrap_or_else(|| "mods/workspace-chrome/square-pen.svg".into());
                         let tint = editor.is_none_or(|e| e.tint);
                         let choice = choice.to_owned();
-                        let path = state.file.clone().unwrap();
+                        let path = state.file_path().cloned().unwrap();
                         let menu_path = path.clone();
                         d.child(div().flex().items_center().h(px(26.)).border_1().border_color(c("border")).rounded(px(ui::RADIUS_SM)).overflow_hidden()
                             .child(div().id("panel-editor").flex().items_center().gap(px(6.)).px(px(8.)).h_full().cursor_pointer()
@@ -3711,7 +3727,7 @@ impl AppWindow {
                                 }))
                                 .child(svg().path("mods/files/chevron-down.svg").size(px(12.)).text_color(c("muted-foreground")))))
                     })
-                    .when(state.file.is_some(), |d| {
+                    .when(state.file_path().is_some(), |d| {
                         d.child(
                             panel_button(
                                 "panel-pin",
@@ -3721,7 +3737,7 @@ impl AppWindow {
                             )
                             .on_click(cx.listener(
                                 |this, _, window, cx| {
-                                    if let Some(path) = this.canvas_state.file.clone() {
+                                    if let Some(path) = this.canvas_state.file_path().cloned() {
                                         this.open_preview(
                                             json!({"path":path,"place":"canvas"}),
                                             window,
@@ -3750,14 +3766,13 @@ impl AppWindow {
             );
             let mut body = div().flex().flex_1().min_h_0();
             if let Some((view, _)) = state
-                .file
-                .as_ref()
+                .file_path()
                 .filter(|p| {
                     state.editing.as_ref() != Some(*p) && rendered(p)
                 })
                 .and_then(|p| state.previews.get(p))
             {
-                let quote_path = state.file.clone().unwrap();
+                let quote_path = state.file_path().cloned().unwrap();
                 let quote_view = view.clone();
                 // Padding sits on the TextView so its scrollbar overlay reaches the panel edge.
                 body = body.child(div().flex_1().min_w_0().h_full().child(gpui_base::TextView::new(view).scrollable(true).px(px(24.)).py(px(20.))
@@ -3766,7 +3781,7 @@ impl AppWindow {
                         gpui::ImageSource::Image(BLANK.clone())
                     }).on_link_click(|_,_,_,_|{}))
                     .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, None, &quote_view, e.position, window, cx))));
-            } else if state.file.is_some() {
+            } else if state.file_path().is_some() {
                 body = body.child(
                     div()
                         .flex_1()
@@ -3792,6 +3807,7 @@ impl AppWindow {
                 );
             }
             panel = panel.child(body);
+            }
             row = row.child(panel);
         }
         div().relative().size_full().flex().flex_col().child(bar).child(row).children(grip)

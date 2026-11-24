@@ -886,8 +886,44 @@ impl Pane {
     }
 }
 
+/// A tab in the Files panel: a file, or a pane docked there. Saved as the file's absolute
+/// path, or `pane:<id>` for a pane (an absolute path never starts with "pane:").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PanelTab {
+    File(String),
+    Pane(String),
+}
+impl Serialize for PanelTab {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match self {
+            PanelTab::File(path) => s.serialize_str(path),
+            PanelTab::Pane(id) => s.serialize_str(&format!("pane:{id}")),
+        }
+    }
+}
+impl<'de> Deserialize<'de> for PanelTab {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        Ok(match text.strip_prefix("pane:") {
+            Some(id) => PanelTab::Pane(id.to_owned()),
+            None => PanelTab::File(text),
+        })
+    }
+}
+impl PanelTab {
+    pub fn file(&self) -> Option<&String> {
+        match self { PanelTab::File(path) => Some(path), PanelTab::Pane(_) => None }
+    }
+    pub fn pane(&self) -> Option<&String> {
+        match self { PanelTab::Pane(id) => Some(id), PanelTab::File(_) => None }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Panel {
+    /// Open tabs. A pane is docked exactly when a `Pane` tab names it.
+    #[serde(default)]
+    pub tabs: Vec<PanelTab>,
     #[serde(default)]
     pub tree_hidden: bool,
     #[serde(default)]
@@ -1010,6 +1046,28 @@ impl Document {
     pub fn space_of(&self, key: &str) -> Option<&Space> {
         let id = self.panes.iter().find(|c| c.id == key)?.space.as_ref()?;
         self.spaces.iter().find(|s| &s.space == id)
+    }
+    /// Whether a pane is docked in the Files panel (it has no place on the canvas).
+    pub fn docked(&self, id: &str) -> bool {
+        self.panel.tabs.iter().any(|t| t.pane().is_some_and(|p| p == id))
+    }
+    /// Whether the canvas draws this pane: it is in the current place and not docked.
+    pub fn shown(&self, pane: &Pane) -> bool {
+        self.shows(pane.space.as_ref()) && !self.docked(&pane.id)
+    }
+    /// Docks a pane as a panel tab. Its rect is kept for `undock`.
+    pub fn dock(&mut self, id: &str) {
+        if let Some(p) = self.panes.iter_mut().find(|p| p.id == id) { p.pinned = None; }
+        open_panel_tab(&mut self.panel.tabs, &PanelTab::Pane(id.to_owned()));
+    }
+    /// Puts a docked pane back on the canvas at its saved rect, or centered on `center` when it
+    /// never had one (an empty rect).
+    pub fn undock(&mut self, id: &str, center: Point) {
+        self.panel.tabs.retain(|t| t.pane().is_none_or(|p| p != id));
+        if let Some(p) = self.panes.iter_mut().find(|p| p.id == id).filter(|p| p.rect[2] <= 0. || p.rect[3] <= 0.) {
+            let [w, h] = [560., 420.];
+            p.rect = [center[0] - w / 2., center[1] - h / 2., w, h];
+        }
     }
     /// Whether a pane in `space` is shown in the current place.
     pub fn shows(&self, space: Option<&String>) -> bool {
@@ -1884,17 +1942,17 @@ mod tests {
     }
 }
 
-pub fn open_panel_tab(tabs: &mut Vec<String>, item: &str) {
-    if !tabs.iter().any(|t| t == item) {
-        tabs.push(item.to_owned());
+pub fn open_panel_tab(tabs: &mut Vec<PanelTab>, item: &PanelTab) {
+    if !tabs.contains(item) {
+        tabs.push(item.clone());
     }
 }
 
-pub fn close_panel_tab(tabs: &mut Vec<String>, active: Option<&str>, item: &str) -> Option<String> {
+pub fn close_panel_tab(tabs: &mut Vec<PanelTab>, active: Option<&PanelTab>, item: &PanelTab) -> Option<PanelTab> {
     tabs.retain(|t| t != item);
     active
-        .filter(|a| *a != item && tabs.iter().any(|t| t == a))
-        .map(str::to_owned)
+        .filter(|a| *a != item && tabs.contains(a))
+        .cloned()
         .or_else(|| tabs.last().cloned())
 }
 
@@ -1922,18 +1980,38 @@ mod panel_tests {
     #[test]
     fn tabs_activate_without_duplicates_and_close_to_neighbor() {
         let mut tabs = vec![];
-        open_panel_tab(&mut tabs, "/tmp/b.rs");
-        open_panel_tab(&mut tabs, "/tmp/a.rs");
-        open_panel_tab(&mut tabs, "/tmp/b.rs");
-        assert_eq!(tabs, ["/tmp/b.rs", "/tmp/a.rs"]);
-        assert_eq!(
-            close_panel_tab(&mut tabs, Some("/tmp/a.rs"), "/tmp/b.rs").as_deref(),
-            Some("/tmp/a.rs")
-        );
-        assert_eq!(
-            close_panel_tab(&mut tabs, Some("/tmp/a.rs"), "/tmp/a.rs"),
-            None
-        );
+        let [a, b] = ["/tmp/a.rs", "/tmp/b.rs"].map(|p| PanelTab::File(p.into()));
+        open_panel_tab(&mut tabs, &b);
+        open_panel_tab(&mut tabs, &a);
+        open_panel_tab(&mut tabs, &b);
+        assert_eq!(tabs, [b.clone(), a.clone()]);
+        assert_eq!(close_panel_tab(&mut tabs, Some(&a), &b), Some(a.clone()));
+        assert_eq!(close_panel_tab(&mut tabs, Some(&a), &a), None);
+    }
+    #[test]
+    fn panel_tabs_keep_the_old_string_form() {
+        let tabs: Vec<PanelTab> = serde_json::from_str(r#"["/tmp/a.rs","pane:p3"]"#).unwrap();
+        assert_eq!(tabs, [PanelTab::File("/tmp/a.rs".into()), PanelTab::Pane("p3".into())]);
+        assert_eq!(serde_json::to_string(&tabs).unwrap(), r#"["/tmp/a.rs","pane:p3"]"#);
+        // A document saved before panel tabs existed still loads.
+        let panel: Panel = serde_json::from_str(r#"{"width":null}"#).unwrap();
+        assert!(panel.tabs.is_empty());
+    }
+    #[test]
+    fn docking_keeps_the_rect_and_hides_the_pane_from_the_canvas() {
+        let mut doc = Document::default();
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [10., 20., 300., 400.], z: 0, space: None, pinned: Some([1., 1., 2., 2.]) });
+        doc.dock("p1");
+        assert!(doc.docked("p1") && !doc.shown(&doc.panes[0]) && doc.panes[0].pinned.is_none());
+        doc.dock("p1");
+        assert_eq!(doc.panel.tabs.len(), 1);
+        doc.undock("p1", [500., 500.]);
+        assert!(!doc.docked("p1") && doc.shown(&doc.panes[0]));
+        assert_eq!(doc.panes[0].rect, [10., 20., 300., 400.]);
+        doc.panes[0].rect = [0.; 4];
+        doc.dock("p1");
+        doc.undock("p1", [500., 500.]);
+        assert_eq!(doc.panes[0].rect, [220., 290., 560., 420.]);
     }
     #[test]
     fn breadcrumbs_respect_directory_boundaries() {
