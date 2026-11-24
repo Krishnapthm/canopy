@@ -122,7 +122,7 @@ A page you rested keeps running out of sight, so a video can keep playing. When 
 
 ## Annotate
 
-When a layout bug is easier to point at than describe, click **Annotate** in the header or the helper bar. It is one tool for pointing at an element, drawing on the page and sending the result to an agent. Canopy takes a still of the page while you work, so the page does not move under your pen. A popped-out page is annotated the same way in its own window.
+When a layout bug is easier to point at than describe, click **Annotate** in the header or the helper bar. You can annotate from the pane's tab in the Files panel too. It is one tool for pointing at an element, drawing on the page and sending the result to an agent. Canopy takes a still of the page while you work, so the page does not move under your pen. A popped-out page is annotated the same way in its own window.
 
 The bar sits at the bottom of the pane. It has four icon tools and an **x** to stop:
 
@@ -143,7 +143,7 @@ Hold `Space` to scroll or interact with the live page. Release it to take a fres
 
 ### Choose the agent
 
-With exactly one agent wired to the pane, **Send** goes to it and there is nothing to choose. If other running agents are available, **Choose agent** appears in the header next to **Annotate** until you pick one. It lists agents wired to the pane first, then the other running agents. **Send** with no agent chosen asks you to choose one first. If the recipient changes while Canopy saves the screenshot, check the agent and press **Send** again.
+With exactly one agent wired to the pane, **Send** goes to it and there is nothing to choose. With several wired agents or only unwired agents available, **Choose agent** appears in the header next to **Annotate** until you pick one. It lists agents wired to the pane first, then the other running agents. **Send** with no agent chosen asks you to choose one first. If the recipient changes while Canopy saves the screenshot, check the agent and press **Send** again.
 
 The agent receives the annotated screenshot, then the URL, viewport and numbered comments. Element comments include the selector, visible text, a short HTML excerpt and styles. Text labels are listed with their coordinates in the message.
 

@@ -468,7 +468,8 @@ impl AppWindow {
         if !popped && !self.canvas_state.shows_pane(&pane) { return Err("Bring the pane into view to annotate it".into()); }
         let zoom = self.canvas_state.doc.camera.zoom;
         let width = pane.pinned.map_or(pane.rect[2] * zoom, |p| p[2]) - 2.;
-        let needs_room = !self.canvas_state.doc.docked(id) && (width < 520. || zoom < 0.75);
+        let docked = self.canvas_state.doc.docked(id);
+        let needs_room = !docked && (width < 520. || zoom < 0.75);
         let url = pane.url().unwrap_or_default().to_owned();
         match pane.kind {
             canvas::Kind::Browser { viewport, .. } => {
@@ -480,12 +481,14 @@ impl AppWindow {
                     if opened { self.ensure_view(id, window, cx)?; }
                 } else {
                     if opened { self.wake_for_annotation(id, window, cx)?; }
-                    let expanded = self.canvas_state.browser_tab.clone();
-                    if let Some(expanded) = &expanded {
-                        self.run_key("canvas.browser_expand", json!({"pane": expanded}), window, cx);
+                    if !docked {
+                        let expanded = self.canvas_state.browser_tab.clone();
+                        if let Some(expanded) = &expanded {
+                            self.run_key("canvas.browser_expand", json!({"pane": expanded}), window, cx);
+                        }
+                        if needs_room { self.snap_usable(id, cx); }
+                        if needs_room || expanded.as_deref() == Some(id) { self.wake_for_annotation(id, window, cx)?; }
                     }
-                    if needs_room { self.snap_usable(id, cx); }
-                    if needs_room || expanded.as_deref() == Some(id) { self.wake_for_annotation(id, window, cx)?; }
                 }
                 let session = Rc::new(());
                 self.canvas_state.annotation_starts.insert(id.to_owned(), session.clone());
@@ -576,9 +579,11 @@ impl AppWindow {
 
     fn begin_annotation(&mut self, pane: String, host: Host, (still, page_size): Capture, was_live: bool, window: &mut Window, cx: &mut Context<Self>) {
         let focus = cx.focus_handle();
-        focus.focus(window, cx);
-        self.canvas_state.selected = vec![pane.clone()];
-        self.canvas_state.space_down = false;
+        if self.browser_popped(&pane) || self.annotation_pane_visible(&pane) {
+            focus.focus(window, cx);
+            self.canvas_state.selected = vec![pane.clone()];
+            self.canvas_state.space_down = false;
+        }
         let a = Annotate {
             pane: pane.clone(), host, image: render_image(still.clone()), still, page_size,
             done: vec![], undone: vec![], tool: Tool::Select, color: COLORS[0].1, width: STROKES[1].1,
@@ -622,7 +627,7 @@ impl AppWindow {
         cx.notify();
         // A popped page shows again when its window redraws (`popped_body`).
         if browser && !self.browser_popped(id) {
-            if wake { self.wake_for_annotation(id, window, cx)?; }
+            if wake && self.annotation_pane_visible(id) { self.wake_for_annotation(id, window, cx)?; }
             else if live { self.rest_browser(id, cx); }
         }
         Ok(())
@@ -1267,6 +1272,7 @@ impl AppWindow {
             if !self.annotation_agents(id).iter().any(|agent| agent.0 == addr) {
                 return Err("That agent is no longer running".into());
             }
+            self.canvas_state.selected = vec![id.to_owned()];
             let a = self.canvas_state.annotations.get_mut(id).unwrap();
             a.target = Some(addr.to_owned());
             if let Some(draft) = &a.draft {
@@ -1411,8 +1417,13 @@ impl AppWindow {
         let a = self.canvas_state.annotations.get(id)?;
         // A popped page's annotation takes the keyboard in its own window.
         if self.browser_popped(id) { return None; }
-        if a.live || a.outgoing.as_ref().is_some_and(|o| o.sending) || !self.canvas_state.doc.panes.iter().any(|p| &p.id == id && self.canvas_state.shows_pane(p)) { return None; }
+        if a.live || a.outgoing.as_ref().is_some_and(|o| o.sending) || !self.annotation_pane_visible(id) { return None; }
         Some(a.draft.as_ref().map_or_else(|| a.focus.clone(), |d| d.input.read(cx).focus_handle(cx)))
+    }
+
+    /// Whether the main window can give the annotation focus or show its live page again.
+    fn annotation_pane_visible(&self, id: &str) -> bool {
+        self.canvas_state.doc.panes.iter().any(|p| p.id == id && self.canvas_state.shows_pane(p))
     }
 
     /// Running agents an annotation of pane `id` can go to: wired ones first, then the pane's space.
