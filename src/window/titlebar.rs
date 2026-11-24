@@ -36,8 +36,8 @@ const WIN_BUTTON: f32 = 46.0;
 
 impl AppWindow {
     pub(super) fn titlebar(&self) -> Titlebar {
-        // Only macOS lets the canvas draw under the window buttons; elsewhere its menu strip and
-        // the system's buttons stay, and the canvas bar sits below them.
+        // Linux still asks for system decorations when the canvas supplies the client controls.
+        // Windows keeps its separate caption strip.
         if cfg!(not(target_os = "macos")) && self.has_canvas() {
             return Titlebar::System;
         }
@@ -107,14 +107,18 @@ impl AppWindow {
                 #[cfg(windows)]
                 win::toggle_maximize(window);
                 #[cfg(not(any(target_os = "macos", windows)))]
-                window.zoom_window();
+                if window.window_controls().maximize {
+                    window.zoom_window();
+                }
             } else {
                 this.drag_from = Some(ev.position);
             }
         }))
         .on_mouse_down(MouseButton::Right, cx.listener(|_, _ev: &MouseDownEvent, _window, _| {
             #[cfg(not(any(target_os = "macos", windows)))]
-            _window.show_window_menu(_ev.position);
+            if _window.window_controls().window_menu {
+                _window.show_window_menu(_ev.position);
+            }
         }))
     }
 
@@ -157,25 +161,43 @@ impl AppWindow {
         }
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         {
+            if self.chrome.visible_blocks().iter().any(|node| matches!(node.kind, Kind::Canvas)) {
+                return linux::resize_grips(tree, window);
+            }
             let system = self.titlebar() == Titlebar::System;
-            let menu = system.then(|| {
-                let bounds = self.bounds.clone();
-                let measure = canvas(move |b, _, _| {
-                    bounds.borrow_mut().insert("main-menu-trigger".into(), b);
-                }, |_, _, _, _| {}).absolute().size_full();
-                let button = gpui_base::Button::new("primary-menu")
-                    .accessibility_label("Main Menu").size(px(32.)).rounded(px(6.))
-                    .hover(|s| s.bg(c("hover")))
-                    .tooltip(canvas_view::strip_tooltip("Main Menu".into(), Some("app.menu")))
-                    .child(svg().path("icons/menu.svg").size(px(16.)).text_color(c("foreground")))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.dispatch("app.menu", &json!({}), true, window, cx);
-                    }));
-                div().relative().flex_none().child(measure).child(button).into_any_element()
-            });
+            let menu = system.then(|| self.main_menu_button(cx));
             let close = cx.listener(|this, _: &(), window, cx| this.close_window(window, cx));
             linux::frame(tree, "Canopy".into(), system, menu, window, cx, move |window, cx| close(&(), window, cx))
         }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    fn main_menu_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let bounds = self.bounds.clone();
+        let measure = canvas(move |b, _, _| {
+            bounds.borrow_mut().insert("main-menu-trigger".into(), b);
+        }, |_, _, _, _| {}).absolute().size_full();
+        let button = gpui_base::Button::new("primary-menu")
+            .accessibility_label("Main Menu").size(px(32.)).rounded(px(6.))
+            .hover(|s| s.bg(c("hover")))
+            .tooltip(canvas_view::strip_tooltip("Main Menu".into(), Some("app.menu")))
+            .child(svg().path("icons/menu.svg").size(px(16.)).text_color(c("foreground")))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.dispatch("app.menu", &json!({}), true, window, cx);
+            }));
+        div().relative().flex_none().child(measure).child(button)
+            .on_any_mouse_down(|_, _, cx| cx.stop_propagation())
+            .into_any_element()
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    pub(super) fn canvas_strip(&self, bar: Div, content: Div, cx: &mut Context<Self>) -> AnyElement {
+        linux::CanvasStrip {
+            bar,
+            content,
+            menu: self.main_menu_button(cx),
+            owner: cx.entity().downgrade(),
+        }.into_any_element()
     }
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -217,6 +239,92 @@ impl AppWindow {
 pub(crate) mod linux {
     use super::*;
 
+    /// Adds native desktop controls to the strip when Canopy supplies the window frame.
+    #[derive(IntoElement)]
+    pub(super) struct CanvasStrip {
+        pub(super) bar: Div,
+        pub(super) content: Div,
+        pub(super) menu: AnyElement,
+        pub(super) owner: WeakEntity<AppWindow>,
+    }
+
+    impl RenderOnce for CanvasStrip {
+        fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+            let [left, right] = caption_buttons(window, cx, move |window, cx| {
+                let _ = self.owner.update(cx, |this, cx| this.close_window(window, cx));
+            });
+            let mut bar = self.bar.pr(px(12.)).gap(px(4.));
+            let menu_on_left = left.is_empty();
+            let caption = |buttons: Vec<gpui_base::Button>| (!buttons.is_empty()).then(|| {
+                div().flex().flex_none().items_center().gap(px(4.)).children(buttons)
+                    .on_any_mouse_down(|_, _, cx| cx.stop_propagation())
+            });
+            bar = bar.children(caption(left));
+            if menu_on_left {
+                bar = bar.child(self.menu).child(self.content);
+            } else {
+                bar = bar.child(self.content).child(self.menu);
+            }
+            bar.children(caption(right))
+        }
+    }
+
+    /// Builds both sides in desktop order, filtering buttons the compositor handles or disables.
+    fn caption_buttons(
+        window: &Window,
+        cx: &App,
+        close: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> [Vec<gpui_base::Button>; 2] {
+        if !matches!(window.window_decorations(), Decorations::Client { .. }) || window.is_fullscreen() {
+            return [Vec::new(), Vec::new()];
+        }
+        let close = Rc::new(close);
+        let controls = window.window_controls();
+        let maximized = window.is_maximized();
+        let layout = cx.button_layout().unwrap_or_else(WindowButtonLayout::linux_default);
+        [layout.left, layout.right].map(|side| {
+            side.into_iter().flatten().filter_map(|button| {
+                let (label, icon): (_, &[u8]) = match button {
+                    WindowButton::Minimize if controls.minimize =>
+                        ("Minimize", include_bytes!("../../defaults/mods/tabs/win-min.svg")),
+                    WindowButton::Maximize if controls.maximize && maximized =>
+                        ("Restore", include_bytes!("../../defaults/mods/tabs/win-restore.svg")),
+                    WindowButton::Maximize if controls.maximize =>
+                        ("Maximize", include_bytes!("../../defaults/mods/tabs/win-max.svg")),
+                    WindowButton::Close =>
+                        ("Close Window", include_bytes!("../../defaults/mods/tabs/win-close.svg")),
+                    WindowButton::Minimize | WindowButton::Maximize => return None,
+                };
+                let close = close.clone();
+                Some(gpui_base::Button::new((ElementId::from("linux-caption"), button.id()))
+                    .flex_none().size(px(28.)).rounded(px(14.)).accessibility_label(label)
+                    .tooltip(canvas_view::strip_tooltip(label.into(), None))
+                    .hover(|s| s.bg(c("hover")))
+                    .child(svg().data(icon).size(px(14.)).text_color(c("foreground")))
+                    .on_click(move |_, window, cx| match button {
+                        WindowButton::Minimize => window.minimize_window(),
+                        WindowButton::Maximize => window.zoom_window(),
+                        WindowButton::Close => close(window, cx),
+                    }))
+            }).collect()
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::caption_buttons;
+        use gpui::{Decorations, Empty, TestAppContext};
+
+        #[gpui::test]
+        fn server_decorations_leave_caption_buttons_to_the_desktop(cx: &mut TestAppContext) {
+            cx.add_window(|window, cx| {
+                assert!(matches!(window.window_decorations(), Decorations::Server));
+                assert!(caption_buttons(window, cx, |_, _| {}).iter().all(Vec::is_empty));
+                Empty
+            });
+        }
+    }
+
     /// Adds the app header and the frame controls that the compositor leaves to us.
     pub(crate) fn frame(
         tree: AnyElement,
@@ -230,36 +338,10 @@ pub(crate) mod linux {
         let client = matches!(window.window_decorations(), Decorations::Client { .. });
         let client_header = system && client && !window.is_fullscreen();
         let tree = if client_header || menu.is_some() {
-            let close = std::rc::Rc::new(close);
-            let controls = window.window_controls();
-            let maximized = window.is_maximized();
-            let layout = cx.button_layout().unwrap_or_else(WindowButtonLayout::linux_default);
-            let buttons = |side: [Option<WindowButton>; MAX_BUTTONS_PER_SIDE]| {
-                let close = close.clone();
-                side.into_iter().flatten().filter_map(move |button| {
-                    let (label, icon): (_, &[u8]) = match button {
-                        WindowButton::Minimize if controls.minimize =>
-                            ("Minimize", include_bytes!("../../defaults/mods/tabs/win-min.svg")),
-                        WindowButton::Maximize if controls.maximize && maximized =>
-                            ("Restore", include_bytes!("../../defaults/mods/tabs/win-restore.svg")),
-                        WindowButton::Maximize if controls.maximize =>
-                            ("Maximize", include_bytes!("../../defaults/mods/tabs/win-max.svg")),
-                        WindowButton::Close =>
-                            ("Close Window", include_bytes!("../../defaults/mods/tabs/win-close.svg")),
-                        _ => return None,
-                    };
-                    let close = close.clone();
-                    Some(gpui_base::Button::new((ElementId::from("linux-caption"), button.id()))
-                        .flex_none().size(px(28.)).rounded(px(14.)).accessibility_label(label)
-                        .tooltip(canvas_view::strip_tooltip(label.into(), None))
-                        .hover(|s| s.bg(c("hover")))
-                        .child(svg().data(icon).size(px(14.)).text_color(c("foreground")))
-                        .on_click(move |_, window, cx| match button {
-                            WindowButton::Minimize => window.minimize_window(),
-                            WindowButton::Maximize => window.zoom_window(),
-                            WindowButton::Close => close(window, cx),
-                        }))
-                })
+            let [left, right] = if client_header {
+                caption_buttons(window, cx, close)
+            } else {
+                [Vec::new(), Vec::new()]
             };
             let press = window.use_state(cx, |_, _| std::cell::Cell::new(None::<Point<Pixels>>));
             let center = div().flex_1().min_w_0().h_full().flex().items_center()
@@ -267,10 +349,10 @@ pub(crate) mod linux {
                 .when(client_header, |bar| bar.child(div().truncate().text_size(px(13.)).child(title)));
             let header = div().flex().flex_none().h(px(36.)).w_full().items_center()
                 .px(px(8.)).gap(px(4.)).bg(c("chrome"))
-                .when(client_header, |bar| bar.children(buttons(layout.left)))
+                .children(left)
                 .child(drag_region(center, press.clone()))
                 .children(menu)
-                .when(client_header, |bar| bar.children(buttons(layout.right)));
+                .children(right);
             div().size_full().flex().flex_col()
                 .on_mouse_move(move |event, window, cx| {
                     let press = press.read(cx);
@@ -320,7 +402,7 @@ pub(crate) mod linux {
             })
     }
 
-    fn resize_grips(tree: AnyElement, window: &Window) -> AnyElement {
+    pub(super) fn resize_grips(tree: AnyElement, window: &Window) -> AnyElement {
     let Decorations::Client { tiling } = window.window_decorations() else { return tree };
     if window.is_maximized() || window.is_fullscreen() {
         return tree;
