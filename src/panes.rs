@@ -13,13 +13,13 @@ const USAGE: &str = "usage: canopy pane new file <path> [--wire] | new browser <
 fn request(args: &[String], caller: Option<&str>) -> Result<(&'static str, Value), String> {
     let mut words: Vec<_> = args.iter().map(String::as_str).collect();
     // `--place` works anywhere after `new`; the window checks the kind accepts it.
-    let place = match words.iter().position(|w| *w == "--place") {
-        Some(i) if words[0] == "new" => {
+    let flag = if words.first() == Some(&"new") { words.iter().position(|w| *w == "--place") } else { None };
+    let place = match flag {
+        Some(i) => {
             let place = words.get(i + 1).copied().filter(|p| matches!(*p, "panel" | "canvas" | "pinned")).ok_or("--place is panel, canvas or pinned")?;
             words.drain(i..=i + 1);
             Some(place)
         }
-        Some(_) => return Err(USAGE.into()),
         None => None,
     };
     let (name, mut a) = plain_request(&words, caller)?;
@@ -133,6 +133,7 @@ mod tests {
         assert_eq!(req(&["new", "browser", "localhost:3000", "--place", "canvas"], None).unwrap(), ("canvas.pane_new", json!({"kind":"browser","url":"localhost:3000","place":"canvas"})));
         assert_eq!(req(&["new", "sim", "--place", "pinned", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"sim","wire":"t1","place":"pinned"})));
         assert!(req(&["new", "sim", "--place", "dock"], None).is_err() && req(&["close", "p1", "--place", "panel"], None).is_err());
+        assert_eq!(req(&["type", "p1", "--place"], None).unwrap(), ("canvas.sim_input", json!({"pane":"p1","action":"type","text":"--place"})));
         assert_eq!(req(&["new", "sim", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"sim","wire":"t1"})));
         assert_eq!(req(&["new", "sim", "booted", "--wire"], Some("t1")).unwrap(), ("canvas.pane_new", json!({"kind":"sim","udid":"booted","wire":"t1"})));
         assert!(req(&["new", "sim", "a", "b"], None).is_err());

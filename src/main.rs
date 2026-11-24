@@ -62,6 +62,7 @@ Usage:
   canopy hook sub-start|sub-stop|session-end|wire|idle  report a session hook (JSON on stdin, best effort)
   canopy wire                   who you are, and the peers and panes wired to you
   canopy pane new file <path> [--wire] | read|shot|close <pane> | open <pane> <target>  canvas panes
+  canopy pane new browser <url> | new sim [<device>]  add --place panel|canvas|pinned to choose where it opens
   canopy spawn <program> --name <n> [--model <m>] [-- <message>]  start an agent beside this one, wired to it
   canopy check <mod folder>     load a mod once and report what's wrong
   canopy config                 Settings defaults and explanations
