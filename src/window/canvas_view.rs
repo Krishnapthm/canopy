@@ -4290,6 +4290,7 @@ mod preview_tests {
 }
 
 fn format_quote(quote: &Value, cwd: Option<&str>) -> String {
+    if quote["kind"] == "browser" { return browser::format_quote(quote, cwd); }
     let path = std::path::Path::new(quote["path"].as_str().unwrap_or_default());
     let display = cwd.and_then(|cwd| path.strip_prefix(cwd).ok()).unwrap_or(path);
     let mut header = format!("@{}", display.display());

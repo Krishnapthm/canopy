@@ -136,6 +136,10 @@ fn page_zoom(pane: &canvas::Pane, camera: canvas::Camera, body: [f32; 2]) -> f64
 
 const ENTER_URL: &str = "type a URL in the address field first";
 
+/// Opening tags in a quote are cut to this many characters, visible text to `TEXT_CUT`.
+const TAG_CUT: usize = 80;
+const TEXT_CUT: usize = 200;
+
 
 /// Browser state that is not saved: native views, snapshots and waiting replies.
 #[derive(Default)]
@@ -269,6 +273,36 @@ pub(in crate::window) fn web_url(input: &str) -> Result<String, String> {
     let name = host.rsplit_once(':').filter(|_| !host.starts_with('[')).map_or(host, |(n, _)| n).to_ascii_lowercase();
     let local = matches!(name.as_str(), "localhost" | "127.0.0.1" | "0.0.0.0") || host.starts_with("[::1]") || name.ends_with(".localhost") || name.ends_with(".test");
     Ok(format!("{}://{url}", if local { "http" } else { "https" }))
+}
+
+/// Cuts text to `max` characters, marking the cut with `…`.
+fn cut(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) { Some((at, _)) => format!("{}…", &text[..at]), None => text.to_owned() }
+}
+
+/// Formats a `quote.send` browser pointer as a URL and its element or source reference.
+pub(in crate::window) fn format_quote(quote: &Value, cwd: Option<&str>) -> String {
+    let source = &quote["source"];
+    let s = |k: &str| source[k].as_str().or(quote[k].as_str()).unwrap_or_default();
+    let mut out = format!("@{}", s("url"));
+    if let Some(file) = source["file"].as_str() {
+        let path = std::path::Path::new(file);
+        let file = cwd.and_then(|cwd| path.strip_prefix(cwd).ok()).unwrap_or(path).display().to_string();
+        if !s("component").is_empty() { out.push_str(&format!(" <{}>", s("component"))); }
+        out.push_str(&format!(" {file}"));
+        if let Some(start) = quote["start"].as_u64() {
+            out.push_str(&format!(":{start}"));
+            if let Some(end) = quote["end"].as_u64().filter(|e| *e != start) { out.push_str(&format!("-{end}")); }
+        }
+        out.push_str(&format!(" {}", serde_json::to_string(&cut(s("tag"), TAG_CUT)).unwrap()));
+    } else {
+        out.push_str(&format!(" {}", s("selector")));
+        if !s("text").is_empty() { out.push_str(&format!(" {}", serde_json::to_string(&cut(s("text"), TEXT_CUT)).unwrap())); }
+    }
+    match quote["message"].as_str().map(str::trim).filter(|m| !m.is_empty()) {
+        Some(message) => format!("{out}\n\n{message}"),
+        None => out,
+    }
 }
 
 /// The file react-grab named (a path, a dev-server URL, a bundler URL or, from Vite's source
@@ -2038,7 +2072,7 @@ impl AppWindow {
 #[cfg(test)]
 mod tests {
     // Explicit: a glob would bring gpui's own `test` attribute in.
-    use super::{GRAB_REQUESTS, PRESETS, REACT_GRAB, file_url, menu_items, open_in, page_script, page_zoom, parse_viewport, resolve_source, web_url};
+    use super::{GRAB_REQUESTS, PRESETS, REACT_GRAB, file_url, format_quote, menu_items, open_in, page_script, page_zoom, parse_viewport, resolve_source, web_url};
     use crate::canvas::{Camera, Kind, Pane};
     use crate::settings::{KeepCookies, OpenLinks};
     use serde_json::json;
@@ -2150,6 +2184,17 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    #[test]
+    fn quotes_point_not_copy() {
+        let react = json!({"start":42,"end":61,"source":{"url":"http://localhost:3000/pricing","component":"PricingCard","file":"/w/src/PricingCard.tsx","tag":format!("<div class=\"card {}\">", "x".repeat(100))}});
+        let quote = format_quote(&react, Some("/w"));
+        assert!(quote.starts_with("@http://localhost:3000/pricing <PricingCard> src/PricingCard.tsx:42-61 \"<div class=\\\"card xxx"), "{quote}");
+        assert!(quote.ends_with("…\""), "the tag is cut: {quote}");
+        let dom = json!({"text":"Buy now","message":" fix this ","source":{"url":"https://x.dev/","selector":"main > section:nth-of-type(2)"}});
+        assert_eq!(format_quote(&dom, None), "@https://x.dev/ main > section:nth-of-type(2) \"Buy now\"\n\nfix this");
+        let one = json!({"kind":"browser","path":"u","text":"","start":3,"end":3,"source":{"url":"u","component":"A","file":"/x/A.tsx","tag":"<a>"}});
+        assert_eq!(super::super::format_quote(&one, Some("/w")), "@u <A> /x/A.tsx:3 \"<a>\"");
+    }
 }
 
 /// Where a live page sits: the camera and rect, or for a pinned pane just its screen rect, so

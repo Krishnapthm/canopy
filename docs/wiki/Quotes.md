@@ -43,7 +43,7 @@ Every quote starts with `@` and the source: a file path (relative to the agent's
 | Image region | `@path region x,y WxH crop-path`, where `crop-path` is a saved copy of the region. |
 | Whole image | `@path` |
 | PDF | `@path page N`, then the passage as `>` lines. |
-| Browser element | `@url`, then the component and source file and lines when known, else a CSS selector, then the element's opening tag or text. |
+| Browser element from `quote.send` | `@url`, then the component and source file and lines when known, else a CSS selector, then the element's opening tag or text. |
 
 For example, three lines of a Rust file with a message:
 
