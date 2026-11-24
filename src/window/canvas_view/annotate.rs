@@ -1334,7 +1334,7 @@ impl AppWindow {
         })
     }
 
-    fn annotation_bar(&self, id: &str, a: &Annotate, cx: &mut Context<Self>) -> Div {
+    fn annotation_bar(&self, id: &str, a: &Annotate, cx: &mut Context<Self>) -> Stateful<Div> {
         let items = a.items();
         let can_send = !items.is_empty() && !a.live && !a.refreshing && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending);
         let gap = || div().w(px(1.)).h(px(16.)).flex_none().bg(c("border"));
