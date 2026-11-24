@@ -106,3 +106,18 @@ channels supply no OSC 9/777 text.
 
 Checked with `claude --version` and the installed binary's strings. Live PTY
 output at turn completion or a permission prompt still needs a session.
+
+## Notification evidence, 2026-11-24
+
+- Installed `claude --version` reports 2.1.322 and `claude --help` lists
+  `auto` under `--permission-mode`. The installed executable contains
+  `Claude needs your permission` and `AskUserQuestion` strings. This is
+  static evidence of the wording and tool, separate from the live approval
+  and completion status observations above (scratch hc 0.1.20).
+- Installed `hc --version` reports 0.1.22. The pinned core source documents
+  permission and question kinds on a blocked root OSC 7501 report. Canopy
+  uses the current report for alert copy. OSC 9/777 notifications and
+  terminal titles have no status event identifier linking them to that report.
+- The reported Auto-mode screenshot showed a finished alert with permission
+  text in its body. Live Auto-mode desktop delivery and the exact
+  AskUserQuestion report kind on hc 0.1.22 still need isolated verification.

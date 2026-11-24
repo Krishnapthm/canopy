@@ -493,7 +493,7 @@ impl Model {
         let busy = |w: Option<&str>| matches!(w, Some("working" | "blocked" | "error"));
         if blocked(new) && !blocked(prev) {
             Some(Alert::Blocked)
-        } else if busy(prev) && new.is_some() && !busy(new) && !looking {
+        } else if busy(prev) && matches!(new, Some("idle" | "done")) && !looking {
             Some(Alert::Done)
         } else {
             None
@@ -685,6 +685,7 @@ mod tests {
         assert_eq!(alert(Some("working"), Some("idle"), true), None);
         assert_eq!(alert(None, Some("idle"), false), None);
         assert_eq!(alert(Some("working"), None, false), None);
+        assert_eq!(alert(Some("working"), Some("unknown"), false), None);
     }
 
     #[test]

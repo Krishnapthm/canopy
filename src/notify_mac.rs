@@ -56,7 +56,7 @@ define_class!(
             if let Some(address) = field(&info, ns_string!("address")) {
                 toast(json!({
                     "title": content.title().to_string(),
-                    "body": field(&info, ns_string!("toastBody")),
+                    "body": Some(content.body().to_string()).filter(|body| !body.is_empty()),
                     "level": field(&info, ns_string!("toastLevel")),
                     "action": { "name": "agent.focus", "args": { "terminal": address } },
                 }));
@@ -107,13 +107,7 @@ fn app_active() -> bool {
 }
 
 /// Returns false if the app should show its usual toast immediately.
-pub(crate) fn post(
-    title: &str,
-    body: impl FnOnce() -> String,
-    address: &str,
-    fallback: &Value,
-    cx: &gpui::App,
-) -> bool {
+pub(crate) fn post(address: &str, fallback: &Value, cx: &gpui::App) -> bool {
     let Some(native) = cx.try_global::<Notifications>() else {
         return false;
     };
@@ -138,18 +132,16 @@ pub(crate) fn post(
         .clone();
 
     let content = UNMutableNotificationContent::new();
-    content.setTitle(&NSString::from_str(title));
-    content.setBody(&NSString::from_str(&body()));
+    content.setTitle(&NSString::from_str(fallback["title"].as_str().unwrap_or_default()));
+    content.setBody(&NSString::from_str(fallback["body"].as_str().unwrap_or_default()));
     let address = NSString::from_str(address);
-    let toast_body = NSString::from_str(fallback["body"].as_str().unwrap_or_default());
     let toast_level = NSString::from_str(fallback["level"].as_str().unwrap_or_default());
     let info = NSDictionary::from_slices(
         &[
             ns_string!("address"),
-            ns_string!("toastBody"),
             ns_string!("toastLevel"),
         ],
-        &[&*address, &*toast_body, &*toast_level],
+        &[&*address, &*toast_level],
     );
     // Each value is a property-list string.
     unsafe { content.setUserInfo(info.cast_unchecked()) };

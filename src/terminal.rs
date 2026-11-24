@@ -559,11 +559,6 @@ impl TerminalView {
         g.refresh_theme(&vt::theme(), cell);
     }
 
-    #[cfg(target_os = "macos")]
-    pub(crate) fn recent_notice(&self) -> Option<(String, Instant)> {
-        self.grid.borrow().vt.recent_notice().map(|(text, at)| (text.to_owned(), at))
-    }
-
     /// Its title as shown (see `shown_title`); news only when that changed.
     fn set_title(&mut self, title: &str, cx: &mut Context<Self>) {
         let shown = shown_title(title);
