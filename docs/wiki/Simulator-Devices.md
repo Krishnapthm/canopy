@@ -38,13 +38,13 @@ For a docked simulator, drag the Files panel's edge to change the available widt
 
 ## Shut down or close
 
-- Click **Shut down** on the helper bar to turn off the device and return to the device picker. A toast confirms when Xcode finishes.
+- Click **Shut down** in the controls below the phone to turn off the booted device and return to the device picker. A toast confirms when Xcode finishes.
 - Right-click the pane and choose **Shut down and close** to turn off the device and remove the pane in one step.
 - Click **Close** to remove the pane and leave the device running. To close a selected pane from the keyboard, press `Delete`. If the simulator has keyboard focus, press `Esc` first.
 
 ## Bottom bar
 
-Hover over or select a pane with a live device to show its device actions inside the pane.
+Hover over or select a pane with a booted device to show its controls in a row below the phone.
 The bar hides while annotating. In the device's own window, the bottom bar also offers **Bring back**.
 
 | Button | What it does |
@@ -54,10 +54,11 @@ The bar hides while annotating. In the device's own window, the bottom bar also 
 | **Screenshot** | Saves a PNG to the Desktop. The toast shows the file. |
 | **Record** | Records a video to the Desktop. Click **Stop recording** to stop. |
 | **Annotate** | Freezes the screen so you can pin comments and draw. |
+| **Shut down** | Turns off the device and shows the device picker. |
 
 ## Annotate
 
-To point out a problem on a booted simulator, click **Annotate** in the bar over the device screen. If the device is in its own window, click **Bring back** first. The tool is the same as the one in the [Browser Pane](Browser-Pane#annotate), with the same bar at the bottom of the pane.
+To point out a problem on a booted simulator, click **Annotate** in the bar below the device. The screen freezes inside its bezel at the current size. Clicks and drags on the still draw or pin comments. If the device is in its own window, click **Bring back** first. The tool is the same as the one in the [Browser Pane](Browser-Pane#annotate), with the same bar at the bottom of the pane.
 
 - With **Select**, click a point or drag over an area. A numbered blue pin drops there and a single-line comment box opens beside it. Press `Enter` to **Add** the comment, `Cmd+Enter` to **Send** everything queued, or `Shift+Enter` for a new line. Click a pin to edit its comment.
 - **Pen**, **Box** and **Text** draw on the still. Colour and stroke appear only while one of them is on. `Cmd+Z` and `Shift+Cmd+Z` undo and redo.
@@ -78,7 +79,6 @@ Click **Stop annotating** or press `Esc` to leave. With marks or comments on the
 | **Open in Device Hub** | Opens Xcode's Device Hub. |
 | **Pin to screen** or **Move to canvas** | Switches between a fixed screen position and moving with the canvas. |
 | **Connect** | Starts a wire from the pane. |
-| **Shut down** | Turns off the device and shows the device picker. |
 | **Close** | Removes the pane and leaves the device running. |
 
 ## Agents drive the device

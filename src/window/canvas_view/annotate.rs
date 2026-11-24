@@ -512,7 +512,6 @@ impl AppWindow {
             canvas::Kind::Sim { .. } => {
                 let view = self.canvas_state.sims.get(id).ok_or("The simulator is not booted")?;
                 if view.popped.is_some() { return Err("Bring the simulator back to annotate it".into()); }
-                if needs_room { self.snap_usable(id, cx); }
                 let (host, capture) = self.capture_sim(id, cx)?;
                 self.begin_annotation(id.to_owned(), host, capture, true, window, cx);
             }
@@ -873,12 +872,30 @@ impl AppWindow {
     pub(super) fn annotate_body(&self, pane: &canvas::Pane, native: AnyElement, [w, h]: Pos, cx: &mut Context<Self>) -> AnyElement {
         let id = &pane.id;
         let Some(a) = self.canvas_state.annotations.get(id) else { return native };
+        // The simulator still uses the same screen rectangle and bezel as the live phone.
+        let sim_frame = if matches!(a.host, Host::Sim { .. }) {
+            self.canvas_state.sims.get(id).and_then(|view| view.live.as_ref()).and_then(|screen| {
+                let screen = screen.read(cx);
+                let fit = screen.fit(super::sim::device_room([w, h]))?;
+                Some((fit, screen.frozen_frame(fit, a.image.clone())))
+            })
+        } else {
+            None
+        };
+        let sim_screen = sim_frame.as_ref().map(|(fit, _)| fit.screen);
         let mark_key = format!("annotate-body:{id}");
         let bounds = self.bounds.clone();
         let target = id.clone();
         let mut root = div().id(SharedString::from(format!("annotate-{id}"))).relative().size_full()
             .track_focus(&a.focus)
-            .child(canvas(move |b, _, _| { bounds.borrow_mut().insert(mark_key, b); }, |_, _, _, _| {}).absolute().size_full())
+            .child(canvas(move |b, _, _| {
+                let b = if let Some([x, y, w, h]) = sim_screen {
+                    Bounds::new(b.origin + point(px(x), px(y)), size(px(w), px(h)))
+                } else {
+                    b
+                };
+                bounds.borrow_mut().insert(mark_key, b);
+            }, |_, _, _, _| {}).absolute().size_full())
             .capture_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
                 let mods = e.keystroke.modifiers;
                 let drafting = this.canvas_state.annotations.get(&target).is_some_and(|a| a.draft.is_some());
@@ -924,9 +941,17 @@ impl AppWindow {
             root = root.child(native);
         } else {
             let (target, hovering, leaving) = (id.clone(), id.clone(), id.clone());
-            root = root.child(div().id("annotation-still").absolute().size_full().bg(c("canvas"))
+            let (still, scale, [ox, oy]) = if let Some((fit, frame)) = sim_frame {
+                let [x, y, w, h] = fit.screen;
+                root = root.child(frame);
+                (annotation_rect([x, y, w, h]), fit.scale, [x, y])
+            } else {
+                let (scale, offset) = fit([0., 0., w, h], a.page_size);
+                (div().absolute().size_full().bg(c("canvas"))
+                    .child(img(a.image.clone()).size_full().object_fit(gpui::ObjectFit::Contain)), scale, offset)
+            };
+            root = root.child(still.id("annotation-still")
                 .cursor(if a.tool == Tool::Select { CursorStyle::PointingHand } else { CursorStyle::Crosshair })
-                .child(img(a.image.clone()).size_full().object_fit(gpui::ObjectFit::Contain))
                 .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, window, cx| this.annotation_hover(&hovering, e.position, window, cx)))
                 .on_hover(cx.listener(move |this, over: &bool, _, cx| {
                     if *over { return; }
@@ -947,7 +972,6 @@ impl AppWindow {
                     }
                     cx.stop_propagation();
                 })));
-            let (scale, [ox, oy]) = fit([0., 0., w, h], a.page_size);
             let screen = |[x, y]: Pos| [ox + x * scale, oy + y * scale];
             let box_at = |[x, y, w, h]: Rect| {
                 let [x, y] = screen([x, y]);
@@ -1016,9 +1040,16 @@ impl AppWindow {
                 root = root.child(self.annotation_composer(id, draft, at, [w, h], cx));
             }
         }
+        let bar = self.annotation_bar(id, a, cx);
+        let bar = if matches!(a.host, Host::Sim { .. }) {
+            div().id("sim-annotation-controls").max_w_full().overflow_x_scroll()
+                .child(bar.flex_none().flex_nowrap()).into_any_element()
+        } else {
+            bar.into_any_element()
+        };
         root.child(div().absolute().bottom(px(12.)).left_0().w_full().flex().flex_col().items_center().gap(px(8.))
             .when(a.hint, |controls| controls.child(self.annotation_hint(id, a, w, cx)))
-            .child(self.annotation_bar(id, a, cx)))
+            .child(bar))
             .into_any_element()
     }
 
@@ -1338,7 +1369,8 @@ impl AppWindow {
         let items = a.items();
         let can_send = !items.is_empty() && !a.live && !a.refreshing && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending);
         let gap = || div().w(px(1.)).h(px(16.)).flex_none().bg(c("border"));
-        let mut bar = super::helper_bar::bar_shell(1.).id("annotation-bar").relative().max_w_full().flex_wrap().items_center().justify_center().occlude()
+        let mut bar = super::helper_bar::bar_shell(1.).id("annotation-bar").relative().items_center().justify_center().occlude()
+            .when(matches!(a.host, Host::Browser { .. }), |bar| bar.max_w_full().flex_wrap())
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         for (tool, action, label, icon) in TOOLS {
             bar = bar.child(annotation_button(action, icon, label, a.tool == tool).on_click(self.annotation_click(id, action, cx)));
