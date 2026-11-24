@@ -177,6 +177,14 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 | `pane` | no |
 | `panes` | no |
 
+## `canvas.note_new`
+
+Open a sticky note on the canvas. The optional point is in world coordinates.
+
+| Argument | Required |
+|---|---|
+| `point` | no |
+
 ## `canvas.pane_new`
 
 Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.

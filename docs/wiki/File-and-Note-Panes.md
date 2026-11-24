@@ -31,8 +31,10 @@ If the file already has a pane, Canopy moves that pane to you instead of opening
 
 ### Make a note
 
-1. Click **Note** on the toolbar, or press `t` in canvas mode.
-2. Type in the pane.
+1. Right-click empty canvas and choose **New Sticky Note**, click **Note** on the toolbar, or press `Option+Cmd+N` (`Ctrl+Alt+N` on Linux and Windows).
+2. Click the note and type. To move it, hover over the note and drag the grip in its helper bar.
+
+The `t` shortcut also opens a note while the canvas has focus.
 
 Every edit is saved as you type, in `canvas.json` in the app home, so notes survive restarts. A note is not a file in your project, so it never shows up in Git.
 

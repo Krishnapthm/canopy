@@ -39,6 +39,7 @@ function items(p, git, agents) {
     case "canvas-agents": return agentItems(agents, at);
     case "canvas-empty": return [
       ["New terminal", "canvas.create", at],
+      ["New Sticky Note", "canvas.note_new", { point: tg.point }],
       ["Open file", "preview.open", { point: tg.point }],
       ["Arrange", "canvas.arrange", {}],
       ["Arrange as", "sub:canvas-arrange", {}],
@@ -143,7 +144,7 @@ function rule(list, i) {
 function shortcut(name, args) {
   // `pane.split:right` binds pane.split with { direction: "right" }.
   const value = args && Object.values(args)[0];
-  const k = keys().find((b) => b.section === "global" && (b.action === name || b.action === `${name}:${value}`));
+  const k = keys().find((b) => (b.section === "global" || (name === "canvas.note_new" && b.section === "layout:main")) && (b.action === name || b.action === `${name}:${value}`));
   return k?.label ?? "";
 }
 

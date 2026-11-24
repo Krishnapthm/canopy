@@ -79,9 +79,11 @@ fn kind_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>) -> Vec<BarAc
             ]);
             actions
         }
-        canvas::Kind::Mod { .. } => hint.into_iter().flat_map(|h| &h.actions).map(|a| BarAction {
+        canvas::Kind::Mod { .. } => (canvas::header_height(&pane.kind) == 0.).then(|| BarAction {
+            icon: "icons/grip-vertical.svg".into(), label: "Drag to move".into(), command: String::new(), args: Value::Null,
+        }).into_iter().chain(hint.into_iter().flat_map(|h| &h.actions).map(|a| BarAction {
             icon: a.icon.clone().into(), label: a.label.clone().into(), command: a.command.clone(), args: a.args.clone(),
-        }).chain([
+        })).chain([
             BarAction { icon: "icons/link.svg".into(), label: "Connect".into(), command: "canvas.connect".into(), args: json!({}) },
             BarAction { icon: "icons/x.svg".into(), label: "Close".into(), command: "canvas.close".into(), args: json!({}) },
         ]).collect(),
@@ -201,6 +203,7 @@ impl AppWindow {
         let state = &self.canvas_state;
         let mut bar = bar_shell(s);
         for BarAction { icon, label, command, args } in actions {
+            let drag = command.is_empty();
             let active = connected && command == "canvas.connect";
             let enabled = if command == "canvas.sim_zoom" && args["step"] == "actual" {
                 #[cfg(target_os = "macos")]
@@ -223,9 +226,22 @@ impl AppWindow {
                     .when(enabled, |d| d.group_hover(group, |d| d.text_color(c("foreground")))))
                 .when(!hint.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("muted-foreground")).child(hint)))
                 .tooltip(strip_tooltip(label.to_string(), Some(&command)))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(MouseButton::Left, cx.listener({
+                    let target = target.clone();
+                    move |this, e: &MouseDownEvent, window, cx| {
+                        if drag {
+                            this.raise_pane(&target, cx);
+                            this.focus.focus(window, cx);
+                            this.canvas_state.selected = vec![target.clone()];
+                            this.canvas_state.wire.selected = None;
+                            this.start_preview_drag(&target, e.position);
+                            cx.notify();
+                        }
+                        cx.stop_propagation();
+                    }
+                }))
                 .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
-                    if !enabled { return; }
+                    if !enabled || drag { return; }
                     // Connect draws a wire with the pointer; the keyboard's `c` runs canvas.connect.
                     if command == "canvas.connect" { return this.wire_start(&target, e.position(), window, cx); }
                     this.focus.focus(window, cx);
@@ -255,8 +271,8 @@ mod helper_bar_tests {
         assert_eq!(pane_actions(&pane, None, false)[0].args, json!({"path":"/tmp/a.md"}));
         pane.kind = canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() };
         let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }] };
-        assert_eq!(pane_actions(&pane, Some(&hint), false).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
-        assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
+        assert_eq!(pane_actions(&pane, Some(&hint), false).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["", "canvas.pane_set", "canvas.connect", "canvas.close"]);
+        assert_eq!(commands(&pane), ["", "canvas.connect", "canvas.close"]);
         pane.kind = serde_json::from_value(json!({"kind":"browser","props":{"url":"http://localhost:3000","home":"http://localhost:3000"}})).unwrap();
         assert!(commands(&pane).is_empty());
         assert!(pane_actions(&pane, None, true).is_empty());

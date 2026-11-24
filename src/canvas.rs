@@ -30,7 +30,13 @@ pub fn header_world(zoom: f32) -> f32 { HEADER / zoom }
 /// A browser pane's header: a row of tabs over a row of navigation and the address field.
 pub const BROWSER_HEADER: f32 = 66.;
 /// The header height of a pane of this kind, in screen px at every zoom.
-pub fn header_height(kind: &Kind) -> f32 { if matches!(kind, Kind::Browser { .. }) { BROWSER_HEADER } else { HEADER } }
+pub fn header_height(kind: &Kind) -> f32 {
+    match kind {
+        Kind::Browser { .. } => BROWSER_HEADER,
+        Kind::Mod { kind, .. } if kind == "mod:note" => 0.,
+        _ => HEADER,
+    }
+}
 /// Below this camera zoom an expanded cell shows a flat stand-in instead of live text.
 pub const EXPANDED_MIN_ZOOM: f32 = 0.5;
 

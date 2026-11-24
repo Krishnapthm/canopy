@@ -4,6 +4,8 @@ Every default shortcut and mouse gesture, for reference. In the app, press `?` i
 
 Keys are shown for macOS first. Many canvas-mode keys are single letters, and work only when the canvas has the keyboard (see [Concepts](Concepts#typing-into-a-pane-and-canvas-mode)).
 
+
+Create a sticky note with `Option+Cmd+N` on macOS or `Ctrl+Alt+N` on Linux and Windows.
 ## Mouse
 
 - Click a pane to select it. Drag it to move the selection. `Shift`+click adds or removes a pane.

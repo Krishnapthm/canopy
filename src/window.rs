@@ -3065,6 +3065,11 @@ impl AppWindow {
             "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
+            "canvas.note_new" => {
+                let mut args = json!({"kind":"mod:note"});
+                if let Some(point) = a.get("point") { args["point"] = point.clone(); }
+                self.pane_command("canvas.pane_new", &args, window, cx);
+            }
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" | "canvas.pane_dock" => self.pane_command(name, a, window, cx),
             "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" | "canvas.annotate_agent" => self.annotation_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"

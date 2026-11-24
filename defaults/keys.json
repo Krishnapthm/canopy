@@ -72,6 +72,7 @@
     "shift-insert": "terminal.paste"
   },
   "layout:main": {
+    "ctrl-alt-n": "canvas.note_new",
     "ctrl-shift-a": "canvas.select_all",
     "ctrl-shift-t": "canvas.browser_tab_new",
     "ctrl-shift-w": "canvas.browser_tab_close",

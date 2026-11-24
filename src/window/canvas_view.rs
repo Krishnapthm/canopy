@@ -2833,15 +2833,14 @@ impl AppWindow {
             }),
         ));
         card_element
-                .child(Self::pane_header().h(px(canvas::header_height(&card.kind))).flex_none().border_b_1().border_color(c("border"))
+                .when(canvas::header_height(&card.kind) > 0., |d| d.child(Self::pane_header().h(px(canvas::header_height(&card.kind))).flex_none().border_b_1().border_color(c("border"))
                     .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                         this.open_menu("canvas-colors", json!({"pane":color_menu}), Some(e.position), window, cx);
                         cx.stop_propagation();
                     }))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-                        this.begin_layout();
-                        this.canvas_state.shown = Some(this.canvas_state.doc.clone());
-                        this.canvas_state.preview_drag = Some((drag.clone(), None, e.position)); cx.stop_propagation();
+                        this.start_preview_drag(&drag, e.position);
+                        cx.stop_propagation();
                     }))
                     .map(|head| match header {
                         Some(header) => head.p(px(0.)).child(header),
@@ -2849,10 +2848,17 @@ impl AppWindow {
                             .child(div().flex_none().mt(px(1.)).child(svg().path(icon).size(px(16.)).text_color(c("foreground"))))
                             .child(div().min_w_0().truncate().child(title))
                             .child(div().flex_1().min_w_0().truncate().text_color(c("muted-foreground")).child(detail)),
-                    }))
+                    })))
                 .child(div().flex_1().min_h_0().overflow_hidden().child(body))
                 .children(Self::resize_zones(card, camera.zoom, cx))
                 .into_any_element()
+    }
+
+    /// Starts a boxed pane move from its header or shared helper bar.
+    fn start_preview_drag(&mut self, id: &str, position: Point<Pixels>) {
+        self.begin_layout();
+        self.canvas_state.shown = Some(self.canvas_state.doc.clone());
+        self.canvas_state.preview_drag = Some((id.to_owned(), None, position));
     }
 
     /// Eight resize hitboxes shared by expanded terminals and boxed panes.
