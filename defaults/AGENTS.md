@@ -709,6 +709,9 @@ What's about the user, never a look:
   goes there when clicked. `done` / `blocked` replace the bundled MP3s
   (path absolute or relative to `~/.config/canopy`). Changes apply live,
   including the Play buttons in Settings > Alerts.
+- On macOS, Settings > Alerts toggles `desktop_notifications` (default `true`).
+  Background agent alerts can use a recent OSC 9 or 777 message from the
+  terminal. Native notifications are silent and open the agent on click.
 - `core`: the herdr-core binary to use, when it isn't where Canopy looks
   (PATH, the login shell's PATH, `~/.local/bin`, Homebrew, mise, Nix,
   cargo). Read at start.
@@ -1093,8 +1096,10 @@ expanded cell's header name it renames the tab in place instead). Clicking
 empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. Holding Cmd (Ctrl elsewhere) alone for 0.4 s
 shows keys on the toolbar and helper bars, even while a terminal has focus. Expanded cells are
 100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
-neighbours back. Drag the bottom-right corner to resize; the terminal is resized on release. Several
-can be open. The wheel scrolls a focused expanded terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
+neighbours back. Drag any edge or corner of an expanded terminal or boxed pane to resize it.
+The terminal grid refits on release. Holding a move or resize near a canvas edge pans the canvas.
+Wheel or two-finger scroll pans over the canvas and unentered panes, while an entered terminal
+keeps plain scroll. Pinch and Cmd+scroll (Ctrl+scroll elsewhere) zoom the canvas. `canvas.expand {terminal?}` toggles
 the named or last selected cell; `panel.open {terminal}` only expands. An expanded cell keeps its size at every
 zoom; below 0.5 zoom it shows a flat stand-in instead of live text. The side panel shows files and sub-agent transcripts only.
 
@@ -1239,7 +1244,9 @@ action, x?, y?, x1?, y1?, x2?, y2?, ms?, text?, button?}` (what those verbs send
 `canvas.sim_home`, `canvas.sim_screenshot` (to the Desktop, replies with path),
 `canvas.sim_record` (start, or stop and save a movie on the Desktop), `canvas.sim_annotate`
 (the person draws on a still and sends it to an agent as a quote: you get `@<png path>` and a
-line saying what it shows), `canvas.sim_zoom {step?: "actual" | "in" | "out"}`,
+line saying what it shows), `canvas.sim_zoom {step?: "actual" | "default" | "in" | "out"}`,
+`canvas.sim_shutdown {pane?, close?}` (turn off the device and show the picker, or close the
+pane with `close: true`. The result arrives in a toast),
 `canvas.sim_pop` (own window, or back), `canvas.sim_refresh` (new screenshot, retry live),
 `canvas.sim_device` (picker menu), `canvas.sim_hub` (Device Hub) and `canvas.sim_reveal {path}`
 (show a saved file in Finder). All but sim_hub, sim_reveal and sim_input take `pane?`, else the
@@ -1252,6 +1259,11 @@ Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", pat
 or `booted`), `canvas.close {pane}`. Mods read `canvasPanes()` and `paneKinds()`; `panes()` is
 the tab layouts' panes. `canvas.pane_set {pane, props}` shallow-merges an object
 into a mod pane's saved props (at most 1 MiB); a note's `props.text` is its read text.
+Use `canvas.pane_color {pane, color}` to set a canvas pane's hue. Pass `null` or omit
+`color` to inherit the space's hue. Each `canvasPanes()` entry has an optional `color`
+override. A `panes()` entry reports its terminal's effective canvas hue or `null`.
+Each `spaces()` entry reports the inherited canvas hue or `null` for gray spaces
+and spaces without a canvas card. Use `theme()["tint-" + color]` to draw a hue.
 `canvas.hand {on?}` sets or toggles left-drag panning, as with Space held.
 
 ### Browser panes
@@ -1354,8 +1366,9 @@ without asking. `canvas.close {terminal}` closes one cell: running agents ask "T
 `canvas.sync` turns sync input on for the selected panes (typing in one reaches all) or off.
 `canvas.equalize` gives the selected panes (else the focused one) the standard `terminal_size`; `canvas.new` opens a full terminal pane, cascading from the last one.
 
-Views are in the macOS View menu or the Linux titlebar's primary menu
-(`app.menu`, optionally with a `group`);
+Views are in the macOS View menu or the Linux Main Menu (F10).
+The Main Menu also opens Settings, Keyboard Shortcuts and Welcome.
+Use `app.menu` to open it or pass a `group` to open a page;
 the active view is checked. `view.agents`, `view.all`, `view.terminals` and
 their keys still work. The canvas toolbar has file and focus-fit buttons.
 

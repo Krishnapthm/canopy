@@ -9,11 +9,15 @@ Keys are shown for macOS first. Many canvas-mode keys are single letters, and wo
 - Click a pane to select it. Drag it to move the selection. `Shift`+click adds or removes a pane.
 - Drag empty canvas to select panes with a box. Hold `Shift` to add to the selection.
 - Double-click a terminal pane to enter it. Click empty canvas or another pane to leave it.
-- Pan with `Space`+drag, middle-button drag or trackpad scrolling. Pinch or use `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) to zoom.
+- Pan with `Space`+drag, middle-button drag or wheel or two-finger scroll. Scroll pans over empty canvas and panes you have not entered. Inside an entered terminal, plain scroll moves through its output.
+- Pinch or use `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) to zoom the canvas around the pointer.
+- Drag a pane edge or corner to resize. While moving or resizing a pane, hold the pointer near a canvas edge to pan. See [Canvas](Canvas#select-and-move-panes).
 
 ## Show keys
 
 Hold `Cmd` (`Ctrl` on Linux and Windows) alone for 0.4 seconds to show shortcut hints, including with a terminal entered. Release it or press a key to hide the hints.
+
+On Linux, **F10** opens the [Main Menu](Linux-Desktop).
 
 ## Canvas mode keys
 

@@ -21,6 +21,9 @@ Canopy replaces its shipped layouts and mods on every start, moving any you edit
 
 ## Built-in layouts
 
+Open **Settings** > **Look** and choose a card under **Layout**. The **Canopy**
+card shows the canvas with a wired agent, terminal, and simulator.
+
 Select a layout in the [command palette](Go-To-and-Palette):
 
 - **Layout: Canopy** (`main`): the canvas with a floating toolbar and a status strip.

@@ -28,7 +28,7 @@ The first time you open a space for a local project folder, the toolbar opens **
 
 ![A helper bar above a terminal pane](images/toolbar-and-helper-bar-2.png)
 
-Hover or select a pane, and its helper bar appears just above the pane's top-left corner, outside the content so it never covers what you are reading. It hides while you drag, resize, draw a selection box or select an image region, so it does not get in the way.
+Hover or select a pane to see its helper bar above the top-left corner. When there is too little room above the pane, the bar moves inside its top edge. It hides while you drag, resize, draw a selection box or select an image region.
 
 Every pane kind's bar ends with the same two buttons:
 

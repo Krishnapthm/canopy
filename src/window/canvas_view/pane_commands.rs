@@ -75,7 +75,7 @@ impl AppWindow {
             })
         } else { None };
         // A named simulator must exist before a pane points at it.
-        let udid = match a["udid"].as_str() { Some(target) if kind == "sim" => super::sim::resolve(target)?, _ => String::new() };
+        let udid = match a["udid"].as_str() { Some(target) if kind == "sim" => self.resolve_sim(target)?, _ => String::new() };
         // A pane opened pinned never lands on the canvas, so nothing should make room for it:
         // the layout solve that adding runs is undone once it is pinned.
         let home = super::dock::Home::parse(a, kind)?;
@@ -234,7 +234,7 @@ impl AppWindow {
         if pane.sim().is_none() { return Err(format!("pane {id} ({}) has no verb open", pane.kind_name())); }
         // A sim pane shows the simulator (a udid or "booted"), booting it; its own udid refreshes.
         let target = a["target"].as_str().ok_or("canvas.pane_open needs target")?;
-        let udid = super::sim::resolve(target)?;
+        let udid = self.resolve_sim(target)?;
         self.point_sim(id, udid.clone(), window, cx);
         Ok(json!({"pane":id,"udid":udid}))
     }
@@ -287,7 +287,7 @@ mod tests {
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == blank["pane"]), "a blank note closes without asking");
             assert!(this.canvas_state.doc.wires.is_empty());
             // A sim pane before simctl answers: read says what it knows; open needs a target.
-            this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.], z: 9, space: None, pinned: None });
+            this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.], z: 9, space: None, color: None, pinned: None });
             assert_eq!(this.pane_read(&json!({"pane":"p9"}), cx).unwrap()["text"], canvas::envelope("p9", "sim", &[("udid", "")], "No simulator picked yet."));
             assert_eq!(this.pane_open(&json!({"pane":"p9"}), window, cx).unwrap_err(), "canvas.pane_open needs target");
         });

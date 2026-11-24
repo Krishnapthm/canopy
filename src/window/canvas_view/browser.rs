@@ -450,7 +450,7 @@ impl AppWindow {
         let kind = canvas::Kind::Browser {
             home: url.clone(), tabs: vec![canvas::Tab { id: "t1".into(), url, title: String::new() }], active: 0, viewport: None,
         };
-        doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], SIZE[0], SIZE[1]], z, space, pinned: None });
+        doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], SIZE[0], SIZE[1]], z, space, color: None, pinned: None });
         self.canvas_state.last_browser = Some(id.clone());
         if empty { self.canvas_state.browsers.panes.entry(id.clone()).or_default().focus_url = true; }
         self.solve_layout(Some(&id), None, cx);
@@ -2282,7 +2282,7 @@ mod tests {
                 tabs: vec![crate::canvas::Tab { id: "t1".into(), url: String::new(), title: String::new() }],
                 active: 0, home: String::new(), viewport: None,
             },
-            rect: [0., 0., 640., 838.], z: 1, space: None, pinned: None,
+            rect: [0., 0., 640., 838.], z: 1, space: None, color: None, pinned: None,
         };
         assert_eq!(page_zoom(&pane, camera, [640., 800.]), 0.75);
         pane.pinned = Some(pane.rect);

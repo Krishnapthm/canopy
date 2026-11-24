@@ -3,7 +3,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, InputState, Input, Popup } from "gpui-base";
-import { commands, keys, nextCommand, openOverlay, setShared, notify, hc, run, theme, themes, fonts, settings, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, ui } from "herdr";
+import { commands, keys, nextCommand, openOverlay, setShared, notify, hc, run, theme, themes, fonts, settings, exec, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, ui } from "herdr";
 
 const I = (name) => `frame/settings/${name}.svg`;
 
@@ -209,15 +209,21 @@ export default class Settings extends View {
   // only if nobody changed it meanwhile (else read again and redo).
   change(edit, cx) {
     cx.spawn(async (cx) => {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        await this.load();
-        const next = JSON.parse(JSON.stringify(this.person));
-        edit(next);
-        try {
-          await writeTextFile(this.file(), JSON.stringify(next, null, 2) + "\n", this.raw);
-          this.person = next;
-          break;
-        } catch {}
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await this.load();
+          const next = JSON.parse(JSON.stringify(this.person));
+          edit(next);
+          try {
+            await writeTextFile(this.file(), JSON.stringify(next, null, 2) + "\n", this.raw);
+            this.person = next;
+            break;
+          } catch (e) {
+            if (attempt === 2) throw e;
+          }
+        }
+      } catch (e) {
+        notify({ title: "Couldn't save settings", body: String(e), level: "error" });
       }
       cx.notify();
     });
@@ -894,14 +900,31 @@ export default class Settings extends View {
     const sounds = this.person.sounds ?? {};
     const on = sounds.enabled !== false;
     const file = (f) => (f ? f.split(/[\\/]/).pop() : "Canopy's sound");
-    return v_flex()
-      .w_full()
+    const desktop = this.person.desktop_notifications !== false;
+    const page = v_flex().w_full();
+    if (window()?.platform === "macos") {
+      page.child(this.heading(t, "Notifications"))
+        .child(this.row(t, "Desktop notifications", "Show agent alerts while Canopy is in the background.",
+          this.toggle(t, "st-desktop-notifications", desktop, (_e, cx) => this.change((p) => (p.desktop_notifications = !desktop), cx))))
+        .child(this.row(t, "macOS notification style", "Banners disappear automatically. Alerts stay until you dismiss them.",
+          this.button(t, "st-notification-style", "Notification style", (_e, cx) => cx.spawn(async () => {
+            try {
+              const result = await exec("/usr/bin/open", ["x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=dev.canopy.app"]);
+              if (result.code !== 0) throw new Error(result.stderr.trim() || "System Settings could not be opened.");
+            } catch (e) {
+              notify({ title: "Couldn't open notification settings", body: String(e), level: "error" });
+            }
+          }))))
+        .child(div().pt(12).text_size(12.5).line_height("18px").text_color(t.dim)
+          .child("Agents include a message when their own terminal notifications are on."));
+    }
+    return page
       .child(this.heading(t, "Sounds"))
       .child(
         this.row(
           t,
           "Play sounds",
-          "When an agent needs you, and when one finishes while you're not looking. A note shows in the corner either way.",
+          "When an agent needs you, and when one finishes while you're not looking.",
           this.toggle(t, "st-sounds", on, (_e, cx) => this.change((p) => (p.sounds = { ...(p.sounds ?? {}), enabled: !on }), cx)),
         ),
       )
