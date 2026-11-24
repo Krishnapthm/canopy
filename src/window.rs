@@ -3068,6 +3068,11 @@ impl AppWindow {
             "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
+            "canvas.note_new" => {
+                let mut args = json!({"kind":"mod:note"});
+                if let Some(point) = a.get("point") { args["point"] = point.clone(); }
+                self.pane_command("canvas.pane_new", &args, window, cx);
+            }
             "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" | "canvas.pane_dock" => self.pane_command(name, a, window, cx),
             "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" | "canvas.annotate_agent" => self.annotation_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
@@ -3076,7 +3081,7 @@ impl AppWindow {
             | "canvas.browser_tab_new" | "canvas.browser_tab_select" | "canvas.browser_tab_close" => self.browser_command(name, a, person, window, cx),
             name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
-            "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
+            "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_zoom_out" | "canvas.pdf_zoom_reset" | "canvas.pdf_zoom_in" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
             "app.menu" => {
                 let Some(target) = crate::app_menu::popup(&self.canvas_state.doc.view, a["group"].as_str()) else {
                     return self.fail("Unknown main menu group");
@@ -3101,6 +3106,7 @@ impl AppWindow {
                 }
             }
             "panel.editor" => self.panel_editor(a, window, cx),
+            "preview.external" => self.open_in_preview(a, window, cx),
             "preview.open" => self.open_preview(a.clone(), window, cx),
             "canvas.hand" => {
                 self.canvas_state.hand = a["on"].as_bool().unwrap_or(!self.canvas_state.hand);
@@ -3116,15 +3122,25 @@ impl AppWindow {
                 space.color = color;
                 self.canvas_changed(cx);
             }
-            "canvas.pane_color" => {
-                let color = if a["color"].is_null() {
+            "canvas.pane_color" | "canvas.pane_color_next" => {
+                let doc = &mut self.canvas_state.doc;
+                let Some(index) = Self::arg(a, "pane").and_then(|id| doc.panes.iter().position(|p| p.id == id)) else { return self.fail("no such canvas pane") };
+                let color = if name == "canvas.pane_color_next" {
+                    let Some(color) = doc.suggest_pane_color(index) else { return self.fail("No unused pane color") };
+                    Some(color)
+                } else if a["color"].is_null() {
                     None
                 } else {
-                    let Some(color) = Self::arg(a, "color").and_then(canvas::Hue::from_name) else { return self.fail("invalid pane color") };
+                    let Some(color) = Self::arg(a, "color").and_then(canvas::Hue::parse) else { return self.fail("Choose a named color or enter a hex color such as #3a78e8") };
                     Some(color)
                 };
-                let Some(pane) = Self::arg(a, "pane").and_then(|id| self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id)) else { return self.fail("no such canvas pane") };
-                pane.color = color;
+                if name == "canvas.pane_color"
+                    && let Some(color @ canvas::Hue::Hex(_)) = color
+                    && !doc.pane_palette.contains(&color)
+                {
+                    doc.pane_palette.push(color);
+                }
+                doc.panes[index].color = color;
                 self.canvas_changed(cx);
             }
             // ---- spaces

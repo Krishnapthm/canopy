@@ -4,6 +4,8 @@ The files panel is a side panel with your space's file tree and file previews. U
 
 ![The files panel beside the canvas](images/files-panel-1.png)
 
+
+On macOS, right-click a local image or PDF in the file tree and choose **Open in Preview**. The preview tab also has an **Open in Preview** button.
 ## Open the panel
 
 1. Click the folder button, **Files**, in the [top strip](Spaces#the-top-strip).

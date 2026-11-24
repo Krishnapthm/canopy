@@ -31,7 +31,11 @@ Hover or select any pane and a small bar of buttons appears above its top-left c
 
 ## Color a pane
 
-Give a pane its own color to pick it out from the rest of its space. Right-click the header of a terminal or agent pane and open **Color**. On other panes, right-click the header to open the color choices directly. Choose a hue, or use **Space color** to restore inheritance.
+Give a pane its own color to pick it out from the rest of its space. Click the color swatch in its top controls. On a sticky note, the swatch is in the helper bar.
+
+- Choose a named color or **Custom hex color** and enter a value such as `#3a78e8`. Saved colors appear in other pane color menus and stay available after you quit Canopy.
+- Choose **Suggest a color** to cycle through colors unused in this space. Canopy generates a new color if all saved colors are in use.
+- Choose **Space color** to restore inheritance.
 
 The tint appears in the frame when you deselect the pane. Selection and sync input have their own outlines. Choose **gray** for an explicit gray tint, even in a space with another color.
 

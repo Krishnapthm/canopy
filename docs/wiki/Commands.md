@@ -177,6 +177,14 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 | `pane` | no |
 | `panes` | no |
 
+## `canvas.note_new`
+
+Open a sticky note on the canvas. The optional point is in world coordinates.
+
+| Argument | Required |
+|---|---|
+| `point` | no |
+
 ## `canvas.pane_new`
 
 Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
@@ -686,12 +694,20 @@ Set a space color.
 
 ## `canvas.pane_color`
 
-Set a canvas pane's hue. Pass null or omit color to inherit the space's hue.
+Set a canvas pane's hue to a named palette color or #RRGGBB. Pass null or omit color to inherit the space's hue.
 
 | Argument | Required |
 |---|---|
 | `pane` | yes |
 | `color` | no |
+
+## `canvas.pane_color_next`
+
+Assign the next unused color in the pane's space.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
 
 ## `panel.editor`
 
@@ -1298,6 +1314,32 @@ No arguments.
 ## `canvas.pdf_next`
 
 Go to the next page in the last selected PDF pane.
+
+No arguments.
+
+## `preview.external`
+
+Open a local image or PDF in macOS Preview.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `canvas.pdf_zoom_out`
+
+Zoom out in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_zoom_reset`
+
+Reset zoom in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_zoom_in`
+
+Zoom in in the last selected PDF pane.
 
 No arguments.
 

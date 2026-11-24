@@ -14,7 +14,7 @@ const specs = new Map(
   ]),
 );
 // Menu-only items that open another popup or dialog, and the command each one ends in.
-const local: Record<string, string | null> = { "canvas-close": "terminal.kill" };
+const local: Record<string, string | null> = { "canvas-close": "terminal.kill", "custom-color": null };
 const agents = [{ name: "Claude Code", installed: true, run: ["claude"] }, { name: "Gone", installed: false, run: ["gone"] }];
 
 test("every canvas menu item passes only declared args, with the required ones", () => {
@@ -74,9 +74,21 @@ test("pane colors use the canvas pane ID and can restore inheritance", () => {
   expect(color).toEqual(["Color", "sub:canvas-colors", { pane: "t1" }]);
   const paneColors = items({ tab: "canvas-colors", target: color![2] });
   expect(paneColors[0]).toEqual(["Space color", "canvas.pane_color", { pane: "t1", color: null }]);
-  expect(paneColors.slice(1).map(([label, command, args]) => [label, command, args])).toEqual(
+  expect(paneColors[1]).toEqual(["Suggest a color", "canvas.pane_color_next", { pane: "t1" }]);
+  expect(paneColors.slice(3).map(([label, command, args]) => [label, command, args])).toEqual(
     items({ tab: "canvas-colors", target: { id: "s1" } }).map(([label]) => [label, "canvas.pane_color", { pane: "t1", color: label }])
   );
+});
+
+test("the custom color prompt resubmits the selected pane ID with its hex color", () => {
+  const opened: any[] = [];
+  const Menu = new Function("View", "props", "closeOverlay", "openOverlay", `${source}; return Menu;`)(
+    class {}, () => ({ overlay: "color-menu" }), () => {}, (spec: unknown) => opened.push(spec));
+  const target = { pane: "p1", color: "#aabbcc" };
+  new Menu().run(items({ tab: "canvas-colors", target }).find(([, command]) => command === "custom-color"));
+  expect(opened[0].props).toMatchObject({
+    value: target.color, field: "color", command: { name: "canvas.pane_color", args: { pane: "p1" } },
+  });
 });
 
 test("arrange picker lists the four layouts and preserves its space target", () => {

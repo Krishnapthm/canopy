@@ -51,6 +51,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.agents", &[], "Open the installed agent list beside the selected cell."),
     cmd("quote.menu", &[req("path"), opt("start"), opt("end"), req("text"), opt("point"), opt("pane"), opt("kind"), opt("source")], "Open the quote popover at point or the pointer: agents wired to the quoted pane first, then other running agents, then installed agents to start with the quote."),
     cmd("canvas.close", &[opt("terminal"), opt("terminals"), opt("confirmed"), opt("dont_ask"), opt("pane"), opt("panes")], "Close every selected pane (else the focused one) behind one dialog listing them, the named terminal, or one file or mod pane by id (pane; a mod pane holding text refuses); terminals and panes are the confirmed lists, closed without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts."),
+    cmd("canvas.note_new", &[opt("point")], "Open a sticky note on the canvas. The optional point is in world coordinates."),
     cmd("canvas.pane_new", &[req("kind"), opt("path"), opt("url"), opt("udid"), opt("wire"), opt("point"), opt("place"), opt("pinned")], "Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or \"booted\") or lists devices to pick. place is \"panel\" (a tab in the Files panel, the default for browsers and sims), \"canvas\" (at point, the middle of the view by default) or \"pinned\" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable."),
     cmd("canvas.pane_dock", &[opt("pane"), opt("docked")], "Dock a browser or sim pane as a tab in the Files panel, or with docked false move it back onto the canvas at its saved place. Without docked it toggles. Acts on pane, else the selected pane. Replies with pane and docked."),
     cmd("canvas.pane_pin", &[opt("pane"), opt("pinned")], "Pin a pane where it shows on screen, so it stays there while the canvas pans and zooms, or with pinned false move it back onto the canvas. Without pinned it toggles. Acts on pane, else the selected pane. Replies with pane and pinned."),
@@ -110,7 +111,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("view.all", &[], "Show all cards."),
     cmd("view.terminals", &[], "Show terminal cards."),
     cmd("canvas.space_style", &[req("id"), req("color")], "Set a space color."),
-    cmd("canvas.pane_color", &[req("pane"), opt("color")], "Set a canvas pane's hue. Pass null or omit color to inherit the space's hue."),
+    cmd("canvas.pane_color", &[req("pane"), opt("color")], "Set a canvas pane's hue to a named palette color or #RRGGBB. Pass null or omit color to inherit the space's hue."),
+    cmd("canvas.pane_color_next", &[req("pane")], "Assign the next unused color in the pane's space."),
     cmd("panel.editor", &[opt("choice"), opt("done"), opt("path"), opt("dirty")], "Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state."),
     cmd("preview.open", &[opt("path"), opt("point"), opt("place")], "Open a file tab, or choose a file; place canvas or point pins a canvas card."),
     cmd("canvas.create", &[opt("point"), opt("kind"), opt("space"), opt("argv"), opt("name"), opt("folder")], "Create a canvas terminal or space at a world point (default: the middle of the view); a space with a folder (empty: the root) is made directly, without one the Choose space dialog opens."),
@@ -193,6 +195,10 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.pdf_highlight", &[], "Toggle text highlight mode in the last selected PDF pane."),
     cmd("canvas.pdf_prev", &[], "Go to the previous page in the last selected PDF pane."),
     cmd("canvas.pdf_next", &[], "Go to the next page in the last selected PDF pane."),
+    cmd("preview.external", &[req("path")], "Open a local image or PDF in macOS Preview."),
+    cmd("canvas.pdf_zoom_out", &[], "Zoom out in the last selected PDF pane."),
+    cmd("canvas.pdf_zoom_reset", &[], "Reset zoom in the last selected PDF pane."),
+    cmd("canvas.pdf_zoom_in", &[], "Zoom in in the last selected PDF pane."),
     cmd("canvas.pdf_clear", &[], "Clear all highlights in the last selected PDF pane."),
 ];
 

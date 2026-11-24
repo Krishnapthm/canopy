@@ -656,6 +656,7 @@ impl AppWindow {
             .child(strip)
             .child(button("browser-tab-new", "mods/workspace-chrome/plus.svg", "New tab", "canvas.browser_tab_new", cx))
             .child(div().flex_1())
+            .child(self.pane_color_swatch(id, cx))
             .when(host == Host::Pane, |d| d.child(panel_button("browser-connect", "icons/link.svg", c("muted-foreground"), c("hover"))
                 .aria_label("Connect").tooltip(strip_tooltip("Connect".into(), Some("canvas.connect")))
                 .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| this.wire_start(&connect, e.position(), window, cx)))))

@@ -361,7 +361,7 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
     for hue in crate::canvas::Hue::ALL {
         let key = hue.tint_token();
         if !t.contains_key(&key) {
-            let Rgb(r, g, b) = rgb(&t[hue.name()]);
+            let Rgb(r, g, b) = rgb(&t[&hue.name()]);
             let base = u32::from_be_bytes([0, r, g, b]);
             t.insert(key, hex(mix(base, toward, amount)));
         }

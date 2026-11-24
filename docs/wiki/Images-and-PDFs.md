@@ -4,6 +4,8 @@ Image and PDF panes bring reference material onto the canvas: a screenshot from 
 
 Open either with **Open file** on the toolbar, `Cmd+O` (`Ctrl+O` on Linux and Windows), or by dragging the file onto the canvas.
 
+On macOS, choose **Open in Preview** in the helper bar to open the original file in Apple Preview.
+
 ## Images
 
 Image panes show PNG, JPEG, GIF and WebP files, scaled to fit the pane.
@@ -42,6 +44,7 @@ Highlights stay on the pane, so you can mark up a spec as you read it and quote 
 
 ### Move around
 
+- Click **Zoom out**, **Reset zoom**, or **Zoom in** to change the PDF zoom. Reset returns it to 100%.
 - Click **Previous page** or **Next page**, or press `[` and `]` with the pane selected.
 - Click **Clear highlights**, or press `Shift+M`, to remove every highlight. The button shows only when there are some.
 
