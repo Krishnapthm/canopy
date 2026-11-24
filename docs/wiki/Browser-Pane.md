@@ -162,11 +162,11 @@ The bar sits at the bottom of the pane. It has four icon tools and an **x** to s
 | **Box** | Draws a rectangle. |
 | **Text** | Click, type a label, then press `Enter`. |
 
-Colour and stroke width appear in the bar only while **Pen**, **Box** or **Text** is on (**Text** has no stroke). **Send** appears once something is queued. The bar does not move. `Cmd+Z` undoes and `Shift+Cmd+Z` redoes.
+Colour and stroke width appear in the bar only while **Pen**, **Box** or **Text** is on (**Text** has no stroke). The batch appears at the top of the page after you add the first item. Drawings and comments appear in the order you added them. Use **Send** above the page to send the batch. If the send fails before it reaches the agent’s prompt, the batch stays available to edit or send again. `Cmd+Z` undoes and `Shift+Cmd+Z` redoes.
 
 ### The comment box
 
-The comment box is a single line that grows when you press `Shift+Enter` for a new line. Press `Enter` to **Add** the comment to the queue, or `Cmd+Enter` to **Send** everything queued. Hover the round button beside the box to see both choices as a small menu. `Esc` closes the box and keeps the annotation. Click a pin later to edit its comment. Saving an edited comment with no text deletes it.
+The comment box is a single line that grows when you press `Shift+Enter` for a new line. Press `Enter` to **Add** the comment to the queue, or `Cmd+Enter` to **Send** everything queued. Both buttons are inside the box. For a selected element, **Copy reference** copies the page URL and the element’s source file and line when available, or its CSS selector when the source file is unavailable. You can copy the reference before adding a comment. `Esc` closes the box and keeps the annotation. Click a pin later to edit its comment. Saving an edited comment with no text deletes it.
 
 Hold `Space` to scroll or interact with the live page. Release it to take a fresh still. Element pins follow their elements. Area and text annotations keep their original page coordinates.
 
@@ -204,7 +204,7 @@ Browser panes are built for local development, and they keep to themselves:
 - New tab is drawn by Canopy. The browser loads a page when you or an agent opens an address.
 - Downloads are blocked. Website content cannot open files on your disk. Local files open with [scoped read access](#open-a-local-file).
 - Links that ask for a new window open in the same pane.
-- Annotate reads each element's React source through a bundled copy of an open-source tool. It starts only when you click an element, with its telemetry and its own toolbar turned off, and its version check, open-file link and web font import removed.
+- Annotate reads each element's React source through a bundled copy of an open-source tool. Canopy initializes it when you first select an element, with its telemetry and its own toolbar turned off, and its version check, open-file link and web font import removed.
 - Canopy keeps the last snapshot of each tab in `<app home>/browser/<pane>-<tab>.png` so the canvas can draw it after a restart. Closing the tab or pane deletes the snapshot.
 
 See [Security and Privacy](Security-and-Privacy) for the app as a whole.

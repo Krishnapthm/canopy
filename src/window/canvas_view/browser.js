@@ -5,7 +5,7 @@
 // Agent-facing data only: no source or HTML leaves the page beyond what Canopy cuts.
 (() => {
   if (window.__canopy) return;
-  // The shortest CSS path, from the element up, that matches only this element.
+  // The shortest CSS path, from the element up, that matches only this element in its root.
   const selector = (el) => {
     const steps = [];
     for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
@@ -16,7 +16,7 @@
         if (same.length > 1) step += `:nth-of-type(${same.indexOf(node) + 1})`;
       }
       steps.unshift(step);
-      if (document.querySelectorAll(steps.join(" > ")).length === 1) break;
+      if (el.getRootNode().querySelectorAll(steps.join(" > ")).length === 1) break;
     }
     return steps.join(" > ");
   };
@@ -32,7 +32,16 @@
     if (!api) {
       // react-grab keeps its toolbar's state in localStorage; clear it so no old toolbar returns.
       try { localStorage.removeItem("react-grab-toolbar-state"); } catch {}
-      api = globalThis.__REACT_GRAB_MODULE__.init({ telemetry: false, toolbar: { enabled: false } });
+      api = globalThis.__REACT_GRAB_MODULE__.init({
+        telemetry: false,
+        toolbar: { enabled: false },
+        getContent: async (elements) => (await Promise.all(elements.map(async (el) => {
+          const url = el.ownerDocument.URL;
+          const fallback = selector(el);
+          const { file, line } = await source(el);
+          return `@${url} ${file ? file + (line ? `:${line}` : "") : fallback}`;
+        }))).join("\n"),
+      });
     }
     return api;
   }
@@ -79,7 +88,7 @@
       if (!el) return null;
       const style = getComputedStyle(el);
       return {
-        selector: selector(el), tag: cut(openTag(el), 80), text: text(el, 120),
+        url: el.ownerDocument.URL, selector: selector(el), tag: cut(openTag(el), 80), text: text(el, 120),
         html: cut(el.outerHTML, 300), rect: rect(el.getBoundingClientRect()),
         styles: Object.fromEntries(styleNames.map(name => [name, style.getPropertyValue(name)])),
         ...await source(el),

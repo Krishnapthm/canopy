@@ -18,7 +18,7 @@ What you can select depends on the pane:
 | File, or a preview in the Files panel | Select text. |
 | Image | Drag a region, or click **Quote image** for the whole image. See [Images and PDFs](Images-and-PDFs). |
 | PDF | Turn on **Highlight text**, then drag across text. See [Images and PDFs](Images-and-PDFs). |
-| Browser | Click **Annotate**, then click an element. Annotations skip the quote menu. See [Browser Pane](Browser-Pane#annotate). |
+| Browser | Click **Annotate**, then click an element. Use **Copy reference** to copy the URL and source location or selector for the selected element. See [Browser Pane](Browser-Pane#annotate). |
 | Terminal | Not supported. Selecting terminal text copies it. |
 
 ## Choose the agent

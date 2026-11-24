@@ -124,12 +124,11 @@ enum DraftKind {
     Label { color: Color },
 }
 
-/// The open composer: a pill input at a point, with the Add/Send menu opened by hovering its button.
+/// The open composer holds the draft text and the anchor for its inline actions.
 struct Draft {
     at: Pos,
     kind: DraftKind,
     input: Entity<gpui_base::input::TextareaState>,
-    menu: bool,
     _enter: Subscription,
 }
 
@@ -218,12 +217,25 @@ fn tidy_element(value: &Value) -> Option<Anchor> {
         (!style.is_empty()).then(|| (key.to_owned(), json!(style)))
     }).collect();
     Some(Anchor::Element(json!({
-        "selector": selector, "rect": rect,
+        "url": page_string(&value["url"], 4096), "selector": selector, "rect": rect,
         "tag": page_string(&value["tag"], 80), "text": page_string(&value["text"], 120),
         "html": page_string(&value["html"], 300), "styles": styles,
         "component": page_string(&value["component"], 200), "file": page_string(&value["file"], 500),
         "line": value["line"].as_u64(), "column": value["column"].as_u64(),
     })))
+}
+
+/// A clipboard pointer identifies the source page even if the pane has since navigated.
+#[cfg(any(target_os = "macos", test))]
+fn element_reference(el: &Value, page: &str) -> String {
+    let url = el["url"].as_str().filter(|url| !url.is_empty()).unwrap_or(page);
+    if let Some(file) = el["file"].as_str().filter(|file| !file.is_empty()) {
+        if let Some(line) = el["line"].as_u64().filter(|line| *line > 0) {
+            return format!("@{url} {file}:{line}");
+        }
+        return format!("@{url} {file}");
+    }
+    format!("@{url} {}", el["selector"].as_str().unwrap_or_default())
 }
 
 fn tidy_text(value: &Value) -> Option<Anchor> {
@@ -1024,6 +1036,9 @@ impl AppWindow {
                             .text_size(px(10.)).child(label.clone()));
                 }
             }
+            if matches!(a.host, Host::Browser { .. }) {
+                root = root.children(self.browser_annotation_queue(id, a, [w, h], cx));
+            }
             if let Some(draft) = &a.draft {
                 let mut at = screen(draft.at);
                 if let DraftKind::Comment { anchor } = &draft.kind {
@@ -1037,7 +1052,11 @@ impl AppWindow {
                         root = root.child(pin(at[0], at[1], (20. * scale).max(16.), pins + 1));
                     }
                 }
-                root = root.child(self.annotation_composer(id, draft, at, [w, h], cx));
+                let reference = match (&a.host, &draft.kind) {
+                    (Host::Browser { url, .. }, DraftKind::Comment { anchor: Anchor::Element(el) }) => Some(element_reference(el, url)),
+                    _ => None,
+                };
+                root = root.child(self.annotation_composer(id, draft, reference, at, [w, h], cx));
             }
         }
         let bar = self.annotation_bar(id, a, cx);
@@ -1201,7 +1220,7 @@ impl AppWindow {
         });
         a.editing = editing;
         a.hover = None;
-        a.draft = Some(Draft { at, kind, input, menu: false, _enter: enter });
+        a.draft = Some(Draft { at, kind, input, _enter: enter });
         cx.notify();
     }
 
@@ -1240,48 +1259,39 @@ impl AppWindow {
         if send && let Err(error) = self.send_annotation(id, window, cx) { self.annotation_error(error, window, cx); }
     }
 
-    /// The comment pill next to its pin: a round button that Adds, with an Add/Send menu while it is hovered.
-    fn annotation_composer(&self, id: &str, draft: &Draft, [x, y]: Pos, [w, h]: Pos, cx: &mut Context<Self>) -> Stateful<Div> {
-        const PILL: f32 = 240.;
-        const MENU: f32 = 56.;
-        let width = (PILL + 34.).min(w);
-        let comment = matches!(draft.kind, DraftKind::Comment { .. });
-        let top = (y + 14.).clamp(MENU, (h - 56.).max(MENU));
-        let (add, send, enter, leave, open) = (id.to_owned(), id.to_owned(), id.to_owned(), id.to_owned(), id.to_owned());
-        let row = |label: &'static str, keys: &'static str| div().flex().items_center().justify_between().gap(px(14.)).h(px(24.)).px(px(8.))
-            .rounded(px(ui::RADIUS_SM)).cursor_pointer().hover(|d| d.bg(c("hover")))
-            .child(label).child(div().text_color(c("muted-foreground")).child(keys));
-        let menu = div().id("composer-menu").flex().flex_col().p(px(2.)).bg(c("popover")).border_1().border_color(c("border"))
-            .rounded(px(ui::RADIUS)).shadow_md().text_size(px(12.)).text_color(c("foreground")).occlude()
-            .child(row("Add", "↵").id("composer-add").on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&add, false, window, cx))))
-            .child(row("Send", "⌘↵").id("composer-send-all").on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&send, true, window, cx))));
-        div().id("annotation-composer").absolute().left(px((x + 12.).clamp(0., (w - width).max(0.)))).top(px(top - MENU)).w(px(width))
-            .flex().flex_col().justify_end().gap(px(4.))
+    /// Inline actions add a draft to the undo history, send the batch, or copy its element reference.
+    fn annotation_composer(&self, id: &str, draft: &Draft, reference: Option<String>, [x, y]: Pos, [w, h]: Pos, cx: &mut Context<Self>) -> Stateful<Div> {
+        let width = w.min(274.);
+        let top = (y + 14.).clamp(0., (h - 118.).max(0.));
+        let (add, send, copy) = (id.to_owned(), id.to_owned(), id.to_owned());
+        div().id("annotation-composer").absolute()
+            .left(px((x + 12.).clamp(0., (w - width).max(0.)))).top(px(top)).w(px(width))
+            .flex().flex_col().gap(px(4.)).p(px(4.)).occlude()
+            .bg(c("popover")).border_1().border_color(c("ring")).rounded(px(ui::RADIUS)).shadow_md()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            // Leaving the whole composer, menu included, closes the menu.
-            .on_hover(cx.listener(move |this, over: &bool, _, cx| {
-                if *over { return; }
-                if let Some(d) = this.canvas_state.annotations.get_mut(&leave).and_then(|a| a.draft.as_mut()).filter(|d| d.menu) {
-                    d.menu = false;
-                    cx.notify();
-                }
-            }))
-            .child(div().h(px(MENU - 4.)).flex().items_end().justify_end().when(draft.menu && comment, |d| d.child(menu)))
-            .child(div().flex().items_end().gap(px(6.)).occlude()
-                .child(div().flex_1().min_w_0().px(px(12.)).py(px(6.)).bg(c("popover")).border_1().border_color(c("ring"))
-                    .rounded(px(16.)).shadow_md().text_size(px(13.)).text_color(c("foreground"))
-                    .child(gpui_base::Textarea::new(&draft.input)))
-                .child(div().id("composer-send").role(gpui::Role::Button).aria_label("Add").size(px(28.)).flex_none()
-                    .flex().items_center().justify_center().rounded_full().bg(c("foreground")).cursor_pointer()
-                    .child(svg().path("icons/send.svg").size(px(14.)).text_color(c("popover")))
-                    .on_hover(cx.listener(move |this, over: &bool, _, cx| {
-                        if let Some(d) = this.canvas_state.annotations.get_mut(&enter).and_then(|a| a.draft.as_mut()) && *over && !d.menu {
-                            d.menu = true;
-                            cx.notify();
-                        }
-                    }))
-                    .on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&open, false, window, cx)))))
+            .child(div().px(px(6.)).py(px(2.)).text_size(px(13.)).text_color(c("foreground"))
+                .child(gpui_base::Textarea::new(&draft.input)))
+            .child(div().flex().flex_wrap().justify_end().gap(px(2.))
+                .children(reference.map(|reference| annotation_text_button("Copy reference", false)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(reference.clone()));
+                        this.toast(Toast { title: "Element reference copied".into(), body: None, level: Level::Success,
+                            action: Some(("pane.focus".into(), json!({"pane": copy}))) }, window, cx);
+                    }))))
+                .child(annotation_text_button("Add", false).tooltip(strip_tooltip("Add (Enter)".into(), None))
+                    .on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&add, false, window, cx))))
+                .child(annotation_text_button("Send", true).tooltip(strip_tooltip("Send (Cmd+Enter)".into(), None))
+                    .on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&send, true, window, cx)))))
     }
+}
+
+#[cfg(target_os = "macos")]
+fn annotation_text_button(label: &'static str, primary: bool) -> Stateful<Div> {
+    div().id(label).role(gpui::Role::Button).aria_label(label)
+        .flex().items_center().flex_none().h(px(24.)).px(px(6.)).rounded(px(ui::RADIUS_SM))
+        .text_size(px(12.)).cursor_pointer()
+        .when(primary, |button| button.bg(c("accent")).text_color(c("accent-foreground")).hover(|d| d.opacity(0.85)))
+        .when(!primary, |button| button.text_color(c("foreground")).hover(|d| d.bg(c("hover"))))
 }
 
 #[cfg(target_os = "macos")]
@@ -1365,9 +1375,40 @@ impl AppWindow {
         })
     }
 
-    fn annotation_bar(&self, id: &str, a: &Annotate, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// The browser shows the batch in the same order as the undo history, with comment pin numbers.
+    fn browser_annotation_queue(&self, id: &str, a: &Annotate, [w, h]: Pos, cx: &mut Context<Self>) -> Option<Div> {
         let items = a.items();
-        let can_send = !items.is_empty() && !a.live && !a.refreshing && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending);
+        if items.is_empty() { return None; }
+        let mut pin = 0;
+        let rows = items.into_iter().map(|item| {
+            let label = match item {
+                Item::Mark(Mark::Pen { .. }) => "Pen stroke".into(),
+                Item::Mark(Mark::Box { .. }) => "Box".into(),
+                Item::Mark(Mark::Text { text, .. }) => format!("Text: {text}"),
+                Item::Comment(_, comment) => {
+                    pin += 1;
+                    format!("{pin}. {}", comment.text)
+                }
+            };
+            div().flex_none().px(px(6.)).truncate().child(label)
+        });
+        Some(div().absolute().top(px(6.)).left_0().w_full().flex().justify_center()
+            .child(super::helper_bar::bar_shell(1.).id("browser-annotation-queue").occlude()
+                .w(px((w - 12.).clamp(1., 400.))).flex_col().items_end()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(div().id("browser-annotation-items").w_full().flex().flex_col()
+                    .max_h(px((h * 0.2).clamp(18., 90.))).overflow_y_scroll()
+                    .text_size(px(12.)).text_color(c("foreground")).children(rows))
+                .child(self.annotation_send_button(id, a, cx))))
+    }
+
+    fn annotation_send_button(&self, id: &str, a: &Annotate, cx: &mut Context<Self>) -> Stateful<Div> {
+        let enabled = !a.live && !a.refreshing && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending);
+        annotation_text_button("Send", true).opacity(if enabled { 1. } else { 0.45 })
+            .when(enabled, |button| button.on_click(self.annotation_click(id, "send", cx)))
+    }
+
+    fn annotation_bar(&self, id: &str, a: &Annotate, cx: &mut Context<Self>) -> Stateful<Div> {
         let gap = || div().w(px(1.)).h(px(16.)).flex_none().bg(c("border"));
         let mut bar = super::helper_bar::bar_shell(1.).id("annotation-bar").relative().items_center().justify_center().occlude()
             .when(matches!(a.host, Host::Browser { .. }), |bar| bar.max_w_full().flex_wrap())
@@ -1399,12 +1440,8 @@ impl AppWindow {
             }
         }
         bar = bar.child(gap());
-        if !items.is_empty() {
-            bar = bar.child(div().id("annotation-send").role(gpui::Role::Button).aria_label("Send")
-                .flex().items_center().flex_none().h(px(24.)).px(px(10.))
-                .rounded(px(ui::RADIUS_SM)).bg(swatch(PIN)).text_color(gpui::white()).text_size(px(12.))
-                .opacity(if can_send { 1. } else { 0.45 }).when(can_send, |d| d.cursor_pointer())
-                .child("Send").on_click(self.annotation_click(id, "send", cx)));
+        if matches!(a.host, Host::Sim { .. }) && !a.items().is_empty() {
+            bar = bar.child(self.annotation_send_button(id, a, cx));
         }
         bar = bar.child(annotation_button("close", "icons/x.svg", "Stop annotating", false).on_click(self.annotation_click(id, "close", cx)));
         if a.live && matches!(a.host, Host::Browser { .. }) {
@@ -1638,6 +1675,15 @@ mod tests {
     use super::{Action, Anchor, Annotate, COLORS, Comment, Host, Item, Mark, Probe, STROKES, Tool, annotation_recipient, burn, fit, message, tidy_element};
     use gpui::{RenderImage, TestAppContext};
     use serde_json::json;
+
+    #[test]
+    fn copied_element_reference_names_original_page_and_source() {
+        let el = json!({"url": "http://localhost:3000/old", "file": "/work/src/App.tsx", "line": 42});
+        assert_eq!(super::element_reference(&el, "http://localhost:3000/new"), "@http://localhost:3000/old /work/src/App.tsx:42");
+        let el = json!({"url": "", "file": "", "selector": "main > button"});
+        assert_eq!(super::element_reference(&el, "https://example.com/"), "@https://example.com/ main > button");
+    }
+
     use std::{collections::HashMap, rc::Rc, sync::Arc};
 
     fn example(host: Host, cx: &TestAppContext) -> Annotate {
