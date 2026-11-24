@@ -7,8 +7,8 @@
 //! Responsive pages reflow with the pane. Fixed CSS viewport presets scale to fit the
 //! pane body and sit centered inside it. See docs/wiki/Browser-Pane.md.
 //!
-//! The header (`browser_chrome`) has two rows: tabs and window buttons, then navigation, the
-//! address field and Annotate. The pane and the pop-out window draw the same header. A popped
+//! The browser header puts tabs and pane controls above navigation, the address field and
+//! Annotate. A docked browser puts its upper row in the Files tab strip. A popped
 //! pane keeps no views of its own: every tab's page is built in the pop-out window (`BrowserWindow`),
 //! and bringing the pane back destroys them, to be rebuilt in the pane when next used.
 //!
@@ -592,21 +592,22 @@ impl AppWindow {
         if title.is_empty() { (tab.url.clone(), String::new()) } else { (title.to_owned(), tab.url.clone()) }
     }
 
-    /// The two-row header of a browser pane or its pop-out window: tabs and window buttons, then
-    /// navigation, the address field and Annotate. Buttons and the field stop the mouse-down so
-    /// they do not drag; elsewhere on row 1 a press drags the pane (its card handles that) or,
-    /// in the pop-out, the window.
-    pub(super) fn browser_chrome(&self, id: &str, host: Host, cx: &mut Context<Self>) -> AnyElement {
-        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return div().into_any_element() };
-        let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return div().into_any_element() };
-        let popped = self.browser_popped(id);
-        let button = |slot: &'static str, icon: &'static str, label: &str, command: &'static str, cx: &mut Context<Self>| {
-            let id = id.to_owned();
-            panel_button(slot, icon, c("muted-foreground"), c("hover")).aria_label(label.to_owned()).tooltip(strip_tooltip(label.to_owned(), Some(command)))
-                .on_click(cx.listener(move |this, _, window, cx| this.run_key(command, json!({"pane": id}), window, cx)))
-        };
-        let mut strip = div().id(SharedString::from(format!("{id}-tabs"))).role(gpui::Role::TabList)
-            .flex().min_w_0().flex_shrink_1().overflow_hidden().gap(px(2.));
+    fn browser_button(&self, id: &str, slot: &'static str, icon: &'static str, label: &str, command: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
+        let id = id.to_owned();
+        panel_button(slot, icon, c("muted-foreground"), c("hover")).aria_label(label.to_owned()).tooltip(strip_tooltip(label.to_owned(), Some(command)))
+            .on_click(cx.listener(move |this, _, window, cx| this.run_key(command, json!({"pane": id}), window, cx)))
+    }
+
+    /// The browser's page tabs. In the Files strip they share its horizontal scroll area.
+    pub(super) fn browser_tabs(&self, id: &str, host: Host, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
+        let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return None };
+        let docked = host == Host::Pane && self.canvas_state.doc.docked(id);
+        let tint = docked.then(|| self.docked_tab(id, cx).2).flatten();
+        let mut strip = div().id(SharedString::from(format!("{id}-tabs")))
+            .flex().items_center().gap(px(2.))
+            .when(docked, |d| d.flex_none())
+            .when(!docked, |d| d.role(gpui::Role::TabList).min_w_0().flex_shrink_1().overflow_hidden());
         for (i, tab) in tabs.iter().enumerate() {
             let selected = i == *active;
             let title = if !tab.title.is_empty() { tab.title.clone() } else if !tab.url.is_empty() { tab.url.clone() } else { "New tab".to_owned() };
@@ -635,7 +636,8 @@ impl AppWindow {
                     .tooltip(strip_tooltip(title.clone(), None))
                     .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_tab_select", select.clone(), window, cx)))
                     .child(svg().path("icons/globe.svg").flex_none().size(px(14.)).text_color(c("muted-foreground")))
-                    .child(div().flex_1().min_w_0().truncate().child(title)))
+                    .child(div().flex_1().min_w_0().truncate().child(title))
+                    .when_some(tint.as_deref().filter(|_| selected), |d, tint| d.child(div().flex_none().size(px(6.)).rounded_full().bg(c(tint)))))
                 .child(div().id("close").role(gpui::Role::Button).aria_label("Close tab").flex_none().size(px(16.))
                     .flex().items_center().justify_center().rounded(px(ui::RADIUS_SM)).cursor_pointer().hover(|d| d.bg(c("hover")))
                     .when(!selected, |d| d.opacity(0.).group_hover(group.clone(), |d| d.opacity(1.)))
@@ -644,18 +646,20 @@ impl AppWindow {
                     .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_tab_close", close.clone(), window, cx)))
                     .child(svg().path("icons/x.svg").size(px(12.)).text_color(c("muted-foreground")))));
         }
+        Some(strip.into_any_element())
+    }
+
+    pub(super) fn browser_tab_add(&self, id: &str, cx: &mut Context<Self>) -> Stateful<Div> {
+        self.browser_button(id, "browser-tab-new", "mods/workspace-chrome/plus.svg", "New tab", "canvas.browser_tab_new", cx)
+    }
+
+    /// Pane controls stay visible when the Files tabs scroll.
+    pub(super) fn browser_tab_actions(&self, id: &str, host: Host, cx: &mut Context<Self>) -> Div {
         let more = id.to_owned();
         let connect = id.to_owned();
-        let pop_label = if popped { "Bring back" } else { "Pop out" };
+        let pop_label = if self.browser_popped(id) { "Bring back" } else { "Pop out" };
         let docked = self.canvas_state.doc.docked(id);
-        let row1 = div().flex().items_center().h(px(30.)).pr(px(8.)).pl(px(super::TAB_INSET)).gap(px(4.))
-            // Room for the window's traffic lights.
-            .when(host == Host::Window, |d| d.pl(px(super::bar_inset(true, false))).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
-                if e.click_count == 2 { window.titlebar_double_click(); } else { window.start_window_move(); }
-            }))
-            .child(strip)
-            .child(button("browser-tab-new", "mods/workspace-chrome/plus.svg", "New tab", "canvas.browser_tab_new", cx))
-            .child(div().flex_1())
+        div().flex().flex_none().items_center().gap(px(4.))
             .child(self.pane_color_swatch(id, cx))
             .when(host == Host::Pane, |d| d.child(panel_button("browser-connect", "icons/link.svg", c("muted-foreground"), c("hover"))
                 .aria_label("Connect").tooltip(strip_tooltip("Connect".into(), Some("canvas.connect")))
@@ -663,19 +667,23 @@ impl AppWindow {
             .child(panel_button("browser-more", "icons/ellipsis.svg", c("muted-foreground"), c("hover")).aria_label("More").tooltip(strip_tooltip("More".into(), None))
                 .on_click(cx.listener(move |this, _, window, cx| this.browser_menu(&more, host, window, cx))))
             // In the pop-out, Close already brings the page back.
-            .when(host == Host::Pane, |d| d.child(button("browser-pop", "icons/picture-in-picture-2.svg", pop_label, "canvas.browser_pop", cx)))
-            .when(host == Host::Pane && !docked, |d| d.child(button("browser-expand", "icons/maximize-2.svg", "Expand", "canvas.browser_expand", cx)))
-            .when(host == Host::Pane && !docked, |d| d.child(button("browser-close", "icons/x.svg", "Close", "canvas.close", cx)))
-            .when(host == Host::Window, |d| d.child(button("browser-close", "icons/x.svg", "Bring back", "canvas.browser_pop", cx)));
+            .when(host == Host::Pane, |d| d.child(self.browser_button(id, "browser-pop", "icons/picture-in-picture-2.svg", pop_label, "canvas.browser_pop", cx)))
+            .when(host == Host::Pane && !docked, |d| d.child(self.browser_button(id, "browser-expand", "icons/maximize-2.svg", "Expand", "canvas.browser_expand", cx)))
+            .when(host == Host::Pane && !docked, |d| d.child(self.browser_button(id, "browser-close", "icons/x.svg", "Close", "canvas.close", cx)))
+            .when(host == Host::Window, |d| d.child(self.browser_button(id, "browser-close", "icons/x.svg", "Bring back", "canvas.browser_pop", cx)))
+    }
+
+    /// Navigation, the address field and Annotate, below the browser tabs.
+    pub(super) fn browser_navigation(&self, id: &str, host: Host, cx: &mut Context<Self>) -> AnyElement {
         let ui = self.canvas_state.browsers.panes.get(id);
         let field = ui.and_then(|ui| if host == Host::Pane { ui.url_input.as_ref() } else { ui.pop_input.as_ref() }).map(|(input, _)| input.clone());
         let reset = id.to_owned();
         let annotate = id.to_owned();
         let picker = self.annotation_picker(id);
-        let row2 = div().flex().items_center().h(px(32.)).px(px(8.)).gap(px(4.))
-            .child(button("browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
-            .child(button("browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
-            .child(button("browser-reload", "icons/rotate-cw.svg", "Reload", "canvas.browser_reload", cx))
+        div().flex().items_center().h(px(32.)).px(px(8.)).gap(px(4.))
+            .child(self.browser_button(id, "browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
+            .child(self.browser_button(id, "browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
+            .child(self.browser_button(id, "browser-reload", "icons/rotate-cw.svg", "Reload", "canvas.browser_reload", cx))
             .child(div().flex().flex_1().min_w_0().h(px(24.)).px(px(8.)).items_center().overflow_hidden()
                 .rounded(px(ui::RADIUS_SM)).bg(c("canvas")).border_1().border_color(c("border"))
                 // Typing in the field is not a pane drag.
@@ -697,10 +705,25 @@ impl AppWindow {
                 .tooltip(strip_tooltip("Annotate".into(), Some("canvas.browser_annotate")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_annotate", json!({"pane": annotate}), window, cx)))
-                .child("Annotate"));
+                .child("Annotate"))
+            .into_any_element()
+    }
+
+    /// The two-row canvas or pop-out header. Buttons stop mouse-down so empty space
+    /// in the top row can still drag the pane or window.
+    pub(super) fn browser_chrome(&self, id: &str, host: Host, cx: &mut Context<Self>) -> AnyElement {
+        let Some(tabs) = self.browser_tabs(id, host, cx) else { return div().into_any_element() };
+        let row = div().flex().items_center().h(px(30.)).pr(px(8.)).pl(px(super::TAB_INSET)).gap(px(4.))
+            .when(host == Host::Window, |d| d.pl(px(super::bar_inset(true, false))).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
+                if e.click_count == 2 { window.titlebar_double_click(); } else { window.start_window_move(); }
+            }))
+            .child(tabs)
+            .child(self.browser_tab_add(id, cx))
+            .child(div().flex_1())
+            .child(self.browser_tab_actions(id, host, cx));
         div().flex().flex_col().w_full().h(px(canvas::BROWSER_HEADER)).min_w_0().text_color(c("foreground"))
             .when(host == Host::Window, |d| d.bg(c("surface")).border_b_1().border_color(c("border")))
-            .child(row1).child(row2).into_any_element()
+            .child(row).child(self.browser_navigation(id, host, cx)).into_any_element()
     }
 
     pub(in crate::window) fn selected_browser(&self) -> Option<String> {
@@ -797,7 +820,9 @@ impl AppWindow {
         if host == Host::Pane {
             let docked = self.canvas_state.doc.docked(id);
             items.insert(1, json!([if docked { "Move to canvas" } else { "Open in panel" }, "canvas.pane_dock", {"pane": id, "docked": !docked}]));
-            if !docked {
+            if docked {
+                items.insert(2, json!(["Close browser pane", "canvas.close", at]));
+            } else {
                 let pinned = pane.pinned.is_some();
                 items.insert(2, json!([if pinned { "Unpin" } else { "Pin to screen" }, "canvas.pane_pin", {"pane": id, "pinned": !pinned}]));
             }
@@ -2312,7 +2337,9 @@ impl AppWindow {
 #[cfg(test)]
 mod tests {
     // Explicit: a glob would bring gpui's own `test` attribute in.
-    use super::{GRAB_REQUESTS, PRESETS, REACT_GRAB, file_url, format_quote, menu_items, open_in, page_script, page_zoom, parse_viewport, resolve_source, web_url};
+    #[cfg(target_os = "macos")]
+    use super::browser_target_url;
+    use super::{GRAB_REQUESTS, PRESETS, REACT_GRAB, format_quote, menu_items, open_in, page_script, page_zoom, parse_viewport, permits_navigation, resolve_source, web_url};
     use crate::canvas::{Camera, Kind, Pane};
     use crate::settings::{KeepCookies, OpenLinks};
     use serde_json::json;

@@ -142,15 +142,15 @@ impl AppWindow {
         (icon, title, tint)
     }
 
-    /// The panel's header and body for the docked pane `id`: its helper bar over the same body
-    /// the canvas card draws. The body's bounds are recorded as `panel-body:<id>`.
+    /// The docked pane's navigation or helper bar sits above the same body the canvas card draws.
+    /// The body's bounds are recorded as `panel-body:<id>`.
     pub(super) fn docked_panel(&self, id: &str, cx: &mut Context<Self>) -> Option<(AnyElement, AnyElement)> {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
         let measured = self.bounds.borrow().get(&format!("panel-body:{id}")).map(|b| b.size);
         let view = fit_to_body(pane.clone(), measured.unwrap_or(size(px(400.), px(500.))));
         let camera = canvas::Camera::default();
         let (chrome, body, title) = match &pane.kind {
-            canvas::Kind::Browser { .. } => (Some(self.browser_chrome(id, browser::Host::Pane, cx)), self.browser_body(&view, camera, cx), self.browser_title(pane).0),
+            canvas::Kind::Browser { .. } => (Some(self.browser_navigation(id, browser::Host::Pane, cx)), self.browser_body(&view, camera, cx), self.browser_title(pane).0),
             canvas::Kind::Sim { .. } => (None, self.sim_card_body(&view, camera, cx), self.sim_title(pane, cx).0),
             _ => return None,
         };
