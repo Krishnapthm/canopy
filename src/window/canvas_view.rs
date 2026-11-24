@@ -3715,7 +3715,7 @@ impl AppWindow {
                 })),
         );
         // Browser (the macOS web view) and simulator (a Mac with Xcode) open docked in the Files
-        // panel; their helper bar moves them onto the canvas.
+        // panel; their controls move them onto the canvas.
         let docked_new = |id: &'static str, icon: &'static str, label: &'static str, kind: &'static str| panel_button(id, icon, c("muted-foreground"), c("hover"))
             .aria_label(label).tooltip(strip_tooltip(label.into(), None))
             .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.pane_new", json!({"kind":kind}), window, cx)));
@@ -3797,7 +3797,8 @@ impl AppWindow {
                         .group_hover("canvas-panel-resize", |d| d.bg(c("ring")))
                         .when(state.resizing, |d| d.bg(c("ring")))),
             );
-            let mut tabs = div().id("canvas-tabs").role(gpui::Role::TabList).flex().flex_1().min_w_0().h_full().overflow_x_scroll();
+            let mut tabs = div().id("canvas-tabs").role(gpui::Role::TabList).flex().flex_1().min_w_0().h_full().overflow_x_scroll()
+                .when(!expanded, |d| d.pl(px(TAB_INSET)));
             for tab in &state.doc.panel.tabs {
                 let tab = tab.clone();
                 let active = state.file.as_ref() == Some(&tab);
@@ -4024,9 +4025,11 @@ impl AppWindow {
 /// Height of the bar the canvas draws across the window top (px at zoom 1).
 const BAR: f32 = 36.;
 
+const TAB_INSET: f32 = 12.;
+
 /// Space left of the bar's Home tab: macOS traffic lights sit there, except in full screen.
 fn bar_inset(macos: bool, fullscreen: bool) -> f32 {
-    if macos && !fullscreen { 76. } else { 12. }
+    if macos && !fullscreen { 76. } else { TAB_INSET }
 }
 
 /// How long the zoom must be still before an expanded cell draws live text again.

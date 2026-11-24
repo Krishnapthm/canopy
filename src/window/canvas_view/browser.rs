@@ -79,7 +79,7 @@ fn open_in(name: Option<&str>) -> String {
 }
 
 /// The label of the "open in the system browser" button and menu row.
-pub(super) fn open_in_label() -> String {
+fn open_in_label() -> String {
     open_in(default_browser_name().as_deref())
 }
 
@@ -111,12 +111,83 @@ fn menu_items(id: &str, viewport: Option<[f32; 2]>, keep: settings::KeepCookies,
 }
 
 /// The `file:` URL of a path the person picked: every byte outside the unreserved set is
-/// percent-encoded. Only `canvas.browser_open_file` makes one; `web_url` refuses them.
+/// percent-encoded. Web-initiated navigation never uses this helper.
 fn file_url(path: &std::path::Path) -> String {
-    let encoded: String = path.to_string_lossy().bytes()
+    let encoded: String = path.as_os_str().as_encoded_bytes().iter().copied()
         .map(|b| if b.is_ascii_alphanumeric() || b"/-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
         .collect();
     format!("file://{encoded}")
+}
+
+/// Classifies an explicit address. Web pages never call this entry point.
+pub(super) fn browser_target_url(input: &str) -> Result<String, String> {
+    let input = input.trim();
+    let file_scheme = input.get(..5).is_some_and(|prefix| prefix.eq_ignore_ascii_case("file:"));
+    if !file_scheme && !std::path::Path::new(input).is_absolute() { return web_url(input); }
+    #[cfg(target_os = "macos")]
+    {
+        let path = if file_scheme { file_path(input)? } else { input.into() };
+        let path = checked_file(&path)?;
+        Ok(file_url(&path))
+    }
+    #[cfg(not(target_os = "macos"))]
+    Err("browser panes run on macOS only".into())
+}
+
+#[cfg(target_os = "macos")]
+fn file_path(url: &str) -> Result<std::path::PathBuf, String> {
+    use objc2_foundation::{NSString, NSURL};
+    NSURL::URLWithString(&NSString::from_str(url))
+        .filter(|url| url.isFileURL() && url.host().is_none_or(|host| {
+            let host = host.to_string();
+            host.is_empty() || host.eq_ignore_ascii_case("localhost")
+        }))
+        .and_then(|url| url.to_file_path())
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| "Enter an absolute path or a local file URL".into())
+}
+
+#[cfg(target_os = "macos")]
+fn checked_file(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let path = path.canonicalize().map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
+    let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or_default().to_ascii_lowercase();
+    if !path.is_file() || !matches!(extension.as_str(), "html" | "htm" | "svg" | "txt" | "pdf" | "png" | "jpg" | "jpeg" | "gif" | "webp" | "avif" | "ico" | "bmp" | "tiff") {
+        return Err(format!("Unsupported browser file: {}", path.display()));
+    }
+    Ok(path)
+}
+
+/// A view that can read a local file never loads a web page, and vice versa.
+#[cfg(any(target_os = "macos", test))]
+fn permits_navigation(local: Option<&str>, url: &str) -> bool {
+    match local {
+        Some(file) => url.split('#').next() == Some(file),
+        None => url.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("http://"))
+            || url.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://")),
+    }
+}
+
+/// Pick HTML using the native panel so other files are disabled before selection.
+#[cfg(target_os = "macos")]
+fn pick_html(done: impl FnOnce(Option<std::path::PathBuf>) + 'static) {
+    use objc2_app_kit::{NSModalResponse, NSModalResponseOK, NSOpenPanel};
+    use objc2_foundation::{NSArray, NSString};
+    let panel = NSOpenPanel::openPanel(objc2::MainThreadMarker::new().expect("browser command runs on the main thread"));
+    panel.setCanChooseDirectories(false);
+    panel.setCanChooseFiles(true);
+    panel.setAllowsMultipleSelection(false);
+    #[allow(deprecated)]
+    panel.setAllowedFileTypes(Some(&NSArray::from_retained_slice(&[NSString::from_str("html"), NSString::from_str("htm")])));
+    let done = std::cell::Cell::new(Some(done));
+    let handler = block2::RcBlock::new({
+        let panel = panel.clone();
+        move |response: NSModalResponse| {
+            if let Some(done) = done.take() {
+                done((response == NSModalResponseOK).then(|| panel.URL()).flatten().and_then(|url| url.to_file_path()));
+            }
+        }
+    });
+    panel.beginWithCompletionHandler(&handler);
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -160,6 +231,9 @@ struct Page {
     /// and waking it does not reload.
     #[cfg(target_os = "macos")]
     native: Option<Native>,
+    /// A folder chosen for this exact file and tab. Never saved to disk.
+    #[cfg(target_os = "macos")]
+    local_folder: Option<(String, std::path::PathBuf)>,
     /// Rested and not yet checked out of sight for media still playing (`watch_pages`).
     watch: bool,
     /// The "still playing" toast was raised and the page has not been woken since.
@@ -206,6 +280,8 @@ struct Native {
     view: Entity<gpui_wry::WebView>,
     raw: gpui_wry::WebViewHandle,
     clip: objc2::rc::Retained<objc2_app_kit::NSView>,
+    // The pending local load may run only while this view is still mounted.
+    _local_load: Option<std::rc::Rc<()>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -228,6 +304,8 @@ pub(in crate::window) enum Event {
     Title(String),
     /// A link asked for a new window: it opens in this pane instead.
     Open(String),
+    Blocked(String),
+    LoadError(String),
     /// The snapshot taken when the page rested (None: it failed).
     Rested(Option<image::RgbaImage>),
     /// A resting page out of sight has media playing.
@@ -568,24 +646,27 @@ impl AppWindow {
                     .child(svg().path("icons/x.svg").size(px(12.)).text_color(c("muted-foreground")))));
         }
         let more = id.to_owned();
+        let connect = id.to_owned();
         let pop_label = if popped { "Bring back" } else { "Pop out" };
-        let row1 = div().flex().items_center().h(px(30.)).px(px(8.)).gap(px(4.))
+        let docked = self.canvas_state.doc.docked(id);
+        let row1 = div().flex().items_center().h(px(30.)).pr(px(8.)).pl(px(super::TAB_INSET)).gap(px(4.))
             // Room for the window's traffic lights.
-            .when(host == Host::Window, |d| d.pl(px(72.)).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
+            .when(host == Host::Window, |d| d.pl(px(super::bar_inset(true, false))).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
                 if e.click_count == 2 { window.titlebar_double_click(); } else { window.start_window_move(); }
             }))
             .child(strip)
             .child(button("browser-tab-new", "mods/workspace-chrome/plus.svg", "New tab", "canvas.browser_tab_new", cx))
             .child(div().flex_1())
+            .when(host == Host::Pane, |d| d.child(panel_button("browser-connect", "icons/link.svg", c("muted-foreground"), c("hover"))
+                .aria_label("Connect").tooltip(strip_tooltip("Connect".into(), Some("canvas.connect")))
+                .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| this.wire_start(&connect, e.position(), window, cx)))))
             .child(panel_button("browser-more", "icons/ellipsis.svg", c("muted-foreground"), c("hover")).aria_label("More").tooltip(strip_tooltip("More".into(), None))
                 .on_click(cx.listener(move |this, _, window, cx| this.browser_menu(&more, host, window, cx))))
             // In the pop-out, Close already brings the page back.
             .when(host == Host::Pane, |d| d.child(button("browser-pop", "icons/picture-in-picture-2.svg", pop_label, "canvas.browser_pop", cx)))
-            .when(host == Host::Pane, |d| d.child(button("browser-expand", "icons/maximize-2.svg", "Expand", "canvas.browser_expand", cx)))
-            .child(match host {
-                Host::Pane => button("browser-close", "icons/x.svg", "Close", "canvas.close", cx),
-                Host::Window => button("browser-close", "icons/x.svg", "Bring back", "canvas.browser_pop", cx),
-            });
+            .when(host == Host::Pane && !docked, |d| d.child(button("browser-expand", "icons/maximize-2.svg", "Expand", "canvas.browser_expand", cx)))
+            .when(host == Host::Pane && !docked, |d| d.child(button("browser-close", "icons/x.svg", "Close", "canvas.close", cx)))
+            .when(host == Host::Window, |d| d.child(button("browser-close", "icons/x.svg", "Bring back", "canvas.browser_pop", cx)));
         let ui = self.canvas_state.browsers.panes.get(id);
         let field = ui.and_then(|ui| if host == Host::Pane { ui.url_input.as_ref() } else { ui.pop_input.as_ref() }).map(|(input, _)| input.clone());
         let reset = id.to_owned();
@@ -646,7 +727,7 @@ impl AppWindow {
 
     /// Makes each browser pane's address field, and keeps its text at the pane's URL unless the
     /// person is typing in it. Enter opens what was typed (`canvas.pane_open`, which makes
-    /// `localhost:3000` a URL and refuses non-web schemes). Runs from `render`, which has a window.
+    /// `localhost:3000` a URL and handles explicit local files). Runs from `render`, which has a window.
     pub(in crate::window) fn sync_browser_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let doc = &self.canvas_state.doc;
         let urls: Vec<_> = doc.panes.iter().filter(|p| p.url().is_some()).map(|p| (p.id.clone(), self.canvas_state.shows_pane(p))).collect();
@@ -676,7 +757,7 @@ impl AppWindow {
             }
             None => {
                 let input = cx.new(|cx| {
-                    let mut input = gpui_base::input::InputState::new(window, cx).placeholder("Search or enter address");
+                    let mut input = gpui_base::input::InputState::new(window, cx).placeholder("Enter an address or file path");
                     input.set_value(url, window, cx);
                     input
                 });
@@ -708,6 +789,19 @@ impl AppWindow {
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
         let canvas::Kind::Browser { viewport, .. } = &pane.kind else { return };
         let mut items = menu_items(id, *viewport, self.person.browser_keep_cookies, self.person.browser_open_links, &open_in_label());
+        let at = json!({"pane": id});
+        if pane.url().is_some_and(|url| url.starts_with("file:")) {
+            items.insert(4, json!(["Allow folder assets…", "canvas.browser_allow_folder", at]));
+        }
+        items.insert(0, json!(["Home", "canvas.browser_home", at]));
+        if host == Host::Pane {
+            let docked = self.canvas_state.doc.docked(id);
+            items.insert(1, json!([if docked { "Move to canvas" } else { "Open in panel" }, "canvas.pane_dock", {"pane": id, "docked": !docked}]));
+            if !docked {
+                let pinned = pane.pinned.is_some();
+                items.insert(2, json!([if pinned { "Unpin" } else { "Pin to screen" }, "canvas.pane_pin", {"pane": id, "pinned": !pinned}]));
+            }
+        }
         // The pop-out shows the page at window size: viewport presets apply on the canvas only.
         if host == Host::Window { items.retain(|i| i[1] != "canvas.browser_viewport" && i[0] != "Viewport"); }
         self.show_browser_menu(id, host, items, window, cx);
@@ -844,7 +938,29 @@ impl AppWindow {
                 return;
             }
             Event::Open(url) => {
-                if let Ok(url) = web_url(&url) { self.navigate_browser(&key, &url, cx); }
+                let local = self.tab_by_key(&key).is_some_and(|t| t.url.starts_with("file:"));
+                match web_url(&url) {
+                    Ok(url) if !local => self.navigate_browser(&key, &url, cx),
+                    _ => self.command_error("Page not opened", "Open this address explicitly in the browser's address field", window, cx),
+                }
+            }
+            Event::Blocked(url) => {
+                self.toast(Toast {
+                    title: "Page not opened".into(),
+                    body: Some(format!("This page cannot open {}", cut(&url, 180))),
+                    level: Level::Error,
+                    action: Some(("pane.focus".into(), json!({"pane": id}))),
+                }, window, cx);
+            }
+            Event::LoadError(error) => {
+                let waiting = std::mem::take(&mut page.waiting);
+                page.loading = false;
+                for ask in waiting {
+                    let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
+                    let _ = tx.send(json!({"error":error}));
+                }
+                self.toast(Toast { title: "Page not opened".into(), body: Some(error), level: Level::Error,
+                    action: Some(("pane.focus".into(), json!({"pane": id}))) }, window, cx);
             }
             Event::Rested(shot) => {
                 if let Some(rgba) = shot {
@@ -1032,11 +1148,18 @@ impl AppWindow {
         selected
     }
 
-    /// Opens a picked .html or .htm file in a new tab (`canvas.browser_open_file`).
-    fn open_html_file(&mut self, id: &str, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
-        let html = path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"));
-        if !html { return self.command_error("Open HTML file", "pick an .html or .htm file", window, cx); }
-        if let Err(e) = self.new_browser_tab(id, file_url(path), true, window, cx) { self.command_error("Open HTML file", &e, window, cx); }
+    /// Grants a picked directory to the current local file for the lifetime of this tab.
+    #[cfg(target_os = "macos")]
+    fn allow_browser_folder(&mut self, id: &str, url: &str, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let file = checked_file(&file_path(url)?)?;
+        let folder = path.canonicalize().map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
+        if !folder.is_dir() || !file.starts_with(&folder) {
+            return Err("Choose a folder containing the file and its assets".into());
+        }
+        let key = self.page_key(id).ok_or("the browser tab closed")?;
+        self.canvas_state.browsers.pages.entry(key).or_default().local_folder = Some((url.to_owned(), folder));
+        self.load_browser(id, url, false, window, cx);
+        Ok(())
     }
 
     /// Opens an HTTP(S) link clicked in a terminal in the last browser here or in a pane beside it.
@@ -1111,7 +1234,7 @@ impl AppWindow {
             "canvas.browser_tab_new" => {
                 let url = match &a["url"] {
                     Value::Null => Ok(String::new()),
-                    Value::String(url) => web_url(url),
+                    Value::String(url) => browser_target_url(url),
                     _ => Err("url must be a string".into()),
                 };
                 let result = url.and_then(|url| self.new_browser_tab(&id, url, false, window, cx))
@@ -1139,13 +1262,41 @@ impl AppWindow {
                 crate::links::open(&crate::links::Target::Url(url));
             }
             "canvas.browser_open_file" => {
-                // The one way a file: page opens: the person picks the file themselves.
-                let picked = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some("Open".into()) });
-                cx.spawn_in(window, async move |this, cx| {
-                    let Ok(Ok(Some(paths))) = picked.await else { return };
-                    let Some(path) = paths.into_iter().next() else { return };
-                    let _ = this.update_in(cx, |this, window, cx| this.open_html_file(&id, &path, window, cx));
-                }).detach();
+                if !person { return self.fail("Use a path or file URL to open a file from a command"); }
+                #[cfg(target_os = "macos")]
+                {
+                    let (send, picked) = async_channel::bounded(1);
+                    pick_html(move |path| { let _ = send.try_send(path); });
+                    cx.spawn_in(window, async move |this, cx| {
+                        let Ok(Some(path)) = picked.recv().await else { return };
+                        let _ = this.update_in(cx, |this, window, cx| {
+                            let result = checked_file(&path).and_then(|path| this.new_browser_tab(&id, file_url(&path), true, window, cx));
+                            if let Err(e) = result { this.command_error("Open HTML file", &e, window, cx); }
+                        });
+                    }).detach();
+                }
+                #[cfg(not(target_os = "macos"))]
+                self.fail("browser panes run on macOS only");
+            }
+            "canvas.browser_allow_folder" => {
+                if !person || !url.starts_with("file:") { return self.fail("Choose a folder for an open local file"); }
+                #[cfg(target_os = "macos")]
+                {
+                    let key = self.page_key(&id);
+                    let picked = cx.prompt_for_paths(PathPromptOptions { files: false, directories: true, multiple: false, prompt: Some("Choose a folder containing the file and its assets".into()) });
+                    cx.spawn_in(window, async move |this, cx| {
+                        let Ok(Ok(Some(paths))) = picked.await else { return };
+                        let Some(path) = paths.first() else { return };
+                        let _ = this.update_in(cx, |this, window, cx| {
+                            if this.page_key(&id) != key || this.browser_url(&id).ok() != Some(url.as_str()) { return; }
+                            if let Err(e) = this.allow_browser_folder(&id, &url, path, window, cx) {
+                                this.command_error("Allow folder assets", &e, window, cx);
+                            }
+                        });
+                    }).detach();
+                }
+                #[cfg(not(target_os = "macos"))]
+                self.fail("browser panes run on macOS only");
             }
             "canvas.browser_home" => self.load_browser(&id, &home, false, window, cx),
             "canvas.browser_reload" => self.eval_or_load(&id, "location.reload()", &url, window, cx),
@@ -1203,18 +1354,6 @@ impl AppWindow {
                 }).detach();
             }
         }
-    }
-
-    /// A browser pane's helper bar labels for its state: bring back a popped page. (An expanded
-    /// page hides its pane and bar, so no Collapse label is needed.)
-    pub(super) fn browser_relabel(&self, id: &str, mut actions: Vec<super::helper_bar::BarAction>) -> Vec<super::helper_bar::BarAction> {
-        let popped = self.browser_popped(id);
-        let annotating = self.canvas_state.annotations.contains_key(id);
-        for a in &mut actions {
-            if popped && a.command == "canvas.browser_pop" { a.label = "Bring back".into(); }
-            if annotating && a.command == "canvas.browser_annotate" { a.label = "Stop annotating".into(); }
-        }
-        actions
     }
 
     /// Saves the CSS viewport and updates a live pane's zoom at its current size.
@@ -1279,7 +1418,7 @@ impl AppWindow {
 
     /// Loads a target in the active tab, or in a new tab when requested.
     pub(super) fn browser_open(&mut self, id: &str, target: &str, tab: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
-        let url = web_url(target)?;
+        let url = browser_target_url(target)?;
         if tab == "new" {
             let tab = self.new_browser_tab(id, url.clone(), false, window, cx)?;
             return Ok(json!({"pane":id,"url":url,"tab":tab}));
@@ -1293,6 +1432,18 @@ impl AppWindow {
     fn load_browser(&mut self, id: &str, url: &str, home: bool, window: &mut Window, cx: &mut Context<Self>) {
         if url.is_empty() { return; }
         let Some(key) = self.page_key(id) else { return };
+        #[cfg(target_os = "macos")]
+        let previous = self.browser_url(id).unwrap_or_default().to_owned();
+        #[cfg(target_os = "macos")]
+        let mut placement = None;
+        #[cfg(target_os = "macos")]
+        if let Some(page) = self.canvas_state.browsers.pages.get_mut(&key) {
+            if previous.starts_with("file:") || url.starts_with("file:") {
+                if previous != url { page.local_folder = None; }
+                placement = page.live;
+                self.release_page(&key, "the browser opened another address");
+            }
+        }
         let pane = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id).unwrap();
         pane.set_url(url.to_owned());
         if home && let canvas::Kind::Browser { home, .. } = &mut pane.kind { *home = url.to_owned(); }
@@ -1304,6 +1455,10 @@ impl AppWindow {
         }
         // A new view already loads the saved URL.
         if made { self.navigate_browser(&key, url, cx); }
+        #[cfg(target_os = "macos")]
+        if let Some(placement) = placement {
+            self.canvas_state.browsers.pages.get_mut(&key).unwrap().live = Some(placement);
+        }
         cx.notify();
     }
 
@@ -1330,6 +1485,53 @@ impl Page {
         #[cfg(not(target_os = "macos"))]
         false
     }
+}
+
+/// Local HTML can run its own scripts. Block network resources before loading the file so a
+/// script fetched from the network cannot run with the local page's read access.
+#[cfg(target_os = "macos")]
+fn load_local_file(
+    view: &wry::WebView,
+    path: &std::path::Path,
+    folder: Option<&std::path::Path>,
+    alive: std::rc::Weak<()>,
+    failed: impl Fn(String) + 'static,
+) -> Result<(), String> {
+    use objc2_foundation::{NSError, NSString, NSURL};
+    use objc2_web_kit::{WKContentRuleList, WKContentRuleListStore};
+    use wry::WebViewExtMacOS as _;
+    let file = NSURL::from_file_path(path).ok_or("Invalid browser file path")?;
+    let access = match folder {
+        Some(folder) => NSURL::from_directory_path(folder).ok_or("Invalid browser folder path")?,
+        None => file.clone(),
+    };
+    let rules_dir = crate::mods::app_dir().join("browser").join("content-rules");
+    std::fs::create_dir_all(&rules_dir).map_err(|e| format!("Cannot create WebKit content rules store: {e}"))?;
+    let rules_url = NSURL::from_directory_path(rules_dir).ok_or("Invalid WebKit content rules path")?;
+    let mtm = objc2::MainThreadMarker::new().expect("WebKit loads on the main thread");
+    // SAFETY: creation, completion and WebKit calls all run on the main thread.
+    let store = unsafe { WKContentRuleListStore::storeWithURL(Some(&rules_url), mtm) }
+        .ok_or("Cannot open WebKit content rules store")?;
+    let view = view.webview();
+    let handler = block2::RcBlock::new(move |rules: *mut WKContentRuleList, _: *mut NSError| {
+        if alive.upgrade().is_none() { return; }
+        // SAFETY: WebKit passes a valid compiled rule list or null.
+        let Some(rules) = (unsafe { rules.as_ref() }) else {
+            return failed("WebKit could not restrict local file access".into());
+        };
+        unsafe {
+            view.configuration().userContentController().addContentRuleList(rules);
+            if view.loadFileURL_allowingReadAccessToURL(&file, &access).is_none() {
+                failed("WebKit could not open the local file".into());
+            }
+        }
+    });
+    let identifier = NSString::from_str("canopy-local-files");
+    let rules = NSString::from_str(r#"[{"trigger":{"url-filter":"^[a-z]+://"},"action":{"type":"block"}},{"trigger":{"url-filter":"^file://"},"action":{"type":"ignore-previous-rules"}}]"#);
+    unsafe {
+        store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(Some(&identifier), Some(&rules), Some(&handler));
+    }
+    Ok(())
 }
 
 /// The page's URL; None before any page committed. (wry's own `url()` panics then.)
@@ -1431,6 +1633,16 @@ impl AppWindow {
         if self.canvas_state.browsers.pages.get(&key).is_some_and(Page::has_view) { return Ok(()); }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.url().is_some()).ok_or_else(|| format!("no browser pane {id}"))?;
         let (url, rect) = (pane.url().unwrap().to_owned(), pane.rect);
+        let local = if url.starts_with("file:") {
+            let path = checked_file(&file_path(&url)?)?;
+            // Recheck after rest, pop-out, or restore. A stale folder grant cannot follow a
+            // symlink to a different file or directory.
+            let folder = self.canvas_state.browsers.pages.get(&key).and_then(|page| page.local_folder.as_ref())
+                .filter(|(granted_url, folder)| granted_url == &url && path.starts_with(folder))
+                .and_then(|(_, folder)| folder.canonicalize().ok().filter(|current| current == folder));
+            let address = file_url(&path);
+            Some((address, path, folder))
+        } else { None };
         let popped = self.canvas_state.browsers.panes.get(id).and_then(|ui| ui.popped);
         let tx = self.browser_events(window, cx);
         self.canvas_state.browsers.next_view += 1;
@@ -1444,8 +1656,21 @@ impl AppWindow {
             };
             let (load_tx, load_key) = (tx.clone(), key.clone());
             let (open_tx, open_key) = (tx.clone(), key.clone());
-            let webview = browser_store(wry::WebViewBuilder::new())
-                .with_url(url)
+            let (nav_tx, nav_key) = (tx.clone(), key.clone());
+            let local_url = local.as_ref().map(|(address, _, _)| address.clone());
+            let builder = if local.is_some() {
+                wry::WebViewBuilder::new().with_incognito(true)
+            } else {
+                browser_store(wry::WebViewBuilder::new()).with_url(url)
+            };
+            let webview = builder
+                .with_navigation_handler(move |url| {
+                    let permitted = permits_navigation(local_url.as_deref(), &url);
+                    if !permitted && url != "about:blank" {
+                        let _ = nav_tx.try_send((nav_key.clone(), view_id, Event::Blocked(url.clone())));
+                    }
+                    permitted || url == "about:blank"
+                })
                 .with_devtools(true)
                 .with_visible(false)
                 .with_accept_first_mouse(true)
@@ -1463,6 +1688,11 @@ impl AppWindow {
                 .with_download_started_handler(|_, _| false)
                 .build_as_child(window)
                 .map_err(|e| format!("cannot make the web view: {e}"))?;
+            let local_load = if let Some((_, path, folder)) = local {
+                let token = std::rc::Rc::new(());
+                load_local_file(&webview, &path, folder.as_deref(), std::rc::Rc::downgrade(&token), send(Event::LoadError))?;
+                Some(token)
+            } else { None };
             let clip = super::browser_mask::wrap(&webview)?;
             let view = cx.new(|cx| gpui_wry::WebView::new(webview, window, cx));
             let raw = view.update(cx, |v, _| {
@@ -1471,7 +1701,7 @@ impl AppWindow {
                 if popped.is_none() { fit_view(v, rect); }
                 v.handle()
             });
-            Ok(Native { view, raw, clip })
+            Ok(Native { view, raw, clip, _local_load: local_load })
         };
         // The window that asked may itself be the pop-out, which cannot be updated from inside.
         let native = match popped {
@@ -2095,6 +2325,35 @@ mod tests {
     fn open_in_label_falls_back() {
         assert_eq!(open_in(Some("Arc")), "Open in Arc");
         assert_eq!(open_in(None), "Open in default browser");
+    }
+
+    #[test]
+    fn web_and_local_views_cannot_navigate_into_each_other() {
+        let file = "file:///tmp/example.html";
+        assert!(permits_navigation(None, "https://localhost:3000/"));
+        assert!(!permits_navigation(None, file));
+        assert!(!permits_navigation(None, "FILE:///tmp/example.html"));
+        assert!(permits_navigation(Some(file), file));
+        assert!(permits_navigation(Some(file), "file:///tmp/example.html#details"));
+        assert!(!permits_navigation(Some(file), "file:///tmp/other.html"));
+        assert!(!permits_navigation(Some(file), "https://localhost:3000/"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn explicit_file_targets_use_canonical_files() {
+        let root = std::env::temp_dir().join(format!("canopy-browser-target-{}", std::process::id()));
+        std::fs::create_dir(&root).unwrap();
+        let file = root.join("web page #1.html");
+        std::fs::write(&file, "").unwrap();
+        let url = browser_target_url(file.to_str().unwrap()).unwrap();
+        assert!(url.ends_with("/web%20page%20%231.html"));
+        assert_eq!(browser_target_url(&url), Ok(url));
+        assert!(browser_target_url("file://other-host/tmp/page.html").is_err());
+        let binary = root.join("file.exe");
+        std::fs::write(&binary, "").unwrap();
+        assert!(browser_target_url(binary.to_str().unwrap()).unwrap_err().contains("Unsupported"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -163,7 +163,10 @@ pane, else the selected one. `canvas.browser_viewport` takes `pane?` and a `size
 `canvas.browser_cookies` takes `{keep: until_quit|forever}` and needs no pane.
 `canvas.browser_links` takes `{open: built_in|default}` and needs no pane.
 `canvas.browser_open_file` `{pane?}` asks the person to pick an `.html` file and opens it in
-a new tab (agents cannot open `file:` URLs any other way). `canvas.browser_external` also takes `tab`.
+a new tab. Browser pane and tab commands accept an explicit absolute local path or `file:` URL.
+The CLI also accepts paths starting with `./` or `../`. By default WebKit can read only that
+file. `canvas.browser_allow_folder {pane?}` asks the person to choose a folder containing it
+and its assets. `canvas.browser_external` also takes `tab`.
 
 Browser and simulator annotations arrive as submitted prompts. Canopy attaches the
 annotated screenshot first, then sends the numbered comments and their anchors.

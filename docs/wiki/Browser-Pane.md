@@ -7,9 +7,9 @@ A browser pane keeps web pages in tabs on the canvas, right next to the agent wo
 1. Click **Browser** at the top right of the window. A **New tab** page opens in the [files panel](Files-Panel) with the address field focused.
 2. Type an address such as `localhost:3000` and press Enter.
 
-The browser opens docked in the files panel, as a tab. Click **Move to canvas** on its helper bar to put it on the canvas with your other panes. On the canvas, **Open in panel** docks it again, and **Pin to screen** pins it to the top right corner of the window, where it stays while you pan and zoom (**Unpin** puts it back).
+The browser opens docked in the files panel, as a tab. Choose **Move to canvas** from **⋯** to put it on the canvas with your other panes. On the canvas, **Open in panel** docks it again, and **Pin to screen** pins it to the top right corner of the window, where it stays while you pan and zoom (**Unpin** puts it back).
 
-Only `http` and `https` pages open. A bare local address like `localhost:3000` gets `http://`, and other bare hosts get `https://`.
+A bare local address like `localhost:3000` gets `http://`, and other bare hosts get `https://`.
 
 Agents can open a browser pane too, usually wired to themselves:
 
@@ -20,6 +20,30 @@ canopy pane open p2 http://localhost:3000/pricing  # point an existing pane at a
 ```
 
 `canopy pane open` also makes the new address the pane's **Home**.
+
+## Open a local file
+
+Enter an absolute path such as `/work/demo/index.html` or a local `file:` URL in
+the address field. To pick HTML in a new tab, choose **⋯** > **Open HTML file…**.
+You can also right-click a file in the [Files panel](Files-Panel) and choose
+**Open in Canopy browser**. Unsupported schemes and file formats show a toast.
+
+WebKit can read only the opened file by default. If styles, scripts or images
+are missing, choose **⋯** > **Allow folder assets…** and pick a folder containing
+both the file and its assets. This grant lasts for the current file in that tab
+until you close the tab, navigate to a different address or quit. Local pages
+load their assets from disk and block network resources. To follow a link to
+another page, enter its address yourself.
+
+The browser accepts HTML (`.html`, `.htm`), SVG, plain text (`.txt`), PDF and
+images (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.avif`, `.ico`, `.bmp`, `.tiff`).
+The native picker shows HTML files. Commands also take local targets:
+
+```sh
+canopy pane new browser ./dist/index.html
+canopy pane open p2 file:///work/demo/index.html
+```
+
 
 ## Tabs
 
@@ -62,7 +86,7 @@ A browser pane's header has two rows. The pop-out window draws the same header.
 **Row 1** holds the tabs and window controls, left to right:
 
 - The tab list and **New tab**.
-- **⋯**, the menu below.
+- **Connect**, which starts a wire, and **⋯**, the menu below.
 - **Pop out**, **Expand** and **Close** (see below). In the pop-out, **Close** brings the page back, and **Pop out** and **Expand** are not shown. Its menu has no Viewport rows: the page fills the window.
 
 **Row 2** holds navigation:
@@ -71,7 +95,7 @@ A browser pane's header has two rows. The pop-out window draws the same header.
 - The **address field**. Type an address and press Enter to open it (`localhost:3000` gets `http://`); this also sets the pane's **Home**. Press Escape to put the current address back. While you are not typing, the field follows the page.
 - **Annotate** (`canvas.browser_annotate`), a button with its label that starts annotating the page.
 
-Drag the pane by the empty part of row 1, or by the [helper bar](Toolbar-and-Helper-Bar).
+Drag the pane by the empty part of row 1. Browser actions are in the header. A docked browser uses its Files panel tab to close and **Expand panel** to fill the window.
 
 ### The ⋯ menu
 
@@ -80,7 +104,11 @@ Drag the pane by the empty part of row 1, or by the [helper bar](Toolbar-and-Hel
 | **Open in** *your browser* | Opens the current address in your system browser (the app that opens `https` links, or **Open in default browser** if Canopy cannot tell). |
 | **Copy link** | Copies the address and shows a toast. |
 | **Save screenshot** | Saves the page to `<temp>/canopy/<pane>.png` and shows the path in a toast. |
-| **Open HTML file…** | Asks you to pick an `.html` or `.htm` file and opens it in a new tab as a `file:` page. This is the only way a `file:` page opens: the address field and agents are refused `file:` addresses. |
+| **Open HTML file…** | Opens a native picker for an `.html` or `.htm` file and opens it in a new tab. |
+| **Allow folder assets…** | For an open local file, asks you to pick a folder whose assets the page can load. |
+| **Home** | Goes to the pane’s first address or the one last set with `canopy pane open`. |
+| **Move to canvas**, **Open in panel** | Moves the pane between the Files panel and the canvas. |
+| **Pin to screen**, **Unpin** | Holds a canvas pane at the top right of the window or returns it to the canvas. |
 | **Viewport** | Choose **Responsive**, **1280 × 800**, **1024 × 768**, **Mobile 375 × 812**, or **Tablet 768 × 1024**. A check marks the saved choice. Responsive pages reflow as the pane resizes. Each fixed size sets the page's CSS viewport and scales it to fit, centered in the pane. |
 | **Links** | **Open links in built-in browser**: checked, links clicked in terminals open in a browser tab; unchecked, in your system browser. The same as the **Open links** setting. |
 | **Keep cookies** | Choose **Until quit** or **Forever**. A check marks the current choice. |
@@ -122,7 +150,7 @@ A page you rested keeps running out of sight, so a video can keep playing. When 
 
 ## Annotate
 
-When a layout bug is easier to point at than describe, click **Annotate** in the header or the helper bar. You can annotate from the pane's tab in the Files panel too. It is one tool for pointing at an element, drawing on the page and sending the result to an agent. Canopy takes a still of the page while you work, so the page does not move under your pen. A popped-out page is annotated the same way in its own window.
+When a layout bug is easier to point at than describe, click **Annotate** in the header. The same control is available when the pane is docked in the Files panel. It is one tool for pointing at an element, drawing on the page and sending the result to an agent. Canopy takes a still of the page while you work, so the page does not move under your pen. A popped-out page is annotated the same way in its own window.
 
 The bar sits at the bottom of the pane. It has four icon tools and an **x** to stop:
 
@@ -168,26 +196,12 @@ canopy pane shot p2   # a PNG screenshot of the page
 
 Reading an empty pane returns `New tab`. When the pane has a URL, both commands wait for the page to finish loading, time out after 30 seconds, and work even when the pane is off screen. See [Let Agents Show You](Let-Agents-Show-You#show-me-the-running-app).
 
-## Helper bar
-
-| Button | What it does |
-|---|---|
-| **Back** | Goes to the previous page. |
-| **Reload** | Reloads the page. |
-| **Home** | Goes to the pane's home address: the first address it opened, or the last one set with `canopy pane open`. |
-| **Annotate** | Freezes the page for marks and comments. |
-| **Screenshot** | Saves the page to `<temp>/canopy/<pane>.png` and shows the path in a toast. |
-| **Open in** *your browser* | Opens the current address in your system browser. |
-| **Expand**, **Pop out** | The same as in the header; Pop out reads **Bring back** while the pane is popped out. |
-| **Pin to screen** / **Move to canvas** | Pins the pane to the window, or puts it back on the canvas. |
-| **Connect**, **Close** | Draws a wire, or closes the pane. |
-
 ## Privacy
 
 Browser panes are built for local development, and they keep to themselves:
 
 - New tab is drawn by Canopy. The browser loads a page when you or an agent opens an address.
-- Downloads are blocked.
+- Downloads are blocked. Website content cannot open files on your disk. Local files open with [scoped read access](#open-a-local-file).
 - Links that ask for a new window open in the same pane.
 - Annotate reads each element's React source through a bundled copy of an open-source tool. It starts only when you click an element, with its telemetry and its own toolbar turned off, and its version check, open-file link and web font import removed.
 - Canopy keeps the last snapshot of each tab in `<app home>/browser/<pane>-<tab>.png` so the canvas can draw it after a restart. Closing the tab or pane deletes the snapshot.

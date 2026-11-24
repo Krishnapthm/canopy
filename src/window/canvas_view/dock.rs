@@ -158,13 +158,12 @@ impl AppWindow {
         let actions = helper_bar::pane_actions(pane, None, true);
         #[cfg(target_os = "macos")]
         let actions = self.sim_relabel(id, actions, cx);
-        let actions = self.browser_relabel(id, actions);
         let label = wired.as_ref().map_or(title, |agent| format!("Wired to {}", self.pill_name(agent)));
         let header = div().flex().flex_col().flex_none()
             .children(chrome)
-            .child(div().flex().items_center().gap(px(6.)).px(px(12.)).h(px(36.)).border_b_1().border_color(c("border"))
+            .when(!actions.is_empty(), |d| d.child(div().flex().items_center().gap(px(6.)).px(px(12.)).h(px(36.)).border_b_1().border_color(c("border"))
                 .child(div().flex_1().min_w_0().truncate().text_size(px(12.)).text_color(c("muted-foreground")).child(label))
-                .child(self.bar(id, actions, 1., wired.is_some(), cx)))
+                .child(self.bar(id, actions, 1., wired.is_some(), cx))))
             .into_any_element();
         let bounds = self.bounds.clone();
         let key = format!("panel-body:{id}");

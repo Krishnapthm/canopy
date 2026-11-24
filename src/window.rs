@@ -3069,7 +3069,7 @@ impl AppWindow {
             "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" | "canvas.annotate_agent" => self.annotation_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
             | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
-            | "canvas.browser_cookies" | "canvas.browser_links" | "canvas.browser_clear" | "canvas.browser_inspect" | "canvas.browser_open_file"
+            | "canvas.browser_cookies" | "canvas.browser_links" | "canvas.browser_clear" | "canvas.browser_inspect" | "canvas.browser_open_file" | "canvas.browser_allow_folder"
             | "canvas.browser_tab_new" | "canvas.browser_tab_select" | "canvas.browser_tab_close" => self.browser_command(name, a, person, window, cx),
             name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),

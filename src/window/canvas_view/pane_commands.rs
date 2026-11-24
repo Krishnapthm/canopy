@@ -73,7 +73,7 @@ impl AppWindow {
         let url = if kind == "browser" {
             Some(match &a["url"] {
                 Value::Null => String::new(),
-                Value::String(url) => super::browser::web_url(url)?,
+                Value::String(url) => super::browser::browser_target_url(url)?,
                 _ => return Err("canvas.pane_new: url must be a string".into()),
             })
         } else { None };
@@ -340,7 +340,7 @@ mod tests {
             this.browser_reply("p1", None, window, cx).unwrap();
             assert_eq!(rx.try_recv().unwrap()["text"], canvas::envelope("p1", "browser", &[("url", "")], "New tab"));
             assert_eq!(this.run_as("canvas.pane_new", json!({"kind":"browser","url":null,"place":"canvas"}), false, window, cx)["url"], "");
-            assert_eq!(this.pane_new(&json!({"kind":"browser","url":"file:///etc/passwd"}), window, cx).unwrap_err(), "only http and https pages open in a browser pane, not file:");
+            assert!(this.pane_new(&json!({"kind":"browser","url":"file:///etc/passwd"}), window, cx).is_err());
             // Dispatch above resyncs the canvas, which drops this test's stand-in terminal.
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
             let web = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","wire":"t1","place":"canvas"}), window, cx).unwrap();

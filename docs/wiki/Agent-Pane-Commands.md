@@ -17,7 +17,7 @@ canopy pane new mod:note --wire         # open a note beside the calling agent
 - See [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices) for their opening commands.
 
 `canopy pane open <pane> <target>` changes a browser or simulator pane's target. File panes refuse `open`.
-It prints `<pane>: <url>` for a browser and `ok` for a simulator.
+A browser accepts a web address, a local `file:` URL or an absolute file path. The CLI also resolves paths starting with `./` or `../` against the directory you ran it from. It prints `<pane>: <url>` for a browser and `ok` for a simulator.
 
 See [Browser Pane](Browser-Pane) for browser targets and [Simulator Devices](Simulator-Devices) for `tap`, `swipe`, `type` and `press`.
 

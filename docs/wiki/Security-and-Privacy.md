@@ -42,4 +42,4 @@ See [Agent Pane Commands](Agent-Pane-Commands#the-envelope) for the envelope.
 Canopy sends no telemetry, checks for no updates and uploads no feedback.
 Programs and mods you run can make network requests.
 
-See [Browser Pane privacy](Browser-Pane#privacy) for requests from browser panes.
+See [Browser Pane privacy](Browser-Pane#privacy) for requests from browser panes and [Open a local file](Browser-Pane#open-a-local-file) for what WebKit can read on disk.
