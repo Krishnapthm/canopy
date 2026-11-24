@@ -8,10 +8,10 @@ Simulator panes need macOS with Xcode and at least one simulator installed. For 
 
 ## Open a simulator
 
-1. Click **Simulator** at the top right of the window.
+1. Click **Simulator** at the top right of the window. It opens as a tab in the [files panel](Files-Panel).
 2. Click a simulator in the list. Canopy boots it if it is shut down.
 
-The simulator opens pinned to the top right corner: it stays there, at the same size, while you pan and zoom the canvas. Drag its header to move it and its corner to resize it. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes; **Pin to screen** pins it again.
+The simulator opens docked in the files panel. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes. On the canvas, **Open in panel** docks it again, and **Pin to screen** pins it to the top right corner at the same size while you pan and zoom (**Unpin** puts it back). Drag a pinned or canvas simulator's header to move it and its corner to resize it.
 
 The **Simulator** button shows only when Xcode's `xcrun simctl` is installed.
 

@@ -11,6 +11,7 @@ canopy pane new file ./README.md --wire  # open a file beside the calling agent
 canopy pane new mod:note --wire         # open a note beside the calling agent
 ```
 
+- `--place panel|canvas|pinned` chooses where a browser or simulator opens. The default is `panel`, a tab in the [files panel](Files-Panel). Other kinds always open on the canvas.
 - `--wire` wires the pane to the calling terminal, using `HC_TERMINAL_ID`. It requires a Canopy terminal.
 - `new` prints the pane ID, its path, URL or kind, and a command to read it. Wired panes add `wired to you`.
 - See [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices) for their opening commands.

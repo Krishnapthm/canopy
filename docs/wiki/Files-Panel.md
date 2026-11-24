@@ -1,6 +1,6 @@
 # Files Panel
 
-The files panel is a side panel with your space's file tree and file previews. Use it when you want to browse the project, read what an agent changed, or make a quick edit yourself, without putting a pane on the canvas. It is also where sub-agent transcripts open.
+The files panel is a side panel with your space's file tree and file previews. Use it when you want to browse the project, read what an agent changed, or make a quick edit yourself, without putting a pane on the canvas. It is also where sub-agent transcripts open, and where browser and simulator panes dock by default.
 
 ![The files panel beside the canvas](images/files-panel-1.png)
 
@@ -11,7 +11,7 @@ The files panel is a side panel with your space's file tree and file previews. U
 
 - Click **Expand panel** to fill the window. Click **Restore panel** to return to the canvas.
 - Resizing also ends expanded mode.
-- Click **Close panel** to close it. The folder button restores its file tabs.
+- Click **Close panel** to hide it. The folder button brings back the tab you had open. Docked panes stay docked while it is hidden.
 
 ## Browse and preview files
 
@@ -28,6 +28,17 @@ In the classic layout, the tree follows the focused pane's folder, or the active
 - Other text previews accept files up to 1 MiB and show the first 400,000 UTF-16 code units.
 - The tree loads at most 500 entries per folder and 5,000 entries in total.
 - For files on the canvas, see [File and Note Panes](File-and-Note-Panes).
+
+## Browsers and simulators in the panel
+
+A browser or simulator opens as a tab in this panel, so it sits beside your work without taking canvas space. Click **Browser** or **Simulator** in the [top strip](Spaces#the-top-strip), or let an agent run `canopy pane new browser localhost:3000`.
+
+- A docked pane's tab shows its kind's icon and its title (the page title or the device name). A wired pane adds a small dot.
+- The panel header holds the pane's [helper bar](Toolbar-and-Helper-Bar). Click **Move to canvas** to put the pane back on the canvas where it was, or in the middle of the view if it never had a place there.
+- Click **Connect** in the header and drop the wire on an agent to wire the pane. A docked pane has no place on the canvas, so no line is drawn. The header reads "Wired to" and the agent's name instead, and the dot marks the tab.
+- Click the tab's X to close the pane. Closing the panel only hides the tabs.
+
+A docked pane is not on the canvas: layout, tiling and wire lines skip it. Canopy remembers docked panes between runs. On the canvas, **Open in panel** on a browser or simulator's helper bar docks it. The pages themselves work as described in [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices).
 
 ## Edit a file
 
