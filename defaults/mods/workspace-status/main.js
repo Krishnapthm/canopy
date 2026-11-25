@@ -37,11 +37,14 @@ export default class WorkspaceStatus extends View {
         .child(svg("mods/workspace-chrome/branch.svg").size(13))
         .when(Boolean(spaceTint), label => label.child(colorDot(spaceTint)))
         .child(space.branch)))
-      .children(shown.map(a => chip(`agent-${a.address}`)
-        .tooltip(`${a.space_name} · ${a.tab_name}`)
-        .on_click(() => run("agent.focus", { terminal: a.address }))
-        .child(colorDot(dot[a.status] ?? t.dim))
-        .child(div().max_w(120).truncate().text_color(tint(allPanes.find(p => p.pane === a.pane)?.color) ?? (a.status === "blocked" ? t.blocked : t.muted)).child(a.program?.name || a.title || a.address))))
+      .children(shown.map(a => {
+        const paneTint = tint(allPanes.find(p => p.pane === a.pane)?.color);
+        return chip(`agent-${a.address}`)
+          .tooltip(`${a.space_name} · ${a.tab_name}`)
+          .on_click(() => run("agent.focus", { terminal: a.address }))
+          .child(colorDot(paneTint ?? dot[a.status] ?? t.dim))
+          .child(div().max_w(120).truncate().text_color(paneTint ?? (a.status === "blocked" ? t.blocked : t.muted)).child(a.program?.name || a.title || a.address));
+      }))
       .when(more > 0, el => el.child(chip("agents-more").on_click(() => run("mod.open", { name: "picker" })).child(`+${more}`)))
       .child(div().flex_1())
       .child(div().id("palette").text_color(t.dim).on_click(() => run("app.palette")).child(this.hint(t)));
