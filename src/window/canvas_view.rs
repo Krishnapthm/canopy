@@ -2995,7 +2995,7 @@ impl AppWindow {
     }
 
     /// Shortcut hints for an empty canvas, like VS Code's empty editor: only actions that have a key.
-    fn empty_hints(&self) -> Option<AnyElement> {
+    fn empty_hints(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let keys = crate::keys::listing();
         let rows: Vec<_> = [
             ("New terminal", "canvas.new"),
@@ -3014,10 +3014,37 @@ impl AppWindow {
                 .child(div().w(px(160.)).text_right().text_size(px(12.)).text_color(c("muted-foreground")).child(label))
                 .child(div().w(px(160.)).flex().gap(px(4.)).children(caps)))
         }).collect();
-        (!rows.is_empty()).then(|| {
+        let recent = self.recent_rows(cx);
+        (!rows.is_empty() || !recent.is_empty()).then(|| {
+            let list = (!recent.is_empty()).then(|| div().w(px(480.)).mt(px(20.)).flex().flex_col()
+                .child(div().h(px(28.)).px(px(8.)).flex().items_center().text_size(px(11.)).text_color(c("muted-foreground")).child("Recent"))
+                .children(recent));
             div().absolute().inset_0().flex().items_center().justify_center()
-                .child(div().flex().flex_col().children(rows)).into_any_element()
+                .child(div().flex().flex_col().items_center().child(div().flex().flex_col().children(rows)).children(list))
+                .into_any_element()
         })
+    }
+
+    /// Home's recent list: up to 5 closed spaces not open now; a click reopens one in its folder.
+    fn recent_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        if self.canvas_state.doc.room.is_some() { return Vec::new(); }
+        let home = super::home();
+        let open: Vec<String> = self.model.spaces.iter().map(|s| self.model.space_name(s, &home)).collect();
+        let shown = |folder: &str| match folder.strip_prefix(home.trim_end_matches(['/', '\\'])) {
+            Some(rest) if home.len() > 1 && (rest.is_empty() || rest.starts_with(['/', '\\'])) => format!("~{rest}"),
+            _ => folder.to_owned(),
+        };
+        self.model.recent.iter().map(|r| (if r.name.is_empty() { crate::model::folder_name(&r.folder, &home) } else { r.name.clone() }, r))
+            .filter(|(name, _)| !open.contains(name)).take(5).enumerate().map(|(i, (name, r))| {
+                let (reopen, folder) = (json!({"name":r.name,"folder":r.folder}), shown(&r.folder));
+                div().id(("recent-space", i)).h(px(28.)).px(px(8.)).rounded(px(4.)).flex().items_center().gap(px(12.))
+                    .text_size(px(12.)).cursor_pointer().hover(|d| d.bg(c("hover")))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _, window, cx| this.dispatch("space.new", &reopen, true, window, cx)))
+                    .child(div().flex_none().text_color(c("foreground")).child(name))
+                    .child(div().min_w_0().truncate().text_color(c("muted-foreground")).child(folder))
+                    .into_any_element()
+            }).collect()
     }
 
     pub(super) fn render_canvas(&self, owner: &Node, cx: &mut Context<Self>) -> AnyElement {
@@ -3759,7 +3786,7 @@ impl AppWindow {
         if !shown_doc.panes.iter().any(|p| shown_doc.shown(p))
             && (state.doc.room.is_some() || self.model.spaces.iter().all(|s| root_space(s)))
         {
-            area = area.children(self.empty_hints());
+            area = area.children(self.empty_hints(cx));
         }
         area = area.child(self.wire_layer(viewport, true, &edges));
         if let Some((a, b, _)) = &state.marquee {
