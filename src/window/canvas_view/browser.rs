@@ -882,6 +882,7 @@ impl AppWindow {
     /// anywhere else, closes it.
     fn pop_menu(&self, id: &str, view: Size<Pixels>, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (at, items) = self.canvas_state.browsers.panes.get(id)?.pop_menu.clone()?;
+        let [x, y, width, _] = pop_menu_rect(at, &items, view);
         let rows = items.into_iter().enumerate().map(|(i, item)| {
             let label = item[0].as_str().unwrap_or_default().to_owned();
             let Some(command) = item[1].as_str().map(str::to_owned) else {
@@ -899,8 +900,6 @@ impl AppWindow {
                     cx.notify();
                 })).into_any_element()
         }).collect::<Vec<_>>();
-        let (width, height) = (220., rows.len() as f32 * 32. + 10.);
-        let (x, y) = (f32::from(at.x).min(f32::from(view.width) - width - 4.).max(4.), f32::from(at.y).min(f32::from(view.height) - height - 4.).max(4.));
         let (left, right) = (id.to_owned(), id.to_owned());
         Some(div().absolute().inset_0()
             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, _, cx| this.dismiss_pop_menu(&left, cx)))
@@ -1656,6 +1655,18 @@ fn fit_view(view: &gpui_wry::WebView, ([width, height], zoom): ([f32; 2], f64)) 
     let _ = view.raw().zoom(zoom);
 }
 
+/// Where the pop-out's ⋯ menu sits, as window `[x, y, w, h]`: at the click, kept 4 px inside.
+#[cfg(target_os = "macos")]
+fn pop_menu_rect(at: Point<Pixels>, items: &[Value], view: Size<Pixels>) -> [f32; 4] {
+    // Rows as `pop_menu` draws them: 32 px commands, 25 px headings, 5 px padding and a 1 px
+    // border on each side.
+    let rows: f32 = items.iter().map(|item| if item[1].is_string() { 32. } else { 25. }).sum();
+    let (width, height) = (220., rows + 12.);
+    let x = f32::from(at.x).min(f32::from(view.width) - width - 4.).max(4.);
+    let y = f32::from(at.y).min(f32::from(view.height) - height - 4.).max(4.);
+    [x, y, width, height]
+}
+
 /// A popped-out pane's window: the pane's header over the active tab's page. It holds no state
 /// of its own; it draws what `AppWindow` keeps and redraws when that changes.
 #[cfg(target_os = "macos")]
@@ -1946,13 +1957,24 @@ impl AppWindow {
     /// hidden, and all hidden while the menu is open or an annotation shows its still, since a
     /// native view draws over GPUI), or a note for an empty tab.
     fn popped_body(&self, id: &str, view: Size<Pixels>, cx: &mut Context<Self>) -> AnyElement {
-        let menu = self.canvas_state.browsers.panes.get(id).is_some_and(|ui| ui.pop_menu.is_some())
-            || self.canvas_state.annotations.get(id).is_some_and(|a| !a.live);
+        let annotating = self.canvas_state.annotations.get(id).is_some_and(|a| !a.live);
+        // The ⋯ menu is cut out of the page, which stays visible around it.
+        let menu = self.canvas_state.browsers.panes.get(id).and_then(|ui| ui.pop_menu.as_ref())
+            .map(|(at, items)| pop_menu_rect(*at, items, view));
+        let frame = [0., canvas::BROWSER_HEADER, f32::from(view.width), (f32::from(view.height) - canvas::BROWSER_HEADER).max(1.)];
         let active = self.page_key(id);
         for key in self.pane_page_keys(id) {
             let Some(native) = self.canvas_state.browsers.pages.get(&key).and_then(|p| p.native.as_ref()) else { continue };
-            let show = !menu && active.as_ref() == Some(&key);
+            let show = !annotating && active.as_ref() == Some(&key);
             native.view.update(cx, |v, _| { if show && !v.visible() { v.show(); } else if !show && v.visible() { v.hide(); } });
+            if !show { continue; }
+            match menu {
+                Some(hole) => {
+                    let open = super::browser_mask::visible(frame, &[hole]);
+                    if !super::browser_mask::set_mask(native.raw.raw(), frame, &open, &open) { native.view.update(cx, |v, _| v.hide()); }
+                }
+                None => super::browser_mask::clear_mask(native.raw.raw()),
+            }
         }
         match active.and_then(|key| self.canvas_state.browsers.pages.get(&key)).and_then(|p| p.native.as_ref()) {
             Some(native) => {

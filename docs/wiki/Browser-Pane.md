@@ -129,7 +129,7 @@ Drag the pane by the empty part of row 1. Browser actions are in the header. A d
 
 **Pop out** moves the whole pane into its own window: every tab, not just the active one. The window has the same header and a title bar drawn around the traffic lights; drag it by the empty part of row 1. Its size is the pane's size at 100% zoom, at least 640 × 480. The pane shows "Popped out" and a **Bring back** button.
 
-Tabs, Back, Forward, Reload, the address field, the ⋯ menu and the Web Inspector all work on the window's pages. Sign-ins carry over, because the pane and the window share one website data store. The window annotates the same way the pane does.
+Tabs, Back, Forward, Reload, the address field, the ⋯ menu and the Web Inspector all work on the window's pages. The ⋯ menu opens over the page, which stays visible around it. Sign-ins carry over, because the pane and the window share one website data store. The window annotates the same way the pane does.
 
 **Bring back** (the pane's button, the window's **Close**, or its red traffic light) destroys the window's pages and puts the pane back as it was: the same tabs and active tab at the addresses they last had. Pages load again when you click them. Closing the pane closes its window.
 
