@@ -151,7 +151,7 @@ impl AppWindow {
         };
         let measure = |key: String| {
             let bounds_map = self.bounds.clone();
-            canvas(move |b, _, _| { bounds_map.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().size_full()
+            canvas(move |b, _, _| { bounds_map.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full()
         };
         let drag = self.float_drag.as_ref().filter(|d| d.id == f.id && d.moving);
         let (edge, _) = drag.map_or((f.edge, f.align), |d| d.target);

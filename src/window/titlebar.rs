@@ -176,7 +176,7 @@ impl AppWindow {
         let bounds = self.bounds.clone();
         let measure = canvas(move |b, _, _| {
             bounds.borrow_mut().insert("main-menu-trigger".into(), b);
-        }, |_, _, _, _| {}).absolute().size_full();
+        }, |_, _, _, _| {}).absolute().top_0().left_0().size_full();
         let button = gpui_base::Button::new("primary-menu")
             .accessibility_label("Main Menu").size(px(32.)).rounded(px(6.))
             .hover(|s| s.bg(c("hover")))

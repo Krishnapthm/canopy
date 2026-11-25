@@ -948,7 +948,7 @@ impl AppWindow {
                 bounds.insert("canopy-canvas".into(), b);
                 #[cfg(target_os = "macos")]
                 bounds.insert("browser-canvas".into(), b);
-            }, |_, _, _, _| {}).absolute().size_full())
+            }, |_, _, _, _| {}).absolute().top_0().left_0().size_full())
             .children(self.expanded_webview(id, page)).into_any_element())
     }
 
@@ -2601,8 +2601,10 @@ impl AppWindow {
 
     fn browser_measure(&self, key: String) -> gpui::Canvas<()> {
         let bounds = self.bounds.clone();
+        // Pinned to the corner: after other content, an absolute box without insets sits below
+        // it, which measured a page's body as an empty strip under it and masked the page white.
         canvas(move |b, _, _| { bounds.borrow_mut().insert(key, b); }, |_, _, _, _| {})
-            .absolute().size_full()
+            .absolute().top_0().left_0().size_full()
     }
 
     /// Window-space bounds of the live element, including the viewport's centering offset.

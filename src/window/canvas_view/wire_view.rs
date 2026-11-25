@@ -396,7 +396,7 @@ impl AppWindow {
                 window.paint_quad(outline(Bounds::new(p([x, y]), size(px(r[2] * camera.zoom), px(r[3] * camera.zoom))), c("ring"), BorderStyle::Solid).corner_radii(px(8. * camera.zoom)));
             }
             if animating && !cx.reduce_motion() { window.request_animation_frame(); }
-        }).absolute().size_full().into_any_element()
+        }).absolute().top_0().left_0().size_full().into_any_element()
     }
 }
 

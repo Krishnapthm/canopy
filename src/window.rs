@@ -4364,7 +4364,7 @@ impl AppWindow {
         let mut el = div().relative().overflow_hidden().size_full().flex();
         let bounds_map = self.bounds.clone();
         let id = n.id.clone();
-        el = el.child(canvas(move |b, _, _| { bounds_map.borrow_mut().insert(id, b); }, |_, _, _, _| {}).absolute().size_full());
+        el = el.child(canvas(move |b, _, _| { bounds_map.borrow_mut().insert(id, b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full());
         el = apply_look(el, n, focused.contains(&n.id));
         if n.window_drag {
             el = self.window_drag(el, cx);
@@ -4671,7 +4671,7 @@ impl AppWindow {
             let bounds = self.bounds.clone();
             let cover = format!("cover:overlay:{}", o.id);
             let mut measure = Some(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
-                .absolute().size_full());
+                .absolute().top_0().left_0().size_full());
             let body = div()
                 .id(SharedString::from(format!("ov-{}", o.id)))
                 .relative()
