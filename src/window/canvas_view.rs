@@ -3851,26 +3851,11 @@ impl AppWindow {
         }
         let mut row = div().flex_1().min_h_0().w_full().flex();
         if !expanded {
-            let toolbar = self.render_canvas_toolbar(owner, cx);
-            let (edge, toolbar) = toolbar.map(|(edge, toolbar)| (edge, Some(toolbar)))
-                .unwrap_or((crate::layout::Edge::Bottom, None));
-            let horizontal = !edge.vertical();
-            let before = matches!(edge, crate::layout::Edge::Top | crate::layout::Edge::Left);
-            let bounds = self.bounds.clone();
-            let mut surface = div().relative().flex().flex_1().min_w_0().min_h_0().overflow_hidden()
-                .bg(c(bg))
-                .child(canvas(move |b, _, _| {
-                    bounds.borrow_mut().insert("canvas-work-area".into(), b);
-                }, |_, _, _, _| {}).absolute().size_full());
-            let center = div().flex().flex_col().flex_1().min_w_0().min_h_0()
+            row = row.child(div().flex().flex_col().flex_1().min_w_0().min_h_0().overflow_hidden().bg(c(bg))
                 .child(div().flex().flex_1().min_w_0().min_h_0().child(area))
                 .when(self.connect_hint(), |d| d.child(div().h(px(32.)).flex_none().w_full().overflow_hidden()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(self.render_slot("canvas-keys", cx))));
-            if horizontal { surface = surface.flex_col(); }
-            surface = if before { surface.children(toolbar).child(center) }
-                else { surface.child(center).children(toolbar) };
-            row = row.child(surface);
+                    .child(self.render_slot("canvas-keys", cx)))));
         }
         if state.file.is_some() || state.files {
             let full_width = self

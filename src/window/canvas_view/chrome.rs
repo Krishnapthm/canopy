@@ -276,7 +276,7 @@ mod tests {
     use gpui::TestAppContext;
     use serde_json::json;
 
-    const DOCK: &str = "window::canvas_view::chrome::tests::toolbar_stays_in_the_canvas_column";
+    const DOCK: &str = "window::canvas_view::chrome::tests::toolbar_floats_over_the_canvas_column";
 
     #[test]
     fn toolbar_and_dock_have_separate_bounds() {
@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn toolbar_stays_in_the_canvas_column(cx: &mut TestAppContext) {
+    fn toolbar_floats_over_the_canvas_column(cx: &mut TestAppContext) {
         if !running_alone(DOCK) {
             return;
         }
@@ -316,11 +316,12 @@ mod tests {
             let viewport = this.canvas_bounds().unwrap();
             let bounds = this.bounds.borrow();
             let toolbar = bounds["float:toolbar"];
-            let work = bounds["canvas-work-area"];
+            // The toolbar floats over the canvas, which runs under it to the window edge.
             assert!(toolbar.size.width > px(20.));
-            assert!(viewport.bottom() <= toolbar.top());
-            assert!(toolbar.right() <= work.right());
-            assert!(work.right() < bounds["root"].right());
+            assert!(viewport.top() < toolbar.top() && toolbar.bottom() <= viewport.bottom());
+            assert!(toolbar.right() <= viewport.right());
+            assert!(viewport.right() < bounds["root"].right());
+            assert!(this.canvas_chrome_at(toolbar.center()));
 
             let placed = this.canvas_state.chrome.borrow();
             assert_eq!(placed.len(), 2);
