@@ -843,6 +843,11 @@ impl AppWindow {
         self.show_browser_menu(id, host, items, window, cx);
     }
 
+    /// The pane popped out into this window, if it is one.
+    pub(super) fn popped_pane(&self, window: &Window) -> Option<String> {
+        self.canvas_state.browsers.panes.iter().find(|(_, ui)| ui.popped == Some(window.window_handle())).map(|(id, _)| id.clone())
+    }
+
     /// Which window should render a menu opened by a pane command.
     #[cfg(target_os = "macos")]
     pub(super) fn browser_menu_host(&self, id: &str, window: &Window) -> Host {

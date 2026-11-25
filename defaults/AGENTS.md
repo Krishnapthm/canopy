@@ -1373,6 +1373,7 @@ every selected pane (else the focused one) behind one dialog that lists them, wi
 "Cancel". With `confirm_close_terminal: false` in settings.json (default true) and no agent among them they close
 without asking. `canvas.close {terminal}` closes one cell: running agents ask "Terminate agent?", plain terminals
 "Close this terminal?". Done sub-agent cells clear; working ones refuse with a toast.
+`canvas.close_focused` (Cmd+W) and `panel.close_tab {path}` are for the person only: they close the active Files tab or the one selected pane, and a Files tab with unsaved changes asks first.
 `canvas.front` and `canvas.back` raise or lower the selected panes; the order is saved.
 `canvas.sync` turns sync input on for the selected panes (typing in one reaches all) or off.
 `canvas.equalize` gives the selected panes (else the focused one) the standard `terminal_size`; `canvas.new` opens a full terminal pane, cascading from the last one.

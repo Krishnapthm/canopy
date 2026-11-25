@@ -55,7 +55,7 @@ tab and focus its address field. Click a tab to switch to it, click its
 **Close tab** button (shown on the selected tab and when you hover another) or
 middle-click it to close it. Right-click a tab for **Open in** your browser and
 **Close tab**. In [canvas mode](Canvas), `Cmd+W` also closes
-the active tab of the selected browser pane.
+the active tab of the selected browser pane, or of the one in the Files panel when you last clicked there.
 
 Browser tabs look like the Files panel tabs, in the panel, on the canvas and in a
 pop-out window. Tabs are up to 180 px wide

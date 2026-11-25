@@ -100,6 +100,7 @@ pub(crate) mod value;
 pub mod view;
 pub(crate) mod watch;
 pub use watch::application_file_counts;
+pub use materialize::{forget_menu_covers, menu_covers};
 
 pub use anyhow;
 pub use value::set_pixel_scale;

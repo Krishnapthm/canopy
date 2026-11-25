@@ -419,6 +419,15 @@ mod tests {
             this.close_boxed_panes(&[did], cx);
             assert_eq!(this.canvas_state.doc.panel.tabs, [draft.clone()]);
             this.close_panel_tab(&draft, window, cx);
+            assert!(this.canvas_state.doc.panel.tabs.contains(&draft), "a dirty tab asks before it closes");
+            let asked = this.canvas_state.dirty_generation;
+            // The draft was saved and edited again after the dialog opened: the old confirm is stale.
+            this.canvas_state.dirty_generation += 1;
+            this.dispatch("panel.close_tab", &json!({"path":draft_path,"confirmed":true,"generation":asked}), true, window, cx);
+            assert!(this.canvas_state.doc.panel.tabs.contains(&draft) && this.canvas_state.dirty.is_some());
+            this.dispatch("panel.close_tab", &json!({"path":draft_path,"confirmed":true,"generation":asked + 1}), false, window, cx);
+            assert!(this.canvas_state.doc.panel.tabs.contains(&draft), "an agent cannot close a file tab");
+            this.dispatch("panel.close_tab", &json!({"path":draft_path,"confirmed":true,"generation":asked + 1}), true, window, cx);
             assert!(this.canvas_state.doc.panel.tabs.is_empty() && this.canvas_state.file.is_none());
             assert!(this.browser_reply("p1", None, window, cx).unwrap_err().contains("canopy pane"), "a read with no caller to answer refuses");
             this.close_canvas_cell(&json!({"pane":"p3"}), window, cx);

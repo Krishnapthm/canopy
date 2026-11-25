@@ -4,7 +4,7 @@
 use super::*;
 
 #[cfg(target_os = "macos")]
-type LocalMask = Option<([f32; 2], Vec<R>)>;
+type LocalMask = Option<([f32; 2], Vec<R>, Vec<R>)>;
 
 #[cfg(target_os = "macos")]
 pub(super) type MaskCache = Rc<RefCell<HashMap<String, LocalMask>>>;
@@ -143,6 +143,11 @@ impl AppWindow {
             Some((key.to_owned(), id.to_owned(), view, expanded, docked, above))
         }).collect();
         let bounds = self.bounds.clone();
+        // A menu's frame is wider than its painted boxes (room for a submenu). The page shows
+        // through the empty part, but clicks there still reach the menu, which closes on them.
+        let menu_frames: Vec<String> = self.overlays.iter()
+            .filter(|o| self.copies.get(&o.slot).is_some_and(|copy| copy.inst.name == "menu"))
+            .map(|o| format!("cover:overlay:{}", o.id)).collect();
         let controls = state.chrome.clone();
         let last = state.browsers.last_masks.clone();
         let this = cx.entity().downgrade();
@@ -153,7 +158,10 @@ impl AppWindow {
                     let canvas = bounds.get("browser-canvas").copied();
                     let mut overlays: Vec<_> = bounds.iter().filter(|(k, _)| k.starts_with("cover:")).collect();
                     overlays.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
-                    let overlays: Vec<_> = overlays.into_iter().map(|(_, bounds)| rect(*bounds)).collect();
+                    let (frames, overlays): (Vec<_>, Vec<_>) = overlays.into_iter().partition(|(k, _)| menu_frames.contains(k));
+                    let mut overlays: Vec<_> = overlays.into_iter().map(|(_, bounds)| rect(*bounds)).collect();
+                    overlays.extend(gpui_shell::menu_covers().into_iter().map(rect));
+                    let frames: Vec<_> = frames.into_iter().map(|(_, bounds)| rect(*bounds)).collect();
                     let controls = controls.borrow();
                     for (key, id, view, expanded, docked, above) in pages {
                         let host = if docked && !expanded {
@@ -173,12 +181,15 @@ impl AppWindow {
                         above.extend_from_slice(&overlays);
                         above.extend(controls.iter().map(|control| rect(control.bounds)));
                         let pieces = visible_in_host(frame, clip.map(rect), &above);
+                        above.extend_from_slice(&frames);
+                        let hits = if frames.is_empty() { pieces.clone() } else { visible_in_host(frame, clip.map(rect), &above) };
                         // Translation alone can reuse the mask. Resizing also changes its layer frame.
-                        let local = (pieces != [frame]).then(|| ([frame[2], frame[3]], local_rects(frame, &pieces)));
+                        let local = (pieces != [frame] || hits != [frame])
+                            .then(|| ([frame[2], frame[3]], local_rects(frame, &pieces), local_rects(frame, &hits)));
                         if last.borrow().get(&key) == Some(&local) {
                             continue;
                         }
-                        if set_mask(view.raw(), frame, &pieces) {
+                        if set_mask(view.raw(), frame, &pieces, &hits) {
                             last.borrow_mut().insert(key, local);
                         } else {
                             let this = this.clone();
@@ -322,12 +333,13 @@ mod native {
         }
     }
 
-    pub(super) fn set_mask(view: &wry::WebView, frame: R, visible: &[R]) -> bool {
+    /// Paints the page only in `visible` and lets it take clicks only in `hits` (a subset).
+    pub(super) fn set_mask(view: &wry::WebView, frame: R, visible: &[R], hits: &[R]) -> bool {
         let webview = view.webview();
         let Some(clip) = container(&webview) else {
             return false;
         };
-        if visible == [frame] {
+        if visible == [frame] && hits == [frame] {
             clear_mask(view);
             return true;
         }
@@ -356,7 +368,7 @@ mod native {
         unsafe {
             layer.setMask(Some(&shape));
         }
-        *clip.ivars().borrow_mut() = Some(rects);
+        *clip.ivars().borrow_mut() = Some(local_rects(frame, hits));
         true
     }
 }

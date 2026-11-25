@@ -2117,6 +2117,23 @@ fn warn_unhonoured_a11y(behavior: &Behavior, component: &str, honoured: &[&str])
     }
 }
 
+thread_local! {
+    static MENU_COVERS: std::cell::RefCell<std::collections::HashMap<String, Bounds<Pixels>>> = Default::default();
+}
+
+const MENU_COVER: &str = "canopy-menu-cover:";
+
+/// The painted boxes of open menus (script ids starting `canopy-menu-cover:`), as of the last paint.
+/// The host masks native views under exactly these.
+pub fn menu_covers() -> Vec<Bounds<Pixels>> {
+    MENU_COVERS.with(|covers| covers.borrow().values().copied().collect())
+}
+
+/// Forgets the boxes of one menu once it closes (`prefix` is `canopy-menu-cover:<overlay>:`).
+pub fn forget_menu_covers(prefix: &str) {
+    MENU_COVERS.with(|covers| covers.borrow_mut().retain(|key, _| !key.starts_with(prefix)));
+}
+
 /// A plain `div` becomes stateful when a state style needs an identity, or when
 /// the script named it.
 ///
@@ -2183,6 +2200,12 @@ fn flex_element(
     let stateful = components::dock::with_commands(stateful, &behavior, runtime, cx);
     let stateful = with_aria(stateful, &behavior);
     let mut stateful = with_active_and_focus(stateful, &states);
+    if let Some(marker) = behavior.key.as_ref().filter(|key| key.starts_with(MENU_COVER)) {
+        let marker = marker.to_string();
+        stateful = stateful.on_prepaint(move |bounds, _, _| {
+            MENU_COVERS.with(|covers| { covers.borrow_mut().insert(marker.clone(), bounds); });
+        });
+    }
     if !behavior.disabled
         && let Some(callback) = behavior.on_click
     {
