@@ -4643,9 +4643,12 @@ mod input_tests {
 
         let zoom = Modifiers { platform: cfg!(target_os = "macos"), control: !cfg!(target_os = "macos"), ..none };
         wheel(cx, position, 1000., TouchPhase::Moved, zoom);
-        assert!(camera(cx).zoom > before.zoom);
+        let limit = camera(cx).zoom;
+        assert!(limit > before.zoom);
+        wheel(cx, position, 1000., TouchPhase::Moved, zoom);
+        assert_eq!(camera(cx).zoom, limit, "zoom stops at the limit instead of stretching past it");
         wheel(cx, position, 0., TouchPhase::Ended, none);
-        assert!(view.update(cx, |this, _| this.canvas_state.motion.target.is_some()), "a zero-delta end starts settling at the zoom limit");
+        assert!(view.update(cx, |this, _| this.canvas_state.motion.target.is_none() && this.canvas_state.wheel_zoom.is_none()), "nothing to spring back from");
 
         let before = camera(cx);
         cx.simulate_event(PinchEvent { position, delta: -0.1, modifiers: none, phase: TouchPhase::Moved });
@@ -4657,10 +4660,10 @@ mod input_tests {
         cx.simulate_event(notch);
         cx.executor().advance_clock(WHEEL_GESTURE / 2);
         cx.run_until_parked();
-        assert!(view.read_with(cx, |this, _| this.canvas_state.motion.target.is_none()), "new wheel input postpones settling");
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wheel_zoom.is_some()), "new wheel input postpones the gesture end");
         cx.executor().advance_clock(WHEEL_GESTURE / 2);
         cx.run_until_parked();
-        assert!(view.read_with(cx, |this, _| this.canvas_state.motion.target.is_some()), "wheel input without an end settles after a quiet period");
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wheel_zoom.is_none()), "wheel input without an end ends after a quiet period");
     }
 
     #[gpui::test]
