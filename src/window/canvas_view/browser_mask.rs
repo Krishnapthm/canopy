@@ -153,7 +153,8 @@ impl AppWindow {
                     let canvas = bounds.get("browser-canvas").copied();
                     let mut overlays: Vec<_> = bounds.iter().filter(|(k, _)| k.starts_with("cover:")).collect();
                     overlays.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
-                    let overlays: Vec<_> = overlays.into_iter().map(|(_, bounds)| rect(*bounds)).collect();
+                    let mut overlays: Vec<_> = overlays.into_iter().map(|(_, bounds)| rect(*bounds)).collect();
+                    overlays.extend(gpui_shell::menu_covers().into_iter().map(rect));
                     let controls = controls.borrow();
                     for (key, id, view, expanded, docked, above) in pages {
                         let host = if docked && !expanded {

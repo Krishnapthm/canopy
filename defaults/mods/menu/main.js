@@ -206,8 +206,8 @@ export default class Menu extends View {
   }
 
   // One menu box: the rows of `list`, `at` highlighted.
-  box(t, list, at, row) {
-    return v_flex().w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(ui.size.radius).shadow_lg().text_size(ui.size.text)
+  box(t, list, at, row, part) {
+    return v_flex().id(`canopy-menu-cover:${props()?.overlay}:${part}`).w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(ui.size.radius).shadow_lg().text_size(ui.size.text)
       // Clicks inside the box never reach the root, which closes the menu.
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .children(list.map((it, i) => !it[1]
@@ -245,6 +245,10 @@ export default class Menu extends View {
     const inSub = sub && this.subAt >= 0;
     // The submenu hangs beside its row: rows above it, their rules and the box padding.
     const top = this.sub ? list.slice(0, this.sub.i + 1).reduce((y, it, i) => y + (it[1] || !it[2]?.label ? ROW : LABEL) + (rule(list, i) || it[2]?.label ? 9 : 0), 5) - ROW - 5 : 0;
+    // The submenu box, or a zero-size marker so the host's mask forgets a closed one.
+    const subBox = () => sub
+      ? div().mt(top).child(this.box(t, sub, this.subAt, (row, it) => row.on_click(() => this.run(it)), "sub"))
+      : div().id(`canopy-menu-cover:${props()?.overlay}:sub`).absolute().w(0).h(0);
     return h_flex()
       .id("menu")
       .track_focus(this.handle)
@@ -252,6 +256,8 @@ export default class Menu extends View {
       .min_h(0)
       .items_start()
       .gap(4)
+      // Near the right edge the host moves the frame left: the box stays under the pointer, the submenu opens on its left.
+      .when(Boolean(p?.flip), el => el.justify_end())
       // The overlay is wider than the menu, for the submenu: a click on the empty part closes it.
       .on_mouse_down("left", () => closeOverlay(props().overlay))
       .on_key_down((e, cx) => {
@@ -276,6 +282,7 @@ export default class Menu extends View {
         else return;
         cx.notify();
       })
+      .when(Boolean(p?.flip), el => el.child(subBox()))
       .child(this.box(t, list, this.at, (row, it, i) => row
         .on_hover((on, cx) => {
           if (!on) return;
@@ -284,8 +291,7 @@ export default class Menu extends View {
           else if (this.sub) { this.sub = null; cx.notify(); }
           else cx.notify();
         })
-        .on_click((_e, cx) => this.choose(i, cx))))
-      .when(Boolean(sub), el => el.child(div().mt(top)
-        .child(this.box(t, sub ?? [], this.subAt, (row, it) => row.on_click(() => this.run(it))))));
+        .on_click((_e, cx) => this.choose(i, cx)), "main"))
+      .when(!p?.flip, el => el.child(subBox()));
   }
 }

@@ -3801,6 +3801,13 @@ impl AppWindow {
         let defaults = self.folders.get(name).map(|f| mod_overlay(&f.dir)).unwrap_or_else(|| json!({}));
         let home = target["group"].is_null();
         let mut spec = terminal_menu_spec(name, &defaults, tab, target);
+        // A menu opens a submenu beside itself (the frame is two boxes wide). Near the right edge the
+        // frame moves left so its first box stays under the pointer and the submenu opens on the left.
+        let frame = settings::z(spec["width"].as_f64().unwrap_or(220.0) as f32);
+        if tab != "primary" && let Some(x) = menu_flip(self.pointer.x, frame, settings::z(MENU_BOX), window.viewport_size().width) {
+            spec["at"] = json!({"x": f32::from(x), "y": f32::from(self.pointer.y)});
+            spec["props"]["flip"] = json!(true);
+        }
         let id = if tab == "primary" {
             const ID: &str = "main-menu";
             if name == "menu" {
@@ -3997,6 +4004,7 @@ impl AppWindow {
             }
             self.bounds.borrow_mut().remove(&o.slot);
             self.bounds.borrow_mut().remove(&format!("cover:overlay:{}", o.id));
+            gpui_shell::forget_menu_covers(&format!("canopy-menu-cover:{}:", o.id));
             self.remove_copy(&o.slot, window, cx);
             if o.layout.is_some() {
                 self.sync(window, cx);
@@ -4634,20 +4642,26 @@ impl AppWindow {
             let id = o.id.clone();
             // Up to 1: a share of the window (terminals in overlays want room, not px).
             let span = |v: f32, full: Pixels| if v <= 1.0 { full * v } else { settings::z(v) };
-            let (w, h) = (span(o.size.width, viewport.width), span(o.size.height, viewport.height));
+            let (mut w, mut h) = (span(o.size.width, viewport.width), span(o.size.height, viewport.height));
+            // A menu never outgrows the window it floats in.
+            if o.kind == OverlayKind::Popup {
+                (w, h) = (w.min(viewport.width - px(16.)), h.min(viewport.height - px(16.)));
+            }
             let sized = |v: f32| v > 0.0 || o.kind != OverlayKind::Window;
             let content = match &o.layout {
                 Some(l) => self.render_node(l, &HashSet::new(), None, cx),
                 None => self.render_slot(&o.slot, cx),
             };
             let bounds = self.bounds.clone();
+            // The menu mod reports its painted boxes itself (`gpui_shell::menu_covers`), so its empty frame stays clickable.
+            let is_menu = self.copies.get(&o.slot).is_some_and(|copy| copy.inst.name == "menu");
             let cover = format!("cover:overlay:{}", o.id);
             let mut measure = Some(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
                 .absolute().size_full());
             let body = div()
                 .id(SharedString::from(format!("ov-{}", o.id)))
                 .relative()
-                .children(if o.kind == OverlayKind::Dialog { None } else { measure.take() })
+                .children(if o.kind == OverlayKind::Dialog || is_menu { None } else { measure.take() })
                 .track_focus(&o.focus)
                 // Esc stays with terminals (agents use it to interrupt) and windows.
                 .when(o.layout.is_none() && o.kind.modal_keys(), |d| d.key_context("Overlay"))
@@ -4914,6 +4928,15 @@ fn home() -> String {
 fn mod_overlay(dir: &std::path::Path) -> Value {
     let meta: Value = std::fs::read_to_string(dir.join("mod.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     meta.get("overlay").cloned().filter(Value::is_object).unwrap_or_else(|| json!({}))
+}
+
+/// The width of one menu box in defaults/mods/menu/main.js (WIDTH there).
+const MENU_BOX: f32 = 220.0;
+
+/// Where a menu frame (`frame` wide, its first box `one` wide) starts when it would run past the
+/// right edge at `x`: moved left so the first box stays under the pointer. None when it fits or has no submenu room.
+fn menu_flip(x: Pixels, frame: Pixels, one: Pixels, viewport: Pixels) -> Option<Pixels> {
+    (frame > one && x + frame + px(8.) > viewport).then(|| (x - (frame - one)).max(px(8.)))
 }
 
 fn terminal_menu_spec(name: &str, defaults: &Value, tab: &str, target: Value) -> Value {
@@ -5837,6 +5860,16 @@ mod tests {
                 assert_eq!(bounds.origin, point(px(100.0), px(200.0)));
             }
         }
+    }
+
+    #[test]
+    fn menu_frame_flips_left_only_when_it_would_leave_the_window() {
+        let (frame, one, vw) = (px(444.), px(220.), px(1000.));
+        assert_eq!(super::menu_flip(px(300.), frame, one, vw), None);
+        assert_eq!(super::menu_flip(px(900.), frame, one, vw), Some(px(676.)), "the first box stays under the pointer");
+        assert_eq!(super::menu_flip(px(900.), one, one, vw), None, "a menu without submenu room is left to the window snap");
+        assert_eq!(super::menu_flip(px(560.), frame, one, vw), Some(px(336.)));
+        assert_eq!(super::menu_flip(px(100.), frame, one, px(400.)), Some(px(8.)), "never off the left edge");
     }
 
     #[test]
