@@ -1749,11 +1749,8 @@ impl AppWindow {
             let local_url = local.as_ref().map(|(address, _, _)| address.clone());
             let is_local = local.is_some();
             let download_error = send(Event::LoadError);
-            let builder = if is_local {
-                wry::WebViewBuilder::new().with_incognito(true)
-            } else {
-                browser_store(wry::WebViewBuilder::new()).with_url(url)
-            };
+            // Local pages share the web store: in an incognito store their live view never drew.
+            let builder = if is_local { browser_store(wry::WebViewBuilder::new()) } else { browser_store(wry::WebViewBuilder::new()).with_url(url) };
             let webview = builder
                 .with_navigation_handler(move |url| {
                     let permitted = permits_navigation(local_url.as_deref(), &url);
