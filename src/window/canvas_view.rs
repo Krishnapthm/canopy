@@ -3812,10 +3812,10 @@ impl AppWindow {
         let control = || div().flex().items_center().gap(px(4.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         // Expanded, the file panel fills the window: no space tabs, canvas or canvas controls.
         let expanded = state.panel_expanded && (state.file.is_some() || state.files);
-        let strip = if expanded { bg } else { "chrome" };
+        let strip = "chrome";
         // The expanded browser's tab is the active one; the place it came from draws inactive.
         let home_active = state.doc.room.is_none() && state.browser_tab.is_none();
-        let home_tab = strip_tab("canvas-home", home_active, c(bg), c(strip)).group("canvas-home").role(gpui::Role::Tab).aria_label("Home").aria_selected(home_active).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
+        let home_tab = strip_tab("canvas-home", home_active, c(bg), c(strip)).role(gpui::Role::Tab).aria_label("Home").aria_selected(home_active).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
             .cursor_pointer()
             .text_color(c(if home_active { "foreground" } else { "muted-foreground" }))
             .hover(|d| d.text_color(c("foreground")))
@@ -3835,7 +3835,7 @@ impl AppWindow {
             let group = SharedString::from(format!("space-tab-{id}"));
             let status = self.model.rollup(&space.tabs.iter().flat_map(|t| crate::model::addresses(&t.root)).collect::<Vec<_>>());
             let name = self.model.space_name(space, &home());
-            space_tabs = space_tabs.child(strip_tab(group.clone(), active, c(bg), c(strip)).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(name.clone()).flex().items_center()
+            space_tabs = space_tabs.child(strip_tab(group.clone(), active, c(bg), c(strip)).role(gpui::Role::Tab).aria_selected(active).aria_label(name.clone()).flex().items_center()
                 .h_full().w(px(180.)).min_w(px(96.)).gap(px(6.)).px(px(12.))
                 .text_size(px(12.)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
                 .hover(|d| d.text_color(c("foreground"))).cursor_pointer()
@@ -3984,7 +3984,7 @@ impl AppWindow {
                 let activate = tab.clone();
                 let close = tab.clone();
                 let group = SharedString::from(format!("panel-tab-{key}"));
-                tabs = tabs.child(strip_tab(group.clone(), active, c("hover"), c(bg)).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(label.clone()).flex().items_center().h_full()
+                tabs = tabs.child(strip_tab(group.clone(), active, c(bg), c("chrome")).role(gpui::Role::Tab).aria_selected(active).aria_label(label.clone()).flex().items_center().h_full()
                     .w(px(180.)).min_w(px(96.)).px(px(12.)).gap(px(6.))
                     .text_size(px(12.)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
                     .hover(|d| d.text_color(c("foreground"))).cursor_pointer()
@@ -4011,12 +4011,12 @@ impl AppWindow {
                                 this.close_panel_tab(&close, window, cx);
                             })))));
             }
-            // The panel's part of the bar shares its color, like Claude's side panel header.
+            // The panel's part of the bar is the strip; its active tab flows into the panel body.
             bar = bar.child(div().capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, _| {
                 if e.button == MouseButton::Left { this.canvas_state.close_panel_focus = true; }
             })).flex().flex_none().when(expanded, |d| d.flex_1()).when(!expanded, |d| d.w(px(width))).h_full().items_center()
                 .pr(px(8.)).gap(px(4.))
-                .bg(c(bg)).border_b_1().border_color(c("border"))
+                .bg(c("chrome"))
                 .child(tabs)
                 .children(browser_actions)
                 .child(panel_button("panel-expand", if expanded { "mods/pane/unzoom.svg" } else { "mods/pane/zoom.svg" }, c("muted-foreground"), c("hover"))
@@ -4310,18 +4310,26 @@ fn action_binding(keys: &[(String, String, String)], command: &str) -> Option<St
         .map(|(_, key, _)| key.clone())
 }
 
-/// A top-strip tab: radius 8 on top and, when active, outward bottom curves that join it
-/// to what's below. GPUI can't round a corner outward, so each curve is an 8 px square of
-/// the tab's `fill` under a square of the `strip` color rounded on the corner facing the tab.
-fn strip_tab(id: impl Into<ElementId>, active: bool, fill: Hsla, strip: Hsla) -> Stateful<Div> {
+/// A Chrome-style tab for every strip: radius 8 on top and, when active, the body's `fill`
+/// with outward bottom curves that join it to the body below. GPUI can't round a corner
+/// outward, so each curve is an 8 px square of `fill` under a square of the `strip` color
+/// rounded on the corner facing the tab. `group` is its id and hover group.
+/// Inactive tabs end in a 1 px divider, hidden next to the active or hovered tab: the active
+/// tab's curves paint over its left neighbour's divider, a hovered tab masks it.
+fn strip_tab(group: impl Into<SharedString>, active: bool, fill: Hsla, strip: Hsla) -> Stateful<Div> {
+    let group = group.into();
     let curve = |left: bool| {
         div().absolute().bottom_0().size(px(ui::RADIUS)).bg(fill)
             .map(|d| if left { d.left(px(-ui::RADIUS)) } else { d.right(px(-ui::RADIUS)) })
             .child(div().size_full().bg(strip)
                 .map(|d| if left { d.rounded_br(px(ui::RADIUS)) } else { d.rounded_bl(px(ui::RADIUS)) }))
     };
-    div().id(id).relative().rounded_t(px(ui::RADIUS))
+    let line = || div().absolute().top(px(10.)).bottom(px(10.)).w(px(1.));
+    div().id(group.clone()).group(group.clone()).relative().rounded_t(px(ui::RADIUS))
         .when(active, |d| d.bg(fill).child(curve(true)).child(curve(false)))
+        .when(!active, |d| d
+            .child(line().right_0().bg(c("border")).group_hover(group.clone(), |d| d.opacity(0.)))
+            .child(line().left(px(-1.)).bg(strip).opacity(0.).group_hover(group, |d| d.opacity(1.))))
 }
 
 /// A 24 px plain icon button for canvas and panel controls.

@@ -607,8 +607,9 @@ impl AppWindow {
         let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return None };
         let docked = host == Host::Pane && self.canvas_state.doc.docked(id);
         let tint = docked.then(|| self.docked_tab(id, cx).2).flatten();
-        // The background behind the tabs: the Files strip, else the pane or pop-out header.
-        let strip_color = if docked { self.person.canvas_color.as_deref().unwrap_or("canvas") } else { "surface" };
+        // Docked, the tabs sit on the Files strip and the active one flows into the panel body;
+        // in a pane or pop-out header they sit on the header.
+        let (strip_color, fill) = if docked { ("chrome", self.person.canvas_color.as_deref().unwrap_or("canvas")) } else { ("surface", "hover") };
         let mut strip = div().id(SharedString::from(format!("{id}-tabs")))
             .flex().items_center().h_full()
             .when(docked, |d| d.flex_none())
@@ -622,7 +623,7 @@ impl AppWindow {
             let group = SharedString::from(format!("{id}-tab-{}", tab.id));
             // shortcut: a globe for every tab, no favicons: loading one would be a request outside WebKit.
             // The same tab as the Files strip, so pages and files read as one set of tabs.
-            strip = strip.child(strip_tab(group.clone(), selected, c("hover"), c(strip_color)).group(group.clone())
+            strip = strip.child(strip_tab(group.clone(), selected, c(fill), c(strip_color))
                 .flex().items_center().h_full().w(px(180.)).min_w(px(96.)).flex_shrink_1().pr(px(4.)).text_size(px(12.))
                 .text_color(c(if selected { "foreground" } else { "muted-foreground" }))
                 .hover(|d| d.text_color(c("foreground")))
