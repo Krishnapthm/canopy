@@ -684,6 +684,7 @@ when there is one); the rest of the file still applies. The corresponding `.erro
 
 - `canvas_color`: null follows the theme; a hex color overrides the canvas background.
 - `canvas_gap`: gap between cells and spaces in world pixels (default 24, 0..1024).
+- `canvas_constrain`: true (default) keeps the camera near its panes and limits zoom out to fit all; false allows free panning and the full zoom range.
 - `tile_gap`: gap between cells in tile view in world pixels (default 0, 0..1024).
 - `tile_focus_grows`: false (default) keeps every tile the same size; true lets the selected tile take more room.
 - `canvas_push`: "live" (default) pushes neighbours while dragging; "drop" waits for release; "off" never pushes, so cells may overlap (Home still keeps spaces apart).
@@ -1111,7 +1112,7 @@ Home / space; `canvas.home` goes back and `canvas.space {direction: "next" | "pr
 goes into another space. The app reopens in the space it closed in, and each place keeps its own
 camera (`cameras`). Each pane records its `space`.
 
-Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor.
+Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor. Canvas zoom changes pane frames. Terminal text and PDF page zoom have their own controls.
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
 `canvas.arrange {layout?: "tidy" | "row" | "column" | "wires", space?, picker?}`
 arranges selected cells or the current space; no layout repeats the last choice.

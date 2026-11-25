@@ -12,8 +12,10 @@ An empty space (or Home with no spaces) shows shortcut hints for new terminal, n
 
 - **Pan:** scroll over the canvas (two fingers on a trackpad), drag with the middle mouse button, or hold `Space` and drag. You can also turn on the **Hand** tool on the toolbar and drag with the left button.
 - **Zoom:** hold `Cmd` (`Ctrl` on Linux and Windows) and scroll, or pinch. Zoom follows the pointer.
-- **Zoom limits:** zooming in stops while the biggest pane still fits the window with a margin, so no pane ever runs off screen. Zooming out stops once everything fits (or at 100% if everything already fits). Past either limit the zoom gives a little, then springs back.
+- **Zoom limits:** with **Limit canvas navigation** on, zooming out stops once everything fits (or at 100% if everything already fits), and zooming in stops while the biggest pane fits with a margin. Turn it off to use the full zoom range.
 - **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
+
+Canvas zoom changes pane frames. Terminal text and PDF pages keep their own zoom, unless the viewer is set to fit its pane. By default, panning stays near the panes and zooming out stops at fit-all. Under **Settings** > **Look** > **Canvas**, turn off **Limit canvas navigation** to pan freely and use the full zoom range. Empty canvases remain free to navigate.
 
 Pan and zoom work over empty canvas and over any pane you have not entered. An entered terminal keeps plain scroll for its output. Pinch and `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) still zoom the canvas over a terminal.
 
@@ -100,6 +102,7 @@ Edit these in `settings.json` (see [Settings and Themes](Settings-and-Themes)).
 
 | Setting | Default | What it does |
 |---|---|---|
+| `canvas_constrain` | `true` | Keeps panning near the panes and limits zooming out to fit-all. |
 | `canvas_gap` | `24` | Space between panes and between space cards, in canvas pixels. |
 | `canvas_push` | `"live"` | `"live"` moves neighbors while you drag, `"drop"` waits until you let go, `"off"` lets panes overlap. Space cards on Home are always kept apart. |
 | `space_fill` | `0.04` | How strongly space cards on Home are tinted with their color, from 0 to 1. |

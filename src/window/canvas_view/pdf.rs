@@ -90,7 +90,6 @@ impl AppWindow {
             let id = pane.id.clone();
             view.update(cx, |view, cx| {
                 view.set_show_header(false, cx);
-                view.fit_width(cx);
                 view.set_highlights(view_marks(highlights), cx);
                 let (owner, pane) = (weak.clone(), id.clone());
                 view.set_on_create_highlight(Rc::new(

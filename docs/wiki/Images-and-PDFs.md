@@ -26,7 +26,7 @@ The image helper bar also has **Connect** and **Close**.
 
 ![A PDF pane with highlighted text](images/images-and-pdfs-1.png)
 
-PDF panes let you read, search, highlight and quote a document.
+PDF panes let you read, search, highlight and quote a document. They open at 100% zoom. Zooming the canvas changes how much of the PDF you can see, while the page stays at its own zoom.
 
 ### Find text
 

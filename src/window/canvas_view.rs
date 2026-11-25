@@ -339,6 +339,11 @@ impl State {
         }
     }
 
+    pub(super) fn moving_geometry(&self) -> bool {
+        self.preview_drag.is_some() || self.space_drag.is_some() || self.cell_resize.is_some()
+            || matches!(self.drag, Some((Some(_), _)))
+    }
+
     fn resizing_pane(&self) -> bool {
         self.cell_resize.is_some() || matches!(self.preview_drag, Some((_, Some(_), _)))
     }
@@ -727,10 +732,22 @@ impl AppWindow {
                     if speed != [0., 0.] {
                         let now = std::time::Instant::now();
                         pan = speed.map(|v| v * now.duration_since(last).as_secs_f32().min(0.05));
-                        this.canvas_state.doc.camera.pan(pan);
-                        this.canvas_state.edge_drag = Some((position, now));
-                        this.apply_resize(position, pan, window, cx);
-                        this.layout_frame(window, cx);
+                        let before = this.canvas_state.doc.camera;
+                        let mut requested = before;
+                        requested.pan(pan);
+                        this.canvas_state.doc.camera = requested;
+                        this.constrain_camera(window, cx);
+                        let camera = &mut this.canvas_state.doc.camera;
+                        // Edge-pan only follows the pointer. Leave recentering to the end of the drag.
+                        camera.x = camera.x.clamp(before.x.min(requested.x), before.x.max(requested.x));
+                        camera.y = camera.y.clamp(before.y.min(requested.y), before.y.max(requested.y));
+                        camera.zoom = before.zoom;
+                        pan = [(before.x - camera.x) * camera.zoom, (before.y - camera.y) * camera.zoom];
+                        if pan != [0., 0.] {
+                            this.canvas_state.edge_drag = Some((position, now));
+                            this.apply_resize(position, pan, window, cx);
+                            this.layout_frame(window, cx);
+                        }
                     }
                 }
                 let moved = this.apply_canvas_move(pan, cx);
@@ -1394,6 +1411,7 @@ impl AppWindow {
             self.canvas_state.doc.panel.space = Some(id.clone());
             self.model.active = Some(id.clone());
         }
+        self.constrain_camera(window, cx);
         if first { self.canvas_command("canvas.fit", window, cx); }
         self.canvas_changed(cx);
         self.focus.focus(window, cx);
@@ -1519,8 +1537,16 @@ impl AppWindow {
 
     /// How far the camera may zoom in this place (see `canvas::zoom_range`).
     fn zoom_range(&self, window: &Window, cx: &App) -> [f32; 2] {
-        let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
+        let size = self.canvas_bounds().map(|b| b.size).unwrap_or(window.viewport_size());
+        if !self.person.canvas_constrain { return [canvas::ZOOMS[0], canvas::ZOOMS[11]]; }
         canvas::zoom_range(&self.place_rects(|_| true, cx), [f32::from(size.width), f32::from(size.height)])
+    }
+
+    pub(super) fn constrain_camera(&mut self, window: &Window, cx: &App) {
+        if !self.person.canvas_constrain || !self.has_canvas() || self.canvas_state.panel_expanded { return; }
+        let size = self.canvas_bounds().map(|b| b.size).unwrap_or(window.viewport_size());
+        let rects = self.place_rects(|_| true, cx);
+        canvas::constrain_camera(&mut self.canvas_state.doc.camera, &rects, [f32::from(size.width), f32::from(size.height)]);
     }
 
     /// `zoom_range` widened to hold the current zoom, for gestures and zoom steps: a zoom left
@@ -1812,7 +1838,7 @@ impl AppWindow {
         self.set_expanded(&addr, expand, window, cx);
     }
 
-    /// The camera zoom moved by a gesture: expanded cells draw flat until it has rested for a moment.
+    /// Delay terminal grid resizing until a canvas zoom gesture settles.
     fn zoom_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
         if !state.doc.panes.iter().any(|c| c.size().is_some()) { return; }
@@ -1826,7 +1852,7 @@ impl AppWindow {
         }));
     }
 
-    /// Whether the camera has rested, so expanded cells may draw live text at its zoom.
+    /// Whether expanded cells can refit their terminal grids.
     fn camera_rested(&self) -> bool {
         let state = &self.canvas_state;
         state.motion.target.is_none() && state.zoomed_at.is_none()
@@ -1844,6 +1870,7 @@ impl AppWindow {
             self.canvas_state.motion.target = None;
             self.canvas_state.motion.velocity = [0.; 2];
             self.canvas_state.doc.camera.pan([delta.x.into(), delta.y.into()]);
+            self.constrain_camera(window, cx);
             self.canvas_state.wheel_pan_at = Some(std::time::Instant::now());
             self.canvas_changed(cx);
             cx.notify();
@@ -1888,6 +1915,7 @@ impl AppWindow {
         let z = self.canvas_state.doc.camera.zoom * canvas::zoom_factor(delta);
         let z = canvas::rubber_band(z, self.gesture_range(window, cx));
         self.canvas_state.doc.camera.zoom_at(z, anchor);
+        self.constrain_camera(window, cx);
         self.zoom_moved(window, cx);
         self.canvas_changed(cx);
         cx.notify();
@@ -1972,6 +2000,7 @@ impl AppWindow {
                     active = v[0].abs().max(v[1].abs()) > 5.;
                     if !active { *v = [0.; 2]; }
                 }
+                this.constrain_camera(window, cx);
                 if active { this.animate_camera(window, cx); }
                 else { this.canvas_changed(cx); }
                 cx.notify();
@@ -3182,7 +3211,7 @@ impl AppWindow {
                     cx.notify();
                 }),
             )
-            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
                 // The button came up outside the window: end any drag instead of panning on hover.
                 if e.pressed_button.is_none()
                     && matches!(this.canvas_state.drag, Some((None, _)))
@@ -3218,6 +3247,7 @@ impl AppWindow {
                 this.canvas_state.motion.velocity = [d[0]/dt, d[1]/dt];
                 this.canvas_state.motion.sample = Some(now);
                 this.canvas_state.doc.camera.pan(d);
+                this.constrain_camera(window, cx);
                 this.canvas_state.pan_moved = true;
                 this.canvas_state.drag.as_mut().unwrap().1 = e.position;
                 this.canvas_changed(cx);
@@ -3611,22 +3641,21 @@ impl AppWindow {
                 pills.push((paint_order(&card), pill.into_any_element()));
                 continue;
             }
-            // The body: the terminal, or a flat stand-in when too far out to read. It draws live at every zoom frame; its PTY grid waits for `settled`.
+            // The terminal keeps its text size as the frame changes; its PTY grid waits for `settled`.
             let slot = cell_slot(&card.id);
-            // The entered cell always draws live: its terminal holds the keyboard, Cmd+Esc included.
             let entered = state.entered() == Some(card.id.as_str());
-            let live = self.terms.get(&slot).filter(|_| entered || z >= canvas::EXPANDED_MIN_ZOOM);
-            let body_size = size(px(card.rect[2] - 2.), px(card.rect[3] - canvas::header_world(z) - 2.));
+            let live = self.terms.get(&slot);
+            let body_size = size(px((cw * z - 2.).max(1.)), px((ch * z - canvas::HEADER - 2.).max(1.)));
             // A tile squeezed below readable size shows who it is instead, and its program keeps its grid.
             let compact = state.tile.is_some() && !entered && (cw < canvas::TILE_COMPACT[0] || ch < canvas::TILE_COMPACT[1]);
-            if let Some(t) = self.terms.get(&slot) {
+            if let Some(t) = live {
                 let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.id);
                 // The grid follows the cell only once the zoom rests, else a pinch resizes the program every frame.
                 let settled = !resizing && !compact && self.camera_rested();
                 t.view.update(cx, |v, cx| {
                     // Unentered cells let the wheel through, so the canvas pans over them.
                     v.wheel_needs_focus = true;
-                    v.set_scale(z, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
+                    v.set_scale(1., settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
                 });
             }
             let (select_addr, mode_addr) = (card.id.clone(), card.id.clone());
@@ -4581,6 +4610,7 @@ mod input_tests {
         let (view, cx) = open_window(cx, "canvas-input", "", json!({"id":"root","type":"canvas"}));
         cx.run_until_parked();
         view.update_in(cx, |this, window, cx| {
+            this.person.canvas_constrain = false;
             this.model.add_space("root", "Canvas", &super::super::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
             this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
             this.canvas_state.doc.panes = serde_json::from_value(json!([
@@ -4740,6 +4770,44 @@ mod settings_tests {
     #[test]
     fn pane_moves_follow_frames_and_flush_on_release() {
         in_own_process("window::canvas_view::settings_tests::queued_moves");
+    }
+
+    #[test]
+    fn constrained_camera_stays_put_while_moving_a_pane() {
+        in_own_process("window::canvas_view::settings_tests::camera_during_drag");
+    }
+
+    #[gpui::test]
+    fn camera_during_drag(cx: &mut TestAppContext) {
+        if !running_alone("window::canvas_view::settings_tests::camera_during_drag") { return; }
+        let (view, cx) = open_window(cx, "camera-drag", "", json!({"id":"root","type":"canvas"}));
+        view.update_in(cx, |this, _, cx| {
+            assert!(this.person.canvas_constrain);
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"p1","kind":"image","props":{"path":"/missing.png"},"rect":[100,100,200,150],"z":0}
+            ])).unwrap();
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let before = view.read_with(cx, |this, _| this.canvas_state.doc.camera);
+        view.update_in(cx, |this, _, cx| {
+            this.canvas_state.drag = Some((Some("p1".into()), point(px(0.), px(0.))));
+            this.canvas_state.doc.panes[0].rect[0] += 100.;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.doc.camera), before);
+        view.update_in(cx, |this, _, cx| { this.canvas_state.drag = None; cx.notify(); });
+        cx.run_until_parked();
+        let settled = view.read_with(cx, |this, _| this.canvas_state.doc.camera);
+        assert_eq!(settled.x, before.x + 100.);
+        view.update_in(cx, |this, _, cx| {
+            this.person.canvas_constrain = false;
+            this.canvas_state.doc.panes[0].rect[0] += 100.;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.doc.camera), settled);
     }
 
     #[gpui::test]
@@ -5014,6 +5082,7 @@ mod pane_action_tests {
         let (view, cx) = open_window(cx, "pane-overlap", "", json!({"id":"root","type":"canvas"}));
         cx.run_until_parked();
         cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.person.canvas_constrain = false;
             this.model.add_space("root", "Canvas", &super::super::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
             this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
             this.canvas_state.doc.panes = serde_json::from_value(json!([

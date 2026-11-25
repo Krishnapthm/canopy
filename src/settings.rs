@@ -394,6 +394,7 @@ person_settings! {
     #[serde(skip_serializing_if = "is_true")]
     confirm_close_terminal: bool = true => "Ask before closing a plain terminal cell.";
     canvas_color: Option<String> = None => "Canvas background; null follows the theme.";
+    canvas_constrain: bool = true => "Keep the canvas camera near its panes and limit zoom out to fit all.";
     canvas_gap: f32 = 24. => "Cell and space gap in world pixels (0..1024).";
     tile_gap: f32 = 0. => "Gap between cells in tile view in world pixels (0..1024).";
     tile_focus_grows: bool = false => "In tile view the selected tile takes more room; off keeps every tile the same size.";
@@ -517,6 +518,8 @@ fn is_true(b: &bool) -> bool {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Whether the camera stays near canvas content.
+    pub canvas_constrain: bool,
     /// Cell and space gap in world pixels.
     pub canvas_gap: f32,
     /// Whether neighbours move during a drag or on release.
@@ -585,6 +588,7 @@ impl Default for Settings {
     fn default() -> Self {
         let person = Person::default();
         Settings {
+            canvas_constrain: person.canvas_constrain,
             canvas_gap: person.canvas_gap,
             canvas_push: person.canvas_push,
             browser_keep_cookies: person.browser_keep_cookies,
@@ -632,6 +636,7 @@ impl Settings {
             None => (DEFAULT_LIGHT.to_owned(), DEFAULT_DARK.to_owned()),
         };
         Settings {
+            canvas_constrain: person.canvas_constrain,
             canvas_gap: person.canvas_gap,
             canvas_push: person.canvas_push,
             browser_keep_cookies: person.browser_keep_cookies,
@@ -1163,6 +1168,8 @@ mod tests {
     #[test]
     fn canvas_settings_validate_and_reference_every_default() {
         let defaults = parse_person("{}").unwrap();
+        assert!(defaults.canvas_constrain);
+        assert!(!parse_person(r#"{"canvas_constrain":false}"#).unwrap().canvas_constrain);
         assert_eq!(defaults.canvas_gap, 24.);
         assert_eq!(defaults.canvas_push, CanvasPush::Live);
         assert!(defaults.canvas_resize_terminals);
