@@ -86,6 +86,7 @@ pub struct Model {
     pub spaces: Vec<Space>,
     /// The selected space.
     pub active: Option<String>,
+    /// Closed spaces, newest first, one per folder; opening a space in a folder takes it off.
     pub recent: Vec<Recent>,
     /// Each pane's live folder, for its display name.
     pub pane_folders: BTreeMap<String, String>,
@@ -270,7 +271,7 @@ impl Model {
     pub fn add_space(&mut self, id: &str, name: &str, folder: &str, ctx: Tab) {
         let active = Some(ctx.id.clone());
         self.spaces.push(Space { id: id.to_owned(), name: name.to_owned(), folder: folder.to_owned(), machine: None, tabs: vec![ctx], active, rest: Default::default() });
-        self.recent.retain(|r| r.name != name);
+        self.recent.retain(|r| r.folder != folder);
         self.active = Some(id.to_owned());
     }
 
@@ -397,12 +398,12 @@ impl Model {
         (addresses(&removed.root), closed)
     }
 
-    /// Removes a space (remembered in `recent`). Returns its terminal addresses.
+    /// Removes a space (remembered in `recent`, one entry per folder). Returns its terminal addresses.
     pub fn remove_space(&mut self, id: &str) -> Vec<String> {
         let Some(pi) = self.spaces.iter().position(|p| p.id == id) else { return vec![] };
         let was_active = self.active_index() == Some(pi);
         let p = self.spaces.remove(pi);
-        self.recent.retain(|r| r.name != p.name);
+        self.recent.retain(|r| r.folder != p.folder);
         self.recent.insert(0, Recent { name: p.name.clone(), folder: p.folder.clone() });
         self.recent.truncate(20);
         if was_active {
@@ -742,6 +743,15 @@ mod tests {
         assert_eq!(m.remove_pane("x4", true), (true, false));
         assert!(m.space("p4").is_some_and(|p| p.tabs.is_empty() && p.active.is_none()));
         assert!(m.recent.is_empty());
+        // Unnamed spaces are remembered by folder: closing two keeps both, and opening one
+        // takes off only its own folder.
+        m.add_space("p5", "", "/a", Tab::new("c5", "", "x5", "t5"));
+        m.add_space("p6", "", "/b", Tab::new("c6", "", "x6", "t6"));
+        m.remove_space("p5");
+        m.remove_space("p6");
+        assert_eq!(m.recent.iter().map(|r| r.folder.as_str()).collect::<Vec<_>>(), ["/b", "/a"]);
+        m.add_space("p7", "", "/a", Tab::new("c7", "", "x7", "t7"));
+        assert_eq!(m.recent, [Recent { name: String::new(), folder: "/b".into() }]);
     }
 
     #[test]

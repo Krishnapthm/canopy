@@ -462,7 +462,7 @@ Enter enters the selected cell; Esc clears the selection, then goes Home. `canva
 every selected pane (else the focused one) behind one dialog that lists them, with "Terminate and close all" and
 "Cancel". With `confirm_close_terminal: false` in settings.json (default true) and no agent among them they close
 without asking. `canvas.close {terminal}` closes one cell: running agents ask "Terminate agent?", plain terminals
-"Close this terminal?". Selected file panes close without a dialog; their files stay.
+"Close this terminal?". Selected file panes close without a dialog; their files stay. A space outlives its terminals: `tab.close` on its last tab needs `confirmed: true`.
 Done sub-agent cells clear; working ones refuse with a toast.
 Hover or select a terminal or file pane for its helper bar above the top-left corner.
 Terminals offer Enter, Expand or Collapse, Connect and Close; files offer Open as tab

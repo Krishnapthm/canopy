@@ -3029,13 +3029,14 @@ impl AppWindow {
     fn recent_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         if self.canvas_state.doc.room.is_some() { return Vec::new(); }
         let home = super::home();
-        let open: Vec<String> = self.model.spaces.iter().map(|s| self.model.space_name(s, &home)).collect();
+        // Open spaces by folder, as `Model::recent` keys them; the Home space is not one to reopen.
+        let open: Vec<&str> = self.model.spaces.iter().filter(|s| !root_space(s)).map(|s| s.folder.as_str()).collect();
         let shown = |folder: &str| match folder.strip_prefix(home.trim_end_matches(['/', '\\'])) {
             Some(rest) if home.len() > 1 && (rest.is_empty() || rest.starts_with(['/', '\\'])) => format!("~{rest}"),
             _ => folder.to_owned(),
         };
         self.model.recent.iter().map(|r| (if r.name.is_empty() { crate::model::folder_name(&r.folder, &home) } else { r.name.clone() }, r))
-            .filter(|(name, _)| !open.contains(name)).take(5).enumerate().map(|(i, (name, r))| {
+            .filter(|(_, r)| !open.contains(&r.folder.as_str())).take(5).enumerate().map(|(i, (name, r))| {
                 let (reopen, folder) = (json!({"name":r.name,"folder":r.folder}), shown(&r.folder));
                 div().id(("recent-space", i)).h(px(28.)).px(px(8.)).rounded(px(4.)).flex().items_center().gap(px(12.))
                     .text_size(px(12.)).cursor_pointer().hover(|d| d.bg(c("hover")))

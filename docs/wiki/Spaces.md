@@ -60,9 +60,9 @@ Give a space a color to recognize its panes at a glance. For example, choose **t
 
 Select **Delete space** (or click **Close space** on its tab), then click **Delete** in the confirmation dialog.
 
-Closing the last terminal in a space does not delete it. The space stays open with its files, browsers and other panes until you delete it.
+Closing the last terminal in a space does not delete it. The space stays open with its files, browsers and other panes until you delete it. Closing the tab that holds a space's last terminals asks first, and an agent running `tab.close` must pass `confirmed: true`.
 
-Home lists up to five recently closed spaces under its shortcut hints, each with its folder. Click one to open it again in that folder. A space that is already open is not listed.
+Home lists up to five recently closed spaces under its shortcut hints, each with its folder. Click one to open it again in that folder. Canopy remembers one closed space per folder, and a folder that already has an open space is not listed.
 
 ## Worktree spaces
 

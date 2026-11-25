@@ -577,7 +577,8 @@ The main ones:
   props?}` for a tab whose only pane is a mod (a file, a board; split a shell
   in beside it like any tab), `tab.close {id?, confirmed?}` (in a classic layout,
   closing the last tab closes its space and asks first unless confirmed; on a canvas
-  the space stays open without terminals, and only `space.close` removes it),
+  the space stays open without terminals, and only `space.close` removes it, but
+  ending its last terminals still asks first unless confirmed),
   `tab.rename {id?, name}` ("": its number again), `tab.move {id, index}`,
   `tab.select {index | id}`, `tab.next`, `tab.prev`,
   `tab.settle {id?}`, `tab.unsettle {id?}` (index, next and prev

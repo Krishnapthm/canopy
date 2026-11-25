@@ -3226,12 +3226,23 @@ impl AppWindow {
                 let Some(id) = Self::owned(a, "id").or(active_ctx) else { return self.fail("no tab to close") };
                 let Some(p) = self.model.space_of(&id) else { return self.fail(format!("no tab {id:?}")) };
                 // In a classic layout the last tab takes its space with it: ask like closing the
-                // space. On a canvas the space stays open without terminals.
+                // space. On a canvas the space stays open without terminals, but ending its last
+                // ones still needs the same yes.
                 let canvas = self.has_canvas();
                 if p.tabs.len() == 1 && !canvas {
                     let mut args = json!({ "id": p.id });
                     args["confirmed"] = a.get("confirmed").cloned().unwrap_or(Value::Null);
                     return self.dispatch("space.close", &args, person, window, cx);
+                }
+                let last = (p.tabs.len() == 1).then(|| crate::model::addresses(&p.tabs[0].root).len()).filter(|n| *n > 0);
+                if let Some(n) = last && a.get("confirmed").and_then(Value::as_bool) != Some(true) {
+                    if !person {
+                        return self.fail("tab.close ends the last terminals of its space: pass confirmed: true");
+                    }
+                    let detail = format!("The last {} in {} end{}. The space stays open. This cannot be undone.",
+                        if n == 1 { "terminal".to_owned() } else { format!("{n} terminals") }, self.model.space_name(p, &home()), if n == 1 { "s" } else { "" });
+                    self.confirm("Close terminals?", &detail, "Close", "tab.close", json!({ "id": id, "confirmed": true }), window, cx);
+                    return;
                 }
                 let (addrs, _) = self.model.remove_tab(&id, canvas);
                 self.kill(&addrs, cx);
