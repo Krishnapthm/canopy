@@ -151,7 +151,7 @@ impl AppWindow {
         };
         let measure = |key: String| {
             let bounds_map = self.bounds.clone();
-            canvas(move |b, _, _| { bounds_map.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().size_full()
+            canvas(move |b, _, _| { bounds_map.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full()
         };
         let drag = self.float_drag.as_ref().filter(|d| d.id == f.id && d.moving);
         let (edge, _) = drag.map_or((f.edge, f.align), |d| d.target);
@@ -192,7 +192,9 @@ impl AppWindow {
             let x = if edge == Edge::Right { c.width - n.width } else { px(0.0) };
             inner = inner.absolute().left(x + pad).top(pad);
         }
-        let (id, owner_id, hover_id) = (f.id.clone(), owner.id.clone(), f.id.clone());
+        let owner_bounds = if matches!(owner.kind, Kind::Canvas) { "canopy-canvas" }
+            else { &owner.id };
+        let (id, owner_id, hover_id) = (f.id.clone(), owner_bounds.to_owned(), f.id.clone());
         let mut body = div()
             .id(SharedString::from(slot.clone()))
             .relative()
@@ -217,6 +219,17 @@ impl AppWindow {
             body = body.left(a.from.x * left).top(a.from.y * left);
         }
         // The outer box is what's measured and placed: the spring offset doesn't move it.
+        if !empty && natural.is_some() && matches!(owner.kind, Kind::Canvas) {
+            let bounds = self.bounds.clone();
+            let key = format!("cover:canvas-float:{}", f.id);
+            body = body.child(canvas(move |b, window, _| {
+                let visible = b.intersect(&window.content_mask().bounds);
+                if visible.size.width > px(0.) && visible.size.height > px(0.) {
+                    bounds.borrow_mut().insert(key, visible);
+                }
+            // Pinned to the corner: after the content, an absolute box without insets sits below it.
+            }, |_, _, _, _| {}).absolute().top_0().left_0().size_full());
+        }
         let mut outer = div().relative().flex_none().child(measure(slot.clone())).child(body);
         if natural.is_none() {
             // Measured once before it shows, so it never flashes open.
@@ -224,14 +237,29 @@ impl AppWindow {
         }
 
         let bounds = self.bounds.borrow();
-        if let (Some(d), Some(ob)) = (drag, bounds.get(&owner.id)) {
+        if let (Some(d), Some(ob)) = (drag, bounds.get(owner_bounds)) {
             let size = bounds.get(&slot).map(|b| b.size).unwrap_or_default();
             let x = d.pointer.x - ob.origin.x - size.width * d.grab.0;
             let y = d.pointer.y - ob.origin.y - size.height * d.grab.1;
             return div().absolute().inset_0().child(outer.absolute().left(x).top(y).opacity(0.92)).into_any_element();
         }
-        let mut layer = div().absolute().inset_0().p(settings::z(MARGIN)).flex();
+        let margin = settings::z(MARGIN);
+        let mut layer = div().absolute().inset_0().p(margin).flex();
         layer = if f.edge.vertical() { layer.flex_row() } else { layer.flex_col() };
+        // Longer than its owner along its edge: it scrolls in a lane across the owner instead
+        // of clipping its ends. The lane's padding keeps the frame's shadow.
+        let frame = (pad + border) * 2.0;
+        let overflow = natural.zip(bounds.get(owner_bounds)).is_some_and(|(n, ob)| if f.edge.vertical() {
+            n.height + frame > ob.size.height - margin * 2.0
+        } else {
+            n.width + frame > ob.size.width - margin * 2.0
+        });
+        let outer = if overflow {
+            let lane = div().id(SharedString::from(format!("float-lane:{}", f.id))).flex().p(margin);
+            let lane = if f.edge.vertical() { lane.h_full().flex_col().overflow_y_scroll() } else { lane.w_full().overflow_x_scroll() };
+            layer = layer.p(px(0.0));
+            lane.child(outer).into_any_element()
+        } else { outer.into_any_element() };
         layer = match f.edge {
             Edge::Left | Edge::Top => layer.justify_start(),
             Edge::Right | Edge::Bottom => layer.justify_end(),

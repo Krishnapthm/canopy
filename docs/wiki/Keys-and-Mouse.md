@@ -4,16 +4,22 @@ Every default shortcut and mouse gesture, for reference. In the app, press `?` i
 
 Keys are shown for macOS first. Many canvas-mode keys are single letters, and work only when the canvas has the keyboard (see [Concepts](Concepts#typing-into-a-pane-and-canvas-mode)).
 
+
+Create a sticky note with `Option+Cmd+N` on macOS or `Ctrl+Alt+N` on Linux and Windows.
 ## Mouse
 
 - Click a pane to select it. Drag it to move the selection. `Shift`+click adds or removes a pane.
 - Drag empty canvas to select panes with a box. Hold `Shift` to add to the selection.
 - Double-click a terminal pane to enter it. Click empty canvas or another pane to leave it.
-- Pan with `Space`+drag, middle-button drag or trackpad scrolling. Pinch or use `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) to zoom.
+- Pan with `Space`+drag, middle-button drag or wheel or two-finger scroll. Scroll pans over empty canvas and panes you have not entered. Inside an entered terminal, plain scroll moves through its output.
+- Pinch or use `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) to zoom the canvas around the pointer.
+- Drag a pane edge or corner to resize. Moving a pane until it touches a canvas edge pans the canvas that way. While resizing, hold the pointer near a canvas edge to pan. See [Canvas](Canvas#select-and-move-panes).
 
 ## Show keys
 
 Hold `Cmd` (`Ctrl` on Linux and Windows) alone for 0.4 seconds to show shortcut hints, including with a terminal entered. Release it or press a key to hide the hints.
+
+On Linux, **F10** opens the [Main Menu](Linux-Desktop).
 
 ## Canvas mode keys
 
@@ -37,7 +43,7 @@ These keys apply when the canvas has the keyboard and no input has focus. See [C
 | `n` / `Shift+N` | Open a terminal / the installed agent list. |
 | `v` / `t` | Select tool / new note pane. |
 | `Cmd+O` (`Ctrl+O` on Linux and Windows) | Open a file on the canvas. |
-| `Cmd+W` (macOS) | Close the selected browser pane's active tab. Without a single browser pane selected, close the app tab as usual. |
+| `Cmd+W` (macOS) | Close one focused item: the active tab of the Files panel if you last clicked in it, else the one selected pane (a browser pane closes its active tab). With several panes selected, or none, nothing closes. In classic layout it closes the active workspace tab. |
 | `Backspace` / `Delete` | Close the selection. |
 | `?` | Show the full key list. |
 | `q` | Quote the selected image. |

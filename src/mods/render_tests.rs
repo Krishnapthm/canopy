@@ -203,6 +203,7 @@ fn module(values: BTreeMap<String, Value>, calls: Rc<RefCell<Calls>>) -> HostMod
             })
         });
     }
+    module = module.async_function("exec", |_| Ok(async { Ok(to_host(&json!({"code": 0, "stdout": "", "stderr": ""}))) }));
     module = module.async_function("knownAgents", |_| Ok(async { Ok(HostValue::Array(vec![])) }));
     module = module.async_function("pickFolder", |_| Ok(async { Ok(HostValue::Null) }));
     module = module.async_function("nextCommand", |_| Ok(std::future::pending::<gpui_shell::HostResult>()));
@@ -542,15 +543,15 @@ fn tabs_leave_room_for_macos_traffic_lights(cx: &mut TestAppContext) {
     for (platform, titlebar, fullscreen, width, lights, zoom, expected) in [
         ("macos", "none", false, 44, true, 1.0, 32),
         ("macos", "none", false, 44, true, 0.5, 108),
-        ("macos", "none", false, 44, true, 2.0, 10),
+        ("macos", "none", false, 44, true, 2.0, 12),
         ("macos", "none", false, 60, true, 1.0, 16),
-        ("macos", "none", false, 76, true, 1.0, 10),
-        ("macos", "none", false, 268, true, 1.0, 10),
-        ("macos", "none", true, 44, true, 1.0, 10),
-        ("macos", "system", false, 44, true, 1.0, 10),
-        ("macos", "none", false, 44, false, 1.0, 10),
-        ("linux", "none", false, 44, true, 1.0, 10),
-        ("windows", "none", false, 44, true, 1.0, 10),
+        ("macos", "none", false, 76, true, 1.0, 12),
+        ("macos", "none", false, 268, true, 1.0, 12),
+        ("macos", "none", true, 44, true, 1.0, 12),
+        ("macos", "system", false, 44, true, 1.0, 12),
+        ("macos", "none", false, 44, false, 1.0, 12),
+        ("linux", "none", false, 44, true, 1.0, 12),
+        ("windows", "none", false, 44, true, 1.0, 12),
     ] {
         let mut values = fixture(true, props());
         values.insert("window".into(), json!({"platform":platform,"titlebar":titlebar,"fullscreen":fullscreen,"buttons":false}));
@@ -838,6 +839,22 @@ fn option_key_settings_are_only_shown_on_macos(cx: &mut TestAppContext) {
             assert_eq!(tree.contains(&format!("st-option-{value}")), platform == "macos", "{platform}: {tree}");
         }
         assert_eq!(tree.contains("st-s-keyboard"), platform == "macos", "{platform}: {tree}");
+    }
+}
+
+#[gpui::test]
+fn desktop_notification_controls_are_only_shown_on_macos(cx: &mut TestAppContext) {
+    cx.update(gpui_shell::init);
+    let staged = Staged::new();
+    for platform in ["linux", "windows", "macos"] {
+        let mut p = props();
+        p["section"] = json!("alerts");
+        let mut values = fixture(true, p);
+        values.insert("window".into(), json!({"platform":platform}));
+        let tree = describe_with_values(cx, &staged, "frame/settings", values, None).unwrap();
+        assert_eq!(tree.contains("st-desktop-notifications"), platform == "macos", "{tree}");
+        assert_eq!(tree.contains("st-notification-style"), platform == "macos", "{tree}");
+        assert!(tree.contains("st-sounds"), "{tree}");
     }
 }
 

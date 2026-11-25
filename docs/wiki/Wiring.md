@@ -10,14 +10,14 @@ You can wire two agents so they can work together, or wire a file or note pane t
 
 With the mouse:
 
-1. Hover a pane. **+** handles appear on its sides.
+1. Hover a pane. **+** handles appear along the edges with room for them.
 2. Drag a **+** onto another pane in the same space, and let go.
 
 Or click the **+** (or **Connect** in the helper bar), then click the other pane. Press `Esc` or click empty canvas to cancel.
 
 With the keyboard, in canvas mode:
 
-1. Select a pane and press `c`.
+1. Select a pane and press `c`, or choose **Connect** from its right-click menu.
 2. Move to the other pane with `h`, `j`, `k` or `l`.
 3. Press `Enter`.
 
@@ -80,6 +80,10 @@ Some details worth knowing:
 Canopy saves the wires you draw in `canvas.json`. Wires from parents to their helpers and sub-agents are worked out from herdr-core's parent records, so they appear by themselves and cannot be removed.
 
 The wire from a parent glows briefly whenever a child changes state, so you can see activity spread across a team of agents.
+
+A wire takes the color of the pane where you started it, or the parent's color if it appeared automatically. Its end dots use that color too. Wires without a source color use the theme's neutral color.
+
+Wires run behind panes. Select the wire or both of the panes it connects to bring it above the others. While you draw a wire, it follows the pointer above the panes.
 
 ## See also
 

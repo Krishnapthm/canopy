@@ -92,3 +92,36 @@ Not checked: the live pill repro in the app (folded into the phase 1 hand check)
   `.claude/skills/`. Canopy writes `~/.claude/skills/canopy/SKILL.md` (programs.json
   `skills`); a person who sets `CLAUDE_CONFIG_DIR` gets no skill from Canopy yet.
 - Listing and loading it in a live session is not checked here (that needs a paid session).
+
+## Terminal notifications, 2026-11-24 (2.1.322)
+
+The installed executable's embedded JavaScript maps `preferredNotifChannel`
+values `iterm2` and `iterm2_with_bell` to iTerm2 notifications (OSC 9).
+`ghostty` maps to Ghostty notifications (OSC 777). The embedded settings
+screen labels both OSC values explicitly. `auto` picks the corresponding
+channel for a detected iTerm2 or Ghostty terminal. Canopy's launch environment
+advertises `TERM_PROGRAM=herdr`, so use an explicit OSC channel when checking
+message capture in Canopy. The terminal bell, Kitty OSC 99 and disabled
+channels supply no OSC 9/777 text.
+
+Checked with `claude --version` and the installed binary's strings. Live PTY
+output at turn completion or a permission prompt still needs a session.
+
+## Notification evidence, 2026-11-24
+
+- Installed `claude --version` reports 2.1.322 and `claude --help` lists
+  `auto` under `--permission-mode`. The installed executable contains
+  `Claude needs your permission` and `AskUserQuestion` strings. This is
+  static evidence of the wording and tool, separate from the live approval
+  and completion status observations above (scratch hc 0.1.20).
+- Installed `hc --version` reports 0.1.22. The pinned core source documents
+  permission and question kinds on a blocked root OSC 7501 report. Canopy
+  uses the current report for alert copy. OSC 9/777 notifications and
+  terminal titles have no status event identifier linking them to that report.
+- The reported Auto-mode screenshot showed a finished alert with permission
+  text in its body. Live Auto-mode desktop delivery and the exact
+  AskUserQuestion report kind on hc 0.1.22 still need isolated verification.
+
+## Usage help, 2026-11-24 (2.1.322)
+
+`claude --help` does not document a read-only non-interactive `/usage` interface. Its `--bare` mode explicitly excludes OAuth and keychain reads. No session or authenticated request was started, so a safe isolated way to read usage remains unverified.

@@ -18,7 +18,7 @@ What you can select depends on the pane:
 | File, or a preview in the Files panel | Select text. |
 | Image | Drag a region, or click **Quote image** for the whole image. See [Images and PDFs](Images-and-PDFs). |
 | PDF | Turn on **Highlight text**, then drag across text. See [Images and PDFs](Images-and-PDFs). |
-| Browser | Run `canvas.browser_pick`, then click an element. See [Browser Pane](Browser-Pane#pick-an-element-to-quote). |
+| Browser | Click **Annotate**, then click an element. Use **Copy reference** to copy the URL and source location or selector for the selected element. See [Browser Pane](Browser-Pane#annotate). |
 | Terminal | Not supported. Selecting terminal text copies it. |
 
 ## Choose the agent
@@ -43,7 +43,7 @@ Every quote starts with `@` and the source: a file path (relative to the agent's
 | Image region | `@path region x,y WxH crop-path`, where `crop-path` is a saved copy of the region. |
 | Whole image | `@path` |
 | PDF | `@path page N`, then the passage as `>` lines. |
-| Browser element | `@url`, then the component and source file and lines when known, else a CSS selector, then the element's opening tag or text. |
+| Browser element from `quote.send` | `@url`, then the component and source file and lines when known, else a CSS selector, then the element's opening tag or text. |
 
 For example, three lines of a Rust file with a message:
 
@@ -62,9 +62,9 @@ Review the prompt, then press `Enter` in the agent to send it.
 
 ## Send an annotation
 
-Annotations from a browser or simulator pane go straight to its sole wired agent. When you need to choose a target, **Send** opens the quote menu and keeps the same choices, including **New agent with this**.
+Annotations from a browser or simulator pane go straight to its sole wired agent. With none or several wired, you choose the agent with the button next to **Annotate**, which lists wired agents first and then the other running ones. **Send** does not open the quote menu, so **New agent with this** is not offered.
 
-Canopy pastes the annotated screenshot and any area crops as separate image paths, then pastes the numbered comments and submits the prompt. If the agent runs on another machine, Canopy copies the images there first. It presses `Enter` only once the pasted text shows in the agent's prompt, and never while the agent is waiting for an approval: answer that first, then send again. If the agent stops accepting input after the paste, the text stays in its prompt unsubmitted and the annotation closes, so it is never sent twice. [Browser Pane](Browser-Pane#annotate) and [Simulator Devices](Simulator-Devices#annotate) describe the annotation tools.
+Canopy pastes the annotated screenshot as an image path, then pastes the numbered comments and submits the prompt. If the agent runs on another machine, Canopy copies the images there first. It presses `Enter` only once the pasted text shows in the agent's prompt, and never while the agent is waiting for an approval: answer that first, then send again. If the agent stops accepting input after the paste, the text stays in its prompt unsubmitted and the annotation closes, so it is never sent twice. [Browser Pane](Browser-Pane#annotate) and [Simulator Devices](Simulator-Devices#annotate) describe the annotation tools.
 
 ## See also
 

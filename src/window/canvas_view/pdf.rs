@@ -90,7 +90,6 @@ impl AppWindow {
             let id = pane.id.clone();
             view.update(cx, |view, cx| {
                 view.set_show_header(false, cx);
-                view.fit_width(cx);
                 view.set_highlights(view_marks(highlights), cx);
                 let (owner, pane) = (weak.clone(), id.clone());
                 view.set_on_create_highlight(Rc::new(
@@ -214,6 +213,10 @@ impl AppWindow {
             .to_string_lossy()
             .into_owned();
         let detail = path.parent().unwrap_or(path).to_string_lossy().into_owned();
+        // The page scales with the canvas like a picture; a pinned pane keeps its screen size.
+        let scale = if card.pinned.is_some() { 1. } else { camera.zoom };
+        let crisp = self.camera_rested();
+        view.update(cx, |view, cx| view.set_display_scale(scale, crisp, cx));
         let body = div()
             .size_full()
             .child(view.clone())
@@ -290,6 +293,9 @@ impl AppWindow {
                 "canvas.pdf_highlight" => view.toggle_select_mode(cx),
                 "canvas.pdf_prev" => view.prev_page(cx),
                 "canvas.pdf_next" => view.next_page(cx),
+                "canvas.pdf_zoom_out" => view.zoom_out(cx),
+                "canvas.pdf_zoom_reset" => view.reset_zoom(cx),
+                "canvas.pdf_zoom_in" => view.zoom_in(cx),
                 _ => unreachable!(),
             });
         } else {

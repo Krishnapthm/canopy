@@ -112,6 +112,8 @@ export interface TabInfo {
   working_since: number | null;
 }
 
+export type Hue = "gray" | "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "purple";
+
 export interface SpaceInfo {
   id: string;
   index: number;
@@ -126,6 +128,8 @@ export interface SpaceInfo {
   machine: string | null;
   /** The git branch of the terminal it shows first, if any. */
   branch: string | null;
+  /** Inherited canvas hue, or null for a gray space or a space without a canvas card. */
+  color: Hue | null;
   /** The shown space. */
   active: boolean;
   /** Most urgent agent status in it (blocked > done > working > idle), or null. */
@@ -187,7 +191,7 @@ export function agents(): AgentInfo[];
 export interface PaneInfo {
   pane: string;
   /** null for a mod pane (`pane.split {mod}`): then `mod` names it, and only
-   *  pane, mod, tab, title, focused and zoomed are set. */
+   *  pane, mod, tab, title, focused, zoomed and movable are set, and color is null. */
   terminal: string | null;
   mod?: string;
   tab: string;
@@ -196,6 +200,8 @@ export interface PaneInfo {
   /** Its live folder, and the git branch there. */
   cwd: string | null;
   branch: string | null;
+  /** The terminal's effective canvas hue, or null if it has none. */
+  color: Hue | null;
   /** Agent status if the program reports one, else null. */
   status: Status | null;
   app: string | null;
@@ -222,6 +228,8 @@ export interface CanvasPane {
   z: number;
   /** The space it lives in; absent on Home. */
   space?: string;
+  /** The pane's own hue. When absent it inherits the space's hue. */
+  color?: Hue;
 }
 
 export interface CanvasBrowserPane extends CanvasPane {
@@ -314,7 +322,8 @@ export function placement(): {
 /** Every theme color by name: background (the terminals'), surface, canvas (behind cards),
  *  chrome (sidebars and bars), popover, raised, hover, selected, border, input, foreground,
  *  muted, dim, accent, accent_foreground, solid and solid_foreground (a primary button: ink on
- *  paper, paper on ink), selection, working, blocked, done, idle, unknown, ansi0..ansi15.
+ *  paper, paper on ink), selection, working, blocked, done, idle, unknown, ansi0..ansi15,
+ *  and `tint-<hue>` for each canvas Hue.
  *  Light and dark themes name the same colors, so a mod that uses them follows both. */
 export function theme(): Record<string, string>;
 

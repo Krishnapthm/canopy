@@ -73,9 +73,10 @@
     "cmd-backspace": "send:\u0015"
   },
   "layout:main": {
+    "cmd-alt-n": "canvas.note_new",
     "cmd-a": "canvas.select_all",
     "cmd-t": "canvas.browser_tab_new",
-    "cmd-w": "canvas.browser_tab_close",
+    "cmd-w": "canvas.close_focused",
     "cmd-shift-t": {"command": "canvas.new", "args": {"like": true}},
     "ctrl-=": "canvas.zoom_in",
     "ctrl-+": "canvas.zoom_in",

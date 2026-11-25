@@ -11,8 +11,8 @@ pub fn groups(view: &View) -> Vec<(&'static str, Vec<Value>)> {
             json!(["Open File", "preview.open", {}]),
             json!(["Open Space", "canvas.create", {"kind":"space"}]),
             Value::Null,
-            json!(["Pop Out Panel", "panel.pop_out", {}]),
-            json!(["Close Panel", "panel.close", {}]),
+            json!(["Pop Out Pane", "panel.pop_out", {}]),
+            json!(["Close Pane", "panel.close", {}]),
         ]),
         ("Edit", vec![
             json!(["Copy", "terminal.copy", {}]),
@@ -39,9 +39,52 @@ pub fn groups(view: &View) -> Vec<(&'static str, Vec<Value>)> {
     ]
 }
 
+/// Builds the rows for the in-window menu and its pages.
+pub fn popup(view: &View, group: Option<&str>) -> Option<Value> {
+    let groups = groups(view);
+    let mut home: Vec<_> = groups.iter()
+        .filter(|(name, _)| *name != "Help")
+        .map(|(name, _)| json!([name, "app.menu", {"group":name}]))
+        .collect();
+    home.push(json!(["Settings", "app.settings", {}]));
+    let mut pages = serde_json::Map::new();
+    for (name, rows) in groups {
+        let mut entries = vec![json!(["Back", "app.menu", {}])];
+        for mut row in rows.into_iter().filter(|row| !row.is_null()) {
+            if row[3] == true {
+                row[0] = json!(format!("✓ {}", row[0].as_str().unwrap()));
+            }
+            row.as_array_mut().unwrap().truncate(3);
+            if name == "Help" {
+                home.push(row.clone());
+            }
+            entries.push(row);
+        }
+        pages.insert(name.into(), json!(entries));
+    }
+    let items = match group {
+        Some(name) => pages.get(name)?.clone(),
+        None => json!(home),
+    };
+    Some(json!({"items":items, "home":home, "groups":pages, "group":group}))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn popup_has_direct_settings_and_plain_group_labels() {
+        let menu = popup(&View::Agents, None).unwrap();
+        let rows = menu["items"].as_array().unwrap();
+        assert_eq!(rows[0], json!(["File", "app.menu", {"group":"File"}]));
+        assert!(rows.contains(&json!(["Settings", "app.settings", {}])));
+        assert!(rows.contains(&json!(["Keyboard Shortcuts", "app.help", {}])));
+        let view = popup(&View::Agents, Some("View")).unwrap();
+        assert_eq!(view["items"][0], json!(["Back", "app.menu", {}]));
+        assert_eq!(view["items"][1][0], "✓ Agents");
+        assert!(popup(&View::Agents, Some("unknown")).is_none());
+    }
+
     #[test]
     fn menus_share_valid_commands_and_one_active_view() {
         for view in [View::Agents, View::All, View::Terminals] {

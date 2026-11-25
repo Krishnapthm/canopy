@@ -357,6 +357,15 @@ fn resolve(p: &Palette, overrides: &BTreeMap<String, String>) -> Theme {
     for (k, v) in overrides {
         t.insert(k.clone(), v.clone());
     }
+    let (toward, amount) = if light { (0, 0.12) } else { (0xffffff, 0.45) };
+    for hue in crate::canvas::Hue::ALL {
+        let key = hue.tint_token();
+        if !t.contains_key(&key) {
+            let Rgb(r, g, b) = rgb(&t[&hue.name()]);
+            let base = u32::from_be_bytes([0, r, g, b]);
+            t.insert(key, hex(mix(base, toward, amount)));
+        }
+    }
     t
 }
 
@@ -397,6 +406,9 @@ person_settings! {
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
     zoom: f32 = 1.0 => "Whole app scale (0.5..3).";
+    #[serde(skip_serializing_if = "is_true")]
+    run_in_background: bool = true => "On macOS, hide Canopy on Quit and keep it running in the menu bar.";
+    desktop_notifications: bool = true => "Show macOS notifications for agent alerts when Canopy is in the background.";
     sounds: Sounds = Sounds::default() => "Attention sounds: enabled, done and blocked file overrides.";
     #[serde(skip_serializing_if = "Option::is_none")]
     core: Option<String> = None => "Core binary override, read at startup.";
@@ -547,6 +559,7 @@ pub struct Settings {
     pub minimum_contrast: f32,
     pub option_as_alt: OptionAsAlt,
     pub sounds: Sounds,
+    pub desktop_notifications: bool,
 }
 
 /// Attention sounds: when an agent needs you, and when one finished while you
@@ -599,6 +612,7 @@ impl Default for Settings {
             minimum_contrast: 1.0,
             option_as_alt: OptionAsAlt::Auto,
             sounds: Sounds::default(),
+            desktop_notifications: true,
         }
     }
 }
@@ -643,6 +657,7 @@ impl Settings {
             terminal_padding: look.terminal_padding.unwrap_or(d.terminal_padding),
             terminal_opacity: look.terminal_opacity.unwrap_or(1.0).clamp(0.0, 1.0),
             sounds: person.sounds.clone(),
+            desktop_notifications: person.desktop_notifications,
             clipboard_write: person.clipboard_write,
             minimum_contrast: person.minimum_contrast,
             option_as_alt: person.option_as_alt,
@@ -764,7 +779,7 @@ fn parse_person(text: &str) -> Result<Person, String> {
 }
 
 /// Settings removed from the app, still allowed in old files without a warning.
-const RETIRED_KEYS: &[&str] = &["wire_limit", "wire_budget"];
+const RETIRED_KEYS: &[&str] = &["wire_limit", "wire_budget", "canvas_constrain"];
 
 /// The keys of settings.json that no setting reads, each with a close spelling when there is
 /// exactly one. A warning only: the rest of the file still applies.
@@ -999,6 +1014,9 @@ mod tests {
                 pairs.push(("muted".to_string(), bg, 4.5));
                 pairs.push(("accent".to_string(), bg, 3.0));
             }
+            if [DEFAULT_DARK, DEFAULT_LIGHT].contains(&name) {
+                pairs.extend(crate::canvas::Hue::ALL.map(|hue| (hue.tint_token(), "canvas", 3.0)));
+            }
             for i in 0..16 { pairs.push((format!("ansi{i}"), "background", if [4,5,12,13].contains(&i) { 3.0 } else { 4.5 })); }
             for (fg, bg, min) in pairs {
                 let background = rgb(&t[bg], [0.0;3]);
@@ -1178,6 +1196,15 @@ mod tests {
             assert!(!help.is_empty());
             parse_person(&format!("{{\"{key}\":{default}}}")).unwrap();
         }
+    }
+
+    #[test]
+    fn background_mode_defaults_on_and_preserves_opt_out() {
+        assert!(parse_person(r#"{"zoom":1.5}"#).unwrap().run_in_background);
+        let disabled = parse_person(r#"{"run_in_background":false}"#).unwrap();
+        assert!(!disabled.run_in_background);
+        assert_eq!(serde_json::to_value(disabled).unwrap()["run_in_background"], false);
+        assert!(parse_person(r#"{"run_in_background":"false"}"#).is_err());
     }
 
     /// The guide agents read (written to the home folder) explains every

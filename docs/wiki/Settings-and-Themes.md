@@ -4,7 +4,9 @@ Canopy has two places for preferences. The **Settings** window covers the common
 
 ## Open settings
 
-Press `Cmd+,` (`Ctrl+,` on Linux and Windows).
+On macOS, choose **Settings** in the **Canopy** menu or press **Cmd+,**.
+On Linux, choose **Settings** in the [Main Menu](Linux-Desktop) or press **Ctrl+,**.
+On Windows, press **Ctrl+,**.
 Changes save immediately.
 
 ![The Settings window](images/settings-and-themes-1.png)
@@ -26,6 +28,24 @@ canopy config
 
 See [Canvas](Canvas) and [Terminals](Terminals) for their settings.
 
+## Keep Canopy running on macOS
+
+**Run in Background** keeps Canopy available while its windows are hidden, so you can leave your agents working and return to them later. It is on by default.
+
+Press `Cmd+Q` or choose **Quit Canopy** to hide the app. Click the Canopy icon in the macOS menu bar and choose **Show Canopy** to bring the window forward, or **Quit Canopy** to exit. **Quit** in the Dock also exits the app.
+
+The menu also lists the agent programs in your open spaces. For the local Codex CLI account, it shows used percentages and time until reset when the CLI provides them. Open the menu again after **Refresh Usage** to see the latest result. Canopy rechecks a cached result when it is over a minute old and you open the menu. Other programs show **Unavailable** when Canopy cannot read their usage.
+
+Open **Settings** > **Look** > **App** to turn off **Run in Background**, or set `run_in_background` to `false` in `settings.json`. **Quit Canopy** then exits the app, and Canopy removes its menu bar icon.
+
+## Alerts
+
+Use **Settings** > **Alerts** to control how Canopy gets your attention while agents work. **Desktop notifications** is on by default in the macOS app. In `settings.json`, set `desktop_notifications` to `false` to turn it off. **Play sounds** controls Canopy's alert sounds independently.
+
+Click **Notification style** to open macOS notification settings. Choose **Banners** for notifications that disappear automatically or **Alerts** for notifications that stay until you dismiss them.
+
+To include an agent's message, enable terminal notifications in that agent's own settings. See [Agents](Agents#know-when-an-agent-needs-you) for when Canopy alerts you and where a click takes you.
+
 ## Browser
 
 Open **Settings** > **Look** and scroll to **Browser**. The same settings are available in `settings.json`.
@@ -43,7 +63,7 @@ See [Cookies and site data](Browser-Pane#cookies-and-site-data) for data control
 2. Select **System**, **Light** or **Dark** under **Appearance**.
 3. Click a theme under **Dark** or **Light**.
 
-Each layout keeps its own light and dark theme.
+Each layout keeps its own light and dark theme. Terminal programs that support color scheme reports can follow the terminal background when the theme changes. Programs with a fixed theme keep their own choice.
 The four built-in Canopy and Herdr themes are **Canopy Dark**, **Canopy Light**, **Herdr Dark** and **Herdr Light**.
 The default themes are **Canopy Dark** and **Canopy Light**.
 

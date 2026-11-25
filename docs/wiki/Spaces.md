@@ -43,17 +43,26 @@ The bar across the top of the window, from left to right:
 - **Home** opens Home. It cannot be closed.
 - **Space tabs**, one per space, with a folder icon and the name. A dot marks a space with an agent working or waiting for you. The active tab, and any tab you hover, shows a **Close space** button.
 - **+** opens **New space**.
-- The **grid** button turns on [tile view](Canvas#tile-view).
-- The **folder** button, **Files**, opens or closes the [Files panel](Files-Panel).
+- **Browser** and **Simulator**, when available, open a pane in the [Files panel](Files-Panel).
+- **Tile view** turns on [tile view](Canvas#tile-view).
+- **Files** opens or closes the [Files panel](Files-Panel).
+
+On Linux, the strip also holds [Main Menu and any window controls Canopy draws](Linux-Desktop).
 
 ## Rename, recolor or delete a space
 
 - Double-click a card's name on Home to rename it. Press `Enter` or click elsewhere to save, or `Esc` to cancel.
 - Right-click a card for **Rename**, **Color** or **Delete space**.
 
+Give a space a color to recognize its panes at a glance. For example, choose **teal** for a worktree space to tint its panes and the branch dot in the status strip. Choosing **gray** leaves panes without an inherited tint. A [pane's own color](Panes#color-a-pane) takes priority.
+
 > **Warning:** Deleting a space ends all of its terminals and agents. You cannot undo it.
 
 Select **Delete space** (or click **Close space** on its tab), then click **Delete** in the confirmation dialog.
+
+Closing the last terminal in a space does not delete it. The space stays open with its files, browsers and other panes until you delete it. Closing the tab that holds a space's last terminals asks first, and an agent running `tab.close` must pass `confirmed: true`.
+
+Home lists up to five recently closed spaces under its shortcut hints, each with its folder. Click one to open it again in that folder. Canopy remembers one closed space per folder, and a folder that already has an open space is not listed.
 
 ## Worktree spaces
 

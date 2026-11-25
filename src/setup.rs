@@ -66,10 +66,14 @@ pub fn open(need: Need, requests: async_channel::Receiver<Request>, cx: &mut App
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(620.0), px(460.0)), cx))),
         titlebar: Some(TitlebarOptions { title: Some("Canopy".into()), ..Default::default() }),
-        app_id: Some("dev.canopy.app".into()),
+        app_id: Some(crate::desktop_app_id()),
         ..Default::default()
     };
-    cx.open_window(options, |_, cx| cx.new(|_| Setup { need, state: State::Ready, requests: Some(requests) }))
+    cx.open_window(options, |_window, cx| {
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        _window.observe_button_layout_changed(|window, _| window.refresh()).detach();
+        cx.new(|_| Setup { need, state: State::Ready, requests: Some(requests) })
+    })
         .expect("cannot open the Canopy window");
     cx.activate(true);
 }
@@ -187,7 +191,7 @@ impl Render for Setup {
                 .gap(px(10.0))
                 .child(button("retry", "Retry", true).on_click(cx.listener(|this, _, w, cx| this.start(w, cx)))),
         };
-        div()
+        let tree = div()
             .size_full()
             .flex()
             .items_center()
@@ -217,5 +221,11 @@ impl Render for Setup {
                         State::Failed(e) => div().text_size(px(13.0)).text_color(c("blocked")).child(e.clone()),
                     }),
             )
+            .into_any_element();
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let tree = crate::window::titlebar::linux::frame(
+            tree, "Canopy".into(), true, None, _window, cx, |window, _| window.remove_window(),
+        );
+        tree
     }
 }

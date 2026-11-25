@@ -25,6 +25,8 @@ pub(super) enum SimEvent {
     Changed,
     /// Live failed: show a fresh screenshot instead.
     Fallback,
+    /// Escape returns keyboard input to the canvas, including from a pop-out.
+    FocusCanvas,
 }
 
 /// The live state.
@@ -92,7 +94,7 @@ impl SimScreen {
         let fill = ((bg.r * 255.).round() as u32) << 16 | ((bg.g * 255.).round() as u32) << 8 | (bg.b * 255.).round() as u32;
         let info = cx.spawn(async move |this, cx| {
             let info = cx.background_executor().spawn(async move { sim_live::device_info(&device_type, 3., fill) }).await;
-            let _ = this.update(cx, |this, cx| { this.info = info; cx.notify(); });
+            let _ = this.update(cx, |this, cx| { this.info = info; cx.emit(SimEvent::Changed); cx.notify(); });
         });
         Self {
             pane, device, info: None, shot: None, surface: None, helper: None, live: Live::Off, shown: false, agent_until: None,
@@ -162,7 +164,7 @@ impl SimScreen {
         cx.emit(SimEvent::Changed);
     }
 
-    fn stop(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn stop(&mut self, cx: &mut Context<Self>) {
         // Dropping the helper closes its stdin and it exits; its last events go nowhere.
         self.helper = None;
         self._pump = None;
@@ -235,7 +237,19 @@ impl SimScreen {
         self.info.as_ref().map(|i| i.points).or_else(|| self.surface.as_ref().map(|s| [s.get_width() as f32 / 3., s.get_height() as f32 / 3.]))
     }
 
-    fn fit(&self, room: [f32; 2]) -> Option<sim_live::Fit> {
+    /// The current live frame's pixel dimensions divided by the device scale.
+    pub(super) fn live_points(&self) -> Option<[f32; 2]> {
+        let surface = self.surface.as_ref()?;
+        let scale = self.info.as_ref()?.scale;
+        if !matches!(self.live, Live::On { .. }) || !scale.is_finite() || scale <= 0. { return None; }
+        Some([surface.get_width() as f32 / scale, surface.get_height() as f32 / scale])
+    }
+
+    pub(super) fn outer_points(&self, points: [f32; 2]) -> [f32; 2] {
+        sim_live::outer_size(points, self.info.as_ref().and_then(|i| i.chrome.as_ref()))
+    }
+
+    pub(super) fn fit(&self, room: [f32; 2]) -> Option<sim_live::Fit> {
         let points = self.points()?;
         Some(sim_live::fit(room, points, self.info.as_ref().and_then(|i| i.chrome.as_ref()), MARGIN))
     }
@@ -328,10 +342,10 @@ impl SimScreen {
         }
     }
 
-    fn key_down(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn key_down(&mut self, e: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         if k.key == "escape" && !k.modifiers.modified() {
-            window.blur(cx);
+            cx.emit(SimEvent::FocusCanvas);
             return cx.stop_propagation();
         }
         if !self.input_ready() { return; }
@@ -442,19 +456,11 @@ impl SimScreen {
     /// Starts recording the screen to the Desktop with `simctl io recordVideo`, or stops and
     /// saves a running recording.
     pub fn record(&mut self, by: By, cx: &mut Context<Self>) -> Result<Option<PathBuf>, String> {
-        if let Some(mut recording) = self.recording.take() {
-            recording.stdin = None;
-            let path = recording.path.clone();
-            let elapsed = recording.started.elapsed().as_secs();
-            self.note(by, format!("recorded {}:{:02} to {}", elapsed / 60, elapsed % 60, path.display()));
+        if let Some(saved) = self.finish_recording(by, cx) {
             self._tasks.push(cx.spawn(async move |this, cx| {
-                let done = cx.background_executor().spawn(async move { recording.child.wait().map(|s| s.success()) }).await;
-                let _ = this.update(cx, |_, cx| match done {
-                    Ok(true) => cx.emit(SimEvent::Saved { title: "Saved a screen recording".into(), path }),
-                    _ => cx.emit(SimEvent::Toast("The screen recording could not be saved".into())),
-                });
+                let event = saved.await;
+                let _ = this.update(cx, |_, cx| cx.emit(event));
             }));
-            cx.emit(SimEvent::Changed);
             return Ok(None);
         }
         if !self.device.booted { return Err("Boot the simulator to record it".into()); }
@@ -476,6 +482,22 @@ impl SimScreen {
         self.note(by, format!("started recording to {}", path.display()));
         cx.emit(SimEvent::Changed);
         Ok(Some(path))
+    }
+
+    /// Stops capture and waits off-thread for simctl to finish writing the movie.
+    pub(super) fn finish_recording(&mut self, by: By, cx: &mut Context<Self>) -> Option<Task<SimEvent>> {
+        let Recording { mut child, stdin, path, started, .. } = self.recording.take()?;
+        drop(stdin);
+        let elapsed = started.elapsed().as_secs();
+        self.note(by, format!("recorded {}:{:02} to {}", elapsed / 60, elapsed % 60, path.display()));
+        cx.emit(SimEvent::Changed);
+        Some(cx.background_executor().spawn(async move {
+            if child.wait().is_ok_and(|status| status.success()) {
+                SimEvent::Saved { title: "Saved a screen recording".into(), path }
+            } else {
+                SimEvent::Toast("The screen recording could not be saved".into())
+            }
+        }))
     }
 
     /// Copies the live framebuffer in RGBA for the shared annotation layer.
@@ -530,6 +552,53 @@ fn local(format: &str) -> String {
     }
 }
 
+impl SimScreen {
+    /// Draws the same device frame for live content and a captured annotation still.
+    fn device_frame(&self, mut root: Div, fit: sim_live::Fit, still: Option<Arc<RenderImage>>, cx: Option<&Context<Self>>) -> Div {
+        let at = |r: [f32; 4]| div().absolute().left(px(r[0])).top(px(r[1])).w(px(r[2])).h(px(r[3]));
+        let chrome = self.info.as_ref().and_then(|i| i.chrome.as_ref());
+        // Hardware buttons sit behind the body; a press pushes one in and shows its pressed art.
+        if let Some(chrome) = chrome {
+            for button in &chrome.buttons {
+                let [bx, by, bw, bh] = button.rect;
+                let rect = [fit.body[0] + bx * fit.scale, fit.body[1] + by * fit.scale, bw * fit.scale, bh * fit.scale];
+                if let Some(cx) = cx {
+                    let push = button.press * fit.scale * if bx < 0. { 1. } else { -1. };
+                    let (page, usage, name) = (button.page, button.usage, button.name.clone());
+                    let group = SharedString::from(format!("sim-{}-{}", self.pane, button.name));
+                    root = root.child(at(rect).id(group.clone()).group(group.clone()).cursor_pointer()
+                        .tooltip(strip_tooltip(button.label.clone(), None))
+                        .child(img(button.image.clone()).size_full().group_active(group.clone(), |s| s.left(px(push))))
+                        .child(img(button.down.clone()).absolute().top_0().left(px(push)).size_full().opacity(0.).group_active(group, |s| s.opacity(1.)))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.send(Input::Button { page, usage, down: true });
+                            this.note(By::You, format!("pressed {name}"));
+                        }))
+                        .on_mouse_up(MouseButton::Left, cx.listener(move |this, _: &MouseUpEvent, _, _| this.send(Input::Button { page, usage, down: false })))
+                        .on_mouse_up_out(MouseButton::Left, cx.listener(move |this, _: &MouseUpEvent, _, _| this.send(Input::Button { page, usage, down: false }))));
+                } else {
+                    root = root.child(at(rect).child(img(button.image.clone()).size_full()));
+                }
+            }
+        }
+        // The live framebuffer, or the last screenshot while it is unavailable.
+        let screen = at(fit.screen).bg(gpui::black());
+        root = root.child(match (still, &self.surface, &self.shot) {
+            (Some(still), _, _) => screen.child(img(still).size_full()),
+            (_, Some(surface), _) if matches!(self.live, Live::On { .. }) => screen.child(gpui::surface(surface.clone()).size_full()),
+            (_, _, Some(shot)) => screen.child(img(shot.clone()).size_full()),
+            _ => screen,
+        });
+        if let Some(chrome) = chrome { root = root.child(img(chrome.body.clone()).absolute().left(px(fit.body[0])).top(px(fit.body[1])).w(px(fit.body[2])).h(px(fit.body[3]))); }
+        root
+    }
+
+    pub(super) fn frozen_frame(&self, fit: sim_live::Fit, still: Arc<RenderImage>) -> Div {
+        self.device_frame(div().absolute().top_0().left_0().size_full(), fit, Some(still), None)
+    }
+}
+
 impl Render for SimScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let measured = self.bounds.clone();
@@ -543,7 +612,7 @@ impl Render for SimScreen {
                 }
             },
             |_, _, _, _| {},
-        ).absolute().size_full();
+        ).absolute().top_0().left_0().size_full();
         let mut root = div().id(SharedString::from(format!("sim-screen-{}", self.pane))).size_full().relative()
             .track_focus(&self.focus).on_key_down(cx.listener(Self::key_down))
             .child(measure);
@@ -552,40 +621,11 @@ impl Render for SimScreen {
             // Before the size is known: the screenshot alone, contain-fitted.
             return root.when_some(self.shot.clone(), |d, shot| d.child(img(shot).size_full().p(px(MARGIN)).object_fit(ObjectFit::Contain)));
         };
-        let at = |r: [f32; 4]| div().absolute().left(px(r[0])).top(px(r[1])).w(px(r[2])).h(px(r[3]));
-        let chrome = self.info.as_ref().and_then(|i| i.chrome.as_ref());
-        // Hardware buttons sit behind the body; a press pushes one in and shows its pressed art.
-        if let Some(chrome) = chrome {
-            for button in &chrome.buttons {
-                let [bx, by, bw, bh] = button.rect;
-                let rect = [fit.body[0] + bx * fit.scale, fit.body[1] + by * fit.scale, bw * fit.scale, bh * fit.scale];
-                let push = button.press * fit.scale * if bx < 0. { 1. } else { -1. };
-                let (page, usage, name) = (button.page, button.usage, button.name.clone());
-                let group = SharedString::from(format!("sim-{}-{}", self.pane, button.name));
-                root = root.child(at(rect).id(group.clone()).group(group.clone()).cursor_pointer()
-                    .tooltip(strip_tooltip(button.label.clone(), None))
-                    .child(img(button.image.clone()).size_full().group_active(group.clone(), |s| s.left(px(push))))
-                    .child(img(button.down.clone()).absolute().top_0().left(px(push)).size_full().opacity(0.).group_active(group, |s| s.opacity(1.)))
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, _, cx| {
-                        cx.stop_propagation();
-                        this.send(Input::Button { page, usage, down: true });
-                        this.note(By::You, format!("pressed {name}"));
-                    }))
-                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, _: &MouseUpEvent, _, _| this.send(Input::Button { page, usage, down: false })))
-                    .on_mouse_up_out(MouseButton::Left, cx.listener(move |this, _: &MouseUpEvent, _, _| this.send(Input::Button { page, usage, down: false }))));
-            }
-        }
-        // The live framebuffer, or the last screenshot while it is unavailable.
-        let screen = at(fit.screen).bg(gpui::black());
-        root = root.child(match (&self.surface, &self.shot) {
-            (Some(surface), _) if matches!(self.live, Live::On { .. }) => screen.child(gpui::surface(surface.clone()).size_full()),
-            (_, Some(shot)) => screen.child(img(shot.clone()).size_full()),
-            _ => screen,
-        });
-        if let Some(chrome) = chrome { root = root.child(img(chrome.body.clone()).absolute().left(px(fit.body[0])).top(px(fit.body[1])).w(px(fit.body[2])).h(px(fit.body[3]))); }
+        root = root.child(self.device_frame(div().absolute().top_0().left_0().size_full(), fit, None, Some(cx)));
         // Touch lands on the screen only; a drag keeps going outside it.
         let pane = self.pane.clone();
-        root = root.child(at(fit.screen).id(SharedString::from(format!("sim-{pane}-touch")))
+        let [x, y, w, h] = fit.screen;
+        root = root.child(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).id(SharedString::from(format!("sim-{pane}-touch")))
             .cursor(CursorStyle::Arrow)
             .on_mouse_down(MouseButton::Left, cx.listener(Self::touch_down))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| this.scroll(e, cx))))

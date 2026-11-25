@@ -1,12 +1,16 @@
 # Toolbar and Helper Bar
 
-Canopy has two kinds of button bars. The **toolbar** at the bottom of the canvas creates panes and switches tools. The **helper bar** appears on each pane with the actions that pane kind supports. Between them, nearly everything has a button, and every button shows its keyboard shortcut when you hover it.
+Canopy has two kinds of button bars. The **toolbar** at the bottom of the canvas creates panes and switches tools. The **helper bar** appears on panes with actions outside their header. Between them, nearly everything has a button, and every button shows its keyboard shortcut when you hover it.
+
+The sticky note's helper bar holds its move grip and color swatch.
 
 ## Toolbar
 
 ![The toolbar at the bottom of the canvas](images/toolbar-and-helper-bar-1.png)
 
-The toolbar sits at the bottom center of the canvas layout. From left to right:
+The toolbar floats over the bottom center of the canvas, beside the files panel when it is open. The canvas runs underneath it to the window edge, so panes can pan behind it. Fit, the zoom limits and the empty-canvas hints use the canvas the toolbar leaves open. Drag the toolbar frame to move it to another canvas edge. Scroll along the toolbar if there is too little room for all its buttons.
+
+From left to right, or top to bottom on a side edge:
 
 | Button | What it does |
 |---|---|
@@ -18,7 +22,7 @@ The toolbar sits at the bottom center of the canvas layout. From left to right:
 | Mod pane kinds, such as **Note** | Opens that kind of pane. Each installed [mod pane kind](Layouts-and-Mods#mod-panes) gets a button. |
 | **Connect (select a pane first)** | Starts a wire from the selected pane. Select a pane before you click it. |
 
-**Browser** and **Simulator** sit in the bar at the top right of the window, beside **Tile view** and **Files**. They open the pane pinned: it stays in the top right corner while you pan and zoom the canvas. Click **Move to canvas** on its helper bar to place it on the canvas like any pane, and **Pin to screen** to pin it again. **Browser** shows on macOS only, and **Simulator** only on a Mac where Xcode's `xcrun simctl` is installed.
+**Browser** and **Simulator** sit in the bar at the top right of the window, beside **Tile view** and **Files**. They open the pane docked as a tab in the [files panel](Files-Panel). Choose **Move to canvas** from the browser’s **⋯** menu or from the simulator’s helper bar to place it on the canvas. On the canvas, **Open in panel** docks it again, and **Pin to screen** pins it to the top right corner while you pan and zoom (**Unpin** undoes it). **Browser** shows on macOS only, and **Simulator** only on a Mac where Xcode's `xcrun simctl` is installed.
 
 To wire from the toolbar: select a pane, click **Connect**, use the arrow keys to choose the other pane, and press `Enter` (or `Esc` to cancel). Dragging a pane's **+** handle does the same with the mouse. See [Wiring](Wiring).
 
@@ -28,11 +32,11 @@ The first time you open a space for a local project folder, the toolbar opens **
 
 ![A helper bar above a terminal pane](images/toolbar-and-helper-bar-2.png)
 
-Hover or select a pane, and its helper bar appears just above the pane's top-left corner, outside the content so it never covers what you are reading. It hides while you drag, resize, draw a selection box or select an image region, so it does not get in the way.
+Hover or select a pane to see its helper bar near its top-left corner. If another pane or the canvas edge is in the way, Canopy tries the other sides. Right-click the pane for its actions if no side has enough room. The bar hides while you drag, resize, draw a selection box or select an image region.
 
 Every pane kind's bar ends with the same two buttons:
 
-- **Connect** starts a wire. A line follows the pointer. Click another pane to connect, or press `Esc` or click empty canvas to cancel. **Connect** stays highlighted while the pane has any wire, including the automatic one to a parent agent.
+- **Connect** starts a wire. A line follows the pointer. Click another pane to connect, or press `Esc` or click empty canvas to cancel. **Connect** stays highlighted while the pane has any wire, including the automatic one to a parent agent. In the right-click menu, **Connect** starts the keyboard [wiring](Wiring#draw-a-wire) flow.
 - **Close** closes the pane, with the same rules as anywhere else ([Panes](Panes#close-panes)).
 
 The other buttons depend on the kind. Each kind's page lists them:
@@ -40,11 +44,10 @@ The other buttons depend on the kind. Each kind's page lists them:
 - [Terminals](Terminals): enter, expand or collapse.
 - [File and Note Panes](File-and-Note-Panes): open as a tab.
 - [Images and PDFs](Images-and-PDFs): quote, find, highlight, pages.
-- [Browser Pane](Browser-Pane): back, reload, home, annotate, screenshot, open in your browser.
 - [Simulator Devices](Simulator-Devices): zoom, pop out, choose simulator and open Device Hub. The device actions appear in a bottom bar inside the pane, hidden while annotating.
 - Mod panes show the actions their mod declares. See [Layouts and Mods](Layouts-and-Mods#mod-panes).
 
-Sub-agent panes have no helper bar.
+Browser actions are in the [browser header](Browser-Pane#the-header). Sub-agent panes have no helper bar.
 
 ## Shortcut hints
 

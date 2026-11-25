@@ -6,16 +6,18 @@ The canvas is the open surface that holds a space's panes. Unlike a terminal mul
 
 This page covers moving around, selecting and arranging panes, and the views that help you focus. If "canvas mode" is new to you, read [Concepts](Concepts#typing-into-a-pane-and-canvas-mode) first.
 
-An empty space (or Home with no spaces) shows shortcut hints for new terminal, new agent, go to pane, command palette and fit; a hint shows only when its action has a key.
+An empty space (or Home with no spaces) shows shortcut hints for new terminal, new agent, go to pane, command palette and fit; a hint shows only when its action has a key. Home also lists up to five recently closed spaces under the hints; click one to open it again (see [Spaces](Spaces#rename-recolor-or-delete-a-space)).
 
 ## Move around
 
 - **Pan:** scroll over the canvas (two fingers on a trackpad), drag with the middle mouse button, or hold `Space` and drag. You can also turn on the **Hand** tool on the toolbar and drag with the left button.
 - **Zoom:** hold `Cmd` (`Ctrl` on Linux and Windows) and scroll, or pinch. Zoom follows the pointer.
-- **Zoom limits:** zooming in stops while the biggest pane still fits the window with a margin, so no pane ever runs off screen. Zooming out stops once everything fits (or at 100% if everything already fits). Past either limit the zoom gives a little, then springs back.
-- **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
+- **Zoom limits:** zooming in stops while the biggest pane still fits the canvas the toolbar leaves open, with a margin, and zooming out stops once everything fits (or at 100% if everything already fits). Zoom stops right at the limit, with no bounce. Panning has no limit.
+- **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, clear of the toolbar, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
 
-Scrolling over a terminal you have not entered pans the canvas. Scrolling inside the terminal you have entered scrolls its output.
+Zooming the canvas scales what panes show like a picture: terminal text, PDF pages, web pages, file previews and images grow and shrink with their panes, so nothing reflows or rewraps. A terminal keeps its columns and rows. Pane headers and notes keep their screen size. A PDF's own zoom (its percentage) and a terminal's text zoom are separate and stay as you set them.
+
+Pan and zoom work over empty canvas and over any pane you have not entered. An entered terminal keeps plain scroll for its output. Pinch and `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) still zoom the canvas over a terminal.
 
 Each space, and Home, remembers its own pan and zoom.
 
@@ -26,7 +28,10 @@ In canvas mode, a click on a pane selects it. Selection is how you tell Canopy w
 - `Shift`-click adds a pane to the selection or removes it.
 - Drag on empty canvas to draw a selection box. Hold `Shift` to add to the selection. Click empty canvas to clear it.
 - Drag a selected pane to move the whole selection.
+- Drag a pane until it touches the edge of the canvas and the canvas pans that way to make room. Push further to pan faster, and move back to stop.
 - Arrow keys nudge the selected pane by one gap. `h`, `j`, `k` and `l` (or `Tab` and `Shift+Tab`) move the selection to the nearest pane in that direction.
+
+Drag any edge or corner to resize an expanded terminal or a pane such as a PDF, browser or simulator. While you resize, hold the pointer near the edge of the canvas to pan and reach more room. The canvas pans faster as you approach the edge, and stops when you move back toward the middle or release.
 
 When you drag a pane into others, the neighbors step aside and slide back once you have passed, so panes never end up stacked by accident. The `canvas_push` setting changes this (see [Settings](#settings-that-change-the-canvas)).
 A drag follows the pointer even across other panes. The canvas uses the latest pointer position for each frame and applies any remaining movement when you release. Dragging a selected group moves it together while neighbors slide aside.
@@ -53,7 +58,7 @@ After the first time, **Arrange** repeats your last choice, and `Shift+A` in can
 
 Arrange works on the selected panes if you have selected some, otherwise on the whole space. A space card's menu always arranges that whole space. Pane sizes are kept.
 
-Changed your mind? Click **Undo layout** in the canvas or space menu, or press `Cmd+Z` (`Ctrl+Shift+U` on Linux and Windows). Undo reverses the last move, arrange or file pane resize. It keeps one step, until the window closes. It does not bring back closed panes, and it cannot undo resizing a terminal by its corner.
+Changed your mind? Click **Undo layout** in the canvas or space menu, or press `Cmd+Z` (`Ctrl+Shift+U` on Linux and Windows). Undo reverses the last move, arrange or file pane resize. It keeps one step, until the window closes. Closed panes and terminal sizes stay as they are.
 
 ## Tile view
 
@@ -106,7 +111,9 @@ Edit these in `settings.json` (see [Settings and Themes](Settings-and-Themes)).
 
 ## The status strip
 
-A 24px strip under the canvas shows the branch of the open space (when it has one) and one chip per agent: a status dot and the agent's name, agents that need you first. Click a chip to go to that agent's space and type into it right away. With more than six agents, a final **+N** chip opens the picker. The palette key sits at the right.
+A 24px strip under the canvas shows the branch of the open space (when it has one) and one chip per agent: a colored dot and the agent's name, agents that need you first. Click a chip to go to that agent's space and type into it right away. With more than six agents, a final **+N** chip opens the picker. The palette key sits at the right.
+
+The dot beside the branch uses the [space's color](Spaces#rename-recolor-or-delete-a-space). An agent's name and dot use its [pane color](Panes#color-a-pane), including inherited colors. Without a pane color, the dot shows its current state.
 
 ## How it works
 

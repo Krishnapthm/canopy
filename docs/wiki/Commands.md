@@ -164,6 +164,12 @@ Open the quote popover at point or the pointer: agents wired to the quoted pane 
 | `kind` | no |
 | `source` | no |
 
+## `canvas.close_focused`
+
+Close the focused Files panel tab, or the one selected canvas pane. A browser closes its active tab; with several or no panes selected, nothing closes. Only the person can run it.
+
+No arguments.
+
 ## `canvas.close`
 
 Close every selected pane (else the focused one) behind one dialog listing them, the named terminal, or one file or mod pane by id (pane; a mod pane holding text refuses); terminals and panes are the confirmed lists, closed without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
@@ -177,9 +183,17 @@ Close every selected pane (else the focused one) behind one dialog listing them,
 | `pane` | no |
 | `panes` | no |
 
+## `canvas.note_new`
+
+Open a sticky note on the canvas. The optional point is in world coordinates.
+
+| Argument | Required |
+|---|---|
+| `point` | no |
+
 ## `canvas.pane_new`
 
-Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. The pane opens at point (the middle of the view by default) or at the top right when pinned is true. Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
+Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
 
 | Argument | Required |
 |---|---|
@@ -189,7 +203,17 @@ Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files requi
 | `udid` | no |
 | `wire` | no |
 | `point` | no |
+| `place` | no |
 | `pinned` | no |
+
+## `canvas.pane_dock`
+
+Dock a browser or sim pane as a tab in the Files panel, or with docked false move it back onto the canvas at its saved place. Without docked it toggles. Acts on pane, else the selected pane. Replies with pane and docked.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `docked` | no |
 
 ## `canvas.pane_pin`
 
@@ -236,7 +260,7 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a browser or simulator pane at a target. A browser loads the URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
+Point a browser or simulator pane at a target. A browser loads an HTTP(S) address, an absolute local path or a file URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
 
 | Argument | Required |
 |---|---|
@@ -246,7 +270,7 @@ Point a browser or simulator pane at a target. A browser loads the URL in its ac
 
 ## `canvas.browser_tab_new`
 
-Open a new tab in a browser pane. Pass a URL to load it, or omit url for an empty tab. Replies with pane and tab. With no pane and no single browser pane selected, runs canvas.new.
+Open a new tab in a browser pane. Pass an HTTP(S) address, an absolute local path or a file URL, or omit url for an empty tab. Replies with pane and tab. With no pane and no single browser pane selected, runs canvas.new.
 
 | Argument | Required |
 |---|---|
@@ -305,7 +329,7 @@ Load the URL a browser pane was last opened with (pane, else the selected pane).
 
 ## `canvas.browser_pick`
 
-Make a browser pane live and pick an element on its page; the pick opens the quote popover (pane, else the selected pane).
+Start annotating a browser page with the Select tool: click an element to pin a comment on it (pane, else the selected pane).
 
 | Argument | Required |
 |---|---|
@@ -313,7 +337,7 @@ Make a browser pane live and pick an element on its page; the pick opens the quo
 
 ## `canvas.browser_annotate`
 
-Start or stop annotating a still of a browser page. Acts on pane, else the selected browser pane.
+Start or stop annotating a browser page: select elements, draw, and send comments to an agent. Acts on pane, else the selected browser pane.
 
 | Argument | Required |
 |---|---|
@@ -385,9 +409,17 @@ Set where HTTP and HTTPS links clicked in terminals open: built_in (a browser ta
 |---|---|
 | `open` | yes |
 
+## `canvas.browser_allow_folder`
+
+Ask the person at the window to pick a directory containing the open local file. WebKit can then load assets from that folder for this tab.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
 ## `canvas.browser_open_file`
 
-Pick an .html or .htm file and open it in a new tab of a browser pane (pane, else the selected pane). The only way a file: page loads: the address field and agents are refused file: URLs.
+Pick an .html or .htm file and open it in a new tab of a browser pane (pane, else the selected pane). Opens a native picker for the person at the window.
 
 | Argument | Required |
 |---|---|
@@ -466,7 +498,7 @@ Start or stop annotating a still of a simulator screen. Acts on pane, else the s
 
 ## `canvas.annotate_send`
 
-Submit the annotated screenshot and comments to the wired agent, or open the agent picker. Acts on pane, else the selected annotation.
+Submit the annotated screenshot and comments to the sole wired agent, or the one chosen with canvas.annotate_agent. Acts on pane, else the selected annotation.
 
 | Argument | Required |
 |---|---|
@@ -474,21 +506,38 @@ Submit the annotated screenshot and comments to the wired agent, or open the age
 
 ## `canvas.annotate_action`
 
-Run a drawing tool or toolbar action in an active annotation. Used by its menus.
+Run a tool, colour, stroke, undo or redo in an active annotation, or choose its target agent with `agent:<terminal>`. Used by its menus.
 
 | Argument | Required |
 |---|---|
 | `pane` | yes |
 | `action` | yes |
 
+## `canvas.annotate_agent`
+
+Open the menu that chooses which agent an annotation is sent to (wired agents first). Acts on pane, else the selected annotation.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+
 ## `canvas.sim_zoom`
 
-Resize a simulator pane: step actual (1 point per screen pixel at the current zoom, the default), in or out. Acts on pane, else the selected simulator pane.
+Resize a simulator pane: step actual (one device point per canvas unit, requires a live frame), default (340x700 on screen), in or out. Omit step for actual. Acts on pane, else the selected simulator pane.
 
 | Argument | Required |
 |---|---|
 | `step` | no |
 | `pane` | no |
+
+## `canvas.sim_shutdown`
+
+Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast.
+
+| Argument | Required |
+|---|---|
+| `pane` | no |
+| `close` | no |
 
 ## `canvas.sim_pop`
 
@@ -649,6 +698,33 @@ Set a space color.
 | `id` | yes |
 | `color` | yes |
 
+## `canvas.pane_color`
+
+Set a canvas pane's hue to a named palette color or #RRGGBB. Pass null or omit color to inherit the space's hue.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+| `color` | no |
+
+## `canvas.pane_color_next`
+
+Assign the next unused color in the pane's space.
+
+| Argument | Required |
+|---|---|
+| `pane` | yes |
+
+## `panel.close_tab`
+
+Close a file tab in the Files panel, asking before discarding unsaved changes. The confirm dialog passes confirmed and the draft's generation, and a stale generation closes nothing. Only the person can run it.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+| `confirmed` | no |
+| `generation` | no |
+
 ## `panel.editor`
 
 Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state.
@@ -755,7 +831,7 @@ Make a tab in a space (default: the selected one; name default: none, so it's ca
 
 ## `tab.close`
 
-Close a tab and end its terminals.
+Close a tab and end its terminals. Its space's last terminals need confirmed (a person is asked).
 
 | Argument | Required |
 |---|---|
@@ -1187,7 +1263,7 @@ Open the shared primary command menu, optionally a named group.
 
 ## `app.quit`
 
-Quit (macOS).
+Quit Canopy, or hide it if Run in Background is on (macOS).
 
 No arguments.
 
@@ -1254,6 +1330,32 @@ No arguments.
 ## `canvas.pdf_next`
 
 Go to the next page in the last selected PDF pane.
+
+No arguments.
+
+## `preview.external`
+
+Open a local image or PDF in macOS Preview.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `canvas.pdf_zoom_out`
+
+Zoom out in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_zoom_reset`
+
+Reset zoom in the last selected PDF pane.
+
+No arguments.
+
+## `canvas.pdf_zoom_in`
+
+Zoom in in the last selected PDF pane.
 
 No arguments.
 

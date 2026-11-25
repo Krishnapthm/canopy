@@ -39,6 +39,7 @@ function items(p, git, agents) {
     case "canvas-agents": return agentItems(agents, at);
     case "canvas-empty": return [
       ["New terminal", "canvas.create", at],
+      ["New Sticky Note", "canvas.note_new", { point: tg.point }],
       ["Open file", "preview.open", { point: tg.point }],
       ["Arrange", "canvas.arrange", {}],
       ["Arrange as", "sub:canvas-arrange", {}],
@@ -57,11 +58,22 @@ function items(p, git, agents) {
       ["Delete space", "space.close", { id: tg.id }],
     ];
     case "canvas-arrange": return [["Tidy", "tidy"], ["Row", "row"], ["Column", "column"], ["By wires", "wires"]].map(([name, layout]) => [name, "canvas.arrange", { ...tg, layout }]);
-    case "canvas-colors": return ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"].map(color => [color, "canvas.space_style", { id: tg.id, color }]);
+    case "canvas-colors": {
+      const colors = ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple"];
+      return tg.pane ? [
+        ["Space color", "canvas.pane_color", { pane: tg.pane, color: null }],
+        ["Suggest a color", "canvas.pane_color_next", { pane: tg.pane }],
+        ["Custom hex color", "custom-color", { pane: tg.pane, value: tg.color }],
+        ...[...colors, ...(tg.palette ?? [])].map(color => [color, "canvas.pane_color", { pane: tg.pane, color }]),
+      ] : colors.map(color => [color, "canvas.space_style", { id: tg.id, color }]);
+    }
     case "canvas-wire": return [["Remove", "wire.remove", { a: tg.a, b: tg.b }]];
+    case "canvas-pane": return [["Color", "sub:canvas-colors", { pane: tg.pane }], ...(tg.items ?? [])];
     // A cell's own menu: a pill or header right-click, or a right-click inside its terminal.
     case "canvas-card": return [
+      ...(!tg.popped ? (tg.toolbar ?? []) : []),
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
+      ["Color", "sub:canvas-colors", { pane: tg.terminal }],
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],
       ...(!tg.popped ? [[tg.expanded ? "Collapse" : "Expand", "canvas.expand", { terminal: tg.terminal }]] : []),
       ...(tg.finished ? [["Clear finished", "canvas.clear_finished", { terminal: tg.terminal }]] : []),
@@ -136,7 +148,7 @@ function rule(list, i) {
 function shortcut(name, args) {
   // `pane.split:right` binds pane.split with { direction: "right" }.
   const value = args && Object.values(args)[0];
-  const k = keys().find((b) => b.section === "global" && (b.action === name || b.action === `${name}:${value}`));
+  const k = keys().find((b) => (b.section === "global" || (name === "canvas.note_new" && b.section === "layout:main")) && (b.action === name || b.action === `${name}:${value}`));
   return k?.label ?? "";
 }
 
@@ -153,6 +165,7 @@ export default class Menu extends View {
         cx.notify();
       });
     this.at = 0;
+    this.group = p?.target?.group ?? null;
     const space = p?.tab === "space" && spaces().find((s) => s.id === p.target?.id);
     const folder = space && place(space);
     if (folder)
@@ -164,8 +177,14 @@ export default class Menu extends View {
 
   // `sub`: the open submenu {i, tab, target}; `subAt`: its keyboard row, or -1 while the keys stay on the menu.
   choose(i, cx) {
-    const it = items(props(), this.git, this.agents)[i];
+    const it = this.list[i];
     if (!it?.[1]) return;
+    if (props()?.tab === "primary" && Array.isArray(props().target?.home) && it[1] === "app.menu") {
+      this.group = it[2].group ?? null;
+      this.at = 0;
+      cx.notify();
+      return;
+    }
     if (it[1].startsWith("sub:")) return this.open(i, it, 0, cx);
     this.run(it);
   }
@@ -173,6 +192,10 @@ export default class Menu extends View {
   run(it) {
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: "worktree", kind: "dialog", ...(it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
+    else if (it[1] === "custom-color") openOverlay({ mod: "prompt", kind: "dialog", width: 380, props: {
+      title: "Pane color", label: "Hex color", value: it[2].value?.startsWith("#") ? it[2].value : "", hint: "Use #RRGGBB, for example #3a78e8.",
+      field: "color", command: { name: "canvas.pane_color", args: { pane: it[2].pane } },
+    } });
     else run(it[1], it[2]);
   }
 
@@ -183,8 +206,8 @@ export default class Menu extends View {
   }
 
   // One menu box: the rows of `list`, `at` highlighted.
-  box(t, list, at, row) {
-    return v_flex().w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(ui.size.radius).shadow_lg().text_size(ui.size.text)
+  box(t, list, at, row, part) {
+    return v_flex().id(`canopy-menu-cover:${props()?.overlay}:${part}`).w(WIDTH).p(5).bg(t.popover).border_1().border_color(t.border).rounded(ui.size.radius).shadow_lg().text_size(ui.size.text)
       // Clicks inside the box never reach the root, which closes the menu.
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .children(list.map((it, i) => !it[1]
@@ -203,22 +226,29 @@ export default class Menu extends View {
             .hover((s) => s.bg(t.hover))
             // Only agents carry an icon: the program's own.
             .when(it[1] === "canvas.create" && it[3]?.icon, el => el.child(it[3].tint ? svg(it[3].icon).size(14).flex_none().text_color(t.foreground) : image(it[3].icon).w(14).h(14).flex_none()))
+            .when(it[1] === "canvas.pane_color" && !!it[2].color, el => el.child(div().size(12).flex_none().rounded(6).bg(it[2].color.startsWith("#") ? it[2].color : t[`tint-${it[2].color}`])))
             .child(div().flex_1().child(it[0]))
-            .child(it[1].startsWith("sub:")
-              ? svg("mods/workspace-chrome/chevron-right.svg").size(12).flex_none().text_color(t.muted)
-              : div().text_size(11).text_color(t.dim).child(props()?.tab === "canvas-agents" && it[1] === "canvas.create"
-                ? (i < 9 ? String(i + 1) : "") : shortcut(it[1], it[2]))), it, i))));
+            .when(!it[1].startsWith("sub:"), el => el.child(div().text_size(11).text_color(t.dim)
+              .child(props()?.tab === "canvas-agents" && it[1] === "canvas.create"
+                ? (i < 9 ? String(i + 1) : "") : shortcut(it[1], it[2])))), it, i))));
   }
 
   render(cx) {
     const t = theme();
-    const list = this.list = items(props(), this.git, this.agents);
+    const p = props();
+    const primary = p?.tab === "primary" && Array.isArray(p.target?.home) ? p.target : null;
+    const page = this.group ? primary?.groups?.[this.group] : primary?.home;
+    const list = this.list = Array.isArray(page) ? page : items(p, this.git, this.agents);
     const sub = this.sub && items({ tab: this.sub.tab, target: this.sub.target }, null, null);
     // Arrow keys step over labels and notes.
     const step = (rows, from, d) => { for (let n = 1; n <= rows.length; n++) { const j = (from + d * n + rows.length * n) % rows.length; if (rows[j][1]) return j; } return from; };
     const inSub = sub && this.subAt >= 0;
     // The submenu hangs beside its row: rows above it, their rules and the box padding.
     const top = this.sub ? list.slice(0, this.sub.i + 1).reduce((y, it, i) => y + (it[1] || !it[2]?.label ? ROW : LABEL) + (rule(list, i) || it[2]?.label ? 9 : 0), 5) - ROW - 5 : 0;
+    // The submenu box, or a zero-size marker so the host's mask forgets a closed one.
+    const subBox = () => sub
+      ? div().mt(top).child(this.box(t, sub, this.subAt, (row, it) => row.on_click(() => this.run(it)), "sub"))
+      : div().id(`canopy-menu-cover:${props()?.overlay}:sub`).absolute().w(0).h(0);
     return h_flex()
       .id("menu")
       .track_focus(this.handle)
@@ -226,6 +256,8 @@ export default class Menu extends View {
       .min_h(0)
       .items_start()
       .gap(4)
+      // Near the right edge the host moves the frame left: the box stays under the pointer, the submenu opens on its left.
+      .when(Boolean(p?.flip), el => el.justify_end())
       // The overlay is wider than the menu, for the submenu: a click on the empty part closes it.
       .on_mouse_down("left", () => closeOverlay(props().overlay))
       .on_key_down((e, cx) => {
@@ -243,12 +275,14 @@ export default class Menu extends View {
           else return;
         } else if (e.key === "down") { this.at = step(list, this.at, 1); this.sub = null; }
         else if (e.key === "up") { this.at = step(list, this.at, -1); this.sub = null; }
-        else if (e.key === "right" && list[this.at]?.[1]?.startsWith("sub:")) return this.open(this.at, list[this.at], 0, cx);
+        else if (e.key === "left" && this.group && list[0]?.[1] === "app.menu") return this.choose(0, cx);
+        else if (e.key === "right" && (list[this.at]?.[1]?.startsWith("sub:") || (primary && list[this.at]?.[2]?.group))) return this.choose(this.at, cx);
         else if (e.key === "enter") this.choose(this.at, cx);
         else if (e.key === "escape") closeOverlay(props().overlay);
         else return;
         cx.notify();
       })
+      .when(Boolean(p?.flip), el => el.child(subBox()))
       .child(this.box(t, list, this.at, (row, it, i) => row
         .on_hover((on, cx) => {
           if (!on) return;
@@ -257,8 +291,7 @@ export default class Menu extends View {
           else if (this.sub) { this.sub = null; cx.notify(); }
           else cx.notify();
         })
-        .on_click((_e, cx) => this.choose(i, cx))))
-      .when(Boolean(sub), el => el.child(div().mt(top)
-        .child(this.box(t, sub ?? [], this.subAt, (row, it) => row.on_click(() => this.run(it))))));
+        .on_click((_e, cx) => this.choose(i, cx)), "main"))
+      .when(!p?.flip, el => el.child(subBox()));
   }
 }

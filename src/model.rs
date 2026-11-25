@@ -86,6 +86,7 @@ pub struct Model {
     pub spaces: Vec<Space>,
     /// The selected space.
     pub active: Option<String>,
+    /// Closed spaces, newest first, one per folder; opening a space in a folder takes it off.
     pub recent: Vec<Recent>,
     /// Each pane's live folder, for its display name.
     pub pane_folders: BTreeMap<String, String>,
@@ -270,7 +271,7 @@ impl Model {
     pub fn add_space(&mut self, id: &str, name: &str, folder: &str, ctx: Tab) {
         let active = Some(ctx.id.clone());
         self.spaces.push(Space { id: id.to_owned(), name: name.to_owned(), folder: folder.to_owned(), machine: None, tabs: vec![ctx], active, rest: Default::default() });
-        self.recent.retain(|r| r.name != name);
+        self.recent.retain(|r| r.folder != folder);
         self.active = Some(id.to_owned());
     }
 
@@ -355,8 +356,9 @@ impl Model {
         Ok(())
     }
 
-    /// Removes a pane. Returns what else closed: the tab, and the space if it was its last.
-    pub fn remove_pane(&mut self, pane_id: &str) -> (bool, bool) {
+    /// Removes a pane. Returns what else closed: the tab, and the space if it was its last
+    /// (never with `keep_space`, as on a canvas, where a space outlives its terminals).
+    pub fn remove_pane(&mut self, pane_id: &str, keep_space: bool) -> (bool, bool) {
         let Some(c) = self.tab_of_mut(pane_id) else { return (false, false) };
         c.root.remove(pane_id);
         if c.zoomed.as_deref() == Some(pane_id) {
@@ -373,12 +375,13 @@ impl Model {
             return (false, false);
         }
         let id = c.id.clone();
-        let (_, space_closed) = self.remove_tab(&id);
+        let (_, space_closed) = self.remove_tab(&id, keep_space);
         (true, space_closed)
     }
 
-    /// Removes a tab. Returns its terminal addresses and whether its space closed.
-    pub fn remove_tab(&mut self, ctx: &str) -> (Vec<String>, bool) {
+    /// Removes a tab. Returns its terminal addresses and whether its space closed: a space
+    /// closes with its last tab unless `keep_space`.
+    pub fn remove_tab(&mut self, ctx: &str, keep_space: bool) -> (Vec<String>, bool) {
         let Some(pi) = self.spaces.iter().position(|p| p.tab(ctx).is_some()) else { return (vec![], false) };
         let p = &mut self.spaces[pi];
         let ci = p.tabs.iter().position(|c| c.id == ctx).unwrap();
@@ -387,7 +390,7 @@ impl Model {
             // The tab that slides into the slot, or the last one.
             p.active = p.tabs.get(ci).or(p.tabs.last()).map(|c| c.id.clone());
         }
-        let closed = p.tabs.is_empty();
+        let closed = p.tabs.is_empty() && !keep_space;
         if closed {
             let id = p.id.clone();
             self.remove_space(&id);
@@ -395,12 +398,12 @@ impl Model {
         (addresses(&removed.root), closed)
     }
 
-    /// Removes a space (remembered in `recent`). Returns its terminal addresses.
+    /// Removes a space (remembered in `recent`, one entry per folder). Returns its terminal addresses.
     pub fn remove_space(&mut self, id: &str) -> Vec<String> {
         let Some(pi) = self.spaces.iter().position(|p| p.id == id) else { return vec![] };
         let was_active = self.active_index() == Some(pi);
         let p = self.spaces.remove(pi);
-        self.recent.retain(|r| r.name != p.name);
+        self.recent.retain(|r| r.folder != p.folder);
         self.recent.insert(0, Recent { name: p.name.clone(), folder: p.folder.clone() });
         self.recent.truncate(20);
         if was_active {
@@ -493,7 +496,7 @@ impl Model {
         let busy = |w: Option<&str>| matches!(w, Some("working" | "blocked" | "error"));
         if blocked(new) && !blocked(prev) {
             Some(Alert::Blocked)
-        } else if busy(prev) && new.is_some() && !busy(new) && !looking {
+        } else if busy(prev) && matches!(new, Some("idle" | "done")) && !looking {
             Some(Alert::Done)
         } else {
             None
@@ -685,6 +688,7 @@ mod tests {
         assert_eq!(alert(Some("working"), Some("idle"), true), None);
         assert_eq!(alert(None, Some("idle"), false), None);
         assert_eq!(alert(Some("working"), None, false), None);
+        assert_eq!(alert(Some("working"), Some("unknown"), false), None);
     }
 
     #[test]
@@ -726,15 +730,28 @@ mod tests {
         m.add_tab("p1", Tab::new("c2", "docs", "x2", "t2"));
         m.add_space("p2", "web", "/src/web", Tab::new("c3", "deploy", "x3", "t3"));
         assert_eq!(m.active.as_deref(), Some("p2"));
-        assert_eq!(m.remove_pane("x3"), (true, true));
+        assert_eq!(m.remove_pane("x3", false), (true, true));
         assert_eq!(m.active.as_deref(), Some("p1"));
         assert_eq!(m.recent, [Recent { name: "web".into(), folder: "/src/web".into() }]);
         // A tab closes with its last pane; the space stays while it has another.
-        assert_eq!(m.remove_pane("x2"), (true, false));
+        assert_eq!(m.remove_pane("x2", false), (true, false));
         assert_eq!(m.active_tab().map(|c| c.id.as_str()), Some("c1"));
         // Opening it again takes it off the recent list.
         m.add_space("p4", "web", "/src/web", Tab::new("c4", "x", "x4", "t4"));
         assert!(m.recent.is_empty());
+        // On a canvas the space stays open, empty, and its tab slot clears.
+        assert_eq!(m.remove_pane("x4", true), (true, false));
+        assert!(m.space("p4").is_some_and(|p| p.tabs.is_empty() && p.active.is_none()));
+        assert!(m.recent.is_empty());
+        // Unnamed spaces are remembered by folder: closing two keeps both, and opening one
+        // takes off only its own folder.
+        m.add_space("p5", "", "/a", Tab::new("c5", "", "x5", "t5"));
+        m.add_space("p6", "", "/b", Tab::new("c6", "", "x6", "t6"));
+        m.remove_space("p5");
+        m.remove_space("p6");
+        assert_eq!(m.recent.iter().map(|r| r.folder.as_str()).collect::<Vec<_>>(), ["/b", "/a"]);
+        m.add_space("p7", "", "/a", Tab::new("c7", "", "x7", "t7"));
+        assert_eq!(m.recent, [Recent { name: String::new(), folder: "/b".into() }]);
     }
 
     #[test]
@@ -748,7 +765,7 @@ mod tests {
         // It has no terminal: nothing to restart or kill, and the tab survives
         // its terminal pane closing.
         assert_eq!(m.address_of("x2"), None);
-        assert_eq!(m.remove_pane("x1"), (false, false));
+        assert_eq!(m.remove_pane("x1", false), (false, false));
         assert_eq!(m.tab("c1").unwrap().root.panes().len(), 1);
     }
 
@@ -872,7 +889,7 @@ mod tests {
         let mut m = model_with_one();
         assert!(m.split("x1", Axis::Row, "x9", "t9"));
         assert_eq!(m.focused_pane().as_deref(), Some("x9"));
-        assert_eq!(m.remove_pane("x9"), (false, false));
+        assert_eq!(m.remove_pane("x9", false), (false, false));
         assert_eq!(m.focused_pane().as_deref(), Some("x1"));
         // The arrangement keeps the tab's id with one pane left.
         assert_eq!(m.active_tab().unwrap().root.id, "c1");
@@ -884,19 +901,19 @@ mod tests {
         m.split("x1", Axis::Row, "x2", "t2");
         m.split("x2", Axis::Row, "x3", "t3");
         // From x2 to x3; closing x3 lands on x2, not on the first pane.
-        m.remove_pane("x3");
+        m.remove_pane("x3", false);
         assert_eq!(m.focused_pane().as_deref(), Some("x2"));
         // Clicked around: x1, then x2; close x2 and it's x1.
         m.split("x2", Axis::Row, "x4", "t4");
         m.focus_pane("x1");
         m.focus_pane("x4");
-        m.remove_pane("x4");
+        m.remove_pane("x4", false);
         assert_eq!(m.focused_pane().as_deref(), Some("x1"));
         // The one before is gone too: the next one back that's still there.
         m.split("x2", Axis::Row, "x5", "t5");
         m.focus_pane("x2");
-        m.remove_pane("x5");
-        m.remove_pane("x2");
+        m.remove_pane("x5", false);
+        m.remove_pane("x2", false);
         assert_eq!(m.focused_pane().as_deref(), Some("x1"));
     }
 

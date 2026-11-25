@@ -179,7 +179,7 @@ impl AppWindow {
                     { cx.stop_propagation(); }
                 });
             },
-        ).absolute().size_full()).into_any_element()
+        ).absolute().top_0().left_0().size_full()).into_any_element()
     }
 }
 

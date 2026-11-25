@@ -47,6 +47,10 @@ Read AGENTS.local.md too when present.
   exactly what it says), then smoothness, then the smallest design that works.
 - Idle costs nothing: no polling, periodic timers or token spend while nothing
   happens. A timer may exist only while work is pending.
+- Mouse and trackpad behave the same on every OS: wheel/two-finger pans,
+  pinch and Cmd/Ctrl+wheel zoom, over empty canvas and over any pane that is
+  not entered. Platform code may differ only in the modifier key (Cmd on macOS,
+  Ctrl elsewhere).
 - Agent output is untrusted. Render it as text, never as markup or commands.
 - Every error a user causes or can see reaches them as a toast
   (defaults/mods/toast), never only in a log. See Toasts below.
@@ -55,6 +59,16 @@ Read AGENTS.local.md too when present.
   docs/canopy/harness-notes/.
 - Every dependency is a cost: say what it replaces, its size and its license
   (MIT, Apache-2.0, BSD, ISC or public domain) before adding it.
+
+## Desktop integration
+
+- Share commands, state, labels, settings, toasts and GPUI components across
+  platforms. Keep native menus, window decorations, shortcuts and launcher
+  identity at the platform boundary. Use GPUI and system capabilities first.
+- macOS and Linux are the primary desktops. Verify native UI changes on both.
+  Use Ubuntu GNOME Wayland as the Linux reference and check X11 when changing
+  window or launcher behavior. Keep shared code usable by Windows so it can
+  add its own desktop integration later.
 
 ## How agents learn Canopy
 

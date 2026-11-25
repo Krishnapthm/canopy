@@ -14,7 +14,7 @@ const specs = new Map(
   ]),
 );
 // Menu-only items that open another popup or dialog, and the command each one ends in.
-const local: Record<string, string | null> = { "canvas-close": "terminal.kill" };
+const local: Record<string, string | null> = { "canvas-close": "terminal.kill", "custom-color": null };
 const agents = [{ name: "Claude Code", installed: true, run: ["claude"] }, { name: "Gone", installed: false, run: ["gone"] }];
 
 test("every canvas menu item passes only declared args, with the required ones", () => {
@@ -67,6 +67,28 @@ test("the canvas menu lists installed agents under a label, with a note while ch
 
 test("a drawn wire can be removed", () => {
   expect(items({ tab: "canvas-wire", target: { a: "t1", b: "t2" } })).toEqual([["Remove", "wire.remove", { a: "t1", b: "t2" }]]);
+});
+
+test("pane colors use the canvas pane ID and can restore inheritance", () => {
+  const color = items({ tab: "canvas-card", target: { terminal: "t1", id: "tab1" } }).find(([label]) => label === "Color");
+  expect(color).toEqual(["Color", "sub:canvas-colors", { pane: "t1" }]);
+  const paneColors = items({ tab: "canvas-colors", target: color![2] });
+  expect(paneColors[0]).toEqual(["Space color", "canvas.pane_color", { pane: "t1", color: null }]);
+  expect(paneColors[1]).toEqual(["Suggest a color", "canvas.pane_color_next", { pane: "t1" }]);
+  expect(paneColors.slice(3).map(([label, command, args]) => [label, command, args])).toEqual(
+    items({ tab: "canvas-colors", target: { id: "s1" } }).map(([label]) => [label, "canvas.pane_color", { pane: "t1", color: label }])
+  );
+});
+
+test("the custom color prompt resubmits the selected pane ID with its hex color", () => {
+  const opened: any[] = [];
+  const Menu = new Function("View", "props", "closeOverlay", "openOverlay", `${source}; return Menu;`)(
+    class {}, () => ({ overlay: "color-menu" }), () => {}, (spec: unknown) => opened.push(spec));
+  const target = { pane: "p1", color: "#aabbcc" };
+  new Menu().run(items({ tab: "canvas-colors", target }).find(([, command]) => command === "custom-color"));
+  expect(opened[0].props).toMatchObject({
+    value: target.color, field: "color", command: { name: "canvas.pane_color", args: { pane: "p1" } },
+  });
 });
 
 test("arrange picker lists the four layouts and preserves its space target", () => {
@@ -195,4 +217,35 @@ test("canvas-agents numbers installed rows and starts the numbered agent", () =>
   keydown!({ key: "1", modifiers: { shift: true } }, cx);
   expect(sent).toHaveLength(1);
   expect(stopped).toBe(2);
+});
+
+test("the primary menu follows keyboard navigation without opening another overlay", () => {
+  const sent: unknown[] = [];
+  let closed = 0;
+  let keydown: (event: { key: string }, cx: unknown) => void;
+  const element: any = new Proxy({}, { get: (_, name) => (...args: any[]) => {
+    if (name === "on_key_down") keydown = args[0];
+    return element;
+  } });
+  const home = [["File", "app.menu", { group: "File" }], ["Settings", "app.settings", {}]];
+  const file = [["Back", "app.menu", {}], ["New Terminal", "canvas.create", {}]];
+  const current = { tab: "primary", target: { home, groups: { File: file } } };
+  const Menu = new Function("View", "div", "h_flex", "v_flex", "props", "theme", "ui", "keys", "closeOverlay", "run", `${source}; return Menu;`)(
+    class {}, () => element, () => element, () => element, () => current,
+    () => ({}), { size: {} }, () => [], () => closed++, (...args: unknown[]) => sent.push(args));
+  const menu = new Menu();
+  menu.at = 0;
+  const cx = { notify() {} };
+  menu.render(cx);
+  keydown!({ key: "right" }, cx);
+  menu.render(cx);
+  expect(menu.list).toEqual(file);
+  keydown!({ key: "left" }, cx);
+  menu.render(cx);
+  expect(menu.list).toEqual(home);
+  expect(closed).toBe(0);
+  keydown!({ key: "down" }, cx);
+  keydown!({ key: "enter" }, cx);
+  expect(closed).toBe(1);
+  expect(sent).toEqual([["app.settings", {}]]);
 });
