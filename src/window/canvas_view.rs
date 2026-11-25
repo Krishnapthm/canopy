@@ -3690,12 +3690,13 @@ impl AppWindow {
                 pills.push((paint_order(&card), pill.into_any_element()));
                 continue;
             }
-            // The terminal scales with the canvas like a picture: its grid comes from the body in
-            // world px (the header and frame keep their screen size), and waits for `settled`.
+            // The terminal scales with the canvas like a picture: its grid comes from the body at
+            // zoom 1, drawn at the scale that fits it under the header, and waits for `settled`.
             let slot = cell_slot(&card.id);
             let entered = state.entered() == Some(card.id.as_str());
             let live = self.terms.get(&slot);
-            let body_size = size(px((cw - 2. / z).max(1.)), px((ch - (canvas::HEADER + 2.) / z).max(1.)));
+            let ([bw, bh], drawn) = terminal_body(cw, ch, z);
+            let body_size = size(px(bw), px(bh));
             // A tile squeezed below readable size shows who it is instead, and its program keeps its grid.
             let compact = state.tile.is_some() && !entered && (cw < canvas::TILE_COMPACT[0] || ch < canvas::TILE_COMPACT[1]);
             if let Some(t) = live {
@@ -3705,7 +3706,7 @@ impl AppWindow {
                 t.view.update(cx, |v, cx| {
                     // Unentered cells let the wheel through, so the canvas pans over them.
                     v.wheel_needs_focus = true;
-                    v.set_scale(z, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
+                    v.set_scale(drawn, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
                 });
             }
             let (select_addr, mode_addr) = (card.id.clone(), card.id.clone());
@@ -4233,6 +4234,15 @@ fn full_speed([x, y]: canvas::Point) -> canvas::Point {
     [x * speed, y * speed]
 }
 
+/// A terminal pane's body in world px as at zoom 1, so its grid never depends on the zoom, and
+/// the scale that fits that body into the one drawn at zoom `z`: the header and border keep
+/// their screen size, so the drawn body is not the world body times `z`.
+fn terminal_body(cw: f32, ch: f32, z: f32) -> ([f32; 2], f32) {
+    let body = [(cw - 2.).max(1.), (ch - canvas::HEADER - 2.).max(1.)];
+    let fit = ((cw * z - 2.) / body[0]).min((ch * z - canvas::HEADER - 2.) / body[1]);
+    (body, fit.max(0.01))
+}
+
 /// Screen pixels per second to pan while a dragged `rect` touches or passes an edge of `bounds`:
 /// a quarter speed on contact, full speed 36 px past it. On an axis where the pane covers both
 /// edges, a push would never end, so the pointer near an edge pans instead, as in `edge_pan`.
@@ -4636,7 +4646,7 @@ mod layout_answer_tests {
 
 #[cfg(test)]
 mod input_tests {
-    use super::{AppWindow, WHEEL_GESTURE, edge_pan, edge_push, wheel_claimed};
+    use super::{AppWindow, WHEEL_GESTURE, edge_pan, edge_push, terminal_body, wheel_claimed};
     use super::super::tests::{in_own_process, open_window, running_alone};
     use gpui::{Bounds, Entity, Modifiers, MouseButton, MouseDownEvent, PinchEvent, ScrollDelta,
         ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, point, px, size};
@@ -4685,6 +4695,20 @@ mod input_tests {
         // The other axis still pushes on contact.
         let tall_wide = Bounds::new(point(px(-60.), px(0.)), size(px(480.), px(80.)));
         assert_eq!(edge_push(tall_wide, bounds, point(px(200.), px(40.))), [0., 225.]);
+    }
+
+    #[test]
+    fn terminal_grid_body_ignores_the_zoom() {
+        // The body that sizes the PTY grid is the same at every zoom: the header's screen size
+        // never feeds it, so zooming out keeps the rows.
+        let (body, fit) = terminal_body(800., 600., 1.);
+        assert_eq!((body, fit), ([798., 562.], 1.));
+        for z in [0.1, 0.5, 2.] {
+            let (at, fit) = terminal_body(800., 600., z);
+            assert_eq!(at, body);
+            // Drawn at `fit`, that body fits under the header of the pane drawn at `z`.
+            assert!(at[0] * fit <= 800. * z - 2. + 1e-3 && at[1] * fit <= 600. * z - crate::canvas::HEADER - 2. + 1e-3);
+        }
     }
 
     const WHEEL: &str = "window::canvas_view::input_tests::wheel_over_panes";

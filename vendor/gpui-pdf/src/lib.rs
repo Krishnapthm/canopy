@@ -253,11 +253,13 @@ fn display_height((w, h): (f32, f32), page_width: f32) -> f32 {
 /// The inclusive page-index range `(start, end)` to keep rasterized for the given
 /// scroll position: the pages intersecting the viewport, padded by [`MARGIN`]. Pure
 /// (mirrors [`PdfView`]'s slot layout) so it's unit-testable. `page_width` is the
-/// on-screen column width (base × zoom); `scroll_y` is how far the content is
+/// on-screen column width (base × zoom × display); `display` scales the gaps and padding
+/// (canopy patch: a host display scale); `scroll_y` is how far the content is
 /// scrolled down (px ≥ 0); `viewport_h` is the visible height (px).
 pub fn keep_window(
     dims: &[(f32, f32)],
     page_width: f32,
+    display: f32,
     scroll_y: f32,
     viewport_h: f32,
 ) -> (usize, usize) {
@@ -270,7 +272,7 @@ pub fn keep_window(
     let top = scroll_y.max(0.0);
     let bottom = top + vh;
 
-    let mut y = PAGE_PAD_Y;
+    let mut y = PAGE_PAD_Y * display;
     let mut first: Option<usize> = None;
     let mut last = 0usize;
     for (i, dim) in dims.iter().enumerate() {
@@ -280,7 +282,7 @@ pub fn keep_window(
             first.get_or_insert(i);
             last = i;
         }
-        y = page_bottom + PAGE_GAP;
+        y = page_bottom + PAGE_GAP * display;
     }
     let first = first.unwrap_or(0);
     let start = first.saturating_sub(MARGIN);
@@ -290,24 +292,26 @@ pub fn keep_window(
 
 /// The index of the topmost page intersecting the viewport top — the "current" page
 /// for a page counter. Pure; mirrors the slot layout.
-fn current_page(dims: &[(f32, f32)], page_width: f32, scroll_y: f32) -> usize {
+// canopy patch: `display` scales the gap and padding.
+fn current_page(dims: &[(f32, f32)], page_width: f32, display: f32, scroll_y: f32) -> usize {
     let top = scroll_y.max(0.0);
-    let mut y = PAGE_PAD_Y;
+    let mut y = PAGE_PAD_Y * display;
     for (i, dim) in dims.iter().enumerate() {
         let page_bottom = y + display_height(*dim, page_width);
         if page_bottom > top {
             return i;
         }
-        y = page_bottom + PAGE_GAP;
+        y = page_bottom + PAGE_GAP * display;
     }
     dims.len().saturating_sub(1)
 }
 
 /// The y offset (px) of page `index`'s top in the laid-out column. Pure.
-fn page_top_y(dims: &[(f32, f32)], page_width: f32, index: usize) -> f32 {
-    let mut y = PAGE_PAD_Y;
+// canopy patch: `display` scales the gap and padding.
+fn page_top_y(dims: &[(f32, f32)], page_width: f32, display: f32, index: usize) -> f32 {
+    let mut y = PAGE_PAD_Y * display;
     for dim in dims.iter().take(index) {
-        y += display_height(*dim, page_width) + PAGE_GAP;
+        y += display_height(*dim, page_width) + PAGE_GAP * display;
     }
     y
 }
@@ -1125,14 +1129,14 @@ impl PdfView {
         let mut y = if page == 0 {
             0.0
         } else {
-            page_top_y(&self.dims, pw, page)
+            page_top_y(&self.dims, pw, self.display, page)
         };
         if let Some(TextSlot::Ready(pt)) = self.page_text.get(&page)
             && let Some(h) = self.highlights.iter().find(|h| h.page == page)
             && let Some(r) = pt.locate(&h.quote, h.occurrence).first()
         {
             let disp_h = display_height(self.dims[page], pw);
-            y = (page_top_y(&self.dims, pw, page) + r.y * disp_h - 48.0).max(0.0);
+            y = (page_top_y(&self.dims, pw, self.display, page) + r.y * disp_h - 48.0).max(0.0);
         }
         self.scroll.set_offset(point(px(0.0), px(-y)));
         // Flash, then clear after a beat (unless a newer reveal supersedes this one).
@@ -1262,7 +1266,7 @@ impl PdfView {
         let scroll_y = f32::from(-self.scroll.offset().y).max(0.0);
         let idx = self.matches.iter().position(|m| {
             let ry = m.rects.first().map(|r| r.y).unwrap_or(0.0);
-            page_top_y(&self.dims, pw, m.page) + ry * display_height(self.dims[m.page], pw)
+            page_top_y(&self.dims, pw, self.display, m.page) + ry * display_height(self.dims[m.page], pw)
                 >= scroll_y
         });
         Some(idx.unwrap_or(0))
@@ -1308,7 +1312,7 @@ impl PdfView {
         let rh = m.rects.first().map(|r| r.h).unwrap_or(0.0);
         let pw = self.page_width();
         let disp_h = display_height(self.dims[page], pw);
-        let top = page_top_y(&self.dims, pw, page) + ry * disp_h;
+        let top = page_top_y(&self.dims, pw, self.display, page) + ry * disp_h;
         let bottom = top + rh * disp_h;
         let scroll_y = f32::from(-self.scroll.offset().y).max(0.0);
         let viewport_h = f32::from(self.scroll.bounds().size.height).max(1.0);
@@ -1532,7 +1536,7 @@ impl PdfView {
         let y = if i == 0 {
             0.0
         } else {
-            page_top_y(&self.dims, self.page_width(), i)
+            page_top_y(&self.dims, self.page_width(), self.display, i)
         };
         self.scroll.set_offset(point(px(0.0), px(-y)));
         cx.notify();
@@ -1580,13 +1584,14 @@ impl PdfView {
         let page_width = self.page_width();
         // Mirror the page column's layout: `py(PAGE_PAD_Y)` top + bottom, each page's
         // display height, and `PAGE_GAP` between pages.
-        let content_h = 2.0 * PAGE_PAD_Y
+        // canopy patch: the gap and padding scale with the display scale.
+        let content_h = 2.0 * PAGE_PAD_Y * self.display
             + self
                 .dims
                 .iter()
                 .map(|d| display_height(*d, page_width))
                 .sum::<f32>()
-            + (self.dims.len().saturating_sub(1)) as f32 * PAGE_GAP;
+            + (self.dims.len().saturating_sub(1)) as f32 * PAGE_GAP * self.display;
         if content_h <= viewport_h + 1.0 {
             return None; // everything fits — no scrollbar
         }
@@ -1617,7 +1622,7 @@ impl PdfView {
     /// The topmost visible page index for the current scroll position.
     fn current_page_index(&self) -> usize {
         let scroll_y = f32::from(-self.scroll.offset().y);
-        current_page(&self.dims, self.page_width(), scroll_y)
+        current_page(&self.dims, self.page_width(), self.display, scroll_y)
     }
 
     /// Keep only the pages near the viewport rasterized: render missing / stale
@@ -1645,7 +1650,7 @@ impl PdfView {
         let scale_factor = window.scale_factor();
         let scroll_y = f32::from(-self.scroll.offset().y);
         let viewport_h = f32::from(self.scroll.bounds().size.height);
-        let (start, end) = keep_window(&self.dims, page_width, scroll_y, viewport_h);
+        let (start, end) = keep_window(&self.dims, page_width, self.display, scroll_y, viewport_h);
         let generation = self.generation;
 
         // Extract the text layer (off-thread, cached) for visible pages that need it:
@@ -1718,7 +1723,7 @@ impl PdfView {
                         let pw = this.page_width();
                         let sy = f32::from(-this.scroll.offset().y);
                         let vh = f32::from(this.scroll.bounds().size.height);
-                        let (s, e) = keep_window(&this.dims, pw, sy, vh);
+                        let (s, e) = keep_window(&this.dims, pw, this.display, sy, vh);
                         i >= s && i <= e
                     };
                     let gen_now = this.generation;
@@ -1823,7 +1828,7 @@ impl Render for PdfView {
             .unwrap_or_default();
         let total = self.dims.len();
         let page_width = self.page_width();
-        let current = current_page(&self.dims, page_width, f32::from(-self.scroll.offset().y));
+        let current = current_page(&self.dims, page_width, self.display, f32::from(-self.scroll.offset().y));
 
         // Page slots are *direct* children of the scroll container (assembled below), so
         // `ScrollHandle::bounds_for_item(i)` yields page `i`'s real laid-out bounds —
@@ -2758,8 +2763,9 @@ impl Render for PdfView {
                                     .flex()
                                     .flex_col()
                                     .items_center()
-                                    .gap(px(PAGE_GAP))
-                                    .py(px(PAGE_PAD_Y))
+                                    // canopy patch: scaled like the pages.
+                                    .gap(px(PAGE_GAP * self.display))
+                                    .py(px(PAGE_PAD_Y * self.display))
                                     // Scrolling doesn't re-run render on its own; notify so
                                     // the next frame re-runs `ensure_window` + page counter.
                                     .on_scroll_wheel(cx.listener(|_this, _ev, _window, cx| {
@@ -2920,54 +2926,66 @@ mod tests {
     fn window_at_top_covers_first_pages_plus_margin() {
         let dims = letter_pages(10);
         // Top of the document, ~900px viewport → page 0 visible, ±MARGIN(3).
-        assert_eq!(keep_window(&dims, PAGE_WIDTH, 0.0, 900.0), (0, 3));
+        assert_eq!(keep_window(&dims, PAGE_WIDTH, 1.0, 0.0, 900.0), (0, 3));
     }
 
     #[test]
     fn window_follows_scroll() {
         let dims = letter_pages(10);
         // Scrolled into page 2 (page tops ≈ 16, 1087, 2158, …).
-        assert_eq!(keep_window(&dims, PAGE_WIDTH, 2200.0, 900.0), (0, 5));
+        assert_eq!(keep_window(&dims, PAGE_WIDTH, 1.0, 2200.0, 900.0), (0, 5));
     }
 
     #[test]
     fn window_clamps_at_the_end() {
         let dims = letter_pages(10);
         // Scrolled near the bottom: last pages, end clamped to the final index.
-        let (start, end) = keep_window(&dims, PAGE_WIDTH, 9000.0, 900.0);
+        let (start, end) = keep_window(&dims, PAGE_WIDTH, 1.0, 9000.0, 900.0);
         assert_eq!(end, 9);
         assert!(start >= 5);
     }
 
     #[test]
     fn empty_doc_is_safe() {
-        assert_eq!(keep_window(&[], PAGE_WIDTH, 0.0, 900.0), (0, 0));
+        assert_eq!(keep_window(&[], PAGE_WIDTH, 1.0, 0.0, 900.0), (0, 0));
     }
 
     #[test]
     fn current_page_tracks_scroll() {
         let dims = letter_pages(10);
-        assert_eq!(current_page(&dims, PAGE_WIDTH, 0.0), 0);
+        assert_eq!(current_page(&dims, PAGE_WIDTH, 1.0, 0.0), 0);
         // Page tops ≈ 16, 1087, 2158; scrolled to 2200 sits in page 2.
-        assert_eq!(current_page(&dims, PAGE_WIDTH, 2200.0), 2);
+        assert_eq!(current_page(&dims, PAGE_WIDTH, 1.0, 2200.0), 2);
     }
 
     #[test]
     fn page_top_y_accumulates() {
         let dims = letter_pages(10);
-        assert_eq!(page_top_y(&dims, PAGE_WIDTH, 0), PAGE_PAD_Y);
+        assert_eq!(page_top_y(&dims, PAGE_WIDTH, 1.0, 0), PAGE_PAD_Y);
         // page 1 top = pad + one page height + gap.
         let expected = PAGE_PAD_Y + display_height((8.5, 11.0), PAGE_WIDTH) + PAGE_GAP;
-        assert!((page_top_y(&dims, PAGE_WIDTH, 1) - expected).abs() < 0.01);
+        assert!((page_top_y(&dims, PAGE_WIDTH, 1.0, 1) - expected).abs() < 0.01);
     }
 
     #[test]
     fn zoom_widens_layout() {
         let dims = letter_pages(3);
         // A wider column pushes later pages further down.
-        let one = page_top_y(&dims, PAGE_WIDTH, 2);
-        let two = page_top_y(&dims, PAGE_WIDTH * 2.0, 2);
+        let one = page_top_y(&dims, PAGE_WIDTH, 1.0, 2);
+        let two = page_top_y(&dims, PAGE_WIDTH * 2.0, 1.0, 2);
         assert!(two > one);
+    }
+
+    // canopy patch: a display scale scales the whole column, gaps and padding too, so a
+    // scroll offset scaled by the same ratio keeps the same spot in view.
+    #[test]
+    fn display_scale_scales_the_whole_column() {
+        let dims = letter_pages(10);
+        for page in [0, 1, 9] {
+            let at = page_top_y(&dims, PAGE_WIDTH * 0.25, 0.25, page);
+            assert!((at * 4.0 - page_top_y(&dims, PAGE_WIDTH, 1.0, page)).abs() < 0.01);
+        }
+        assert_eq!(current_page(&dims, PAGE_WIDTH * 0.25, 0.25, 2200.0 * 0.25), 2);
     }
 
     #[test]

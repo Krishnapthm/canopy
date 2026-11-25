@@ -43,6 +43,19 @@ One `cargo build --locked` with the shared target, copied into a scratch bundle,
 with its own `TMPDIR`. Walk the ten items above in the dev window, then `cargo test --locked`
 and `just test`, ponytail-review, and the PR into `integration/ui-round`.
 
+## Review fixes
+
+A review of the PR found eight issues, fixed on the same branch:
+
+1. Terminal grids measured the body under a screen-size header, so zooming out lost rows. The grid now comes from the body at zoom 1 (`terminal_body`), drawn at the scale that fits it under the header. Live pages keep a fixed CSS width the same way; their CSS height still follows the drawn body.
+2. A dragged pane bigger than the canvas pushed forever. `edge_push` pushes on an axis only when one edge is passed; across an axis it covers, the pointer rule decides.
+3. `recent` deduped by name, so unnamed spaces overwrote each other. It is keyed by folder, and Home filters by open folders.
+4. The floating toolbar lost its overflow scroll. Longer than the canvas, it scrolls in a lane across its edge.
+5. Fit, zoom limits and the empty hints ignored the toolbar over the canvas. They use `open_canvas`, the canvas less the toolbar's strip.
+6. Local pages fell back to an incognito store before macOS 14. They use WebKit's default store there.
+7. PDF gaps and padding stayed in screen px under the display scale, so long documents drifted. They scale with it.
+8. `tab.close` on a canvas space's last terminals ended them without `confirmed`. It asks a person and needs `confirmed: true` from commands.
+
 ## Not in scope
 
 - The Files mod polls every 10 s (`cx.timer.every(10000, ...)`), which breaks "idle costs nothing". Worth a follow-up.
