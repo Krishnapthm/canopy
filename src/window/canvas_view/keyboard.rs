@@ -61,6 +61,7 @@ impl AppWindow {
     }
 
     fn keyboard_select(&mut self, key: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.canvas_state.close_panel_focus = false;
         self.canvas_state.selected = vec![key.clone()];
         self.canvas_state.wire.selected = None;
         if let Some(pane) = self.model.pane_of(&key) { self.model.focus_pane(&pane); }

@@ -53,6 +53,7 @@ const SHIPPED_KEYS: &[&str] = &[
 ];
 #[cfg(any(target_os = "macos", test))]
 const SHIPPED_MACOS_KEYS: &[&str] = &[
+    include_str!("keys/shipped/v0.1.15-dev10-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-dev9-keys.macos.json"),
     include_str!("keys/shipped/v0.1.15-dev8-keys.macos.json"),
     include_str!("keys/shipped/v0.1.0-keys.macos.json"),

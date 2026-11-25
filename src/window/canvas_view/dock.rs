@@ -106,9 +106,14 @@ impl AppWindow {
     }
 
     /// Closes a panel tab: a file tab goes away, a pane tab closes its pane.
-    pub(super) fn close_panel_tab(&mut self, tab: &PanelTab, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::window) fn close_panel_tab(&mut self, tab: &PanelTab, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(path) = tab.file().filter(|path| self.canvas_state.dirty.as_ref() == Some(*path)) {
+            self.open_overlay(mods::new_overlay_id(), json!({"mod":"confirm","kind":"dialog","width":400,
+                "props":{"title":"Discard unsaved changes?","detail":"Your changes to this file will be lost.","destructive":true,
+                "accept":"Discard changes","command":{"name":"panel.close_tab","args":{"path":path,"confirmed":true,"generation":self.canvas_state.dirty_generation}}}}), window, cx);
+            return;
+        }
         let state = &mut self.canvas_state;
-        if tab.file().is_some_and(|path| state.dirty.as_ref() == Some(path)) { state.dirty = None; }
         match tab {
             PanelTab::File(_) => state.file = canvas::close_panel_tab(&mut state.doc.panel.tabs, state.file.as_ref(), tab),
             PanelTab::Pane(id) => self.close_boxed_panes(&[id.clone()], cx),

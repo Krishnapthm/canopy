@@ -59,7 +59,11 @@ pub(super) struct State {
     pub file: Option<canvas::PanelTab>,
     pub(super) editing: Option<String>,
     /// The Files editor reports transitions between saved and unsaved text.
-    dirty: Option<String>,
+    pub(super) dirty: Option<String>,
+    /// Bumps each time the draft turns dirty, so a discard dialog for older text cannot confirm.
+    pub(super) dirty_generation: u64,
+    /// The mouse last went down in the Files panel, so the panel owns Cmd+W (WebKit and terminals take key focus without telling GPUI).
+    close_panel_focus: bool,
     /// The file panel fills the window (like Claude's expanded side panel); not saved.
     panel_expanded: bool,
     editors: Vec<crate::programs::Editor>,
@@ -231,6 +235,8 @@ impl State {
             file,
             editing: None,
             dirty: None,
+            dirty_generation: 0,
+            close_panel_focus: false,
             panel_expanded: false,
             editors: Vec::new(),
             recent: Vec::new(),
@@ -1109,6 +1115,27 @@ impl AppWindow {
         cx.notify();
     }
 
+    /// Cmd+W: close the active Files tab when the panel has the focus, else the one selected pane.
+    pub(super) fn close_focused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(id) = self.popped_pane(window) { return self.run("canvas.browser_tab_close", json!({"pane":id}), window, cx); }
+        // A closed panel has no active tab, so a stale panel click does not swallow the key.
+        if let Some(tab) = self.canvas_state.file.clone().filter(|_| self.canvas_state.close_panel_focus) {
+            if let canvas::PanelTab::Pane(id) = &tab {
+                if self.canvas_state.doc.panes.iter().any(|p| &p.id == id && p.url().is_some()) {
+                    return self.run("canvas.browser_tab_close", json!({"pane":id}), window, cx);
+                }
+            }
+            return self.close_panel_tab(&tab, window, cx);
+        }
+        let [id] = self.canvas_state.selected.as_slice() else { return };
+        let id = id.clone();
+        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id && self.canvas_state.doc.shown(p)) else { return };
+        if pane.url().is_some() { return self.run("canvas.browser_tab_close", json!({"pane":id}), window, cx); }
+        if pane.text().is_some() { return self.confirm_close_written(vec![id], window, cx); }
+        if pane.boxed() { return self.close_boxed_panes(&[id], cx); }
+        self.close_canvas_cell(&json!({"terminal":id}), window, cx);
+    }
+
     /// Closes the selected cell with confirmation appropriate to its current kind.
     pub(super) fn close_canvas_cell(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(id) = a["pane"].as_str() {
@@ -1289,6 +1316,7 @@ impl AppWindow {
         if args["path"].as_str().is_some_and(|p| p != path) { return; }
         if let Some(dirty) = args["dirty"].as_bool() {
             if self.canvas_state.editing.as_ref() == Some(&path) {
+                if dirty && self.canvas_state.dirty.is_none() { self.canvas_state.dirty_generation += 1; }
                 self.canvas_state.dirty = dirty.then_some(path);
                 cx.notify();
             }
@@ -2868,6 +2896,7 @@ impl AppWindow {
                 // Capture phase: raise and select before the body handles input and can take focus.
                 .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     if e.button != MouseButton::Left { return; }
+                    this.canvas_state.close_panel_focus = false;
                     this.raise_pane(&raise, cx);
                     this.focus.focus(window, cx);
                     this.canvas_state.selected = vec![raise.clone()];
@@ -3033,6 +3062,7 @@ impl AppWindow {
             })
             // Middle drag, or left drag with Space held, starts a camera pan.
             .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, cx| {
+                if e.button == MouseButton::Left { this.canvas_state.close_panel_focus = false; }
                 if (e.button == MouseButton::Left && this.canvas_state.wire.sticky)
                     || this.canvas_input_covered(e.position) { return; }
                 let state = &mut this.canvas_state;
@@ -3888,6 +3918,9 @@ impl AppWindow {
                 .min(full_width * 0.75);
             let width = if expanded { full_width } else { width };
             let mut panel = div()
+                .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, _| {
+                    if e.button == MouseButton::Left { this.canvas_state.close_panel_focus = true; }
+                }))
                 .relative()
                 .overflow_hidden()
                 .w(px(width))
@@ -3971,7 +4004,9 @@ impl AppWindow {
                             })))));
             }
             // The panel's part of the bar shares its color, like Claude's side panel header.
-            bar = bar.child(div().flex().flex_none().when(expanded, |d| d.flex_1()).when(!expanded, |d| d.w(px(width))).h_full().items_center()
+            bar = bar.child(div().capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, _| {
+                if e.button == MouseButton::Left { this.canvas_state.close_panel_focus = true; }
+            })).flex().flex_none().when(expanded, |d| d.flex_1()).when(!expanded, |d| d.w(px(width))).h_full().items_center()
                 .pr(px(8.)).gap(px(4.))
                 .bg(c(bg)).border_b_1().border_color(c("border"))
                 .child(tabs)
@@ -5026,13 +5061,15 @@ mod pane_action_tests {
     fn targets_headless(cx: &mut TestAppContext) {
         if !running_alone(TARGETS) { return; }
         let (view, cx) = open_window(cx, "pane-targets", "", json!({"id":"root","type":"canvas"}));
-        view.update_in(cx, |this, window, _| {
+        view.update_in(cx, |this, window, cx| {
             this.canvas_state.doc.panes = serde_json::from_value(json!([
                 {"id":"t1","kind":"terminal","props":{},"rect":[0,0,220,36],"z":0},
                 {"id":"t2","kind":"terminal","props":{},"space":"other","rect":[0,0,220,36],"z":1}
             ])).unwrap();
             this.canvas_state.selected = vec!["t1".into(), "t2".into(), "p1".into()];
             assert_eq!(this.targets(window), ["t1"]);
+            this.close_focused(window, cx);
+            assert!(this.closing_terminals.is_empty() && this.canvas_state.doc.panes.len() == 2, "several selected panes are not closed");
             this.canvas_state.doc.room = Some("other".into());
             assert_eq!(this.targets(window), ["t2"]);
             this.canvas_state.selected.clear();

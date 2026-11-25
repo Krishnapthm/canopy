@@ -164,6 +164,12 @@ Open the quote popover at point or the pointer: agents wired to the quoted pane 
 | `kind` | no |
 | `source` | no |
 
+## `canvas.close_focused`
+
+Close the focused Files panel tab, or the one selected canvas pane. A browser closes its active tab; with several or no panes selected, nothing closes. Only the person can run it.
+
+No arguments.
+
 ## `canvas.close`
 
 Close every selected pane (else the focused one) behind one dialog listing them, the named terminal, or one file or mod pane by id (pane; a mod pane holding text refuses); terminals and panes are the confirmed lists, closed without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts.
@@ -708,6 +714,16 @@ Assign the next unused color in the pane's space.
 | Argument | Required |
 |---|---|
 | `pane` | yes |
+
+## `panel.close_tab`
+
+Close a file tab in the Files panel, asking before discarding unsaved changes. The confirm dialog passes confirmed and the draft's generation, and a stale generation closes nothing. Only the person can run it.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+| `confirmed` | no |
+| `generation` | no |
 
 ## `panel.editor`
 

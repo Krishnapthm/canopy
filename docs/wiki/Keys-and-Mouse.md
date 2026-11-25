@@ -43,7 +43,7 @@ These keys apply when the canvas has the keyboard and no input has focus. See [C
 | `n` / `Shift+N` | Open a terminal / the installed agent list. |
 | `v` / `t` | Select tool / new note pane. |
 | `Cmd+O` (`Ctrl+O` on Linux and Windows) | Open a file on the canvas. |
-| `Cmd+W` (macOS) | Close the selected browser pane's active tab. Without a single browser pane selected, close the app tab as usual. |
+| `Cmd+W` (macOS) | Close one focused item: the active tab of the Files panel if you last clicked in it, else the one selected pane (a browser pane closes its active tab). With several panes selected, or none, nothing closes. In classic layout it closes the active workspace tab. |
 | `Backspace` / `Delete` | Close the selection. |
 | `?` | Show the full key list. |
 | `q` | Quote the selected image. |

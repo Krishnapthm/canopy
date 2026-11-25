@@ -50,7 +50,7 @@ A docked pane is not on the canvas: layout, tiling and wire lines skip it. Canop
 3. Edit the text.
 4. Click **Save** to save it, or **Done** to save and return to the preview.
 
-An unsaved dot replaces the tab's X until you hover over it.
+An unsaved dot replaces the tab's X until you hover over it. Closing that tab (its X, or `Cmd+W` while the panel has your last click) asks "Discard unsaved changes?" first, and only the answer you saw closes it: if you edit the file again after the dialog opened, the old answer does nothing. Agents cannot close a file tab.
 Editing accepts text files up to 1 MiB.
 If the file changes outside Canopy, saving fails and keeps your draft.
 

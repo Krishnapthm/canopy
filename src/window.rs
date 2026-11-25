@@ -2872,6 +2872,7 @@ impl AppWindow {
         // Close the dialog holding the keyboard, not the terminal behind it.
         let implicit_close = match crate::keys::current(name).as_str() {
             "tab.close" => Self::arg(&args, "id").is_none(),
+            "canvas.close_focused" => true,
             "canvas.browser_tab_close" => args["pane"].is_null() && self.selected_browser().is_none(),
             "pane.close" => Self::arg(&args, "pane").is_none(),
             _ => false,
@@ -3068,6 +3069,7 @@ impl AppWindow {
             "wire.connect" | "wire.remove" => self.wire_command(name, a, cx),
             "canvas.clear_finished" => self.clear_subs(a, window, cx),
             "canvas.close" => self.close_canvas_cell(a, window, cx),
+            "canvas.close_focused" => if person { self.close_focused(window, cx) } else { self.fail("only the person can close the focused pane") },
             "canvas.note_new" => {
                 let mut args = json!({"kind":"mod:note"});
                 if let Some(point) = a.get("point") { args["point"] = point.clone(); }
@@ -3103,6 +3105,19 @@ impl AppWindow {
                 let selected = self.canvas_state.selected.last().cloned();
                 if let Some(addr) = Self::owned(a, "terminal").or(selected) {
                     self.pop_canvas(addr, name == "panel.bring_back", window, cx);
+                }
+            }
+            "panel.close_tab" => {
+                if !person { return self.fail("only the person can close a file tab"); }
+                if let Some(path) = a["path"].as_str() {
+                    let tab = canvas::PanelTab::File(path.to_owned());
+                    let state = &mut self.canvas_state;
+                    if a["confirmed"] == true && state.dirty.as_deref() == Some(path) {
+                        // The draft changed after the dialog opened, so the person has not seen this one.
+                        if a["generation"].as_u64() != Some(state.dirty_generation) { return; }
+                        state.dirty = None;
+                    }
+                    if state.doc.panel.tabs.contains(&tab) { self.close_panel_tab(&tab, window, cx); }
                 }
             }
             "panel.editor" => self.panel_editor(a, window, cx),

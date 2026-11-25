@@ -53,7 +53,7 @@ tab and focus its address field. Click a tab to switch to it, click its
 **Close tab** button (shown on the selected tab and when you hover another) or
 middle-click it to close it. Right-click a tab for **Open in** your browser and
 **Close tab**. In [canvas mode](Canvas), `Cmd+W` also closes
-the active tab of the selected browser pane.
+the active tab of the selected browser pane, or of the one in the Files panel when you last clicked there.
 
 Tabs are up to 160 px wide and shrink evenly, to 72 px, as more open. Each shows a
 globe and its title: Canopy never loads a page's own icon, because that would be a
