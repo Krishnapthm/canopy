@@ -485,7 +485,6 @@ impl AppWindow {
         true
     }
 
-    /// Move the carried panes directly. Only neighbours need to ease to their new positions.
     /// How fast to pan during a drag: a moved pane or space pans once it touches a canvas edge,
     /// a resize when the pointer nears one.
     fn edge_speed(&self, pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
@@ -505,6 +504,7 @@ impl AppWindow {
         }
     }
 
+    /// Move the carried panes directly. Only neighbours need to ease to their new positions.
     fn apply_canvas_move(&mut self, pan: canvas::Point, cx: &mut Context<Self>) -> bool {
         let state = &mut self.canvas_state;
         let position = state.queued_move.take();
