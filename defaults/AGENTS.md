@@ -1098,7 +1098,7 @@ empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. 
 shows keys on the toolbar and helper bars, even while a terminal has focus. Expanded cells are
 100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
 neighbours back. Drag any edge or corner of an expanded terminal or boxed pane to resize it.
-The terminal grid refits on release. Holding a move or resize near a canvas edge pans the canvas.
+The terminal grid refits on release. A moved pane or space card that touches a canvas edge pans the canvas that way, faster the further it is pushed; a resize pans when the pointer nears an edge.
 Wheel or two-finger scroll pans over the canvas and unentered panes, while an entered terminal
 keeps plain scroll. Pinch and Cmd+scroll (Ctrl+scroll elsewhere) zoom the canvas. `canvas.expand {terminal?}` toggles
 the named or last selected cell; `panel.open {terminal}` only expands. An expanded cell keeps its size at every

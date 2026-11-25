@@ -486,6 +486,25 @@ impl AppWindow {
     }
 
     /// Move the carried panes directly. Only neighbours need to ease to their new positions.
+    /// How fast to pan during a drag: a moved pane or space pans once it touches a canvas edge,
+    /// a resize when the pointer nears one.
+    fn edge_speed(&self, pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
+        let state = &self.canvas_state;
+        let pane = match (&state.preview_drag, &state.drag) {
+            (Some((id, None, _)), _) | (None, Some((Some(id), _))) => state.doc.panes.iter().find(|p| &p.id == id && p.pinned.is_none()).map(|p| p.rect),
+            _ => None,
+        };
+        let space = state.space_drag.as_ref().and_then(|(id, _, _)| state.doc.spaces.iter().find(|s| &s.space == id)).map(|s| s.rect);
+        match pane.or(space) {
+            Some([x, y, w, h]) if !state.resizing_pane() && bounds.contains(&pointer) => {
+                let camera = state.doc.camera;
+                let [sx, sy] = camera.to_screen([x, y]);
+                edge_push(Bounds::new(bounds.origin + point(px(sx), px(sy)), size(px(w * camera.zoom), px(h * camera.zoom))), bounds)
+            }
+            _ => edge_pan(pointer, bounds),
+        }
+    }
+
     fn apply_canvas_move(&mut self, pan: canvas::Point, cx: &mut Context<Self>) -> bool {
         let state = &mut self.canvas_state;
         let position = state.queued_move.take();
@@ -729,7 +748,7 @@ impl AppWindow {
                 let mut pan = [0., 0.];
                 if let Some((position, last)) = this.canvas_state.edge_drag.take() {
                     let bounds = this.bounds.borrow().get("canopy-canvas").copied();
-                    let speed = bounds.map_or([0., 0.], |bounds| edge_pan(position, bounds));
+                    let speed = bounds.map_or([0., 0.], |bounds| this.edge_speed(position, bounds));
                     if speed != [0., 0.] {
                         let now = std::time::Instant::now();
                         pan = speed.map(|v| v * now.duration_since(last).as_secs_f32().min(0.05));
@@ -3098,8 +3117,9 @@ impl AppWindow {
                                     && (resize || this.queue_canvas_move(e.position, window, cx))
                                 {
                                     if resize { this.apply_resize(e.position, [0., 0.], window, cx); }
+                                    let speed = this.edge_speed(e.position, b);
                                     let state = &mut this.canvas_state;
-                                    if (resize || state.drag_live) && edge_pan(e.position, b) != [0., 0.] {
+                                    if (resize || state.drag_live) && speed != [0., 0.] {
                                         let last = state.edge_drag.map_or_else(std::time::Instant::now, |(_, last)| last);
                                         state.edge_drag = Some((e.position, last));
                                         this.layout_frame(window, cx);
@@ -4175,6 +4195,16 @@ fn edge_pan(pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
     [x * speed, y * speed]
 }
 
+/// Screen pixels per second to pan while a dragged `rect` touches or passes an edge of `bounds`:
+/// a quarter speed on contact, full speed 36 px past it.
+fn edge_push(rect: Bounds<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
+    let push = |over: Pixels| if over < px(0.) { 0. } else { (0.25 + f32::from(over) / 48.).min(1.) };
+    let x = push(bounds.left() - rect.left()) - push(rect.right() - bounds.right());
+    let y = push(bounds.top() - rect.top()) - push(rect.bottom() - bounds.bottom());
+    let speed = 900. / x.hypot(y).max(1.);
+    [x * speed, y * speed]
+}
+
 /// Edges and corners stay grabbable even when the pane is zoomed out.
 fn resize_zone_sizes(zoom: f32) -> (f32, f32) {
     ((6. * zoom).max(8.), (12. * zoom).max(8.))
@@ -4556,7 +4586,7 @@ mod layout_answer_tests {
 
 #[cfg(test)]
 mod input_tests {
-    use super::{AppWindow, WHEEL_GESTURE, edge_pan, wheel_claimed};
+    use super::{AppWindow, WHEEL_GESTURE, edge_pan, edge_push, wheel_claimed};
     use super::super::tests::{in_own_process, open_window, running_alone};
     use gpui::{Bounds, Entity, Modifiers, MouseButton, MouseDownEvent, PinchEvent, ScrollDelta,
         ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, point, px, size};
@@ -4585,6 +4615,21 @@ mod input_tests {
         assert_eq!(pan(9., 120.), [0., 0.]);
         let [x, y] = pan(10., 20.);
         assert!((x.hypot(y) - 900.).abs() < 0.001);
+    }
+
+    #[test]
+    fn edge_push_starts_when_a_pane_touches_an_edge() {
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(400.), px(300.)));
+        let push = |x, y| edge_push(Bounds::new(point(px(x), px(y)), size(px(100.), px(80.))), bounds);
+        assert_eq!(push(150., 100.), [0., 0.]);
+        assert_eq!(push(1., 100.), [0., 0.]);
+        assert_eq!(push(0., 100.), [225., 0.]);
+        assert_eq!(push(-36., 100.), [900., 0.]);
+        assert_eq!(push(300., 100.), [-225., 0.]);
+        assert_eq!(push(150., 256.), [0., -900.]);
+        // A pane past both side edges pans neither way.
+        let wide = Bounds::new(point(px(-10.), px(100.)), size(px(420.), px(80.)));
+        assert_eq!(edge_push(wide, bounds), [0., 0.]);
     }
 
     const WHEEL: &str = "window::canvas_view::input_tests::wheel_over_panes";

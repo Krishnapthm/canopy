@@ -28,9 +28,10 @@ In canvas mode, a click on a pane selects it. Selection is how you tell Canopy w
 - `Shift`-click adds a pane to the selection or removes it.
 - Drag on empty canvas to draw a selection box. Hold `Shift` to add to the selection. Click empty canvas to clear it.
 - Drag a selected pane to move the whole selection.
+- Drag a pane until it touches the edge of the canvas and the canvas pans that way to make room. Push further to pan faster, and move back to stop.
 - Arrow keys nudge the selected pane by one gap. `h`, `j`, `k` and `l` (or `Tab` and `Shift+Tab`) move the selection to the nearest pane in that direction.
 
-Drag any edge or corner to resize an expanded terminal or a pane such as a PDF, browser or simulator. Hold a drag near the edge of the canvas to pan and reach more room. The canvas pans faster as you approach the edge, and stops when you move back toward the middle or release.
+Drag any edge or corner to resize an expanded terminal or a pane such as a PDF, browser or simulator. While you resize, hold the pointer near the edge of the canvas to pan and reach more room. The canvas pans faster as you approach the edge, and stops when you move back toward the middle or release.
 
 When you drag a pane into others, the neighbors step aside and slide back once you have passed, so panes never end up stacked by accident. The `canvas_push` setting changes this (see [Settings](#settings-that-change-the-canvas)).
 A drag follows the pointer even across other panes. The canvas uses the latest pointer position for each frame and applies any remaining movement when you release. Dragging a selected group moves it together while neighbors slide aside.

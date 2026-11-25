@@ -13,7 +13,7 @@ Create a sticky note with `Option+Cmd+N` on macOS or `Ctrl+Alt+N` on Linux and W
 - Double-click a terminal pane to enter it. Click empty canvas or another pane to leave it.
 - Pan with `Space`+drag, middle-button drag or wheel or two-finger scroll. Scroll pans over empty canvas and panes you have not entered. Inside an entered terminal, plain scroll moves through its output.
 - Pinch or use `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) to zoom the canvas around the pointer.
-- Drag a pane edge or corner to resize. While moving or resizing a pane, hold the pointer near a canvas edge to pan. See [Canvas](Canvas#select-and-move-panes).
+- Drag a pane edge or corner to resize. Moving a pane until it touches a canvas edge pans the canvas that way. While resizing, hold the pointer near a canvas edge to pan. See [Canvas](Canvas#select-and-move-panes).
 
 ## Show keys
 
