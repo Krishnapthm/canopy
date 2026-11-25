@@ -1553,7 +1553,10 @@ impl AppWindow {
         let revealed = tab_shown && !self.tab_shown;
         self.tab_shown = tab_shown;
         if self.has_canvas() && !self.canvas_state.mode && let Some(t) = self.focused_cell() {
-            if no_dialog && !self.focus.is_focused(window) { t.focus.focus(window, cx); }
+            // Only from nobody or another terminal: a text field (a browser address, a rename)
+            // keeps the keyboard, or releasing Cmd after a paste would pull it out mid-edit.
+            let free = window.focused(cx).is_none_or(|f| self.terms.values().any(|term| term.focus == f));
+            if no_dialog && free { t.focus.focus(window, cx); }
         } else if terminal_block(&self.chrome, focused.as_deref()).is_some() {
             if pane_changed && no_dialog && let Some(f) = focused.as_deref().and_then(|p| self.pane_focus(p, cx)) {
                 f.focus(window, cx);
@@ -2466,7 +2469,7 @@ impl AppWindow {
                 return self.sync(window, cx);
             }
             if closed && self.model.address_of(block).as_deref() == Some(t.address.as_str()) {
-                self.model.remove_pane(block);
+                self.model.remove_pane(block, self.has_canvas());
                 return self.sync(window, cx);
             }
         }
@@ -2696,7 +2699,7 @@ impl AppWindow {
                 };
                 if closed {
                     self.notify_launch_failure(&addr, window, cx);
-                    self.model.remove_pane(&pane);
+                    self.model.remove_pane(&pane, self.has_canvas());
                     changed = true;
                 }
             }
@@ -2809,7 +2812,7 @@ impl AppWindow {
                 if let Some(pane) = self.model.pane_of(&address) { self.model.focus_pane(&pane); }
             }
             TerminalChange::Park => {
-                if let Some(pane) = self.model.pane_of(&address) { self.model.remove_pane(&pane); }
+                if let Some(pane) = self.model.pane_of(&address) { self.model.remove_pane(&pane, self.has_canvas()); }
             }
         }
         if !self.draining {
@@ -3225,13 +3228,26 @@ impl AppWindow {
             "tab.close" => {
                 let Some(id) = Self::owned(a, "id").or(active_ctx) else { return self.fail("no tab to close") };
                 let Some(p) = self.model.space_of(&id) else { return self.fail(format!("no tab {id:?}")) };
-                // The last tab takes its space with it: ask like closing the space.
-                if p.tabs.len() == 1 {
+                // In a classic layout the last tab takes its space with it: ask like closing the
+                // space. On a canvas the space stays open without terminals, but ending its last
+                // ones still needs the same yes.
+                let canvas = self.has_canvas();
+                if p.tabs.len() == 1 && !canvas {
                     let mut args = json!({ "id": p.id });
                     args["confirmed"] = a.get("confirmed").cloned().unwrap_or(Value::Null);
                     return self.dispatch("space.close", &args, person, window, cx);
                 }
-                let (addrs, _) = self.model.remove_tab(&id);
+                let last = (p.tabs.len() == 1).then(|| crate::model::addresses(&p.tabs[0].root).len()).filter(|n| *n > 0);
+                if let Some(n) = last && a.get("confirmed").and_then(Value::as_bool) != Some(true) {
+                    if !person {
+                        return self.fail("tab.close ends the last terminals of its space: pass confirmed: true");
+                    }
+                    let detail = format!("The last {} in {} end{}. The space stays open. This cannot be undone.",
+                        if n == 1 { "terminal".to_owned() } else { format!("{n} terminals") }, self.model.space_name(p, &home()), if n == 1 { "s" } else { "" });
+                    self.confirm("Close terminals?", &detail, "Close", "tab.close", json!({ "id": id, "confirmed": true }), window, cx);
+                    return;
+                }
+                let (addrs, _) = self.model.remove_tab(&id, canvas);
                 self.kill(&addrs, cx);
             }
             "tab.rename" => {
@@ -3301,7 +3317,7 @@ impl AppWindow {
                     return self.dispatch("tab.close", &json!({ "id": id }), person, window, cx);
                 }
                 let addr = self.model.address_of(&pane);
-                self.model.remove_pane(&pane);
+                self.model.remove_pane(&pane, self.has_canvas());
                 self.kill(&addr.into_iter().collect::<Vec<_>>(), cx);
             }
             "pane.zoom" => {
@@ -4348,7 +4364,7 @@ impl AppWindow {
         let mut el = div().relative().overflow_hidden().size_full().flex();
         let bounds_map = self.bounds.clone();
         let id = n.id.clone();
-        el = el.child(canvas(move |b, _, _| { bounds_map.borrow_mut().insert(id, b); }, |_, _, _, _| {}).absolute().size_full());
+        el = el.child(canvas(move |b, _, _| { bounds_map.borrow_mut().insert(id, b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full());
         el = apply_look(el, n, focused.contains(&n.id));
         if n.window_drag {
             el = self.window_drag(el, cx);
@@ -4655,7 +4671,7 @@ impl AppWindow {
             let bounds = self.bounds.clone();
             let cover = format!("cover:overlay:{}", o.id);
             let mut measure = Some(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
-                .absolute().size_full());
+                .absolute().top_0().left_0().size_full());
             let body = div()
                 .id(SharedString::from(format!("ov-{}", o.id)))
                 .relative()
@@ -5108,7 +5124,6 @@ impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_browser_inputs(window, cx);
         self.release_pdf_drops(window, cx);
-        if !self.canvas_state.moving_geometry() { self.constrain_camera(window, cx); }
         self.pin_panes();
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
@@ -5979,6 +5994,40 @@ export default class Probe extends View {
     }
 
     #[test]
+    fn closing_a_canvas_space_last_terminals_needs_confirmed() {
+        in_own_process("last_terminals_confirm");
+    }
+
+    /// On a canvas a space outlives its terminals, but `tab.close` on its last tab still ends
+    /// them, so a command must say `confirmed: true`, like `space.close`.
+    #[gpui::test]
+    fn last_terminals_confirm(cx: &mut TestAppContext) {
+        use serde_json::json;
+        if !running_alone("last_terminals_confirm") { return; }
+        let (view, cx) = open_window(cx, "last-terminals", "", json!({"id":"root", "type":"canvas"}));
+        cx.run_until_parked();
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.model.add_space("sp1", "", "/tmp", crate::model::Tab::new("tb1", "", "p1", "t1"));
+            this.model.add_tab("sp1", crate::model::Tab::new("tb2", "", "p2", "t2"));
+            // As a command from an agent (not the person); tests have no core documents.
+            let close = |this: &mut super::AppWindow, args, window: &mut gpui::Window, cx: &mut gpui::Context<super::AppWindow>| {
+                this.reply = None;
+                this.dispatch("tab.close", &args, false, window, cx);
+                this.reply.take()
+            };
+            // Not the last tab: it closes at once.
+            assert_eq!(close(this, json!({"id":"tb2"}), window, cx), None);
+            assert!(this.model.tab("tb2").is_none());
+            let refused = close(this, json!({"id":"tb1"}), window, cx).unwrap();
+            assert!(refused["error"].as_str().is_some_and(|e| e.contains("confirmed: true")), "{refused}");
+            assert!(this.model.tab("tb1").is_some());
+            assert_eq!(close(this, json!({"id":"tb1", "confirmed": true}), window, cx), None);
+            assert!(this.model.tab("tb1").is_none());
+            assert!(this.model.space("sp1").is_some_and(|s| s.tabs.is_empty()), "the space stays open");
+        }));
+    }
+
+    #[test]
     fn canvas_mouse_works_like_figma() {
         in_own_process("figma_mouse");
     }
@@ -5993,7 +6042,6 @@ export default class Probe extends View {
         let (view, cx) = open_window(cx, "canvas-mouse", "", json!({"id":"root", "type":"canvas"}));
         cx.run_until_parked();
         cx.update(|window, cx| view.update(cx, |this, cx| {
-            this.person.canvas_constrain = false;
             this.model.add_space("root", "Canvas", &super::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
             this.model.space_mut("root").unwrap().tabs.push(crate::model::Tab::new("tab2", "", "pane2", "t2"));
             this.live.insert("t1".into(), json!({"state":"live", "pid":1}));

@@ -345,11 +345,6 @@ impl State {
         }
     }
 
-    pub(super) fn moving_geometry(&self) -> bool {
-        self.preview_drag.is_some() || self.space_drag.is_some() || self.cell_resize.is_some()
-            || matches!(self.drag, Some((Some(_), _)))
-    }
-
     fn resizing_pane(&self) -> bool {
         self.cell_resize.is_some() || matches!(self.preview_drag, Some((_, Some(_), _)))
     }
@@ -488,6 +483,25 @@ impl AppWindow {
         state.queued_move = Some(position);
         self.layout_frame(window, cx);
         true
+    }
+
+    /// How fast to pan during a drag: a moved pane or space pans once it touches a canvas edge,
+    /// a resize when the pointer nears one.
+    fn edge_speed(&self, pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
+        let state = &self.canvas_state;
+        let pane = match (&state.preview_drag, &state.drag) {
+            (Some((id, None, _)), _) | (None, Some((Some(id), _))) => state.doc.panes.iter().find(|p| &p.id == id && p.pinned.is_none()).map(|p| p.rect),
+            _ => None,
+        };
+        let space = state.space_drag.as_ref().and_then(|(id, _, _)| state.doc.spaces.iter().find(|s| &s.space == id)).map(|s| s.rect);
+        match pane.or(space) {
+            Some([x, y, w, h]) if !state.resizing_pane() && bounds.contains(&pointer) => {
+                let camera = state.doc.camera;
+                let [sx, sy] = camera.to_screen([x, y]);
+                edge_push(Bounds::new(bounds.origin + point(px(sx), px(sy)), size(px(w * camera.zoom), px(h * camera.zoom))), bounds, pointer)
+            }
+            _ => edge_pan(pointer, bounds),
+        }
     }
 
     /// Move the carried panes directly. Only neighbours need to ease to their new positions.
@@ -734,26 +748,14 @@ impl AppWindow {
                 let mut pan = [0., 0.];
                 if let Some((position, last)) = this.canvas_state.edge_drag.take() {
                     let bounds = this.bounds.borrow().get("canopy-canvas").copied();
-                    let speed = bounds.map_or([0., 0.], |bounds| edge_pan(position, bounds));
+                    let speed = bounds.map_or([0., 0.], |bounds| this.edge_speed(position, bounds));
                     if speed != [0., 0.] {
                         let now = std::time::Instant::now();
                         pan = speed.map(|v| v * now.duration_since(last).as_secs_f32().min(0.05));
-                        let before = this.canvas_state.doc.camera;
-                        let mut requested = before;
-                        requested.pan(pan);
-                        this.canvas_state.doc.camera = requested;
-                        this.constrain_camera(window, cx);
-                        let camera = &mut this.canvas_state.doc.camera;
-                        // Edge-pan only follows the pointer. Leave recentering to the end of the drag.
-                        camera.x = camera.x.clamp(before.x.min(requested.x), before.x.max(requested.x));
-                        camera.y = camera.y.clamp(before.y.min(requested.y), before.y.max(requested.y));
-                        camera.zoom = before.zoom;
-                        pan = [(before.x - camera.x) * camera.zoom, (before.y - camera.y) * camera.zoom];
-                        if pan != [0., 0.] {
-                            this.canvas_state.edge_drag = Some((position, now));
-                            this.apply_resize(position, pan, window, cx);
-                            this.layout_frame(window, cx);
-                        }
+                        this.canvas_state.doc.camera.pan(pan);
+                        this.canvas_state.edge_drag = Some((position, now));
+                        this.apply_resize(position, pan, window, cx);
+                        this.layout_frame(window, cx);
                     }
                 }
                 let moved = this.apply_canvas_move(pan, cx);
@@ -1371,10 +1373,12 @@ impl AppWindow {
         }).detach();
     }
 
-    /// The folder of the space last clicked on the canvas.
+    /// The folder the canvas file tree shows: the room being shown, else the Home card last
+    /// clicked, else the most recently entered space.
     fn panel_root(&self) -> Option<String> {
-        let space = self.canvas_state.doc.panel.space.as_deref()?;
-        self.model.space(space).map(|s| s.folder.clone())
+        let state = &self.canvas_state;
+        let mut ids = state.doc.room.iter().chain(state.doc.panel.space.iter()).chain(state.recent.iter());
+        ids.find_map(|id| self.model.space(id)).map(|s| s.folder.clone())
     }
     /// The space a window position belongs to: the room being shown, else the Home card under it.
     fn space_at(&self, position: Point<Pixels>) -> Option<String> {
@@ -1439,7 +1443,6 @@ impl AppWindow {
             self.canvas_state.doc.panel.space = Some(id.clone());
             self.model.active = Some(id.clone());
         }
-        self.constrain_camera(window, cx);
         if first { self.canvas_command("canvas.fit", window, cx); }
         self.canvas_changed(cx);
         self.focus.focus(window, cx);
@@ -1565,16 +1568,8 @@ impl AppWindow {
 
     /// How far the camera may zoom in this place (see `canvas::zoom_range`).
     fn zoom_range(&self, window: &Window, cx: &App) -> [f32; 2] {
-        let size = self.canvas_bounds().map(|b| b.size).unwrap_or(window.viewport_size());
-        if !self.person.canvas_constrain { return [canvas::ZOOMS[0], canvas::ZOOMS[11]]; }
-        canvas::zoom_range(&self.place_rects(|_| true, cx), [f32::from(size.width), f32::from(size.height)])
-    }
-
-    pub(super) fn constrain_camera(&mut self, window: &Window, cx: &App) {
-        if !self.person.canvas_constrain || !self.has_canvas() || self.canvas_state.panel_expanded { return; }
-        let size = self.canvas_bounds().map(|b| b.size).unwrap_or(window.viewport_size());
-        let rects = self.place_rects(|_| true, cx);
-        canvas::constrain_camera(&mut self.canvas_state.doc.camera, &rects, [f32::from(size.width), f32::from(size.height)]);
+        let [_, _, w, h] = self.open_canvas(window);
+        canvas::zoom_range(&self.place_rects(|_| true, cx), [w, h])
     }
 
     /// `zoom_range` widened to hold the current zoom, for gestures and zoom steps: a zoom left
@@ -1866,10 +1861,10 @@ impl AppWindow {
         self.set_expanded(&addr, expand, window, cx);
     }
 
-    /// Delay terminal grid resizing until a canvas zoom gesture settles.
+    /// Delay terminal grid resizing and crisp PDF pages until a canvas zoom gesture settles.
     fn zoom_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
-        if !state.doc.panes.iter().any(|c| c.size().is_some()) { return; }
+        if !state.doc.panes.iter().any(|c| c.size().is_some() || matches!(c.kind, canvas::Kind::Pdf { .. })) { return; }
         state.zoomed_at = Some(std::time::Instant::now());
         state.zoom_task = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(ZOOM_REST).await;
@@ -1880,8 +1875,8 @@ impl AppWindow {
         }));
     }
 
-    /// Whether expanded cells can refit their terminal grids.
-    fn camera_rested(&self) -> bool {
+    /// Whether expanded cells can refit their terminal grids and PDF pages re-render.
+    pub(super) fn camera_rested(&self) -> bool {
         let state = &self.canvas_state;
         state.motion.target.is_none() && state.zoomed_at.is_none()
     }
@@ -1898,7 +1893,6 @@ impl AppWindow {
             self.canvas_state.motion.target = None;
             self.canvas_state.motion.velocity = [0.; 2];
             self.canvas_state.doc.camera.pan([delta.x.into(), delta.y.into()]);
-            self.constrain_camera(window, cx);
             self.canvas_state.wheel_pan_at = Some(std::time::Instant::now());
             self.canvas_changed(cx);
             cx.notify();
@@ -1941,9 +1935,8 @@ impl AppWindow {
         self.canvas_state.motion.target = None;
         self.canvas_state.motion.velocity = [0.; 2];
         let z = self.canvas_state.doc.camera.zoom * canvas::zoom_factor(delta);
-        let z = canvas::rubber_band(z, self.gesture_range(window, cx));
-        self.canvas_state.doc.camera.zoom_at(z, anchor);
-        self.constrain_camera(window, cx);
+        let [min, max] = self.gesture_range(window, cx);
+        self.canvas_state.doc.camera.zoom_at(z.clamp(min, max), anchor);
         self.zoom_moved(window, cx);
         self.canvas_changed(cx);
         cx.notify();
@@ -2028,7 +2021,6 @@ impl AppWindow {
                     active = v[0].abs().max(v[1].abs()) > 5.;
                     if !active { *v = [0.; 2]; }
                 }
-                this.constrain_camera(window, cx);
                 if active { this.animate_camera(window, cx); }
                 else { this.canvas_changed(cx); }
                 cx.notify();
@@ -2761,16 +2753,9 @@ impl AppWindow {
                 return;
             }
         }
-        let bounds = self
-            .bounds
-            .borrow()
-            .get("canopy-canvas")
-            .copied()
-            .unwrap_or(Bounds::new(point(px(0.), px(0.)), window.viewport_size()));
-        let anchor = [
-            f32::from(bounds.size.width) / 2.,
-            f32::from(bounds.size.height) / 2.,
-        ];
+        // Zoom and fit around the middle of the canvas the toolbar leaves open.
+        let open = self.open_canvas(window);
+        let anchor = [open[0] + open[2] / 2., open[1] + open[3] / 2.];
         // Fit the selection, else everything in the current place.
         let fit_rects = if name.starts_with("canvas.fit") {
             let all = name == "canvas.fit_all" || self.canvas_state.selected.is_empty();
@@ -2801,8 +2786,7 @@ impl AppWindow {
             }
             "canvas.zoom_reset" => state.doc.camera.zoom_at(1f32.clamp(range[0], range[1]), anchor),
             "canvas.fit" | "canvas.fit_all" => {
-                canvas::focus_fit(&mut state.doc.camera, &mut state.previous_camera,
-                    &fit_rects, [anchor[0] * 2., anchor[1] * 2.]);
+                canvas::focus_fit(&mut state.doc.camera, &mut state.previous_camera, &fit_rects, open);
             }
             _ => state
                 .doc
@@ -2830,7 +2814,10 @@ impl AppWindow {
         let quote_pane = card.id.clone();
         let quote_path = file.to_owned();
         let quote_view = view.clone();
-        let body = div().flex_1().min_h_0().overflow_hidden().px(px(16.)).py(px(12.)).child(gpui_base::TextView::new(view).scrollable(true)
+        // The text scales with the canvas like a picture; a pinned pane keeps its screen size.
+        let z = if card.pinned.is_some() { 1. } else { camera.zoom };
+        let body = div().flex_1().min_h_0().overflow_hidden().px(px(16. * z)).py(px(12. * z))
+            .text_size(px(crate::settings::ui_font_size() * z)).child(gpui_base::TextView::new(view).scrollable(true)
                     .image_source(|_| {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
                         gpui::ImageSource::Image(BLANK.clone())
@@ -3000,7 +2987,7 @@ impl AppWindow {
     }
 
     /// Shortcut hints for an empty canvas, like VS Code's empty editor: only actions that have a key.
-    fn empty_hints(&self) -> Option<AnyElement> {
+    fn empty_hints(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let keys = crate::keys::listing();
         let rows: Vec<_> = [
             ("New terminal", "canvas.new"),
@@ -3019,10 +3006,42 @@ impl AppWindow {
                 .child(div().w(px(160.)).text_right().text_size(px(12.)).text_color(c("muted-foreground")).child(label))
                 .child(div().w(px(160.)).flex().gap(px(4.)).children(caps)))
         }).collect();
-        (!rows.is_empty()).then(|| {
-            div().absolute().inset_0().flex().items_center().justify_center()
-                .child(div().flex().flex_col().children(rows)).into_any_element()
+        let recent = self.recent_rows(cx);
+        (!rows.is_empty() || !recent.is_empty()).then(|| {
+            let list = (!recent.is_empty()).then(|| div().w(px(480.)).mt(px(20.)).flex().flex_col()
+                .child(div().h(px(28.)).px(px(8.)).flex().items_center().text_size(px(11.)).text_color(c("muted-foreground")).child("Recent"))
+                .children(recent));
+            // Centred in the canvas the toolbar leaves open, so it never sits under the toolbar.
+            let [x, y, w, h] = self.open_canvas_in(Size::default());
+            let place = div().absolute();
+            let place = if w > 0. && h > 0. { place.left(px(x)).top(px(y)).w(px(w)).h(px(h)) } else { place.inset_0() };
+            place.flex().items_center().justify_center()
+                .child(div().flex().flex_col().items_center().child(div().flex().flex_col().children(rows)).children(list))
+                .into_any_element()
         })
+    }
+
+    /// Home's recent list: up to 5 closed spaces not open now; a click reopens one in its folder.
+    fn recent_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        if self.canvas_state.doc.room.is_some() { return Vec::new(); }
+        let home = super::home();
+        // Open spaces by folder, as `Model::recent` keys them; the Home space is not one to reopen.
+        let open: Vec<&str> = self.model.spaces.iter().filter(|s| !root_space(s)).map(|s| s.folder.as_str()).collect();
+        let shown = |folder: &str| match folder.strip_prefix(home.trim_end_matches(['/', '\\'])) {
+            Some(rest) if home.len() > 1 && (rest.is_empty() || rest.starts_with(['/', '\\'])) => format!("~{rest}"),
+            _ => folder.to_owned(),
+        };
+        self.model.recent.iter().map(|r| (if r.name.is_empty() { crate::model::folder_name(&r.folder, &home) } else { r.name.clone() }, r))
+            .filter(|(_, r)| !open.contains(&r.folder.as_str())).take(5).enumerate().map(|(i, (name, r))| {
+                let (reopen, folder) = (json!({"name":r.name,"folder":r.folder}), shown(&r.folder));
+                div().id(("recent-space", i)).h(px(28.)).px(px(8.)).rounded(px(4.)).flex().items_center().gap(px(12.))
+                    .text_size(px(12.)).cursor_pointer().hover(|d| d.bg(c("hover")))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _, window, cx| this.dispatch("space.new", &reopen, true, window, cx)))
+                    .child(div().flex_none().text_color(c("foreground")).child(name))
+                    .child(div().min_w_0().truncate().text_color(c("muted-foreground")).child(folder))
+                    .into_any_element()
+            }).collect()
     }
 
     pub(super) fn render_canvas(&self, owner: &Node, cx: &mut Context<Self>) -> AnyElement {
@@ -3127,8 +3146,9 @@ impl AppWindow {
                                     && (resize || this.queue_canvas_move(e.position, window, cx))
                                 {
                                     if resize { this.apply_resize(e.position, [0., 0.], window, cx); }
+                                    let speed = this.edge_speed(e.position, b);
                                     let state = &mut this.canvas_state;
-                                    if (resize || state.drag_live) && edge_pan(e.position, b) != [0., 0.] {
+                                    if (resize || state.drag_live) && speed != [0., 0.] {
                                         let last = state.edge_drag.map_or_else(std::time::Instant::now, |(_, last)| last);
                                         state.edge_drag = Some((e.position, last));
                                         this.layout_frame(window, cx);
@@ -3241,7 +3261,7 @@ impl AppWindow {
                     cx.notify();
                 }),
             )
-            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
                 // The button came up outside the window: end any drag instead of panning on hover.
                 if e.pressed_button.is_none()
                     && matches!(this.canvas_state.drag, Some((None, _)))
@@ -3277,7 +3297,6 @@ impl AppWindow {
                 this.canvas_state.motion.velocity = [d[0]/dt, d[1]/dt];
                 this.canvas_state.motion.sample = Some(now);
                 this.canvas_state.doc.camera.pan(d);
-                this.constrain_camera(window, cx);
                 this.canvas_state.pan_moved = true;
                 this.canvas_state.drag.as_mut().unwrap().1 = e.position;
                 this.canvas_changed(cx);
@@ -3671,11 +3690,13 @@ impl AppWindow {
                 pills.push((paint_order(&card), pill.into_any_element()));
                 continue;
             }
-            // The terminal keeps its text size as the frame changes; its PTY grid waits for `settled`.
+            // The terminal scales with the canvas like a picture: its grid comes from the body at
+            // zoom 1, drawn at the scale that fits it under the header, and waits for `settled`.
             let slot = cell_slot(&card.id);
             let entered = state.entered() == Some(card.id.as_str());
             let live = self.terms.get(&slot);
-            let body_size = size(px((cw * z - 2.).max(1.)), px((ch * z - canvas::HEADER - 2.).max(1.)));
+            let ([bw, bh], drawn) = terminal_body(cw, ch, z);
+            let body_size = size(px(bw), px(bh));
             // A tile squeezed below readable size shows who it is instead, and its program keeps its grid.
             let compact = state.tile.is_some() && !entered && (cw < canvas::TILE_COMPACT[0] || ch < canvas::TILE_COMPACT[1]);
             if let Some(t) = live {
@@ -3685,7 +3706,7 @@ impl AppWindow {
                 t.view.update(cx, |v, cx| {
                     // Unentered cells let the wheel through, so the canvas pans over them.
                     v.wheel_needs_focus = true;
-                    v.set_scale(1., settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
+                    v.set_scale(drawn, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
                 });
             }
             let (select_addr, mode_addr) = (card.id.clone(), card.id.clone());
@@ -3763,7 +3784,7 @@ impl AppWindow {
         if !shown_doc.panes.iter().any(|p| shown_doc.shown(p))
             && (state.doc.room.is_some() || self.model.spaces.iter().all(|s| root_space(s)))
         {
-            area = area.children(self.empty_hints());
+            area = area.children(self.empty_hints(cx));
         }
         area = area.child(self.wire_layer(viewport, true, &edges));
         if let Some((a, b, _)) = &state.marquee {
@@ -3789,10 +3810,10 @@ impl AppWindow {
         let control = || div().flex().items_center().gap(px(4.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         // Expanded, the file panel fills the window: no space tabs, canvas or canvas controls.
         let expanded = state.panel_expanded && (state.file.is_some() || state.files);
-        let strip = if expanded { bg } else { "chrome" };
+        let strip = "chrome";
         // The expanded browser's tab is the active one; the place it came from draws inactive.
         let home_active = state.doc.room.is_none() && state.browser_tab.is_none();
-        let home_tab = strip_tab("canvas-home", home_active, c(bg), c(strip)).group("canvas-home").role(gpui::Role::Tab).aria_label("Home").aria_selected(home_active).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
+        let home_tab = strip_tab("canvas-home", home_active, c(bg), c(strip)).role(gpui::Role::Tab).aria_label("Home").aria_selected(home_active).flex_none().w(px(36.)).h(px(BAR)).flex().items_center().justify_center()
             .cursor_pointer()
             .text_color(c(if home_active { "foreground" } else { "muted-foreground" }))
             .hover(|d| d.text_color(c("foreground")))
@@ -3804,7 +3825,8 @@ impl AppWindow {
         let browser_space = state.browser_tab.as_ref().and_then(|id| state.doc.panes.iter().find(|p| &p.id == id)).and_then(|p| p.space.clone())
             .filter(|id| self.model.spaces.iter().any(|s| s.id == *id && !root_space(s)));
         let mut browser_tab = self.browser_tab_strip(c(bg), c(strip), cx);
-        let mut space_tabs = div().id("canvas-space-tabs").role(gpui::Role::TabList).flex().min_w_0().h_full().overflow_x_scroll();
+        // Room at the ends for the active tab's outward curves, which the scroll clip would cut.
+        let mut space_tabs = div().id("canvas-space-tabs").role(gpui::Role::TabList).flex().min_w_0().h_full().overflow_x_scroll().px(px(ui::RADIUS));
         for space in self.model.spaces.iter().filter(|s| !root_space(s)) {
             let active = state.doc.room.as_ref() == Some(&space.id) && state.browser_tab.is_none();
             let id = space.id.clone();
@@ -3812,7 +3834,7 @@ impl AppWindow {
             let group = SharedString::from(format!("space-tab-{id}"));
             let status = self.model.rollup(&space.tabs.iter().flat_map(|t| crate::model::addresses(&t.root)).collect::<Vec<_>>());
             let name = self.model.space_name(space, &home());
-            space_tabs = space_tabs.child(strip_tab(group.clone(), active, c(bg), c(strip)).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(name.clone()).flex().items_center()
+            space_tabs = space_tabs.child(strip_tab(group.clone(), active, c(bg), c(strip)).role(gpui::Role::Tab).aria_selected(active).aria_label(name.clone()).flex().items_center()
                 .h_full().w(px(180.)).min_w(px(96.)).gap(px(6.)).px(px(12.))
                 .text_size(px(12.)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
                 .hover(|d| d.text_color(c("foreground"))).cursor_pointer()
@@ -3881,26 +3903,11 @@ impl AppWindow {
         }
         let mut row = div().flex_1().min_h_0().w_full().flex();
         if !expanded {
-            let toolbar = self.render_canvas_toolbar(owner, cx);
-            let (edge, toolbar) = toolbar.map(|(edge, toolbar)| (edge, Some(toolbar)))
-                .unwrap_or((crate::layout::Edge::Bottom, None));
-            let horizontal = !edge.vertical();
-            let before = matches!(edge, crate::layout::Edge::Top | crate::layout::Edge::Left);
-            let bounds = self.bounds.clone();
-            let mut surface = div().relative().flex().flex_1().min_w_0().min_h_0().overflow_hidden()
-                .bg(c(bg))
-                .child(canvas(move |b, _, _| {
-                    bounds.borrow_mut().insert("canvas-work-area".into(), b);
-                }, |_, _, _, _| {}).absolute().size_full());
-            let center = div().flex().flex_col().flex_1().min_w_0().min_h_0()
+            row = row.child(div().flex().flex_col().flex_1().min_w_0().min_h_0().overflow_hidden().bg(c(bg))
                 .child(div().flex().flex_1().min_w_0().min_h_0().child(area))
                 .when(self.connect_hint(), |d| d.child(div().h(px(32.)).flex_none().w_full().overflow_hidden()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(self.render_slot("canvas-keys", cx))));
-            if horizontal { surface = surface.flex_col(); }
-            surface = if before { surface.children(toolbar).child(center) }
-                else { surface.child(center).children(toolbar) };
-            row = row.child(surface);
+                    .child(self.render_slot("canvas-keys", cx)))));
         }
         if state.file.is_some() || state.files {
             let full_width = self
@@ -3953,7 +3960,7 @@ impl AppWindow {
             }
             let mut browser_actions = None;
             let mut tabs = div().id("canvas-tabs").role(gpui::Role::TabList).flex().flex_1().min_w_0().h_full().items_center().overflow_x_scroll()
-                .when(!expanded, |d| d.pl(px(TAB_INSET)));
+                .pr(px(ui::RADIUS)).when(!expanded, |d| d.pl(px(TAB_INSET)));
             for tab in &state.doc.panel.tabs {
                 let tab = tab.clone();
                 let active = state.file.as_ref() == Some(&tab);
@@ -3976,7 +3983,7 @@ impl AppWindow {
                 let activate = tab.clone();
                 let close = tab.clone();
                 let group = SharedString::from(format!("panel-tab-{key}"));
-                tabs = tabs.child(strip_tab(group.clone(), active, c("hover"), c(bg)).group(group.clone()).role(gpui::Role::Tab).aria_selected(active).aria_label(label.clone()).flex().items_center().h_full()
+                tabs = tabs.child(strip_tab(group.clone(), active, c(bg), c("chrome")).role(gpui::Role::Tab).aria_selected(active).aria_label(label.clone()).flex().items_center().h_full()
                     .w(px(180.)).min_w(px(96.)).px(px(12.)).gap(px(6.))
                     .text_size(px(12.)).text_color(c(if active { "foreground" } else { "muted-foreground" }))
                     .hover(|d| d.text_color(c("foreground"))).cursor_pointer()
@@ -4003,12 +4010,12 @@ impl AppWindow {
                                 this.close_panel_tab(&close, window, cx);
                             })))));
             }
-            // The panel's part of the bar shares its color, like Claude's side panel header.
+            // The panel's part of the bar is the strip; its active tab flows into the panel body.
             bar = bar.child(div().capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, _| {
                 if e.button == MouseButton::Left { this.canvas_state.close_panel_focus = true; }
             })).flex().flex_none().when(expanded, |d| d.flex_1()).when(!expanded, |d| d.w(px(width))).h_full().items_center()
                 .pr(px(8.)).gap(px(4.))
-                .bg(c(bg)).border_b_1().border_color(c("border"))
+                .bg(c("chrome"))
                 .child(tabs)
                 .children(browser_actions)
                 .child(panel_button("panel-expand", if expanded { "mods/pane/unzoom.svg" } else { "mods/pane/zoom.svg" }, c("muted-foreground"), c("hover"))
@@ -4213,11 +4220,42 @@ const WHEEL_GESTURE: Duration = Duration::from_millis(150);
 /// Screen pixels per second to pan while dragging within 32 pixels of an edge.
 fn edge_pan(pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
     if !bounds.contains(&pointer) { return [0., 0.]; }
+    full_speed([pointer_ramp(pointer.x, bounds.left(), bounds.right()), pointer_ramp(pointer.y, bounds.top(), bounds.bottom())])
+}
+
+/// -1..1 along one axis: toward 1 as `at` nears `start`, toward -1 as it nears `end`.
+fn pointer_ramp(at: Pixels, start: Pixels, end: Pixels) -> f32 {
     let ramp = |distance: Pixels| (1. - f32::from(distance) / 32.).max(0.);
-    let x = ramp(pointer.x - bounds.left()) - ramp(bounds.right() - pointer.x);
-    let y = ramp(pointer.y - bounds.top()) - ramp(bounds.bottom() - pointer.y);
+    ramp(at - start) - ramp(end - at)
+}
+
+/// A direction scaled so its strongest pull pans 900 screen px per second.
+fn full_speed([x, y]: canvas::Point) -> canvas::Point {
     let speed = 900. / x.hypot(y).max(1.);
     [x * speed, y * speed]
+}
+
+/// A terminal pane's body in world px as at zoom 1, so its grid never depends on the zoom, and
+/// the scale that fits that body into the one drawn at zoom `z`: the header and border keep
+/// their screen size, so the drawn body is not the world body times `z`.
+fn terminal_body(cw: f32, ch: f32, z: f32) -> ([f32; 2], f32) {
+    let body = [(cw - 2.).max(1.), (ch - canvas::HEADER - 2.).max(1.)];
+    let fit = ((cw * z - 2.) / body[0]).min((ch * z - canvas::HEADER - 2.) / body[1]);
+    (body, fit.max(0.01))
+}
+
+/// Screen pixels per second to pan while a dragged `rect` touches or passes an edge of `bounds`:
+/// a quarter speed on contact, full speed 36 px past it. On an axis where the pane covers both
+/// edges, a push would never end, so the pointer near an edge pans instead, as in `edge_pan`.
+fn edge_push(rect: Bounds<Pixels>, bounds: Bounds<Pixels>, pointer: Point<Pixels>) -> canvas::Point {
+    let push = |over: Pixels| if over < px(0.) { 0. } else { (0.25 + f32::from(over) / 48.).min(1.) };
+    let axis = |before: Pixels, after: Pixels, at: Pixels, start: Pixels, end: Pixels| {
+        if before >= px(0.) && after >= px(0.) { pointer_ramp(at, start, end) } else { push(before) - push(after) }
+    };
+    full_speed([
+        axis(bounds.left() - rect.left(), rect.right() - bounds.right(), pointer.x, bounds.left(), bounds.right()),
+        axis(bounds.top() - rect.top(), rect.bottom() - bounds.bottom(), pointer.y, bounds.top(), bounds.bottom()),
+    ])
 }
 
 /// Edges and corners stay grabbable even when the pane is zoomed out.
@@ -4292,18 +4330,33 @@ fn action_binding(keys: &[(String, String, String)], command: &str) -> Option<St
         .map(|(_, key, _)| key.clone())
 }
 
-/// A top-strip tab: radius 8 on top and, when active, outward bottom curves that join it
-/// to what's below. GPUI can't round a corner outward, so each curve is an 8 px square of
-/// the tab's `fill` under a square of the `strip` color rounded on the corner facing the tab.
-fn strip_tab(id: impl Into<ElementId>, active: bool, fill: Hsla, strip: Hsla) -> Stateful<Div> {
+/// A Chrome-style tab for every strip: radius 8 on top and, when active, the body's `fill`
+/// with outward bottom curves that join it to the body below. GPUI can't round a corner
+/// outward, so each curve is an 8 px square of `fill` under a square of the `strip` color
+/// rounded on the corner facing the tab. `group` is its id and hover group.
+/// Inactive tabs end in a 1 px divider, hidden next to the active or hovered tab: the active
+/// tab's curves paint over its left neighbour's divider, a hovered tab masks it.
+/// The space above every strip tab.
+const TAB_GAP: f32 = 6.;
+
+fn strip_tab(group: impl Into<SharedString>, active: bool, fill: Hsla, strip: Hsla) -> Stateful<Div> {
+    let group = group.into();
     let curve = |left: bool| {
         div().absolute().bottom_0().size(px(ui::RADIUS)).bg(fill)
             .map(|d| if left { d.left(px(-ui::RADIUS)) } else { d.right(px(-ui::RADIUS)) })
             .child(div().size_full().bg(strip)
                 .map(|d| if left { d.rounded_br(px(ui::RADIUS)) } else { d.rounded_bl(px(ui::RADIUS)) }))
     };
-    div().id(id).relative().rounded_t(px(ui::RADIUS))
-        .when(active, |d| d.bg(fill).child(curve(true)).child(curve(false)))
+    let line = || div().absolute().top(px(10.)).bottom(px(10.)).w(px(1.));
+    // As in Chrome: space above the tab and between tabs. The fill starts below the gap, so
+    // callers keep sizing the tab to the strip's full height.
+    div().id(group.clone()).group(group.clone()).relative().pt(px(TAB_GAP)).mx(px(2.))
+        .when(active, |d| d
+            .child(div().absolute().top(px(TAB_GAP)).bottom_0().left_0().right_0().rounded_t(px(ui::RADIUS)).bg(fill))
+            .child(curve(true)).child(curve(false)))
+        .when(!active, |d| d
+            .child(line().right_0().bg(c("border")).group_hover(group.clone(), |d| d.opacity(0.)))
+            .child(line().left(px(-1.)).bg(strip).opacity(0.).group_hover(group, |d| d.opacity(1.))))
 }
 
 /// A 24 px plain icon button for canvas and panel controls.
@@ -4601,7 +4654,7 @@ mod layout_answer_tests {
 
 #[cfg(test)]
 mod input_tests {
-    use super::{AppWindow, WHEEL_GESTURE, edge_pan, wheel_claimed};
+    use super::{AppWindow, WHEEL_GESTURE, edge_pan, edge_push, terminal_body, wheel_claimed};
     use super::super::tests::{in_own_process, open_window, running_alone};
     use gpui::{Bounds, Entity, Modifiers, MouseButton, MouseDownEvent, PinchEvent, ScrollDelta,
         ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, point, px, size};
@@ -4632,6 +4685,40 @@ mod input_tests {
         assert!((x.hypot(y) - 900.).abs() < 0.001);
     }
 
+    #[test]
+    fn edge_push_starts_when_a_pane_touches_an_edge() {
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(400.), px(300.)));
+        let push = |x, y| edge_push(Bounds::new(point(px(x), px(y)), size(px(100.), px(80.))), bounds, point(px(200.), px(150.)));
+        assert_eq!(push(150., 100.), [0., 0.]);
+        assert_eq!(push(1., 100.), [0., 0.]);
+        assert_eq!(push(0., 100.), [225., 0.]);
+        assert_eq!(push(-36., 100.), [900., 0.]);
+        assert_eq!(push(300., 100.), [-225., 0.]);
+        assert_eq!(push(150., 256.), [0., -900.]);
+        // A pane past both side edges, more on one side, does not push either way: across
+        // that axis the pointer near an edge decides, as in a plain drag.
+        let wide = Bounds::new(point(px(-60.), px(100.)), size(px(480.), px(80.)));
+        assert_eq!(edge_push(wide, bounds, point(px(200.), px(150.))), [0., 0.]);
+        assert_eq!(edge_push(wide, bounds, point(px(392.), px(150.))), [-675., 0.]);
+        // The other axis still pushes on contact.
+        let tall_wide = Bounds::new(point(px(-60.), px(0.)), size(px(480.), px(80.)));
+        assert_eq!(edge_push(tall_wide, bounds, point(px(200.), px(40.))), [0., 225.]);
+    }
+
+    #[test]
+    fn terminal_grid_body_ignores_the_zoom() {
+        // The body that sizes the PTY grid is the same at every zoom: the header's screen size
+        // never feeds it, so zooming out keeps the rows.
+        let (body, fit) = terminal_body(800., 600., 1.);
+        assert_eq!((body, fit), ([798., 562.], 1.));
+        for z in [0.1, 0.5, 2.] {
+            let (at, fit) = terminal_body(800., 600., z);
+            assert_eq!(at, body);
+            // Drawn at `fit`, that body fits under the header of the pane drawn at `z`.
+            assert!(at[0] * fit <= 800. * z - 2. + 1e-3 && at[1] * fit <= 600. * z - crate::canvas::HEADER - 2. + 1e-3);
+        }
+    }
+
     const WHEEL: &str = "window::canvas_view::input_tests::wheel_over_panes";
     const RESIZE: &str = "window::canvas_view::input_tests::resize_over_panes";
 
@@ -4645,7 +4732,6 @@ mod input_tests {
         let (view, cx) = open_window(cx, "canvas-input", "", json!({"id":"root","type":"canvas"}));
         cx.run_until_parked();
         view.update_in(cx, |this, window, cx| {
-            this.person.canvas_constrain = false;
             this.model.add_space("root", "Canvas", &super::super::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
             this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
             this.canvas_state.doc.panes = serde_json::from_value(json!([
@@ -4689,9 +4775,12 @@ mod input_tests {
 
         let zoom = Modifiers { platform: cfg!(target_os = "macos"), control: !cfg!(target_os = "macos"), ..none };
         wheel(cx, position, 1000., TouchPhase::Moved, zoom);
-        assert!(camera(cx).zoom > before.zoom);
+        let limit = camera(cx).zoom;
+        assert!(limit > before.zoom);
+        wheel(cx, position, 1000., TouchPhase::Moved, zoom);
+        assert_eq!(camera(cx).zoom, limit, "zoom stops at the limit instead of stretching past it");
         wheel(cx, position, 0., TouchPhase::Ended, none);
-        assert!(view.update(cx, |this, _| this.canvas_state.motion.target.is_some()), "a zero-delta end starts settling at the zoom limit");
+        assert!(view.update(cx, |this, _| this.canvas_state.motion.target.is_none() && this.canvas_state.wheel_zoom.is_none()), "nothing to spring back from");
 
         let before = camera(cx);
         cx.simulate_event(PinchEvent { position, delta: -0.1, modifiers: none, phase: TouchPhase::Moved });
@@ -4703,10 +4792,10 @@ mod input_tests {
         cx.simulate_event(notch);
         cx.executor().advance_clock(WHEEL_GESTURE / 2);
         cx.run_until_parked();
-        assert!(view.read_with(cx, |this, _| this.canvas_state.motion.target.is_none()), "new wheel input postpones settling");
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wheel_zoom.is_some()), "new wheel input postpones the gesture end");
         cx.executor().advance_clock(WHEEL_GESTURE / 2);
         cx.run_until_parked();
-        assert!(view.read_with(cx, |this, _| this.canvas_state.motion.target.is_some()), "wheel input without an end settles after a quiet period");
+        assert!(view.read_with(cx, |this, _| this.canvas_state.wheel_zoom.is_none()), "wheel input without an end ends after a quiet period");
     }
 
     #[gpui::test]
@@ -4805,44 +4894,6 @@ mod settings_tests {
     #[test]
     fn pane_moves_follow_frames_and_flush_on_release() {
         in_own_process("window::canvas_view::settings_tests::queued_moves");
-    }
-
-    #[test]
-    fn constrained_camera_stays_put_while_moving_a_pane() {
-        in_own_process("window::canvas_view::settings_tests::camera_during_drag");
-    }
-
-    #[gpui::test]
-    fn camera_during_drag(cx: &mut TestAppContext) {
-        if !running_alone("window::canvas_view::settings_tests::camera_during_drag") { return; }
-        let (view, cx) = open_window(cx, "camera-drag", "", json!({"id":"root","type":"canvas"}));
-        view.update_in(cx, |this, _, cx| {
-            assert!(this.person.canvas_constrain);
-            this.canvas_state.doc.panes = serde_json::from_value(json!([
-                {"id":"p1","kind":"image","props":{"path":"/missing.png"},"rect":[100,100,200,150],"z":0}
-            ])).unwrap();
-            cx.notify();
-        });
-        cx.run_until_parked();
-        let before = view.read_with(cx, |this, _| this.canvas_state.doc.camera);
-        view.update_in(cx, |this, _, cx| {
-            this.canvas_state.drag = Some((Some("p1".into()), point(px(0.), px(0.))));
-            this.canvas_state.doc.panes[0].rect[0] += 100.;
-            cx.notify();
-        });
-        cx.run_until_parked();
-        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.doc.camera), before);
-        view.update_in(cx, |this, _, cx| { this.canvas_state.drag = None; cx.notify(); });
-        cx.run_until_parked();
-        let settled = view.read_with(cx, |this, _| this.canvas_state.doc.camera);
-        assert_eq!(settled.x, before.x + 100.);
-        view.update_in(cx, |this, _, cx| {
-            this.person.canvas_constrain = false;
-            this.canvas_state.doc.panes[0].rect[0] += 100.;
-            cx.notify();
-        });
-        cx.run_until_parked();
-        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.doc.camera), settled);
     }
 
     #[gpui::test]
@@ -5119,7 +5170,6 @@ mod pane_action_tests {
         let (view, cx) = open_window(cx, "pane-overlap", "", json!({"id":"root","type":"canvas"}));
         cx.run_until_parked();
         cx.update(|window, cx| view.update(cx, |this, cx| {
-            this.person.canvas_constrain = false;
             this.model.add_space("root", "Canvas", &super::super::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
             this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
             this.canvas_state.doc.panes = serde_json::from_value(json!([

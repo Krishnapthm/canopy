@@ -374,7 +374,7 @@ automatically. Terminal ids keep core addresses, sub-agent ids are `sub:<parent>
 and file ids are `p<N>`, never reused;
 `canvas_color` in settings.json overrides the theme background (null resets).
 Layouts without a theme use `canopy-dark` or `canopy-light` by appearance. Saved `graphite`/`paper` themes alias `herdr-dark`/`herdr-light`.
-Canvas zoom resizes pane frames. Terminal text and PDF page zoom have separate controls. Hand-edited settings reload live: `canvas_constrain` (true: pan near panes and zoom out to fit-all; false: free pan and full zoom), `canvas_gap` (24, 0..1024 world pixels),
+Canvas zoom scales pane content like a picture (terminal grids, PDF pages, web pages and file previews keep their layout); headers and mod panes keep their screen size. Terminal text zoom and PDF page zoom are separate. Hand-edited settings reload live: `canvas_gap` (24, 0..1024 world pixels),
 `tile_gap` (0, tile view cell gap), `tile_focus_grows` (false: equal tiles), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `canvas_resize_terminals` (true: the grid refits to the cell; false keeps it and scales), `space_fill` (0.04, 0..1),
 and `terminal_size` ([100, 30], columns 20..500 and rows 5..200 for new expansions).
 They do not appear in Settings. `canopy config` prints all defaults and explanations.
@@ -462,7 +462,7 @@ Enter enters the selected cell; Esc clears the selection, then goes Home. `canva
 every selected pane (else the focused one) behind one dialog that lists them, with "Terminate and close all" and
 "Cancel". With `confirm_close_terminal: false` in settings.json (default true) and no agent among them they close
 without asking. `canvas.close {terminal}` closes one cell: running agents ask "Terminate agent?", plain terminals
-"Close this terminal?". Selected file panes close without a dialog; their files stay.
+"Close this terminal?". Selected file panes close without a dialog; their files stay. A space outlives its terminals: `tab.close` on its last tab needs `confirmed: true`.
 Done sub-agent cells clear; working ones refuse with a toast.
 Hover or select a terminal or file pane for its helper bar above the top-left corner.
 Terminals offer Enter, Expand or Collapse, Connect and Close; files offer Open as tab

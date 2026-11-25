@@ -17,7 +17,7 @@ On macOS, right-click a local image or PDF in the file tree and choose **Open in
 
 ## Browse and preview files
 
-The canvas tree shows the selected space's folder.
+The canvas tree shows the folder of the space you are in. On Home it shows the space whose card you last clicked, or else the space you entered most recently.
 In the classic layout, the tree follows the focused pane's folder, or the active space's folder when none is focused.
 
 1. Click a folder to expand or collapse it.

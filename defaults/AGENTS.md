@@ -575,8 +575,10 @@ The main ones:
   that exits with a nonzero code within two seconds of launch shows an error
   toast with its exit code and last output lines. Or `tab.new {name?, space?, mod,
   props?}` for a tab whose only pane is a mod (a file, a board; split a shell
-  in beside it like any tab), `tab.close {id?, confirmed?}` (closing the last tab
-  closes its space and asks first unless confirmed),
+  in beside it like any tab), `tab.close {id?, confirmed?}` (in a classic layout,
+  closing the last tab closes its space and asks first unless confirmed; on a canvas
+  the space stays open without terminals, and only `space.close` removes it, but
+  ending its last terminals still asks first unless confirmed),
   `tab.rename {id?, name}` ("": its number again), `tab.move {id, index}`,
   `tab.select {index | id}`, `tab.next`, `tab.prev`,
   `tab.settle {id?}`, `tab.unsettle {id?}` (index, next and prev
@@ -684,7 +686,6 @@ when there is one); the rest of the file still applies. The corresponding `.erro
 
 - `canvas_color`: null follows the theme; a hex color overrides the canvas background.
 - `canvas_gap`: gap between cells and spaces in world pixels (default 24, 0..1024).
-- `canvas_constrain`: true (default) keeps the camera near its panes and limits zoom out to fit all; false allows free panning and the full zoom range.
 - `tile_gap`: gap between cells in tile view in world pixels (default 0, 0..1024).
 - `tile_focus_grows`: false (default) keeps every tile the same size; true lets the selected tile take more room.
 - `canvas_push`: "live" (default) pushes neighbours while dragging; "drop" waits for release; "off" never pushes, so cells may overlap (Home still keeps spaces apart).
@@ -1099,7 +1100,7 @@ empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. 
 shows keys on the toolbar and helper bars, even while a terminal has focus. Expanded cells are
 100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
 neighbours back. Drag any edge or corner of an expanded terminal or boxed pane to resize it.
-The terminal grid refits on release. Holding a move or resize near a canvas edge pans the canvas.
+The terminal grid refits on release. A moved pane or space card that touches a canvas edge pans the canvas that way, faster the further it is pushed; a resize pans when the pointer nears an edge.
 Wheel or two-finger scroll pans over the canvas and unentered panes, while an entered terminal
 keeps plain scroll. Pinch and Cmd+scroll (Ctrl+scroll elsewhere) zoom the canvas. `canvas.expand {terminal?}` toggles
 the named or last selected cell; `panel.open {terminal}` only expands. An expanded cell keeps its size at every
@@ -1112,7 +1113,7 @@ Home / space; `canvas.home` goes back and `canvas.space {direction: "next" | "pr
 goes into another space. The app reopens in the space it closed in, and each place keeps its own
 camera (`cameras`). Each pane records its `space`.
 
-Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor. Canvas zoom changes pane frames. Terminal text and PDF page zoom have their own controls.
+Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor. Canvas zoom scales pane content like a picture: terminal grids, PDF pages, web pages (WebKit zoom times canvas zoom, CSS viewport at the world size) and file previews keep their layout; headers and mod panes keep their screen size. Terminal text zoom and PDF page zoom are separate.
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
 `canvas.arrange {layout?: "tidy" | "row" | "column" | "wires", space?, picker?}`
 arranges selected cells or the current space; no layout repeats the last choice.

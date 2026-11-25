@@ -907,7 +907,7 @@ impl AppWindow {
                     b
                 };
                 bounds.borrow_mut().insert(mark_key, b);
-            }, |_, _, _, _| {}).absolute().size_full())
+            }, |_, _, _, _| {}).absolute().top_0().left_0().size_full())
             .capture_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
                 let mods = e.keystroke.modifiers;
                 let drafting = this.canvas_state.annotations.get(&target).is_some_and(|a| a.draft.is_some());
@@ -947,7 +947,7 @@ impl AppWindow {
                     if phase != gpui::DispatchPhase::Capture || e.button != MouseButton::Left { return; }
                     let _ = releasing.update(cx, |this, cx| this.annotation_gesture_end(&up_id, e.position, window, cx));
                 });
-            }).absolute().size_full());
+            }).absolute().top_0().left_0().size_full());
         }
         if a.live {
             root = root.child(native);
@@ -959,7 +959,7 @@ impl AppWindow {
                 (annotation_rect([x, y, w, h]), fit.scale, [x, y])
             } else {
                 let (scale, offset) = fit([0., 0., w, h], a.page_size);
-                (div().absolute().size_full().bg(c("canvas"))
+                (div().absolute().top_0().left_0().size_full().bg(c("canvas"))
                     .child(img(a.image.clone()).size_full().object_fit(gpui::ObjectFit::Contain)), scale, offset)
             };
             root = root.child(still.id("annotation-still")
@@ -1020,7 +1020,7 @@ impl AppWindow {
             root = root.child(canvas(|_, _, _| {}, move |b, _, window, _| {
                 let origin = b.origin + point(px(ox), px(oy));
                 for mark in &marks { paint_mark(mark, origin, scale, window); }
-            }).absolute().size_full());
+            }).absolute().top_0().left_0().size_full());
             if a.tool == Tool::Select {
                 if let Some(drag) = &a.drag {
                     let area = rectangle(drag.start, drag.end());
@@ -1447,7 +1447,7 @@ impl AppWindow {
         if a.live && matches!(a.host, Host::Browser { .. }) {
             let bounds = self.bounds.clone();
             let cover = format!("cover:annotate:{id}");
-            bar = bar.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {}).absolute().size_full());
+            bar = bar.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full());
         }
         bar
     }
@@ -1468,7 +1468,7 @@ impl AppWindow {
                     if let Err(error) = this.annotation_action(&target, "hint", window, cx) { this.annotation_error(error, window, cx); }
                 })))
             .when(a.live && matches!(a.host, Host::Browser { .. }), |d| {
-                d.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {}).absolute().size_full())
+                d.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full())
             })
     }
 

@@ -92,12 +92,13 @@ fn rect(bounds: Bounds<Pixels>) -> R {
 
 #[cfg(target_os = "macos")]
 impl AppWindow {
-    /// Foreground pane rectangles relative to the canvas origin, which prepaint measures.
-    fn page_covers(&self, id: &str) -> Vec<R> {
+    /// Rectangles over a page relative to the canvas origin, which prepaint measures: foreground
+    /// panes (hidden and click-through), then the pane's resize grips (click-through only).
+    fn page_covers(&self, id: &str) -> (Vec<R>, Vec<R>) {
         let state = &self.canvas_state;
         let doc = state.shown.as_ref().unwrap_or(&state.doc);
         let Some(page) = doc.panes.iter().find(|p| p.id == id) else {
-            return vec![];
+            return (vec![], vec![]);
         };
         let camera = state.doc.camera;
 
@@ -117,14 +118,11 @@ impl AppWindow {
             [x, y + h - corner, corner, corner],
             [x + w - corner, y + h - corner, corner, corner],
         ];
-        grips.into_iter()
-            .chain(
-                doc.panes
-                    .iter()
-                    .filter(|p| doc.shown(p) && paint_order(p) > paint_order(page))
-                    .filter_map(|p| self.pane_screen_bounds(p).map(rect)),
-            )
-            .collect()
+        let panes = doc.panes.iter()
+            .filter(|p| doc.shown(p) && paint_order(p) > paint_order(page))
+            .filter_map(|p| self.pane_screen_bounds(p).map(rect))
+            .collect();
+        (panes, grips.to_vec())
     }
 
     /// Runs after the canvas, controls and the native content slots measure this frame.
@@ -139,8 +137,8 @@ impl AppWindow {
             let (id, _) = key.split_once('/')?;
             let expanded = state.browser_tab.as_deref() == Some(id);
             let docked = self.has_canvas() && state.active_panel_pane() == Some(id);
-            let above = if expanded || docked { vec![] } else { self.page_covers(id) };
-            Some((key.to_owned(), id.to_owned(), view, expanded, docked, above))
+            let (above, grips) = if expanded || docked { (vec![], vec![]) } else { self.page_covers(id) };
+            Some((key.to_owned(), id.to_owned(), view, expanded, docked, above, grips))
         }).collect();
         let bounds = self.bounds.clone();
         // A menu's frame is wider than its painted boxes (room for a submenu). The page shows
@@ -163,7 +161,7 @@ impl AppWindow {
                     overlays.extend(gpui_shell::menu_covers().into_iter().map(rect));
                     let frames: Vec<_> = frames.into_iter().map(|(_, bounds)| rect(*bounds)).collect();
                     let controls = controls.borrow();
-                    for (key, id, view, expanded, docked, above) in pages {
+                    for (key, id, view, expanded, docked, above, grips) in pages {
                         let host = if docked && !expanded {
                             bounds.get(&format!("panel-body:{id}")).copied()
                         } else {
@@ -174,15 +172,19 @@ impl AppWindow {
                         });
                         let frame = bounds.get(&format!("web-frame:{key}")).copied().map(rect);
                         let frame = frame.unwrap_or([0.; 4]);
-                        let mut above: Vec<_> = above.into_iter().filter_map(|[x, y, w, h]| {
+                        let to_window = |rects: Vec<R>| -> Vec<R> { rects.into_iter().filter_map(|[x, y, w, h]| {
                             let canvas = canvas?;
                             Some([x + f32::from(canvas.origin.x), y + f32::from(canvas.origin.y), w, h])
-                        }).collect();
+                        }).collect() };
+                        let mut above = to_window(above);
                         above.extend_from_slice(&overlays);
                         above.extend(controls.iter().map(|control| rect(control.bounds)));
                         let pieces = visible_in_host(frame, clip.map(rect), &above);
+                        // Grips and menu frames take clicks from the page but never hide it.
+                        let grips = to_window(grips);
                         above.extend_from_slice(&frames);
-                        let hits = if frames.is_empty() { pieces.clone() } else { visible_in_host(frame, clip.map(rect), &above) };
+                        above.extend_from_slice(&grips);
+                        let hits = if frames.is_empty() && grips.is_empty() { pieces.clone() } else { visible_in_host(frame, clip.map(rect), &above) };
                         // Translation alone can reuse the mask. Resizing also changes its layer frame.
                         let local = (pieces != [frame] || hits != [frame])
                             .then(|| ([frame[2], frame[3]], local_rects(frame, &pieces), local_rects(frame, &hits)));
@@ -230,9 +232,9 @@ impl super::AppWindow {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) use native::{clear_mask, wrap};
+pub(super) use native::{clear_mask, set_mask, wrap};
 #[cfg(target_os = "macos")]
-use native::{local_rects, set_mask};
+use native::local_rects;
 
 #[cfg(target_os = "macos")]
 mod native {
@@ -334,7 +336,7 @@ mod native {
     }
 
     /// Paints the page only in `visible` and lets it take clicks only in `hits` (a subset).
-    pub(super) fn set_mask(view: &wry::WebView, frame: R, visible: &[R], hits: &[R]) -> bool {
+    pub(in crate::window::canvas_view) fn set_mask(view: &wry::WebView, frame: R, visible: &[R], hits: &[R]) -> bool {
         let webview = view.webview();
         let Some(clip) = container(&webview) else {
             return false;

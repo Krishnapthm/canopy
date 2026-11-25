@@ -831,7 +831,7 @@ Make a tab in a space (default: the selected one; name default: none, so it's ca
 
 ## `tab.close`
 
-Close a tab and end its terminals.
+Close a tab and end its terminals. Its space's last terminals need confirmed (a person is asked).
 
 | Argument | Required |
 |---|---|

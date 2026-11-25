@@ -241,6 +241,22 @@ impl AppWindow {
         self.bounds.borrow().get("canopy-canvas").copied()
     }
 
+    /// The part of the canvas the floating toolbar leaves open, as canvas-local `[x, y, w, h]`
+    /// screen px (the window when the canvas is not measured): fitting, zoom limits and the
+    /// empty-canvas hints use it, so nothing lands under the toolbar.
+    pub(in crate::window) fn open_canvas(&self, window: &Window) -> canvas::Rect {
+        self.open_canvas_in(window.viewport_size())
+    }
+
+    pub(in crate::window) fn open_canvas_in(&self, fallback: Size<Pixels>) -> canvas::Rect {
+        let canvas = self.canvas_bounds().unwrap_or(Bounds::new(point(px(0.), px(0.)), fallback));
+        let bounds = self.bounds.borrow();
+        let edge = self.chrome.walk().iter().flat_map(|n| &n.floating).find(|f| f.id == "toolbar" && !f.hidden).map(|f| f.edge);
+        let toolbar = bounds.get("cover:canvas-float:toolbar").zip(edge)
+            .map(|(b, edge)| (Bounds::new(b.origin - canvas.origin, b.size), edge));
+        uncovered(canvas.size, toolbar)
+    }
+
     /// Whether canvas chrome owns an input position in the displayed frame.
     pub(in crate::window) fn canvas_chrome_at(&self, point: Point<Pixels>) -> bool {
         self.canvas_state
@@ -267,16 +283,31 @@ impl AppWindow {
     }
 }
 
+/// `size` less the strip from its `edge` to the far side of `cover` (canvas-local), as `[x, y, w, h]`.
+fn uncovered(size: Size<Pixels>, cover: Option<(Bounds<Pixels>, crate::layout::Edge)>) -> canvas::Rect {
+    use crate::layout::Edge;
+    let [w, h] = [f32::from(size.width), f32::from(size.height)];
+    let Some((b, edge)) = cover else { return [0., 0., w, h] };
+    let [left, top, right, bottom] = [b.left(), b.top(), b.right(), b.bottom()].map(f32::from);
+    match edge {
+        Edge::Top => { let y = bottom.clamp(0., h); [0., y, w, h - y] }
+        Edge::Bottom => [0., 0., w, top.clamp(0., h)],
+        Edge::Left => { let x = right.clamp(0., w); [x, 0., w - x, h] }
+        Edge::Right => [0., 0., left.clamp(0., w), h],
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{fits, place_helper};
+    use super::{fits, place_helper, uncovered};
+    use crate::layout::Edge;
     use gpui::{Bounds, Pixels, point, px, size};
 
     use crate::window::tests::{in_own_process, open_window, running_alone};
     use gpui::TestAppContext;
     use serde_json::json;
 
-    const DOCK: &str = "window::canvas_view::chrome::tests::toolbar_stays_in_the_canvas_column";
+    const DOCK: &str = "window::canvas_view::chrome::tests::toolbar_floats_over_the_canvas_column";
 
     #[test]
     fn toolbar_and_dock_have_separate_bounds() {
@@ -284,7 +315,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn toolbar_stays_in_the_canvas_column(cx: &mut TestAppContext) {
+    fn toolbar_floats_over_the_canvas_column(cx: &mut TestAppContext) {
         if !running_alone(DOCK) {
             return;
         }
@@ -312,15 +343,23 @@ mod tests {
         cx.update(|window, cx| window.simulate_next_frame(cx));
         cx.run_until_parked();
 
-        view.read_with(cx, |this, _| {
+        cx.update(|window, cx| view.read_with(cx, |this, _| {
             let viewport = this.canvas_bounds().unwrap();
             let bounds = this.bounds.borrow();
             let toolbar = bounds["float:toolbar"];
-            let work = bounds["canvas-work-area"];
+            // The toolbar floats over the canvas, which runs under it to the window edge.
             assert!(toolbar.size.width > px(20.));
-            assert!(viewport.bottom() <= toolbar.top());
-            assert!(toolbar.right() <= work.right());
-            assert!(work.right() < bounds["root"].right());
+            assert!(viewport.top() < toolbar.top() && toolbar.bottom() <= viewport.bottom());
+            assert!(toolbar.right() <= viewport.right());
+            assert!(viewport.right() < bounds["root"].right());
+            assert!(this.canvas_chrome_at(toolbar.center()));
+            let cover = bounds["cover:canvas-float:toolbar"];
+            drop(bounds);
+            // Fitting and zoom limits use the canvas above the toolbar.
+            let open = this.open_canvas(window);
+            assert!(cover.top() >= toolbar.top());
+            assert_eq!(open[3], f32::from(cover.top() - viewport.top()));
+            assert_eq!(open[2], f32::from(viewport.size.width));
 
             let placed = this.canvas_state.chrome.borrow();
             assert_eq!(placed.len(), 2);
@@ -333,7 +372,17 @@ mod tests {
                 );
                 assert!(this.canvas_chrome_at(control.bounds.center()));
             }
-        });
+        }));
+    }
+
+    #[test]
+    fn the_toolbar_strip_is_left_out_of_the_open_canvas() {
+        let size = size(px(800.), px(600.));
+        assert_eq!(uncovered(size, None), [0., 0., 800., 600.]);
+        assert_eq!(uncovered(size, Some((rect(300., 540., 200., 44.), Edge::Bottom))), [0., 0., 800., 540.]);
+        assert_eq!(uncovered(size, Some((rect(300., 16., 200., 44.), Edge::Top))), [0., 60., 800., 540.]);
+        assert_eq!(uncovered(size, Some((rect(16., 200., 44., 200.), Edge::Left))), [60., 0., 740., 600.]);
+        assert_eq!(uncovered(size, Some((rect(740., 200., 44., 200.), Edge::Right))), [0., 0., 740., 600.]);
     }
 
     fn rect(x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {

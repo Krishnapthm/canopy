@@ -595,7 +595,7 @@ impl SimScreen {
     }
 
     pub(super) fn frozen_frame(&self, fit: sim_live::Fit, still: Arc<RenderImage>) -> Div {
-        self.device_frame(div().absolute().size_full(), fit, Some(still), None)
+        self.device_frame(div().absolute().top_0().left_0().size_full(), fit, Some(still), None)
     }
 }
 
@@ -612,7 +612,7 @@ impl Render for SimScreen {
                 }
             },
             |_, _, _, _| {},
-        ).absolute().size_full();
+        ).absolute().top_0().left_0().size_full();
         let mut root = div().id(SharedString::from(format!("sim-screen-{}", self.pane))).size_full().relative()
             .track_focus(&self.focus).on_key_down(cx.listener(Self::key_down))
             .child(measure);
@@ -621,7 +621,7 @@ impl Render for SimScreen {
             // Before the size is known: the screenshot alone, contain-fitted.
             return root.when_some(self.shot.clone(), |d, shot| d.child(img(shot).size_full().p(px(MARGIN)).object_fit(ObjectFit::Contain)));
         };
-        root = root.child(self.device_frame(div().absolute().size_full(), fit, None, Some(cx)));
+        root = root.child(self.device_frame(div().absolute().top_0().left_0().size_full(), fit, None, Some(cx)));
         // Touch lands on the screen only; a drag keeps going outside it.
         let pane = self.pane.clone();
         let [x, y, w, h] = fit.screen;

@@ -180,7 +180,7 @@ impl AppWindow {
                 this.select_browser_pane(&select);
                 cx.notify();
             }))
-            .child(canvas(move |b, _, _| { bounds.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().size_full())
+            .child(canvas(move |b, _, _| { bounds.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full())
             .child(div().size_full().child(body))
             .into_any_element();
         Some((header, body))

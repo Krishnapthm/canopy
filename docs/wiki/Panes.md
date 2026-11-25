@@ -52,6 +52,8 @@ What happens next depends on the kind:
 
 If you select a mix and cancel the terminal dialog, the other selected panes still close.
 
+Closing the last terminal in a space leaves the space open, with its files, browsers and other panes. Only **Delete space** removes a space (see [Spaces](Spaces)).
+
 To stop being asked about plain terminals, set `confirm_close_terminal` to `false` in [settings](Settings-and-Themes), or tick **Don't ask again** when you close one from its own menu. Agents always ask.
 
 ### Which panes an action uses

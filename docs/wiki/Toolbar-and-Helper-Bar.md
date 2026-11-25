@@ -8,7 +8,7 @@ The sticky note's helper bar holds its move grip and color swatch.
 
 ![The toolbar at the bottom of the canvas](images/toolbar-and-helper-bar-1.png)
 
-The toolbar sits at the bottom center of the canvas, beside the files panel when it is open. Drag the toolbar frame to move it to another canvas edge. Scroll along the toolbar if there is too little room for all its buttons.
+The toolbar floats over the bottom center of the canvas, beside the files panel when it is open. The canvas runs underneath it to the window edge, so panes can pan behind it. Fit, the zoom limits and the empty-canvas hints use the canvas the toolbar leaves open. Drag the toolbar frame to move it to another canvas edge. Scroll along the toolbar if there is too little room for all its buttons.
 
 From left to right, or top to bottom on a side edge:
 

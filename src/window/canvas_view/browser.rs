@@ -196,12 +196,13 @@ fn fixed_viewport(pane: &canvas::Pane) -> Option<[f32; 2]> {
 }
 
 #[cfg(any(target_os = "macos", test))]
-/// A fixed viewport scales to fit its body; a responsive page keeps its own zoom, so the
-/// canvas camera changes its layout width, not its text size.
-fn page_zoom(pane: &canvas::Pane, body: [f32; 2]) -> f64 {
+/// A fixed viewport scales to fit its body (screen px); a responsive page zooms so its CSS
+/// width stays `width`, the body's width at zoom 1, and it never reflows as the canvas zooms.
+/// Its CSS height follows the drawn body, since the header keeps its screen size.
+fn page_zoom(pane: &canvas::Pane, body: [f32; 2], width: f32) -> f64 {
     match fixed_viewport(pane) {
         Some([w, h]) => (f64::from(body[0]) / f64::from(w)).min(f64::from(body[1]) / f64::from(h)),
-        None => 1.,
+        None => f64::from(body[0]) / f64::from(width.max(1.)),
     }
 }
 
@@ -550,7 +551,7 @@ impl AppWindow {
                 let zoom_changed = at.0.zoom != next.0.zoom || (preset && at.1[2..] != next.1[2..]);
                 let zoom = zoom_changed.then(|| {
                     let [_, _, width, height] = pane_body(pane, camera);
-                    page_zoom(pane, [width, height])
+                    page_zoom(pane, [width, height], css_width(pane, camera))
                 });
                 cx.defer(move |cx| this.update(cx, |this, _| {
                     let Some(page) = this.canvas_state.browsers.pages.get_mut(&key) else { return };
@@ -602,17 +603,25 @@ impl AppWindow {
     }
 
     /// The browser's page tabs. In the Files strip they share its horizontal scroll area.
+    /// The tab strip's color and the active tab's fill, which the navigation row shares so the
+    /// tab flows into it. Docked, the tabs sit on the Files strip and flow into the panel body.
+    fn browser_tab_colors(&self, docked: bool) -> (&'static str, &str) {
+        if docked { ("chrome", self.person.canvas_color.as_deref().unwrap_or("canvas")) } else { ("surface", "hover") }
+    }
+
     pub(super) fn browser_tabs(&self, id: &str, host: Host, cx: &mut Context<Self>) -> Option<AnyElement> {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
         let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return None };
         let docked = host == Host::Pane && self.canvas_state.doc.docked(id);
         let tint = docked.then(|| self.docked_tab(id, cx).2).flatten();
-        // The background behind the tabs: the Files strip, else the pane or pop-out header.
-        let strip_color = if docked { self.person.canvas_color.as_deref().unwrap_or("canvas") } else { "surface" };
+        // Docked, the tabs sit on the Files strip and the active one flows into the panel body;
+        // in a pane or pop-out header they sit on the header.
+        let (strip_color, fill) = self.browser_tab_colors(docked);
         let mut strip = div().id(SharedString::from(format!("{id}-tabs")))
             .flex().items_center().h_full()
             .when(docked, |d| d.flex_none())
-            .when(!docked, |d| d.role(gpui::Role::TabList).min_w_0().flex_shrink_1().overflow_hidden());
+            // Room for the active tab's outward curves, which the clip would otherwise cut off.
+            .when(!docked, |d| d.role(gpui::Role::TabList).min_w_0().flex_shrink_1().overflow_hidden().px(px(ui::RADIUS)));
         for (i, tab) in tabs.iter().enumerate() {
             let selected = i == *active;
             let title = if !tab.title.is_empty() { tab.title.clone() } else if !tab.url.is_empty() { tab.url.clone() } else { "New tab".to_owned() };
@@ -622,7 +631,7 @@ impl AppWindow {
             let group = SharedString::from(format!("{id}-tab-{}", tab.id));
             // shortcut: a globe for every tab, no favicons: loading one would be a request outside WebKit.
             // The same tab as the Files strip, so pages and files read as one set of tabs.
-            strip = strip.child(strip_tab(group.clone(), selected, c("hover"), c(strip_color)).group(group.clone())
+            strip = strip.child(strip_tab(group.clone(), selected, c(fill), c(strip_color))
                 .flex().items_center().h_full().w(px(180.)).min_w(px(96.)).flex_shrink_1().pr(px(4.)).text_size(px(12.))
                 .text_color(c(if selected { "foreground" } else { "muted-foreground" }))
                 .hover(|d| d.text_color(c("foreground")))
@@ -684,7 +693,9 @@ impl AppWindow {
         let reset = id.to_owned();
         let annotate = id.to_owned();
         let picker = self.annotation_picker(id);
+        let docked = host == Host::Pane && self.canvas_state.doc.docked(id);
         div().id("browser-navigation").flex().items_center().h(px(32.)).min_w_0().overflow_x_scroll().px(px(8.)).gap(px(4.))
+            .bg(c(self.browser_tab_colors(docked).1))
             .child(self.browser_button(id, "browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
             .child(self.browser_button(id, "browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
             .child(self.browser_button(id, "browser-reload", "icons/rotate-cw.svg", "Reload", "canvas.browser_reload", cx))
@@ -717,8 +728,10 @@ impl AppWindow {
     /// in the top row can still drag the pane or window.
     pub(super) fn browser_chrome(&self, id: &str, host: Host, cx: &mut Context<Self>) -> AnyElement {
         let Some(tabs) = self.browser_tabs(id, host, cx) else { return div().into_any_element() };
-        let row = div().flex().items_center().h(px(30.)).pr(px(8.)).pl(px(super::TAB_INSET)).gap(px(4.))
-            .when(host == Host::Window, |d| d.pl(px(super::bar_inset(true, false))).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
+        // The tabs take what the navigation row leaves, so it always meets the page.
+        let row = div().flex().items_center().flex_1().min_h_0().pr(px(8.)).pl(px(super::TAB_INSET - ui::RADIUS)).gap(px(4.))
+            // The strip's own padding makes up the inset.
+            .when(host == Host::Window, |d| d.pl(px(super::bar_inset(true, false) - ui::RADIUS)).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
                 if e.click_count == 2 { window.titlebar_double_click(); } else { window.start_window_move(); }
             }))
             .child(tabs)
@@ -880,6 +893,7 @@ impl AppWindow {
     /// anywhere else, closes it.
     fn pop_menu(&self, id: &str, view: Size<Pixels>, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (at, items) = self.canvas_state.browsers.panes.get(id)?.pop_menu.clone()?;
+        let [x, y, width, _] = pop_menu_rect(at, &items, view);
         let rows = items.into_iter().enumerate().map(|(i, item)| {
             let label = item[0].as_str().unwrap_or_default().to_owned();
             let Some(command) = item[1].as_str().map(str::to_owned) else {
@@ -897,8 +911,6 @@ impl AppWindow {
                     cx.notify();
                 })).into_any_element()
         }).collect::<Vec<_>>();
-        let (width, height) = (220., rows.len() as f32 * 32. + 10.);
-        let (x, y) = (f32::from(at.x).min(f32::from(view.width) - width - 4.).max(4.), f32::from(at.y).min(f32::from(view.height) - height - 4.).max(4.));
         let (left, right) = (id.to_owned(), id.to_owned());
         Some(div().absolute().inset_0()
             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _: &MouseDownEvent, _, cx| this.dismiss_pop_menu(&left, cx)))
@@ -946,7 +958,7 @@ impl AppWindow {
                 bounds.insert("canopy-canvas".into(), b);
                 #[cfg(target_os = "macos")]
                 bounds.insert("browser-canvas".into(), b);
-            }, |_, _, _, _| {}).absolute().size_full())
+            }, |_, _, _, _| {}).absolute().top_0().left_0().size_full())
             .children(self.expanded_webview(id, page)).into_any_element())
     }
 
@@ -1654,6 +1666,18 @@ fn fit_view(view: &gpui_wry::WebView, ([width, height], zoom): ([f32; 2], f64)) 
     let _ = view.raw().zoom(zoom);
 }
 
+/// Where the pop-out's ⋯ menu sits, as window `[x, y, w, h]`: at the click, kept 4 px inside.
+#[cfg(target_os = "macos")]
+fn pop_menu_rect(at: Point<Pixels>, items: &[Value], view: Size<Pixels>) -> [f32; 4] {
+    // Rows as `pop_menu` draws them: 32 px commands, 25 px headings, 5 px padding and a 1 px
+    // border on each side.
+    let rows: f32 = items.iter().map(|item| if item[1].is_string() { 32. } else { 25. }).sum();
+    let (width, height) = (220., rows + 12.);
+    let x = f32::from(at.x).min(f32::from(view.width) - width - 4.).max(4.);
+    let y = f32::from(at.y).min(f32::from(view.height) - height - 4.).max(4.);
+    [x, y, width, height]
+}
+
 /// A popped-out pane's window: the pane's header over the active tab's page. It holds no state
 /// of its own; it draws what `AppWindow` keeps and redraws when that changes.
 #[cfg(target_os = "macos")]
@@ -1748,10 +1772,13 @@ impl AppWindow {
             let local_url = local.as_ref().map(|(address, _, _)| address.clone());
             let is_local = local.is_some();
             let download_error = send(Event::LoadError);
-            let builder = if is_local {
-                wry::WebViewBuilder::new().with_incognito(true)
-            } else {
-                browser_store(wry::WebViewBuilder::new()).with_url(url)
+            // Local pages never use an incognito store, where their live view never drew: the
+            // shared web store, or WebKit's default one where that is unsupported (before macOS
+            // 14). Their own content rules still block network loads.
+            let builder = match (is_local, persistent_browser_store()) {
+                (true, true) => browser_store(wry::WebViewBuilder::new()),
+                (true, false) => wry::WebViewBuilder::new(),
+                (false, _) => browser_store(wry::WebViewBuilder::new()).with_url(url),
             };
             let webview = builder
                 .with_navigation_handler(move |url| {
@@ -1941,13 +1968,24 @@ impl AppWindow {
     /// hidden, and all hidden while the menu is open or an annotation shows its still, since a
     /// native view draws over GPUI), or a note for an empty tab.
     fn popped_body(&self, id: &str, view: Size<Pixels>, cx: &mut Context<Self>) -> AnyElement {
-        let menu = self.canvas_state.browsers.panes.get(id).is_some_and(|ui| ui.pop_menu.is_some())
-            || self.canvas_state.annotations.get(id).is_some_and(|a| !a.live);
+        let annotating = self.canvas_state.annotations.get(id).is_some_and(|a| !a.live);
+        // The ⋯ menu is cut out of the page, which stays visible around it.
+        let menu = self.canvas_state.browsers.panes.get(id).and_then(|ui| ui.pop_menu.as_ref())
+            .map(|(at, items)| pop_menu_rect(*at, items, view));
+        let frame = [0., canvas::BROWSER_HEADER, f32::from(view.width), (f32::from(view.height) - canvas::BROWSER_HEADER).max(1.)];
         let active = self.page_key(id);
         for key in self.pane_page_keys(id) {
             let Some(native) = self.canvas_state.browsers.pages.get(&key).and_then(|p| p.native.as_ref()) else { continue };
-            let show = !menu && active.as_ref() == Some(&key);
+            let show = !annotating && active.as_ref() == Some(&key);
             native.view.update(cx, |v, _| { if show && !v.visible() { v.show(); } else if !show && v.visible() { v.hide(); } });
+            if !show { continue; }
+            match menu {
+                Some(hole) => {
+                    let open = super::browser_mask::visible(frame, &[hole]);
+                    if !super::browser_mask::set_mask(native.raw.raw(), frame, &open, &open) { native.view.update(cx, |v, _| v.hide()); }
+                }
+                None => super::browser_mask::clear_mask(native.raw.raw()),
+            }
         }
         match active.and_then(|key| self.canvas_state.browsers.pages.get(&key)).and_then(|p| p.native.as_ref()) {
             Some(native) => {
@@ -2029,7 +2067,7 @@ impl AppWindow {
         if !doc.docked(id) && !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
         let frame = self.body_rect(saved).ok_or("the canvas is not shown")?;
         let [_, _, width, height] = pane_body(&pane, camera);
-        let zoom = page_zoom(&pane, [width, height]);
+        let zoom = page_zoom(&pane, [width, height], css_width(&pane, camera));
         self.ensure_view(id, window, cx)?;
         let key = self.page_key(id).unwrap();
         let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
@@ -2484,13 +2522,13 @@ mod tests {
             },
             rect: [0., 0., 640., 838.], z: 1, space: None, color: None, pinned: None,
         };
-        assert_eq!(page_zoom(&pane, [640., 800.]), 1., "a responsive page keeps its own zoom");
+        assert_eq!(page_zoom(&pane, [319., 800.], 638.), 0.5, "a responsive page keeps its CSS width");
         let Kind::Browser { viewport, .. } = &mut pane.kind else { unreachable!() };
         *viewport = Some([1280., 800.]);
-        assert_eq!(page_zoom(&pane, [640., 800.]), 0.5);
+        assert_eq!(page_zoom(&pane, [640., 800.], 638.), 0.5);
         let Kind::Browser { viewport, .. } = &mut pane.kind else { unreachable!() };
         *viewport = Some([0., 0.]);
-        assert_eq!(page_zoom(&pane, [640., 800.]), 1.);
+        assert_eq!(page_zoom(&pane, [640., 800.], 640.), 1.);
     }
 
     #[test]
@@ -2554,6 +2592,10 @@ fn placement(pane: &canvas::Pane, camera: canvas::Camera) -> (canvas::Camera, ca
     }
 }
 
+/// The CSS width a responsive page keeps: its body's width at zoom 1.
+#[cfg(target_os = "macos")]
+fn css_width(pane: &canvas::Pane, camera: canvas::Camera) -> f32 { placement(pane, camera).1[2] - 2. }
+
 /// The pane body in canvas screen pixels, excluding the border and fixed-height header.
 #[cfg(target_os = "macos")]
 fn pane_body(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
@@ -2567,7 +2609,7 @@ fn pane_body(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
 pub(super) fn viewport_rect(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
     let [x, y, w, h] = pane_body(pane, camera);
     let Some([css_w, css_h]) = fixed_viewport(pane) else { return [x, y, w, h] };
-    let zoom = page_zoom(pane, [w, h]);
+    let zoom = page_zoom(pane, [w, h], css_width(pane, camera));
     let (page_w, page_h) = ((f64::from(css_w) * zoom) as f32, (f64::from(css_h) * zoom) as f32);
     [x + (w - page_w) / 2., y + (h - page_h) / 2., page_w, page_h]
 }
@@ -2592,8 +2634,10 @@ impl AppWindow {
 
     fn browser_measure(&self, key: String) -> gpui::Canvas<()> {
         let bounds = self.bounds.clone();
+        // Pinned to the corner: after other content, an absolute box without insets sits below
+        // it, which measured a page's body as an empty strip under it and masked the page white.
         canvas(move |b, _, _| { bounds.borrow_mut().insert(key, b); }, |_, _, _, _| {})
-            .absolute().size_full()
+            .absolute().top_0().left_0().size_full()
     }
 
     /// Window-space bounds of the live element, including the viewport's centering offset.
@@ -2609,11 +2653,15 @@ impl AppWindow {
     }
 
     /// The size and zoom a page lays out at in its measured host (the Files panel body, or the
-    /// pane at the current camera), so a resting snapshot matches the page when it wakes.
-    /// Before the host is measured, the pane's world size at zoom 1.
+    /// pane at the current camera, zoomed with it), so a resting snapshot matches the page when
+    /// it wakes. Before the host is measured, the pane's world size at zoom 1.
     fn host_frame(&self, pane: &canvas::Pane) -> ([f32; 2], f64) {
+        let docked = self.canvas_state.doc.docked(&pane.id);
         match self.body_rect(pane).map(|b| [f32::from(b.size.width), f32::from(b.size.height)]) {
-            Some([w, h]) if w >= 1. && h >= 1. => ([w, h], fixed_viewport(pane).map_or(1., |[css_w, _]| f64::from(w / css_w))),
+            Some([w, h]) if w >= 1. && h >= 1. => {
+                let width = if docked { w } else { css_width(pane, self.canvas_state.doc.camera) };
+                ([w, h], fixed_viewport(pane).map_or(f64::from(w / width), |[css_w, _]| f64::from(w / css_w)))
+            }
             _ => {
                 let rect = pane.pinned.unwrap_or(pane.rect);
                 ([rect[2], (rect[3] - canvas::BROWSER_HEADER).max(1.)], 1.)
@@ -2674,10 +2722,11 @@ mod host_tests {
                 "props":{"tabs":[{"id":"t1","url":"https://example.com/"}],"active":0,"home":""},"rect":[0,0,964,740],"z":0}])).unwrap();
             this.bounds.borrow_mut().insert("canopy-canvas".into(), Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(800.))));
             let pane = this.canvas_state.doc.panes[0].clone();
-            // On the canvas: the camera scales the frame, the page keeps zoom 1 and reflows.
+            // On the canvas: the camera scales the frame and the page zooms with it, so its
+            // CSS width stays the body's width at zoom 1 (962 = 964 less the border).
             this.canvas_state.doc.camera.zoom = 0.5;
             let ([w, _], zoom) = this.host_frame(&pane);
-            assert_eq!((w, zoom), (480., 1.));
+            assert_eq!((w, zoom), (480., f64::from(480_f32 / 962.)));
             // Docked: the measured panel body, not the pane's world size.
             this.canvas_state.doc.dock("b1");
             this.canvas_state.file = Some(canvas::PanelTab::Pane("b1".into()));
