@@ -607,8 +607,10 @@ impl AppWindow {
         let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return None };
         let docked = host == Host::Pane && self.canvas_state.doc.docked(id);
         let tint = docked.then(|| self.docked_tab(id, cx).2).flatten();
+        // The background behind the tabs: the Files strip, else the pane or pop-out header.
+        let strip_color = if docked { self.person.canvas_color.as_deref().unwrap_or("canvas") } else { "surface" };
         let mut strip = div().id(SharedString::from(format!("{id}-tabs")))
-            .flex().items_center().gap(px(2.))
+            .flex().items_center().h_full()
             .when(docked, |d| d.flex_none())
             .when(!docked, |d| d.role(gpui::Role::TabList).min_w_0().flex_shrink_1().overflow_hidden());
         for (i, tab) in tabs.iter().enumerate() {
@@ -619,12 +621,11 @@ impl AppWindow {
             let (menu_pane, menu_tab) = (id.to_owned(), tab.id.clone());
             let group = SharedString::from(format!("{id}-tab-{}", tab.id));
             // shortcut: a globe for every tab, no favicons: loading one would be a request outside WebKit.
-            strip = strip.child(div().id(group.clone()).group(group.clone())
-                .flex().items_center().w(px(160.)).min_w(px(72.)).flex_shrink_1().h(px(26.)).pr(px(4.))
-                .rounded(px(ui::RADIUS_SM)).border_1().border_color(gpui::transparent_black()).text_size(px(12.))
+            // The same tab as the Files strip, so pages and files read as one set of tabs.
+            strip = strip.child(strip_tab(group.clone(), selected, c("hover"), c(strip_color)).group(group.clone())
+                .flex().items_center().h_full().w(px(180.)).min_w(px(96.)).flex_shrink_1().pr(px(4.)).text_size(px(12.))
                 .text_color(c(if selected { "foreground" } else { "muted-foreground" }))
-                .when(selected, |d| d.bg(c("surface")).border_color(c("border")))
-                .when(!selected, |d| d.hover(|d| d.bg(c("hover"))))
+                .hover(|d| d.text_color(c("foreground")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();

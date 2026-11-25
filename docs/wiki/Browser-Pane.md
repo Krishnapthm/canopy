@@ -57,7 +57,9 @@ middle-click it to close it. Right-click a tab for **Open in** your browser and
 **Close tab**. In [canvas mode](Canvas), `Cmd+W` also closes
 the active tab of the selected browser pane.
 
-Tabs are up to 160 px wide and shrink evenly, to 72 px, as more open. Each shows a
+Browser tabs look like the Files panel tabs, in the panel, on the canvas and in a
+pop-out window. Tabs are up to 180 px wide
+and shrink evenly, to 96 px, as more open. Each shows a
 globe and its title: Canopy never loads a page's own icon, because that would be a
 request outside the page.
 
