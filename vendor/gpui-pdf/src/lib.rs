@@ -560,6 +560,11 @@ pub struct PdfView {
     fit_viewport: (f32, f32),
     /// On-screen zoom factor (1.0 = base width). Affects layout and render scale.
     zoom: f32,
+    // canopy patch: a host display scale (canvas zoom) on top of `zoom`.
+    /// Multiplies layout like `zoom` without changing it or its label.
+    display: f32,
+    /// The display scale the visible bitmaps were last rendered for.
+    rendered_display: f32,
     /// The quality multiplier the pages were last rendered at; compared against the
     /// `quality` source each frame to detect a host setting change.
     last_quality: f32,
@@ -719,6 +724,8 @@ impl PdfView {
             fit: None,
             fit_viewport: (0.0, 0.0),
             zoom: 1.0,
+            display: 1.0,
+            rendered_display: 1.0,
             last_quality,
             generation: 0,
             pending_drops: Vec::new(),
@@ -985,6 +992,26 @@ impl PdfView {
     pub fn set_show_header(&mut self, show: bool, cx: &mut Context<Self>) {
         self.show_header = show;
         cx.notify();
+    }
+
+    // canopy patch: a host display scale, so the view scales like a picture.
+    /// Scales layout by `scale` (clamped 0.1..8) on top of the zoom, keeping the same
+    /// spot of the document in view. Pages re-render crisp only when `crisp` is true, so a
+    /// host can pass false while a gesture is still changing the scale.
+    pub fn set_display_scale(&mut self, scale: f32, crisp: bool, cx: &mut Context<Self>) {
+        let scale = scale.clamp(0.1, 8.0);
+        if (scale - self.display).abs() > 0.0001 {
+            let offset = self.scroll.offset();
+            let ratio = scale / self.display;
+            self.display = scale;
+            self.scroll.set_offset(point(offset.x * ratio, offset.y * ratio));
+            cx.notify();
+        }
+        if crisp && (self.display - self.rendered_display).abs() > 0.0001 {
+            self.rendered_display = self.display;
+            self.generation = self.generation.wrapping_add(1);
+            cx.notify();
+        }
     }
 
     /// Set the highlights to draw — the host derives these from its own store (e.g.
@@ -1460,8 +1487,10 @@ impl PdfView {
         // Chrome around the page column: the overlay scrollbar plus the page
         // slots' 1px borders and a hair of breathing room.
         let avail_w = (vw - SCROLLBAR_W - 6.0).max(50.0);
+        // The fit is in screen px; the display scale is already part of the column width.
+        let base = PAGE_WIDTH * self.display;
         let zoom = match mode {
-            FitMode::Width => avail_w / PAGE_WIDTH,
+            FitMode::Width => avail_w / base,
             FitMode::Page => {
                 let (pw, ph) = self
                     .dims
@@ -1470,7 +1499,7 @@ impl PdfView {
                     .filter(|(w, h)| *w > 0.0 && *h > 0.0)
                     .unwrap_or((612.0, 792.0));
                 let avail_h = (vh - 2.0 * PAGE_PAD_Y).max(50.0);
-                (avail_h / (PAGE_WIDTH * (ph / pw))).min(avail_w / PAGE_WIDTH)
+                (avail_h / (base * (ph / pw))).min(avail_w / base)
             }
         };
         self.apply_zoom(zoom, cx);
@@ -1532,7 +1561,7 @@ impl PdfView {
 
     /// On-screen column width at the current zoom.
     fn page_width(&self) -> f32 {
-        PAGE_WIDTH * self.zoom
+        PAGE_WIDTH * self.zoom * self.display
     }
 
     /// Scrollbar geometry for the current frame, or `None` when the whole document

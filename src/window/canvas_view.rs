@@ -1859,10 +1859,10 @@ impl AppWindow {
         self.set_expanded(&addr, expand, window, cx);
     }
 
-    /// Delay terminal grid resizing until a canvas zoom gesture settles.
+    /// Delay terminal grid resizing and crisp PDF pages until a canvas zoom gesture settles.
     fn zoom_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
-        if !state.doc.panes.iter().any(|c| c.size().is_some()) { return; }
+        if !state.doc.panes.iter().any(|c| c.size().is_some() || matches!(c.kind, canvas::Kind::Pdf { .. })) { return; }
         state.zoomed_at = Some(std::time::Instant::now());
         state.zoom_task = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(ZOOM_REST).await;
@@ -1873,8 +1873,8 @@ impl AppWindow {
         }));
     }
 
-    /// Whether expanded cells can refit their terminal grids.
-    fn camera_rested(&self) -> bool {
+    /// Whether expanded cells can refit their terminal grids and PDF pages re-render.
+    pub(super) fn camera_rested(&self) -> bool {
         let state = &self.canvas_state;
         state.motion.target.is_none() && state.zoomed_at.is_none()
     }
@@ -2820,7 +2820,10 @@ impl AppWindow {
         let quote_pane = card.id.clone();
         let quote_path = file.to_owned();
         let quote_view = view.clone();
-        let body = div().flex_1().min_h_0().overflow_hidden().px(px(16.)).py(px(12.)).child(gpui_base::TextView::new(view).scrollable(true)
+        // The text scales with the canvas like a picture; a pinned pane keeps its screen size.
+        let z = if card.pinned.is_some() { 1. } else { camera.zoom };
+        let body = div().flex_1().min_h_0().overflow_hidden().px(px(16. * z)).py(px(12. * z))
+            .text_size(px(crate::settings::ui_font_size() * z)).child(gpui_base::TextView::new(view).scrollable(true)
                     .image_source(|_| {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
                         gpui::ImageSource::Image(BLANK.clone())
@@ -3661,11 +3664,12 @@ impl AppWindow {
                 pills.push((paint_order(&card), pill.into_any_element()));
                 continue;
             }
-            // The terminal keeps its text size as the frame changes; its PTY grid waits for `settled`.
+            // The terminal scales with the canvas like a picture: its grid comes from the body in
+            // world px (the header and frame keep their screen size), and waits for `settled`.
             let slot = cell_slot(&card.id);
             let entered = state.entered() == Some(card.id.as_str());
             let live = self.terms.get(&slot);
-            let body_size = size(px((cw * z - 2.).max(1.)), px((ch * z - canvas::HEADER - 2.).max(1.)));
+            let body_size = size(px((cw - 2. / z).max(1.)), px((ch - (canvas::HEADER + 2.) / z).max(1.)));
             // A tile squeezed below readable size shows who it is instead, and its program keeps its grid.
             let compact = state.tile.is_some() && !entered && (cw < canvas::TILE_COMPACT[0] || ch < canvas::TILE_COMPACT[1]);
             if let Some(t) = live {
@@ -3675,7 +3679,7 @@ impl AppWindow {
                 t.view.update(cx, |v, cx| {
                     // Unentered cells let the wheel through, so the canvas pans over them.
                     v.wheel_needs_focus = true;
-                    v.set_scale(1., settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
+                    v.set_scale(z, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
                 });
             }
             let (select_addr, mode_addr) = (card.id.clone(), card.id.clone());

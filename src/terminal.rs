@@ -580,10 +580,10 @@ impl TerminalView {
         &self.focus
     }
 
-    /// Draws at `scale`. `rest` is the body size whose PTY grid is
+    /// Draws at `scale` (the canvas zoom). `rest` is the body size (world px) whose PTY grid is
     /// measured at this scale; None keeps the last grid, so a zoom gesture or a corner drag
     /// changes the program's size once, when it settles.
-    /// `keep_in` is Some when the grid is kept and scaled to fit the body instead of refit.
+    /// `keep_in` is Some (the body in world px) when the grid is kept and scaled to fit the body instead of refit.
     pub fn set_scale(&mut self, scale: f32, rest: Option<Size<Pixels>>, keep_in: Option<Size<Pixels>>, cx: &mut Context<Self>) {
         let rest = rest.map(|r| (r, scale)).or(self.rest);
         if self.scale != scale || self.rest != rest || self.keep_in != keep_in {

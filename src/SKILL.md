@@ -374,7 +374,7 @@ automatically. Terminal ids keep core addresses, sub-agent ids are `sub:<parent>
 and file ids are `p<N>`, never reused;
 `canvas_color` in settings.json overrides the theme background (null resets).
 Layouts without a theme use `canopy-dark` or `canopy-light` by appearance. Saved `graphite`/`paper` themes alias `herdr-dark`/`herdr-light`.
-Canvas zoom resizes pane frames. Terminal text and PDF page zoom have separate controls. Hand-edited settings reload live: `canvas_gap` (24, 0..1024 world pixels),
+Canvas zoom scales pane content like a picture (terminal grids, PDF pages, web pages and file previews keep their layout); headers and mod panes keep their screen size. Terminal text zoom and PDF page zoom are separate. Hand-edited settings reload live: `canvas_gap` (24, 0..1024 world pixels),
 `tile_gap` (0, tile view cell gap), `tile_focus_grows` (false: equal tiles), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `canvas_resize_terminals` (true: the grid refits to the cell; false keeps it and scales), `space_fill` (0.04, 0..1),
 and `terminal_size` ([100, 30], columns 20..500 and rows 5..200 for new expansions).
 They do not appear in Settings. `canopy config` prints all defaults and explanations.

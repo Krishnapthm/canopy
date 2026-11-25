@@ -1111,7 +1111,7 @@ Home / space; `canvas.home` goes back and `canvas.space {direction: "next" | "pr
 goes into another space. The app reopens in the space it closed in, and each place keeps its own
 camera (`cameras`). Each pane records its `space`.
 
-Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor. Canvas zoom changes pane frames. Terminal text and PDF page zoom have their own controls.
+Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor. Canvas zoom scales pane content like a picture: terminal grids, PDF pages, web pages (WebKit zoom times canvas zoom, CSS viewport at the world size) and file previews keep their layout; headers and mod panes keep their screen size. Terminal text zoom and PDF page zoom are separate.
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
 `canvas.arrange {layout?: "tidy" | "row" | "column" | "wires", space?, picker?}`
 arranges selected cells or the current space; no layout repeats the last choice.

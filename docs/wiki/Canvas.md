@@ -15,7 +15,7 @@ An empty space (or Home with no spaces) shows shortcut hints for new terminal, n
 - **Zoom limits:** zooming in stops while the biggest pane still fits the window with a margin, and zooming out stops once everything fits (or at 100% if everything already fits). Zoom stops right at the limit, with no bounce. Panning has no limit.
 - **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
 
-Canvas zoom changes pane frames. Terminal text and PDF pages keep their own zoom, unless the viewer is set to fit its pane.
+Zooming the canvas scales what panes show like a picture: terminal text, PDF pages, web pages, file previews and images grow and shrink with their panes, so nothing reflows or rewraps. A terminal keeps its columns and rows. Pane headers and notes keep their screen size. A PDF's own zoom (its percentage) and a terminal's text zoom are separate and stay as you set them.
 
 Pan and zoom work over empty canvas and over any pane you have not entered. An entered terminal keeps plain scroll for its output. Pinch and `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) still zoom the canvas over a terminal.
 

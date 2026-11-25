@@ -84,7 +84,7 @@ A browser pane is either resting or live:
 - **Click the page** to make it live. Scroll, click and type as in any browser. The page stays live while you pan, zoom or resize the pane. The canvas clips the page at its edges, and panes, helper bars and menus in front of the page remain visible and clickable.
 - **Click outside the pane** to rest the page and take a fresh snapshot.
 
-A page lays out at the size its pane is drawn: the Files panel body, or the pane at the current canvas zoom. So the first snapshot of a new page already fits its pane, with no reload. Zooming the canvas changes a responsive page's layout width but not its text size. Choosing another **Viewport** refits a resting page and retakes its snapshot.
+A page lays out at the size its pane is drawn: the Files panel body, or the pane at the current canvas zoom. So the first snapshot of a new page already fits its pane, with no reload. Zooming the canvas scales a page like a picture: its text grows and shrinks with the pane, and the page never reflows. Choosing another **Viewport** refits a resting page and retakes its snapshot.
 
 ## The header
 

@@ -196,12 +196,12 @@ fn fixed_viewport(pane: &canvas::Pane) -> Option<[f32; 2]> {
 }
 
 #[cfg(any(target_os = "macos", test))]
-/// A fixed viewport scales to fit its body; a responsive page keeps its own zoom, so the
-/// canvas camera changes its layout width, not its text size.
-fn page_zoom(pane: &canvas::Pane, body: [f32; 2]) -> f64 {
+/// A fixed viewport scales to fit its body (screen px); a responsive page zooms with the
+/// canvas (`scale`), so its CSS viewport keeps the pane's world size and it never reflows.
+fn page_zoom(pane: &canvas::Pane, body: [f32; 2], scale: f32) -> f64 {
     match fixed_viewport(pane) {
         Some([w, h]) => (f64::from(body[0]) / f64::from(w)).min(f64::from(body[1]) / f64::from(h)),
-        None => 1.,
+        None => f64::from(scale),
     }
 }
 
@@ -550,7 +550,7 @@ impl AppWindow {
                 let zoom_changed = at.0.zoom != next.0.zoom || (preset && at.1[2..] != next.1[2..]);
                 let zoom = zoom_changed.then(|| {
                     let [_, _, width, height] = pane_body(pane, camera);
-                    page_zoom(pane, [width, height])
+                    page_zoom(pane, [width, height], next.0.zoom)
                 });
                 cx.defer(move |cx| this.update(cx, |this, _| {
                     let Some(page) = this.canvas_state.browsers.pages.get_mut(&key) else { return };
@@ -2029,7 +2029,7 @@ impl AppWindow {
         if !doc.docked(id) && !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
         let frame = self.body_rect(saved).ok_or("the canvas is not shown")?;
         let [_, _, width, height] = pane_body(&pane, camera);
-        let zoom = page_zoom(&pane, [width, height]);
+        let zoom = page_zoom(&pane, [width, height], placement(&pane, camera).0.zoom);
         self.ensure_view(id, window, cx)?;
         let key = self.page_key(id).unwrap();
         let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
@@ -2484,13 +2484,13 @@ mod tests {
             },
             rect: [0., 0., 640., 838.], z: 1, space: None, color: None, pinned: None,
         };
-        assert_eq!(page_zoom(&pane, [640., 800.]), 1., "a responsive page keeps its own zoom");
+        assert_eq!(page_zoom(&pane, [640., 800.], 0.5), 0.5, "a responsive page zooms with the canvas");
         let Kind::Browser { viewport, .. } = &mut pane.kind else { unreachable!() };
         *viewport = Some([1280., 800.]);
-        assert_eq!(page_zoom(&pane, [640., 800.]), 0.5);
+        assert_eq!(page_zoom(&pane, [640., 800.], 2.), 0.5);
         let Kind::Browser { viewport, .. } = &mut pane.kind else { unreachable!() };
         *viewport = Some([0., 0.]);
-        assert_eq!(page_zoom(&pane, [640., 800.]), 1.);
+        assert_eq!(page_zoom(&pane, [640., 800.], 1.), 1.);
     }
 
     #[test]
@@ -2567,7 +2567,7 @@ fn pane_body(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
 pub(super) fn viewport_rect(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
     let [x, y, w, h] = pane_body(pane, camera);
     let Some([css_w, css_h]) = fixed_viewport(pane) else { return [x, y, w, h] };
-    let zoom = page_zoom(pane, [w, h]);
+    let zoom = page_zoom(pane, [w, h], camera.zoom);
     let (page_w, page_h) = ((f64::from(css_w) * zoom) as f32, (f64::from(css_h) * zoom) as f32);
     [x + (w - page_w) / 2., y + (h - page_h) / 2., page_w, page_h]
 }
@@ -2609,11 +2609,13 @@ impl AppWindow {
     }
 
     /// The size and zoom a page lays out at in its measured host (the Files panel body, or the
-    /// pane at the current camera), so a resting snapshot matches the page when it wakes.
-    /// Before the host is measured, the pane's world size at zoom 1.
+    /// pane at the current camera, zoomed with it), so a resting snapshot matches the page when
+    /// it wakes. Before the host is measured, the pane's world size at zoom 1.
     fn host_frame(&self, pane: &canvas::Pane) -> ([f32; 2], f64) {
+        let docked = self.canvas_state.doc.docked(&pane.id);
+        let scale = if docked { 1. } else { placement(pane, self.canvas_state.doc.camera).0.zoom };
         match self.body_rect(pane).map(|b| [f32::from(b.size.width), f32::from(b.size.height)]) {
-            Some([w, h]) if w >= 1. && h >= 1. => ([w, h], fixed_viewport(pane).map_or(1., |[css_w, _]| f64::from(w / css_w))),
+            Some([w, h]) if w >= 1. && h >= 1. => ([w, h], fixed_viewport(pane).map_or(f64::from(scale), |[css_w, _]| f64::from(w / css_w))),
             _ => {
                 let rect = pane.pinned.unwrap_or(pane.rect);
                 ([rect[2], (rect[3] - canvas::BROWSER_HEADER).max(1.)], 1.)
@@ -2674,10 +2676,11 @@ mod host_tests {
                 "props":{"tabs":[{"id":"t1","url":"https://example.com/"}],"active":0,"home":""},"rect":[0,0,964,740],"z":0}])).unwrap();
             this.bounds.borrow_mut().insert("canopy-canvas".into(), Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(800.))));
             let pane = this.canvas_state.doc.panes[0].clone();
-            // On the canvas: the camera scales the frame, the page keeps zoom 1 and reflows.
+            // On the canvas: the camera scales the frame and the page zooms with it, so its
+            // CSS viewport stays the pane's world width.
             this.canvas_state.doc.camera.zoom = 0.5;
             let ([w, _], zoom) = this.host_frame(&pane);
-            assert_eq!((w, zoom), (480., 1.));
+            assert_eq!((w, zoom), (480., 0.5));
             // Docked: the measured panel body, not the pane's world size.
             this.canvas_state.doc.dock("b1");
             this.canvas_state.file = Some(canvas::PanelTab::Pane("b1".into()));
