@@ -119,7 +119,7 @@ impl AppWindow {
 
     /// The topmost shown cell under a window position, with `slop` extra screen pixels around it.
     pub(super) fn wire_cell_at(&self, position: Point<Pixels>, slop: f32) -> Option<String> {
-        if !self.bounds.borrow().get("canopy-canvas")?.contains(&position) || self.canvas_overlay_at(position) { return None; }
+        if !self.canvas_bounds()?.contains(&position) || self.canvas_input_covered(position) { return None; }
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
         let camera = self.canvas_state.doc.camera;
         let p = camera.to_world(self.wire_local(position));
@@ -151,26 +151,29 @@ impl AppWindow {
             return true;
         }
         let busy = e.pressed_button.is_some() || self.canvas_state.drag.is_some() || self.canvas_state.rest.is_some() || self.canvas_state.cell_resize.is_some() || self.canvas_state.preview_drag.is_some() || self.canvas_state.space_drag.is_some() || self.canvas_state.marquee.is_some();
-        let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
-        let point = self.wire_local(e.position);
-        let bar_height = 28. * doc.camera.zoom.clamp(0.75, 1.0) + 2.;
-        let bar_hover = if busy { None } else {
-            doc.panes.iter().filter(|p| doc.shown(p) && !matches!(p.kind, canvas::Kind::Sub { .. }))
-                .filter(|p| {
-                    self.wire_cell_rect(p).is_some_and(|r| {
-                        let camera = self.canvas_state.doc.camera;
-                        let [x, y] = camera.to_screen([r[0], r[1]]);
-                        point[0] >= x && point[0] <= x + r[2] * camera.zoom
-                            && point[1] >= y - 8. - bar_height && point[1] <= y + r[3] * camera.zoom
-                    })
-                // Topmost as drawn: every pane kind paints in one z order.
-                }).max_by_key(|p| super::paint_order(p)).map(|p| p.id.clone())
+        let placed = self.canvas_state.chrome.borrow();
+        let control = placed.iter().find(|control| control.bounds.contains(&e.position));
+        let pane = self.wire_cell_at(e.position, 0.);
+        let near = |port| placed.iter().find(|control| {
+            control.port == port && control.bounds.dilate(px(12.)).contains(&e.position)
+        }).map(|control| control.pane.clone());
+        let bar_hover = if busy || self.canvas_overlay_at(e.position) {
+            None
+        } else {
+            control.map(|c| c.pane.clone()).or_else(|| pane.clone()).or_else(|| near(false))
         };
+        let hover = if busy || self.canvas_overlay_at(e.position) {
+            None
+        } else {
+            control.filter(|c| c.port).map(|c| c.pane.clone())
+                .or_else(|| pane.clone()).or_else(|| near(true))
+                .or_else(|| self.wire_cell_at(e.position, HANDLE))
+        };
+        drop(placed);
         if bar_hover != self.canvas_state.bar_hover {
             self.canvas_state.bar_hover = bar_hover;
             cx.notify();
         }
-        let hover = if busy { None } else { self.wire_cell_at(e.position, HANDLE) };
         if hover != self.canvas_state.wire.hover {
             self.canvas_state.wire.hover = hover;
             cx.notify();
@@ -299,25 +302,31 @@ impl AppWindow {
         if let Err(why) = result { self.fail(why); }
     }
 
-    /// The "+" handles of the hovered cell, and the live curve of a wire being drawn: absolute
-    /// elements to add after the cells.
-    pub(in crate::window) fn wire_handles(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    /// Candidate "+" handles for the central canvas chrome placement pass.
+    pub(super) fn wire_handles(&self, cx: &mut Context<Self>) -> Vec<chrome::Control> {
         let state = &self.canvas_state;
         let doc = state.shown.as_ref().unwrap_or(&state.doc);
-        let camera = doc.camera;
-        let key = state.wire.drag.as_ref().map(|d| &d.0).or(state.wire.hover.as_ref());
-        let Some(rect) = key.and_then(|k| self.wire_cell(doc, k).map(|r| (k.clone(), r))) else { return vec![] };
-        let (key, r) = rect;
-        let mut out = vec![];
-        let (mid_x, mid_y) = (r[0] + r[2] / 2., r[1] + r[3] / 2.);
-        for (i, side) in [[mid_x, r[1]], [r[0] + r[2], mid_y], [mid_x, r[1] + r[3]], [r[0], mid_y]].into_iter().enumerate() {
-            let [x, y] = camera.to_screen(side);
-            let (key, start) = (key.clone(), side);
+        if self.bars_hidden() { return vec![]; }
+        let Some(id) = state.wire.drag.as_ref().map(|d| &d.0).or(state.wire.hover.as_ref()) else { return vec![] };
+        let Some(pane) = doc.panes.iter().find(|p| &p.id == id && doc.shown(p)) else { return vec![] };
+        let Some(host) = self.pane_screen_bounds(pane) else { return vec![] };
+        let half = px(HANDLE / 2.);
+        let outward = half + px(1.);
+        let middle = host.center();
+        [
+            (point(middle.x, host.top()), point(px(0.), -outward)),
+            (point(host.right(), middle.y), point(outward, px(0.))),
+            (point(middle.x, host.bottom()), point(px(0.), outward)),
+            (point(host.left(), middle.y), point(-outward, px(0.))),
+        ].into_iter().enumerate().map(|(i, (side, offset))| {
+            let key = id.clone();
+            let start = state.doc.camera.to_world([side.x.into(), side.y.into()]);
             let line = |w: f32, h: f32| div().absolute().left(px((HANDLE - w) / 2. - 1.)).top(px((HANDLE - h) / 2. - 1.)).w(px(w)).h(px(h)).bg(c("foreground"));
-            out.push(div().id(SharedString::from(format!("wire-handle-{key}-{i}"))).absolute().left(px(x - HANDLE / 2.)).top(px(y - HANDLE / 2.))
+            let element = div().id(SharedString::from(format!("wire-handle-{key}-{i}"))).relative()
                 .size(px(HANDLE)).rounded_full().bg(c("surface")).border_1().border_color(c("muted-foreground")).cursor_pointer()
-                .hover(|d| d.border_color(c("foreground")))
+                .occlude().hover(|d| d.border_color(c("foreground")))
                 .child(line(6., 1.)).child(line(1., 6.))
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     this.canvas_state.selected.clear();
                     // Focus the canvas so Escape can cancel a wire that ends up following the pointer.
@@ -327,9 +336,9 @@ impl AppWindow {
                     this.canvas_state.wire.down = e.position;
                     cx.stop_propagation();
                     cx.notify();
-                })).into_any_element());
-        }
-        out
+                })).into_any_element();
+            chrome::Control { pane: id.clone(), host, port: Some(side + offset - point(half, half)), element }
+        }).collect()
     }
 
     /// Resting edges paint under panes. A selected wire, a wire with both panes selected,
@@ -421,11 +430,16 @@ mod sticky_tests {
 
         let origin = view.update(cx, |this, _| this.bounds.borrow()["canopy-canvas"].origin);
         let at = |x, y| origin + point(px(x), px(y));
-        let (handle, terminal, image) = (at(360., 200.), at(550., 205.), at(550., 410.));
+        let (terminal, image) = (at(550., 205.), at(550., 410.));
         let none = Modifiers::default();
         let left = MouseButton::Left;
 
         cx.simulate_mouse_move(at(230., 190.), None, none);
+        let handle = view.read_with(cx, |this, _| {
+            this.canvas_state.chrome.borrow().iter()
+                .find(|control| control.port && control.pane == "t1" && control.bounds.left() > at(360., 200.).x)
+                .expect("right port clears the pane").bounds.center()
+        });
         cx.simulate_click(handle, none);
         assert!(view.read_with(cx, |this, _| this.canvas_state.wire.sticky));
         cx.simulate_mouse_move(terminal, None, none);

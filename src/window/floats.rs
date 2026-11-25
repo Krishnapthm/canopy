@@ -54,6 +54,7 @@ impl Reveal {
 pub struct FloatDrag {
     id: String,
     owner: String,
+    in_canvas_lane: bool,
     down: Point<Pixels>,
     pointer: Point<Pixels>,
     /// Where the pointer holds the block, as shares of its size.
@@ -96,6 +97,11 @@ fn home(owner: Bounds<Pixels>, size: Size<Pixels>, (edge, align): (Edge, Align))
     point(x, y)
 }
 
+fn canvas_toolbar(owner: &Node, float: &Float) -> bool {
+    matches!(owner.kind, Kind::Canvas) && float.id == "toolbar"
+        && matches!(&float.content, Content::Mod { name, .. } if name == "toolbar")
+}
+
 impl AppWindow {
     /// What `placement()` tells each floating mod (a dragged one: where it would land).
     pub(super) fn float_placements(&self) -> Value {
@@ -126,10 +132,19 @@ impl AppWindow {
     }
 
     pub(super) fn render_floats(&self, n: &Node, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        n.floating.iter().filter(|f| !f.hidden).map(|f| self.render_float(n, f, cx)).collect()
+        n.floating.iter().filter(|f| !f.hidden && !canvas_toolbar(n, f))
+            .map(|f| self.render_float(n, f, false, cx)).collect()
     }
 
-    fn render_float(&self, owner: &Node, f: &Float, cx: &mut Context<Self>) -> AnyElement {
+    /// The canvas toolbar keeps its saved float placement and mod slot, inside an edge lane.
+    pub(super) fn render_canvas_toolbar(&self, owner: &Node, cx: &mut Context<Self>) -> Option<(Edge, AnyElement)> {
+        let f = owner.floating.iter().find(|f| !f.hidden && canvas_toolbar(owner, f))?;
+        let edge = self.float_drag.as_ref().filter(|d| d.id == f.id && d.moving)
+            .map_or(f.edge, |d| d.target.0);
+        Some((edge, self.render_float(owner, f, true, cx)))
+    }
+
+    fn render_float(&self, owner: &Node, f: &Float, in_lane: bool, cx: &mut Context<Self>) -> AnyElement {
         let slot = slot(&f.id);
         let content = match (&f.content, self.copies.get(&slot), self.terms.get(&slot)) {
             (Content::Terminal { .. }, _, Some(t)) => {
@@ -154,12 +169,12 @@ impl AppWindow {
             canvas(move |b, _, _| { bounds_map.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().size_full()
         };
         let drag = self.float_drag.as_ref().filter(|d| d.id == f.id && d.moving);
-        let (edge, _) = drag.map_or((f.edge, f.align), |d| d.target);
+        let (edge, align) = drag.map_or((f.edge, f.align), |d| d.target);
 
         // A drawer: the content keeps its full size; the box shows `peek` px of
         // it next to the edge, more as it opens.
         let natural = self.bounds.borrow().get(&content_slot(&f.id)).map(|b| b.size);
-        let peek = f.peek.filter(|_| edge.vertical()).map(|p| settings::z(p));
+        let peek = f.peek.filter(|_| !in_lane && edge.vertical()).map(|p| settings::z(p));
         let open = self.float_reveal.get(&f.id).map_or(0.0, Reveal::now);
         let cut = match (peek, natural) {
             (Some(p), Some(n)) if p < n.width => Some(size(p + (n.width - p) * open, n.height)),
@@ -192,7 +207,10 @@ impl AppWindow {
             let x = if edge == Edge::Right { c.width - n.width } else { px(0.0) };
             inner = inner.absolute().left(x + pad).top(pad);
         }
-        let (id, owner_id, hover_id) = (f.id.clone(), owner.id.clone(), f.id.clone());
+        let owner_bounds = if in_lane { "canvas-work-area" }
+            else if matches!(owner.kind, Kind::Canvas) { "canopy-canvas" }
+            else { &owner.id };
+        let (id, owner_id, hover_id) = (f.id.clone(), owner_bounds.to_owned(), f.id.clone());
         let mut body = div()
             .id(SharedString::from(slot.clone()))
             .relative()
@@ -210,21 +228,51 @@ impl AppWindow {
             })
             .occlude()
             .on_hover(cx.listener(move |this, hovered: &bool, window, cx| this.float_hovered(&hover_id, *hovered, window, cx)))
-            .on_mouse_down(MouseButton::Left, cx.listener(move |this, ev: &MouseDownEvent, _, _| this.float_press(&id, &owner_id, ev.position)))
+            .on_mouse_down(MouseButton::Left, cx.listener(move |this, ev: &MouseDownEvent, _, _| this.float_press(&id, &owner_id, in_lane, ev.position)))
             .child(inner);
-        if let Some(a) = self.float_anims.get(&f.id) {
+        if let Some(a) = self.float_anims.get(&f.id).filter(|_| !in_lane) {
             let left = 1.0 - spring(a.start.elapsed().as_secs_f32() * 1000.0 / SNAP_MS);
             body = body.left(a.from.x * left).top(a.from.y * left);
         }
         // The outer box is what's measured and placed: the spring offset doesn't move it.
+        if !in_lane && !empty && natural.is_some() && matches!(owner.kind, Kind::Canvas) {
+            let bounds = self.bounds.clone();
+            let key = format!("cover:canvas-float:{}", f.id);
+            body = body.child(canvas(move |b, window, _| {
+                let visible = b.intersect(&window.content_mask().bounds);
+                if visible.size.width > px(0.) && visible.size.height > px(0.) {
+                    bounds.borrow_mut().insert(key, visible);
+                }
+            }, |_, _, _, _| {}).absolute().size_full());
+        }
         let mut outer = div().relative().flex_none().child(measure(slot.clone())).child(body);
         if natural.is_none() {
             // Measured once before it shows, so it never flashes open.
             outer = outer.opacity(0.0);
         }
 
+        if in_lane {
+            let lane = div().id("canvas-toolbar-lane").flex().flex_none()
+                .min_w_0().min_h_0().p(settings::z(MARGIN));
+            let lane = if edge.vertical() {
+                lane.h_full().overflow_y_scroll().flex_col().items_center()
+            } else {
+                lane.w_full().overflow_x_scroll().items_center()
+            };
+            // Auto margins collapse to zero when controls must scroll.
+            let margin = &mut outer.style().margin;
+            let (start, end) = if edge.vertical() {
+                (&mut margin.top, &mut margin.bottom)
+            } else {
+                (&mut margin.left, &mut margin.right)
+            };
+            if align != Align::Start { *start = Some(Length::Auto); }
+            if align == Align::Center { *end = Some(Length::Auto); }
+            return lane.child(outer).into_any_element();
+        }
+
         let bounds = self.bounds.borrow();
-        if let (Some(d), Some(ob)) = (drag, bounds.get(&owner.id)) {
+        if let (Some(d), Some(ob)) = (drag, bounds.get(owner_bounds)) {
             let size = bounds.get(&slot).map(|b| b.size).unwrap_or_default();
             let x = d.pointer.x - ob.origin.x - size.width * d.grab.0;
             let y = d.pointer.y - ob.origin.y - size.height * d.grab.1;
@@ -244,12 +292,12 @@ impl AppWindow {
         layer.child(outer).into_any_element()
     }
 
-    fn float_press(&mut self, id: &str, owner: &str, at: Point<Pixels>) {
+    fn float_press(&mut self, id: &str, owner: &str, in_canvas_lane: bool, at: Point<Pixels>) {
         let b = self.bounds.borrow().get(&slot(id)).copied();
         let share = |v: Pixels, start: Pixels, len: Pixels| if len > px(0.0) { f32::from(v - start) / f32::from(len) } else { 0.5 };
         let grab = b.map_or((0.5, 0.5), |b| (share(at.x, b.origin.x, b.size.width), share(at.y, b.origin.y, b.size.height)));
         let target = self.chrome.walk().iter().flat_map(|n| &n.floating).find(|f| f.id == id).map(|f| (f.edge, f.align)).unwrap_or_default();
-        self.float_drag = Some(FloatDrag { id: id.to_owned(), owner: owner.to_owned(), down: at, pointer: at, grab, moving: false, target });
+        self.float_drag = Some(FloatDrag { id: id.to_owned(), owner: owner.to_owned(), in_canvas_lane, down: at, pointer: at, grab, moving: false, target });
     }
 
     fn float_move(&mut self, at: Point<Pixels>, pressed: bool, cx: &mut Context<Self>) {
@@ -288,6 +336,7 @@ impl AppWindow {
         }
         let bounds = self.bounds.borrow();
         let anim = match (bounds.get(&d.owner), bounds.get(&slot(&d.id))) {
+            _ if d.in_canvas_lane => None,
             (Some(ob), Some(b)) => {
                 let from = point(at.x - b.size.width * d.grab.0, at.y - b.size.height * d.grab.1);
                 let to = home(*ob, b.size, d.target);

@@ -7,6 +7,7 @@ use std::path::Path;
 mod wire_view;
 mod keyboard;
 mod helper_bar;
+mod chrome;
 mod dock;
 mod pane_commands;
 pub(super) mod browser;
@@ -51,6 +52,7 @@ pub(super) struct State {
     /// A shutdown owns its device across panes until simctl replies.
     shutting_down_sims: HashSet<String>,
     bar_hover: Option<String>,
+    chrome: chrome::Placements,
     // The starting size is present for an edge or corner resize.
     preview_drag: Option<(String, Option<canvas::Point>, Point<Pixels>)>,
     /// The panel's active tab (its tabs are `doc.panel.tabs`).
@@ -224,6 +226,7 @@ impl State {
             sims: HashMap::new(),
             shutting_down_sims: HashSet::new(),
             bar_hover: None,
+            chrome: Default::default(),
             preview_drag: None,
             file,
             editing: None,
@@ -423,9 +426,18 @@ fn return_popped_pane(owner: WindowHandle<AppWindow>, addr: &str, cx: &mut App) 
 impl AppWindow {
     /// A cell's own menu (`canvas-card` in the menu mod): from its pill, header or terminal.
     pub(super) fn open_card_menu(&mut self, addr: &str, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.canvas_state.selected.iter().any(|s| s == addr) { self.canvas_state.selected = vec![addr.to_owned()]; }
+        let selection = &mut self.canvas_state.selected;
+        if let Some(index) = selection.iter().position(|id| id == addr) {
+            let target = selection.remove(index);
+            selection.push(target);
+        } else {
+            *selection = vec![addr.to_owned()];
+        }
+        let toolbar = self.pane_helper_menu_items(addr, cx).into_iter()
+            .filter(|item| matches!(item[1].as_str(), Some("canvas.enter" | "canvas.connect")))
+            .collect::<Vec<_>>();
         let tab = self.model.pane_of(addr).and_then(|p| self.model.tab_of(&p)).map(|t| t.id.clone());
-        let target = json!({"terminal":addr,"id":tab,"popped":self.canvas_state.popped.contains_key(addr),
+        let target = json!({"terminal":addr,"id":tab,"popped":self.canvas_state.popped.contains_key(addr),"toolbar":toolbar,
             "expanded":self.canvas_state.doc.panes.iter().any(|c| c.id == addr && c.size().is_some()),
             "finished":self.canvas_state.subs.get(addr).is_some_and(|subs| subs.iter().any(|s| s.done))});
         self.open_menu("canvas-card", target, Some(at), window, cx);
@@ -543,6 +555,10 @@ impl AppWindow {
         !self.overlays.is_empty() && self.bounds.borrow().iter().any(|(id, bounds)| {
             id.starts_with("cover:overlay:") && bounds.contains(&position)
         })
+    }
+
+    fn canvas_input_covered(&self, position: Point<Pixels>) -> bool {
+        self.canvas_overlay_at(position) || self.canvas_chrome_at(position)
     }
 
     /// Resize the held edge in world pixels, or in screen pixels for a pinned pane.
@@ -2811,8 +2827,9 @@ impl AppWindow {
         let drag = card.id.clone();
         let color_menu = drag.clone();
         let raise = drag.clone();
-        let sim_menu = card.sim().map(|udid| (card.id.clone(), !udid.is_empty() && !self.canvas_state.shutting_down_sims.contains(udid)));
+        let shutdown = card.sim().is_some_and(|udid| !udid.is_empty() && !self.canvas_state.shutting_down_sims.contains(udid));
         let browser = card.url().is_some();
+        let pane_menu = card.id.clone();
         #[cfg(target_os = "macos")]
         let rest = card.id.clone();
         let card_element = div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
@@ -2829,13 +2846,15 @@ impl AppWindow {
                     if browser { this.select_browser_pane(&raise); }
                     cx.notify();
                 }))
-                .when_some(sim_menu, |d, (id, can_shutdown)| d.on_mouse_down(MouseButton::Right,
+                .when(!browser, |d| d.on_mouse_down(MouseButton::Right,
                     cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                        let mut items = vec![json!(["Close", "canvas.close", {"pane":id}])];
-                        if can_shutdown {
-                            items.push(json!(["Shut down and close", "canvas.sim_shutdown", {"pane":id,"close":true}]));
+                        let mut items = this.pane_helper_menu_items(&pane_menu, cx);
+                        if shutdown {
+                            items.push(json!(["Shut down and close", "canvas.sim_shutdown", {"pane":pane_menu,"close":true}]));
                         }
-                        this.open_menu("primary", json!({"items":items}), Some(e.position), window, cx);
+                        this.canvas_state.selected = vec![pane_menu.clone()];
+                        this.canvas_state.wire.selected = None;
+                        this.open_menu("canvas-pane", json!({"pane":pane_menu,"items":items}), Some(e.position), window, cx);
                         cx.stop_propagation();
                     })))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
@@ -2852,10 +2871,10 @@ impl AppWindow {
         ));
         card_element
                 .when(canvas::header_height(&card.kind) > 0., |d| d.child(Self::pane_header().h(px(canvas::header_height(&card.kind))).flex_none().border_b_1().border_color(c("border"))
-                    .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
+                    .when(browser, |head| head.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                         this.open_menu("canvas-colors", json!({"pane":color_menu}), Some(e.position), window, cx);
                         cx.stop_propagation();
-                    }))
+                    })))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                         this.start_preview_drag(&drag, e.position);
                         cx.stop_propagation();
@@ -2948,7 +2967,7 @@ impl AppWindow {
         })
     }
 
-    pub(super) fn render_canvas(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_canvas(&self, owner: &Node, cx: &mut Context<Self>) -> AnyElement {
         let state = &self.canvas_state;
         // A pane that leaves the selection leaves sync input; under two, sync ends.
         let synced = {
@@ -2961,7 +2980,9 @@ impl AppWindow {
         };
         let shown_doc = state.shown.as_ref().unwrap_or(&state.doc);
         let camera = state.doc.camera;
-        let bounds = self.bounds.borrow().get("canopy-canvas").copied();
+        let bounds = self.canvas_bounds();
+        state.chrome.borrow_mut().clear();
+        self.bounds.borrow_mut().retain(|key, _| !key.starts_with("cover:canvas-float:"));
         let viewport = bounds
             .map(|b| [f32::from(b.size.width), f32::from(b.size.height)])
             .unwrap_or([1200., 800.]);
@@ -2983,8 +3004,9 @@ impl AppWindow {
             })
             // Middle drag, or left drag with Space held, starts a camera pan.
             .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, cx| {
+                if (e.button == MouseButton::Left && this.canvas_state.wire.sticky)
+                    || this.canvas_input_covered(e.position) { return; }
                 let state = &mut this.canvas_state;
-                if e.button == MouseButton::Left && state.wire.sticky { return; }
                 state.motion.target = None;
                 state.motion.velocity = [0.; 2];
                 state.motion.sample = Some(std::time::Instant::now());
@@ -3011,7 +3033,7 @@ impl AppWindow {
                         let down = view.clone();
                         window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
                             if phase != DispatchPhase::Capture || e.button != MouseButton::Left
-                                || !b.contains(&e.position) || down.read(cx).canvas_overlay_at(e.position)
+                                || !b.contains(&e.position) || down.read(cx).canvas_input_covered(e.position)
                             { return; }
                             down.update(cx, |this, cx| {
                                 if this.wire_pick(e.position, window, cx) {
@@ -3071,14 +3093,14 @@ impl AppWindow {
                         let pinch = view.clone();
                         window.on_mouse_event(move |e: &PinchEvent, phase, window, cx| {
                             if phase == DispatchPhase::Capture && b.contains(&e.position)
-                                && !pinch.read(cx).canvas_overlay_at(e.position)
+                                && !pinch.read(cx).canvas_input_covered(e.position)
                             {
                                 pinch.update(cx, |this, cx| this.canvas_pinch(e, window, cx));
                             }
                         });
                         let wheel = view.clone();
                         window.on_mouse_event(move |e: &ScrollWheelEvent, phase, window, cx| {
-                            if !b.contains(&e.position) || wheel.read(cx).canvas_overlay_at(e.position) { return; }
+                            if !b.contains(&e.position) || wheel.read(cx).canvas_input_covered(e.position) { return; }
                             // Capture before inactive panes can scroll. Bubble after eligible children,
                             // so a terminal that owns keyboard focus can scroll its own output.
                             let claim = match phase {
@@ -3684,14 +3706,26 @@ impl AppWindow {
         {
             area = area.children(self.empty_hints());
         }
-        area = area.child(self.wire_layer(viewport, true, &edges)).children(self.wire_handles(cx));
+        area = area.child(self.wire_layer(viewport, true, &edges));
         if let Some((a, b, _)) = &state.marquee {
             let (a, b) = (self.wire_local(*a), self.wire_local(*b));
             area = area.child(div().absolute().left(px(a[0].min(b[0]))).top(px(a[1].min(b[1])))
                 .w(px((a[0] - b[0]).abs())).h(px((a[1] - b[1]).abs()))
                 .border_1().border_color(c("ring")).bg(c("ring").opacity(0.08)));
         }
-        area = area.children(self.helper_bars(shown_doc, cx));
+        let mut controls = self.helper_bars(shown_doc, cx);
+        controls.extend(self.wire_handles(cx));
+        let panes = shown_doc.panes.iter().filter(|pane| shown_doc.shown(pane))
+            .filter_map(|pane| self.pane_screen_bounds(pane)).collect();
+        let expanded_page = self.expanded_browser(c(bg));
+        let area = if let Some(page) = expanded_page {
+            div().relative().flex().flex_1().min_w_0().min_h_0().overflow_hidden()
+                .child(page).children(self.render_floats(owner, cx)).into_any_element()
+        } else {
+            area.children(self.render_floats(owner, cx))
+                .child(chrome::Layer { controls, panes, placed: state.chrome.clone(), bounds: self.bounds.clone() })
+                .into_any_element()
+        };
         // The bar's controls opt out of window dragging.
         let control = || div().flex().items_center().gap(px(4.)).on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
         // Expanded, the file panel fills the window: no space tabs, canvas or canvas controls.
@@ -3786,19 +3820,29 @@ impl AppWindow {
         if !expanded {
             bar = bar.child(crumbs.child(div().flex_1().h_full())).child(tabs.flex_none().px(px(8.)));
         }
-        if self.connect_hint() {
-            area = area.child(div().absolute().bottom_0().left_0().right_0().h(px(32.))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(self.render_slot("canvas-keys", cx)));
+        let mut row = div().flex_1().min_h_0().w_full().flex();
+        if !expanded {
+            let toolbar = self.render_canvas_toolbar(owner, cx);
+            let (edge, toolbar) = toolbar.map(|(edge, toolbar)| (edge, Some(toolbar)))
+                .unwrap_or((crate::layout::Edge::Bottom, None));
+            let horizontal = !edge.vertical();
+            let before = matches!(edge, crate::layout::Edge::Top | crate::layout::Edge::Left);
+            let bounds = self.bounds.clone();
+            let mut surface = div().relative().flex().flex_1().min_w_0().min_h_0().overflow_hidden()
+                .bg(c(bg))
+                .child(canvas(move |b, _, _| {
+                    bounds.borrow_mut().insert("canvas-work-area".into(), b);
+                }, |_, _, _, _| {}).absolute().size_full());
+            let center = div().flex().flex_col().flex_1().min_w_0().min_h_0()
+                .child(div().flex().flex_1().min_w_0().min_h_0().child(area))
+                .when(self.connect_hint(), |d| d.child(div().h(px(32.)).flex_none().w_full().overflow_hidden()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(self.render_slot("canvas-keys", cx))));
+            if horizontal { surface = surface.flex_col(); }
+            surface = if before { surface.children(toolbar).child(center) }
+                else { surface.child(center).children(toolbar) };
+            row = row.child(surface);
         }
-        let mut row = div()
-            .flex_1()
-            .min_h_0()
-            .w_full()
-            .flex()
-            .when(!expanded, |d| d.child(match self.expanded_browser(c(bg)) { Some(page) => page, None => area.into_any_element() }));
-        // On Linux the caption buttons and menu share the strip, so the grip begins below it.
-        let mut grip = None;
         if state.file.is_some() || state.files {
             let full_width = self
                 .bounds
@@ -3816,6 +3860,7 @@ impl AppWindow {
             let width = if expanded { full_width } else { width };
             let mut panel = div()
                 .relative()
+                .overflow_hidden()
                 .w(px(width))
                 .h_full()
                 .flex_none()
@@ -3823,14 +3868,12 @@ impl AppWindow {
                 .flex_col()
                 .bg(c(bg));
             // The panel's left border is a 1 px line in a 6 px grab area.
-            grip = (!expanded).then(||
-                div()
+            if !expanded {
+                row = row.child(div()
                     .id("canvas-panel-resize")
                     .group("canvas-panel-resize")
-                    .absolute()
-                    .right(px(width - 3.))
-                    .top(px(if cfg!(any(target_os = "linux", target_os = "freebsd")) { BAR } else { 0. }))
-                    .bottom_0()
+                    .flex_none()
+                    .h_full()
                     .w(px(6.))
                     .flex()
                     .justify_center()
@@ -3844,8 +3887,8 @@ impl AppWindow {
                     )
                     .child(div().w(px(1.)).h_full().bg(c("border"))
                         .group_hover("canvas-panel-resize", |d| d.bg(c("ring")))
-                        .when(state.resizing, |d| d.bg(c("ring")))),
-            );
+                        .when(state.resizing, |d| d.bg(c("ring")))));
+            }
             let mut browser_actions = None;
             let mut tabs = div().id("canvas-tabs").role(gpui::Role::TabList).flex().flex_1().min_w_0().h_full().items_center().overflow_x_scroll()
                 .when(!expanded, |d| d.pl(px(TAB_INSET)));
@@ -4062,7 +4105,7 @@ impl AppWindow {
         }
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         let bar = self.canvas_strip(frame, bar, cx);
-        div().relative().size_full().flex().flex_col().child(bar).child(row).children(grip)
+        div().relative().size_full().flex().flex_col().child(bar).child(row)
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, window, cx| {
                 if this.canvas_state.resizing {
                     let width = f32::from(window.viewport_size().width - e.position.x);

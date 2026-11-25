@@ -618,7 +618,13 @@ impl AppWindow {
             let body = self.annotate_body(card, body.into_any_element(), annotate::card_body(card, camera.zoom), cx);
             return div().relative().size_full().child(body)
                 .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(
-                    div().absolute().bottom(px(12.)).left_0().right_0().flex().justify_center().child(bar)))
+                    div().id("sim-device-controls").absolute().bottom(px(12.)).left_0().right_0()
+                        .flex().items_center().overflow_x_scroll()
+                        .child(bar.flex_none().map(|mut bar| {
+                            bar.style().margin.left = Some(Length::Auto);
+                            bar.style().margin.right = Some(Length::Auto);
+                            bar
+                        }))))
                 .into_any_element();
         }
         body
@@ -629,7 +635,7 @@ impl AppWindow {
         self.canvas_state.annotations.contains_key(&pane.id) ||
             self.canvas_state.sims.get(&pane.id).is_some_and(|view|
                 view.popped.is_none() && matches!(view.screen, Screen::Shot(_) | Screen::Loading) &&
-                    view.live.as_ref().is_some_and(|screen| pane.sim() == Some(screen.read(cx).device.udid.as_str())))
+                    view.live.as_ref().is_none_or(|screen| pane.sim() == Some(screen.read(cx).device.udid.as_str())))
     }
 
     /// The body of a sim pane: its device, or what stands in for it.

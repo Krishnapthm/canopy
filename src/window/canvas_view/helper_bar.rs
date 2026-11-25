@@ -147,56 +147,56 @@ impl AppWindow {
             || state.region.is_some()
     }
 
-    /// Helper bars for the hovered pane and every selected pane of the shown
-    /// place: a pill above the top-left corner, or inside the top edge when clipped.
-    pub(super) fn helper_bars(&self, doc: &Document, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        #[cfg(target_os = "macos")]
-        self.bounds.borrow_mut().retain(|k, _| !k.starts_with("cover:bar:") && !k.starts_with("cover:annotate"));
+    /// Describe the bars in placement priority: active wire, hover, then pane paint order.
+    pub(super) fn helper_bars(&self, doc: &Document, cx: &mut Context<Self>) -> Vec<chrome::Control> {
         if self.bars_hidden() { return vec![]; }
         let state = &self.canvas_state;
-        // A wire following the pointer keeps its pane's bar up, to show Connect as active.
         let wiring = state.wire.drag.as_ref().filter(|_| state.wire.sticky).map(|d| d.0.as_str());
         let edges = crate::wire::all(doc, |k| self.live.get(k).and_then(|r| r["parent"].as_str()).map(str::to_owned));
-        let mut targets: Vec<String> = wiring.map(str::to_owned).into_iter().collect();
-        for id in &state.selected {
-            if !targets.contains(id) { targets.push(id.clone()); }
-        }
-        if let Some(id) = &state.bar_hover {
-            targets.retain(|k| k != id);
-            targets.push(id.clone());
-        }
-        let s = doc.camera.zoom.clamp(0.75, 1.0);
-        let bar_height = 28. * s + 2.;
-        let mut out = vec![];
-        for id in targets {
-            let Some(pane) = doc.panes.iter().find(|p| p.id == id && doc.shown(p)) else { continue };
-            let hint = pane.mod_name().and_then(|name| self.folders.get(name)).and_then(|f| f.hint.pane.as_ref());
-            let actions = pane_actions(pane, hint, false);
-            if actions.is_empty() { continue; }
-            let rect = if pane.boxed() { pane.rect } else {
-                let Some(rect) = self.wire_cell(doc, &id) else { continue };
-                rect
-            };
-            #[cfg(target_os = "macos")]
-            let actions = self.sim_relabel(&id, actions, cx);
-            let [x, y] = doc.camera.to_screen([rect[0], rect[1]]);
-            let top = y - 8. - bar_height;
-            let top = if top < 0. && y + rect[3] * doc.camera.zoom > 0. { y.max(0.) + 3. } else { top };
-            let bar = self.bar(&id, actions, s, connect_active(&id, wiring, &edges), cx)
+        let mut targets: Vec<_> = doc.panes.iter().filter(|pane| {
+            doc.shown(pane) && (wiring == Some(pane.id.as_str())
+                || state.bar_hover.as_ref() == Some(&pane.id)
+                || state.selected.contains(&pane.id))
+        }).collect();
+        targets.sort_by(|a, b| {
+            let priority = |p: &canvas::Pane| (wiring == Some(p.id.as_str()),
+                state.bar_hover.as_ref() == Some(&p.id), paint_order(p));
+            priority(b).cmp(&priority(a)).then_with(|| a.id.cmp(&b.id))
+        });
+
+        let scale = doc.camera.zoom.clamp(0.75, 1.0);
+        targets.into_iter().filter_map(|pane| {
+            let id = &pane.id;
+            let host = self.pane_screen_bounds(pane)?;
+            let actions = self.helper_actions(pane, cx);
+            if actions.is_empty() { return None; }
+            let bar = self.bar(id, actions, scale, connect_active(id, wiring, &edges), cx)
                 .when(canvas::header_height(&pane.kind) == 0., |d| {
-                    d.items_center().child(self.note_move_grip(&id, s, cx)).child(self.pane_color_swatch(&id, cx))
+                    d.items_center().child(self.note_move_grip(id, scale, cx)).child(self.pane_color_swatch(id, cx))
                 })
-                .absolute().left(px(x)).top(px(top));
-            #[cfg(target_os = "macos")]
-            let bar = {
-                let bounds = self.bounds.clone();
-                let cover = format!("cover:bar:{id}");
-                bar.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
-                    .absolute().size_full())
-            };
-            out.push(bar.into_any_element());
-        }
-        out
+                .occlude()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation());
+            Some(chrome::Control { pane: id.clone(), host, port: None, element: bar.into_any_element() })
+        }).collect()
+    }
+
+    fn helper_actions(&self, pane: &canvas::Pane, cx: &App) -> Vec<BarAction> {
+        let hint = pane.mod_name().and_then(|name| self.folders.get(name)).and_then(|f| f.hint.pane.as_ref());
+        let actions = pane_actions(pane, hint, false);
+        #[cfg(target_os = "macos")]
+        let actions = self.sim_relabel(&pane.id, actions, cx);
+        #[cfg(not(target_os = "macos"))]
+        let _ = cx;
+        actions
+    }
+
+    /// Reuse helper actions when the pane is too crowded for a bar.
+    pub(super) fn pane_helper_menu_items(&self, id: &str, cx: &App) -> Vec<Value> {
+        self.canvas_state.doc.panes.iter().find(|p| p.id == id)
+            .map(|p| self.helper_actions(p, cx).into_iter()
+                .map(|a| json!([a.label.to_string(), a.command, a.args])).collect())
+            .unwrap_or_default()
     }
 
     fn note_move_grip(&self, id: &str, s: f32, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
@@ -220,7 +220,7 @@ impl AppWindow {
     /// One helper bar pill at scale `s`, positioned by its caller. `connected` highlights Connect.
     pub(super) fn bar(&self, id: &str, actions: Vec<BarAction>, s: f32, connected: bool, cx: &mut Context<Self>) -> Div {
         let state = &self.canvas_state;
-        let mut bar = bar_shell(s);
+        let mut bar = bar_shell(s).flex_nowrap();
         for BarAction { icon, label, command, args } in actions {
             let active = connected && command == "canvas.connect";
             let enabled = if command == "canvas.sim_zoom" && args["step"] == "actual" {
@@ -235,7 +235,7 @@ impl AppWindow {
                 .find(|(section, _, action)| (section == "canvas-mode" || section == "layout:main") && action == &command)
                 .map(|(_, key, _)| key.clone())).unwrap_or_default();
             bar = bar.child(div().id(group.clone()).group(group.clone()).role(gpui::Role::Button).aria_label(label.clone())
-                .h(px(24. * s)).min_w(px(24. * s)).when(hint.is_empty(), |d| d.w(px(24. * s)))
+                .flex_none().h(px(24. * s)).min_w(px(24. * s)).when(hint.is_empty(), |d| d.w(px(24. * s)))
                 .flex().items_center().justify_center().gap(px(2. * s)).rounded(px(ui::RADIUS_SM))
                 .when(enabled, |d| d.cursor_pointer().hover(|d| d.bg(c("hover"))))
                 .when(!enabled, |d| d.opacity(0.5).aria_description("Available when the simulator is live"))

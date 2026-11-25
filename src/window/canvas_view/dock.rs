@@ -159,12 +159,13 @@ impl AppWindow {
         #[cfg(target_os = "macos")]
         let actions = self.sim_relabel(id, actions, cx);
         let label = wired.as_ref().map_or(title, |agent| format!("Wired to {}", self.pill_name(agent)));
-        let header = div().flex().flex_col().flex_none()
+        let header = div().flex().flex_col().flex_none().min_w_0().overflow_hidden()
             .children(chrome)
             .when(!actions.is_empty(), |d| d.child(div().flex().items_center().gap(px(6.)).px(px(12.)).h(px(36.)).border_b_1().border_color(c("border"))
                 .child(div().flex_1().min_w_0().truncate().text_size(px(12.)).text_color(c("muted-foreground")).child(label))
                 .child(self.pane_color_swatch(id, cx))
-                .child(self.bar(id, actions, 1., wired.is_some(), cx))))
+                .child(div().id("dock-pane-controls").min_w_0().overflow_x_scroll()
+                    .child(self.bar(id, actions, 1., wired.is_some(), cx)))))
             .into_any_element();
         let bounds = self.bounds.clone();
         let key = format!("panel-body:{id}");
@@ -174,7 +175,7 @@ impl AppWindow {
                 this.select_browser_pane(&select);
                 cx.notify();
             }))
-            .child(canvas(move |b, _, _| { bounds.borrow_mut().insert(key.clone(), b); }, |_, _, _, _| {}).absolute().size_full())
+            .child(canvas(move |b, _, _| { bounds.borrow_mut().insert(key, b); }, |_, _, _, _| {}).absolute().size_full())
             .child(div().size_full().child(body))
             .into_any_element();
         Some((header, body))

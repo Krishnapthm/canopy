@@ -219,7 +219,7 @@ pub(in crate::window) struct Browsers {
     #[cfg(target_os = "macos")]
     next_view: u64,
     #[cfg(target_os = "macos")]
-    pub(super) last_masks: Rc<RefCell<HashMap<String, Option<Vec<super::browser_mask::R>>>>>,
+    pub(super) last_masks: super::browser_mask::MaskCache,
     /// Page events into the window; made with the first web view.
     events: Option<async_channel::Sender<(String, u64, Event)>>,
 }
@@ -559,13 +559,15 @@ impl AppWindow {
                     }
                 }));
             }
+            let frame = self.measured_webview(self.page_key(&id).unwrap(), view);
             let body = if preset {
                 let [_, _, width, height] = viewport_rect(pane, camera);
                 div().size_full().bg(c("canvas")).flex().items_center().justify_center()
-                    .child(div().flex_none().w(px(width)).h(px(height)).child(view.clone()))
+                    .child(div().flex_none().w(px(width)).h(px(height)).child(frame))
             } else {
-                div().size_full().bg(gpui::white()).child(view.clone())
+                div().size_full().bg(gpui::white()).child(frame)
             };
+            let body = body.relative().child(self.browser_measure(format!("web-body:{id}")));
             return self.annotate_body(pane, body.into_any_element(), super::annotate::card_body(pane, camera.zoom), cx);
         }
         #[cfg(not(target_os = "macos"))]
@@ -680,7 +682,7 @@ impl AppWindow {
         let reset = id.to_owned();
         let annotate = id.to_owned();
         let picker = self.annotation_picker(id);
-        div().flex().items_center().h(px(32.)).px(px(8.)).gap(px(4.))
+        div().id("browser-navigation").flex().items_center().h(px(32.)).min_w_0().overflow_x_scroll().px(px(8.)).gap(px(4.))
             .child(self.browser_button(id, "browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
             .child(self.browser_button(id, "browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
             .child(self.browser_button(id, "browser-reload", "icons/rotate-cw.svg", "Reload", "canvas.browser_reload", cx))
@@ -919,9 +921,17 @@ impl AppWindow {
             .into_any_element())
     }
 
+    fn expanded_webview(&self, id: &str, page: &Page) -> Option<Div> {
+        #[cfg(target_os = "macos")]
+        { Some(self.measured_webview(self.page_key(id)?, &page.native.as_ref()?.view)) }
+        #[cfg(not(target_os = "macos"))]
+        { let _ = (id, page); None }
+    }
+
     /// Shows the expanded live page over the measured canvas area.
     pub(super) fn expanded_browser(&self, bg: Hsla) -> Option<AnyElement> {
-        let page = self.active_page(self.canvas_state.browser_tab.as_ref()?)?;
+        let id = self.canvas_state.browser_tab.as_ref()?;
+        let page = self.active_page(id)?;
         let bounds = self.bounds.clone();
         Some(div().id("canopy-browser-tab").relative().flex_1().h_full().overflow_hidden().bg(bg)
             .child(canvas(move |b, _, _| {
@@ -930,7 +940,7 @@ impl AppWindow {
                 #[cfg(target_os = "macos")]
                 bounds.insert("browser-canvas".into(), b);
             }, |_, _, _, _| {}).absolute().size_full())
-            .children(page.view_element()).into_any_element())
+            .children(self.expanded_webview(id, page)).into_any_element())
     }
 
     /// Answers page events from the web views.
@@ -1501,14 +1511,6 @@ impl AppWindow {
 }
 
 impl Page {
-    /// The live view as an element filling its parent.
-    fn view_element(&self) -> Option<AnyElement> {
-        #[cfg(target_os = "macos")]
-        return self.native.as_ref().map(|n| div().size_full().child(n.view.clone()).into_any_element());
-        #[cfg(not(target_os = "macos"))]
-        None
-    }
-
     fn has_view(&self) -> bool {
         #[cfg(target_os = "macos")]
         return self.native.is_some();
@@ -2530,6 +2532,17 @@ fn show_view(view: &mut gpui_wry::WebView, frame: Bounds<Pixels>, zoom: f64) {
 
 #[cfg(target_os = "macos")]
 impl AppWindow {
+    /// Measure the same content slot GPUI passes to Wry, including a fixed viewport.
+    fn measured_webview(&self, key: String, view: &Entity<gpui_wry::WebView>) -> Div {
+        div().relative().size_full().child(self.browser_measure(format!("web-frame:{key}"))).child(view.clone())
+    }
+
+    fn browser_measure(&self, key: String) -> gpui::Canvas<()> {
+        let bounds = self.bounds.clone();
+        canvas(move |b, _, _| { bounds.borrow_mut().insert(key, b); }, |_, _, _, _| {})
+            .absolute().size_full()
+    }
+
     /// Window-space bounds of the live element, including the viewport's centering offset.
     pub(super) fn body_rect(&self, pane: &canvas::Pane) -> Option<Bounds<Pixels>> {
         if self.canvas_state.doc.docked(&pane.id) {
