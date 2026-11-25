@@ -25,8 +25,6 @@ pub const PILL_WIDTH: f32 = 220.;
 pub const SPACE_CARD: Point = [260., 120.];
 /// The header strip of an expanded cell at zoom 1: the pill's one-line height.
 pub const HEADER: f32 = 36.;
-/// The header's height in world px at `zoom`: headers keep their screen size.
-pub fn header_world(zoom: f32) -> f32 { HEADER / zoom }
 /// A browser pane's header: a row of tabs over a row of navigation and the address field.
 pub const BROWSER_HEADER: f32 = 66.;
 /// The header height of a pane of this kind, in screen px at every zoom.
@@ -37,8 +35,6 @@ pub fn header_height(kind: &Kind) -> f32 {
         _ => HEADER,
     }
 }
-/// Below this camera zoom an expanded cell shows a flat stand-in instead of live text.
-pub const EXPANDED_MIN_ZOOM: f32 = 0.5;
 
 pub const ZOOMS: [f32; 12] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1., 1.1, 1.25, 1.5, 1.75, 2.,
@@ -109,6 +105,20 @@ pub fn zoom_range(rects: &[Rect], viewport: Point) -> [f32; 2] {
     let max = rects.iter().map(|r| fit_zoom(*r, viewport)).fold(ZOOMS[11], f32::min).max(ZOOMS[0]);
     let min = union(rects).map_or(ZOOMS[0], |b| step_down(fit_zoom(b, viewport))).min(1.).min(max);
     [min, max]
+}
+/// Keeps a non-empty place within reach while allowing the camera to move across it.
+pub fn constrain_camera(camera: &mut Camera, rects: &[Rect], viewport: Point) {
+    let Some(bounds) = union(rects) else { return };
+    let min = step_down(fit_zoom(bounds, viewport)).min(1.);
+    if camera.zoom < min {
+        camera.zoom_at(min, [viewport[0] / 2., viewport[1] / 2.]);
+    }
+    let pad = FIT_PAD / 2. / camera.zoom;
+    for (i, value) in [&mut camera.x, &mut camera.y].into_iter().enumerate() {
+        let a = bounds[i] - pad;
+        let b = bounds[i] + bounds[i + 2] + pad - viewport[i] / camera.zoom;
+        *value = if a <= b { (*value).clamp(a, b) } else { (a + b) / 2. };
+    }
 }
 /// `range` stretched to hold `zoom`, so a zoom already past a limit is not pulled back mid-gesture.
 pub fn widen(range: [f32; 2], zoom: f32) -> [f32; 2] { [range[0].min(zoom), range[1].max(zoom)] }
@@ -2040,6 +2050,27 @@ mod tests {
         assert!(view_allows(&View::Terminals, false));
         assert!(!view_allows(&View::Terminals, true));
     }
+    #[test]
+    fn camera_constraints_keep_content_in_reach_and_empty_canvas_free() {
+        let rects = [[100., 200., 200., 150.], [700., 650., 200., 150.]];
+        let viewport = [400., 300.];
+        let mut camera = Camera { x: 10000., y: -10000., zoom: 1. };
+        constrain_camera(&mut camera, &rects, viewport);
+        assert_eq!([camera.x, camera.y], [540., 160.]);
+        camera.zoom = ZOOMS[0];
+        constrain_camera(&mut camera, &rects, viewport);
+        assert_eq!(camera.zoom, zoom_range(&rects, viewport)[0]);
+        assert!(camera.zoom > ZOOMS[0]);
+        let small = [[500., 500., 100., 100.]];
+        let mut centered = Camera::default();
+        constrain_camera(&mut centered, &small, viewport);
+        assert_eq!([centered.x, centered.y], [350., 400.]);
+        let before = Camera { x: 10000., y: -10000., zoom: 0.25 };
+        let mut free = before;
+        constrain_camera(&mut free, &[], viewport);
+        assert_eq!(free, before);
+    }
+
     #[test]
     fn fit_uses_largest_fitting_zoom_step() {
         let mut c = Camera::default();

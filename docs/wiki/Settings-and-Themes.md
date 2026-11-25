@@ -13,6 +13,8 @@ Changes save immediately.
 
 Use **Settings** > **Shortcuts** to [change shortcuts](Keys-and-Mouse).
 
+Under **Look** > **Canvas**, turn off **Limit canvas navigation** to pan freely and use the full zoom range. The setting is on by default. See [Canvas navigation](Canvas) for how it works.
+
 ## Edit settings.json
 
 1. Open `settings.json` in your [app home](Files-and-Folders).
