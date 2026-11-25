@@ -94,3 +94,9 @@ command and is separate from terminal notifications.
 
 Checked with `codex --version` and the installed binary's strings. Live PTY
 output and this version's automatic method selection were not exercised.
+
+## Usage schema, 2026-11-24 (0.171.0)
+
+`codex app-server generate-json-schema --out <scratch>` generated the local protocol schema without starting an app server. It describes `account/rateLimits/read` with a `rateLimits` response containing optional `primary` and `secondary` windows. Each window has `usedPercent`, optional `windowDurationMins`, and optional integer `resetsAt`. The schema also describes optional `rateLimitsByLimitId` buckets. No authenticated request was made, so available accounts and actual response values remain unverified.
+
+An isolated `codex app-server --stdio` with empty `HOME` and `CODEX_HOME` accepted `initialize` and returned an error to `account/rateLimits/read` without sign-in. No agent turn or authenticated request was made.

@@ -607,6 +607,37 @@ pub fn publish_machines(v: Value) -> bool {
 pub fn publish_spaces(v: Value) -> bool {
     publish("spaces", |s| (std::mem::replace(&mut s.spaces, v.clone()), v))
 }
+/// Distinct installed agent programs with panes across spaces.
+#[cfg(target_os = "macos")]
+pub fn usage_programs() -> Vec<(String, String, std::path::PathBuf, bool)> {
+    use std::collections::BTreeMap;
+    let programs = SNAPSHOT.with_borrow(|snapshot| usage_programs_from(&snapshot.agents, &snapshot.spaces));
+    let installed: BTreeMap<_, _> = crate::programs::startable().into_iter().filter_map(|program| {
+        let command = program.pointer("/run/0")?.as_str()?;
+        Some((program["key"].as_str()?.to_owned(), crate::usage::executable(command)?))
+    }).collect();
+    programs.into_iter().filter_map(|(key, (name, local))| {
+        Some((key.clone(), name, installed.get(&key)?.clone(), local))
+    }).collect()
+}
+
+#[cfg(target_os = "macos")]
+fn usage_programs_from(agents: &Value, spaces: &Value) -> std::collections::BTreeMap<String, (String, bool)> {
+    let mut programs = std::collections::BTreeMap::new();
+    for agent in agents.as_array().into_iter().flatten() {
+        let program = &agent["program"];
+        if let (Some(key), Some(name), Some(space)) =
+            (program["key"].as_str(), program["name"].as_str(), agent["space"].as_str())
+        {
+            let local = spaces.as_array().into_iter().flatten()
+                .any(|entry| entry["id"] == space && entry["machine"].is_null());
+            let entry = programs.entry(key.to_owned()).or_insert_with(|| (name.to_owned(), false));
+            entry.1 |= local;
+        }
+    }
+    programs
+}
+
 pub fn publish_agents(v: Value) -> bool {
     publish("agents", |s| (std::mem::replace(&mut s.agents, v.clone()), v))
 }
@@ -1243,6 +1274,20 @@ mod tests {
         assert!(exec_future("herdr_test_missing_command_638".into(), vec![], None, None, EXEC_LIMIT).await.is_err());
         let error = exec_future("sh".into(), vec!["-c".into(), "sleep 0.15; printf late".into()], None, None, Duration::from_millis(30)).await.unwrap_err();
         assert!(error.to_string().contains("0.03 s"), "{error}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn usage_programs_deduplicate_agents_across_spaces() {
+        let agents = json!([
+            {"space":"a", "program":{"key":"codex", "name":"Codex"}},
+            {"space":"b", "program":{"key":"codex", "name":"Codex"}},
+            {"space":"b", "program":{"key":"claude", "name":"Claude Code"}},
+            {"space":"c", "program":null}
+        ]);
+        let spaces = json!([{"id":"a","machine":null}, {"id":"b","machine":"remote"}]);
+        assert_eq!(usage_programs_from(&agents, &spaces).into_iter().collect::<Vec<_>>(),
+            [("claude".into(), ("Claude Code".into(), false)), ("codex".into(), ("Codex".into(), true))]);
     }
 
     #[test]

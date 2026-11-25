@@ -309,7 +309,7 @@ those files or the generated guide. The app rewrites them on start.
   `terminal_scroll_speed` (default 1, 0.1..5) adjusts wheel and trackpad
   scrolling, including mouse reports. Set them in settings.json or the
   layout's look; the layout wins.
-- On macOS, `app.quit` hides Canopy while `run_in_background` is enabled. **Quit Canopy Completely** in the menu bar exits the app.
+- On macOS, `app.quit` hides Canopy while `run_in_background` is enabled. **Quit Canopy** in the menu bar exits the app.
 - `app.settings {section: "shortcuts"}` opens searchable current and shipped keys.
   Recording and resets edit app-home keys.json live, preserving existing command
   arguments; configure new argument-bearing actions in that file.
