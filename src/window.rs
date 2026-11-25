@@ -4331,7 +4331,7 @@ impl AppWindow {
             el = self.window_drag(el, cx);
         }
         let el = match &n.kind {
-            Kind::Canvas => el.child(self.render_canvas(cx)),
+            Kind::Canvas => el.child(self.render_canvas(n, cx)),
             Kind::Block { content } => {
                 let inner = self.render_block(n, content, focused, cx);
                 match frame.filter(|_| n.is_pane()) {
@@ -4384,7 +4384,8 @@ impl AppWindow {
             }
         };
         let row = frame.and_then(|f| f.header.as_ref()).filter(|h| !h.bottom() && !h.hover()).map(pane_size::header_height);
-        el.children(self.render_floats(n, cx)).children(self.pane_grip(&n.id, row, cx)).into_any_element()
+        el.when(!matches!(n.kind, Kind::Canvas), |el| el.children(self.render_floats(n, cx)))
+            .children(self.pane_grip(&n.id, row, cx)).into_any_element()
     }
 
     fn render_block(&self, n: &Node, content: &Content, focused: &HashSet<String>, cx: &mut Context<Self>) -> AnyElement {

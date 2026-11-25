@@ -68,8 +68,10 @@ function items(p, git, agents) {
       ] : colors.map(color => [color, "canvas.space_style", { id: tg.id, color }]);
     }
     case "canvas-wire": return [["Remove", "wire.remove", { a: tg.a, b: tg.b }]];
+    case "canvas-pane": return [["Color", "sub:canvas-colors", { pane: tg.pane }], ...(tg.items ?? [])];
     // A cell's own menu: a pill or header right-click, or a right-click inside its terminal.
     case "canvas-card": return [
+      ...(!tg.popped ? (tg.toolbar ?? []) : []),
       ...(tg.id ? [["Rename", "tab.rename", { id: tg.id }]] : []),
       ["Color", "sub:canvas-colors", { pane: tg.terminal }],
       [tg.popped ? "Bring back" : "Pop out", tg.popped ? "panel.bring_back" : "panel.pop_out", { terminal: tg.terminal }],

@@ -1,7 +1,7 @@
 // The canvas's floating bottom toolbar: tools and new panes. Mouse first; docs/wiki/Toolbar-and-Helper-Bar.md.
 import { View, div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { run, theme, ui, paneKinds, openOverlay, spaces, shared, setShared, readTextFile, home, window, keys } from "herdr";
+import { run, theme, ui, paneKinds, openOverlay, spaces, shared, setShared, readTextFile, home, window, keys, placement } from "herdr";
 
 // Object bindings are serialized by serde_json with sorted field names.
 function key(action, args) {
@@ -49,8 +49,9 @@ export default class Toolbar extends View {
       () => run("canvas.hand", { on: name === "hand" }),
       name === "hand" ? "Space" : key("canvas.hand", { on: false }))
       .when(win.hand === (name === "hand"), el => el.bg(t.selected).text_color(t.foreground));
-    const divider = () => div().w(1).h(18).mx(2).bg(t.border);
-    return h_flex().gap(2).items_center()
+    const vertical = Boolean(placement()?.vertical);
+    const divider = () => vertical ? div().w(18).h(1).my(2).bg(t.border) : div().w(1).h(18).mx(2).bg(t.border);
+    return h_flex().when(vertical, el => el.flex_col()).gap(2).items_center()
       .child(tool("select", "mods/toolbar/pointer.svg", "Select"))
       .child(tool("hand", "mods/toolbar/hand.svg", "Hand (pan)"))
       .child(divider())

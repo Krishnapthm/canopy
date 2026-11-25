@@ -38,7 +38,7 @@ A browser or simulator opens as a tab in this panel, so it sits beside your work
 - A docked pane's tab shows its kind's icon and its title (the page title or the device name). A pane wired to an agent adds a small dot in the agent's pane or inherited space color.
 - Choose **Move to canvas** from the browser’s **⋯** menu or on the simulator’s [helper bar](Toolbar-and-Helper-Bar) to show the pane at its saved spot in its space. A pane without a saved spot opens in the middle of the view.
 - Click **Connect** in the header and drop the wire on an agent to wire the pane. A docked pane has no place on the canvas, so no line is drawn. A dot marks the tab, and the simulator header also shows the agent’s name.
-- When you select a browser, its web tabs take the place of its pane tab. Scroll the strip horizontally when there are more tabs than fit.
+- When you select a browser, its web tabs take the place of its pane tab. Scroll the strip horizontally when there are more tabs than fit. The page stays within the panel below the browser controls as you resize it.
 - Click a simulator's or inactive browser's tab X to close its pane. For the selected browser, choose **Close browser pane** from **⋯**. **Close panel** hides the panel until you need it again.
 
 A docked pane is not on the canvas: layout, tiling and wire lines skip it. Canopy remembers docked panes between runs. On the canvas, use **Open in panel** from the browser’s **⋯** menu or its equivalent on the simulator’s helper bar. The pages themselves work as described in [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices).

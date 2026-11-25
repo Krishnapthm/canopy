@@ -8,7 +8,9 @@ The sticky note's helper bar holds its move grip and color swatch.
 
 ![The toolbar at the bottom of the canvas](images/toolbar-and-helper-bar-1.png)
 
-The toolbar sits at the bottom center of the canvas layout. From left to right:
+The toolbar sits at the bottom center of the canvas, beside the files panel when it is open. Drag the toolbar frame to move it to another canvas edge. Scroll along the toolbar if there is too little room for all its buttons.
+
+From left to right, or top to bottom on a side edge:
 
 | Button | What it does |
 |---|---|
@@ -30,11 +32,11 @@ The first time you open a space for a local project folder, the toolbar opens **
 
 ![A helper bar above a terminal pane](images/toolbar-and-helper-bar-2.png)
 
-Hover or select a pane to see its helper bar above the top-left corner. When there is too little room above the pane, the bar moves inside its top edge. It hides while you drag, resize, draw a selection box or select an image region.
+Hover or select a pane to see its helper bar near its top-left corner. If another pane or the canvas edge is in the way, Canopy tries the other sides. Right-click the pane for its actions if no side has enough room. The bar hides while you drag, resize, draw a selection box or select an image region.
 
 Every pane kind's bar ends with the same two buttons:
 
-- **Connect** starts a wire. A line follows the pointer. Click another pane to connect, or press `Esc` or click empty canvas to cancel. **Connect** stays highlighted while the pane has any wire, including the automatic one to a parent agent.
+- **Connect** starts a wire. A line follows the pointer. Click another pane to connect, or press `Esc` or click empty canvas to cancel. **Connect** stays highlighted while the pane has any wire, including the automatic one to a parent agent. In the right-click menu, **Connect** starts the keyboard [wiring](Wiring#draw-a-wire) flow.
 - **Close** closes the pane, with the same rules as anywhere else ([Panes](Panes#close-panes)).
 
 The other buttons depend on the kind. Each kind's page lists them:

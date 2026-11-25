@@ -3,6 +3,12 @@
 #[cfg(target_os = "macos")]
 use super::*;
 
+#[cfg(target_os = "macos")]
+type LocalMask = Option<([f32; 2], Vec<R>)>;
+
+#[cfg(target_os = "macos")]
+pub(super) type MaskCache = Rc<RefCell<HashMap<String, LocalMask>>>;
+
 /// A screen-space rectangle in logical pixels: x, y, width, height.
 #[cfg(any(target_os = "macos", test))]
 pub(super) type R = [f32; 4];
@@ -55,6 +61,12 @@ pub(super) fn visible(page: R, holes: &[R]) -> Vec<R> {
             .collect();
     }
     pieces
+}
+
+/// A native page without a current host has no pixels or hit targets in this window.
+#[cfg(any(target_os = "macos", test))]
+fn visible_in_host(frame: R, clip: Option<R>, above: &[R]) -> Vec<R> {
+    clip.map_or_else(Vec::new, |clip| visible(frame, &covers(frame, clip, above)))
 }
 
 #[cfg(target_os = "macos")]
@@ -110,82 +122,59 @@ impl AppWindow {
                 doc.panes
                     .iter()
                     .filter(|p| doc.shown(p) && paint_order(p) > paint_order(page))
-                    .filter_map(|p| self.wire_cell_rect(p).map(|world| screen_rect(p, world, camera))),
+                    .filter_map(|p| self.pane_screen_bounds(p).map(rect)),
             )
             .collect()
     }
 
-    /// Runs after the canvas, bars and overlay bodies have measured their current bounds.
+    /// Runs after the canvas, controls and the native content slots measure this frame.
     pub(in crate::window) fn browser_masks(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let state = &self.canvas_state;
-        let doc = state.shown.as_ref().unwrap_or(&state.doc);
+        self.bounds.borrow_mut().retain(|key, _| key != "browser-canvas"
+            && !key.starts_with("web-frame:") && !key.starts_with("web-body:")
+            && !key.starts_with("cover:annotate"));
         let mut live = self.live_browser_views().peekable();
         live.peek()?;
-        let origin = self
-            .bounds
-            .borrow()
-            .get("canopy-canvas")
-            .map(|b| b.origin)
-            .unwrap_or_default();
-        self.bounds.borrow_mut().remove("browser-canvas");
-        let pages: Vec<_> = live
-            .filter_map(|(key, view)| {
-                let (id, _) = key.split_once('/')?;
-                let expanded = state.browser_tab.as_deref() == Some(id);
-                let docked = state.doc.panes.iter().find(|p| p.id == id)
-                    .filter(|_| self.has_canvas() && state.active_panel_pane() == Some(id)).cloned();
-                let body = doc.panes.iter()
-                    .find(|p| p.id == id && state.doc.shown(p))
-                    .filter(|_| state.browser_tab.is_none())
-                    .and_then(|p| self.body_rect(p))
-                    .map(|mut b| {
-                        b.origin = b.origin - origin;
-                        rect(b)
-                    });
-                let above = if body.is_some() { self.page_covers(id) } else { vec![] };
-                Some((key.to_owned(), id.to_owned(), view, expanded, body, above, docked))
-            })
-            .collect();
+        let pages: Vec<_> = live.filter_map(|(key, view)| {
+            let (id, _) = key.split_once('/')?;
+            let expanded = state.browser_tab.as_deref() == Some(id);
+            let docked = self.has_canvas() && state.active_panel_pane() == Some(id);
+            let above = if expanded || docked { vec![] } else { self.page_covers(id) };
+            Some((key.to_owned(), id.to_owned(), view, expanded, docked, above))
+        }).collect();
         let bounds = self.bounds.clone();
+        let controls = state.chrome.clone();
         let last = state.browsers.last_masks.clone();
         let this = cx.entity().downgrade();
         Some(
             canvas(
                 move |_, window, cx| {
                     let bounds = bounds.borrow();
-                    let canvas = bounds.get("browser-canvas").copied().map(rect);
-                    let overlays: Vec<_> = bounds
-                        .iter()
-                        .filter(|(k, _)| k.starts_with("cover:"))
-                        .map(|(_, b)| rect(*b))
-                        .collect();
-                    for (key, id, view, expanded, body, above, docked) in pages {
-                        // The panel's body is measured in this frame, including while resizing.
-                        let (clip, body) = if let Some(pane) = docked {
-                            let panel = bounds.get(&format!("panel-body:{id}")).copied();
-                            (panel.map(rect), panel.map(|b| {
-                                browser::viewport_rect(&dock::fit_to_body(pane, b.size), canvas::Camera::default())
-                            }))
-                        } else { (canvas, body) };
-                        let (frame, pieces) = match clip {
-                            Some(canvas @ [x, y, _, _]) if expanded || body.is_some() => {
-                                let frame = if expanded {
-                                    canvas
-                                } else {
-                                    let [a, b, w, h] = body.unwrap();
-                                    [x + a, y + b, w, h]
-                                };
-                                let mut above: Vec<_> = above
-                                    .into_iter()
-                                    .map(|[a, b, w, h]| [x + a, y + b, w, h])
-                                    .collect();
-                                above.extend_from_slice(&overlays);
-                                (frame, visible(frame, &covers(frame, canvas, &above)))
-                            }
-                            _ => ([0.; 4], vec![]),
+                    let canvas = bounds.get("browser-canvas").copied();
+                    let mut overlays: Vec<_> = bounds.iter().filter(|(k, _)| k.starts_with("cover:")).collect();
+                    overlays.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
+                    let overlays: Vec<_> = overlays.into_iter().map(|(_, bounds)| rect(*bounds)).collect();
+                    let controls = controls.borrow();
+                    for (key, id, view, expanded, docked, above) in pages {
+                        let host = if docked && !expanded {
+                            bounds.get(&format!("panel-body:{id}")).copied()
+                        } else {
+                            canvas
                         };
-                        // Compare local positions so a translating page can reuse its mask.
-                        let local = (pieces != [frame]).then(|| local_rects(frame, &pieces));
+                        let clip = host.map(|host| {
+                            bounds.get(&format!("web-body:{id}")).map_or(host, |body| host.intersect(body))
+                        });
+                        let frame = bounds.get(&format!("web-frame:{key}")).copied().map(rect);
+                        let frame = frame.unwrap_or([0.; 4]);
+                        let mut above: Vec<_> = above.into_iter().filter_map(|[x, y, w, h]| {
+                            let canvas = canvas?;
+                            Some([x + f32::from(canvas.origin.x), y + f32::from(canvas.origin.y), w, h])
+                        }).collect();
+                        above.extend_from_slice(&overlays);
+                        above.extend(controls.iter().map(|control| rect(control.bounds)));
+                        let pieces = visible_in_host(frame, clip.map(rect), &above);
+                        // Translation alone can reuse the mask. Resizing also changes its layer frame.
+                        let local = (pieces != [frame]).then(|| ([frame[2], frame[3]], local_rects(frame, &pieces)));
                         if last.borrow().get(&key) == Some(&local) {
                             continue;
                         }
@@ -374,7 +363,7 @@ mod native {
 
 #[cfg(test)]
 mod tests {
-    use super::{R, covers, intersection, visible};
+    use super::{R, covers, intersection, visible, visible_in_host};
 
     const PAGE: R = [0., 0., 100., 100.];
 
@@ -412,6 +401,21 @@ mod tests {
                 .all(|&r| holes.iter().all(|&h| intersection(r, h).is_none()))
         );
         assert_area(&parts, 5_625.);
+    }
+
+    #[test]
+    fn native_page_uses_the_current_dock_clip_for_both_paint_and_input() {
+        let live_frame = [690., 62., 600., 420.];
+        let dock_before = [700., 80., 500., 360.];
+        let dock_after_resize = [820., 80., 380., 360.];
+        let popup = [880., 120., 130., 160.];
+        for dock in [dock_before, dock_after_resize] {
+            let parts = visible_in_host(live_frame, Some(dock), &[popup]);
+            assert!(parts.iter().all(|&part| intersection(part, dock) == Some(part)
+                && intersection(part, popup).is_none()));
+            assert_area(&parts, dock[2] * dock[3] - popup[2] * popup[3]);
+        }
+        assert!(visible_in_host(live_frame, None, &[popup]).is_empty());
     }
 
     #[test]

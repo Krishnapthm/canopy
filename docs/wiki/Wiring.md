@@ -10,14 +10,14 @@ You can wire two agents so they can work together, or wire a file or note pane t
 
 With the mouse:
 
-1. Hover a pane. **+** handles appear on its sides.
+1. Hover a pane. **+** handles appear along the edges with room for them.
 2. Drag a **+** onto another pane in the same space, and let go.
 
 Or click the **+** (or **Connect** in the helper bar), then click the other pane. Press `Esc` or click empty canvas to cancel.
 
 With the keyboard, in canvas mode:
 
-1. Select a pane and press `c`.
+1. Select a pane and press `c`, or choose **Connect** from its right-click menu.
 2. Move to the other pane with `h`, `j`, `k` or `l`.
 3. Press `Enter`.
 
