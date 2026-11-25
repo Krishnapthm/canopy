@@ -1486,11 +1486,11 @@ impl PdfView {
         self.fit_viewport = (vw, vh);
         // Chrome around the page column: the overlay scrollbar plus the page
         // slots' 1px borders and a hair of breathing room.
+        // canopy patch: fit in unscaled px, so a display scale change never changes the zoom.
+        let (vw, vh) = (vw / self.display, vh / self.display);
         let avail_w = (vw - SCROLLBAR_W - 6.0).max(50.0);
-        // The fit is in screen px; the display scale is already part of the column width.
-        let base = PAGE_WIDTH * self.display;
         let zoom = match mode {
-            FitMode::Width => avail_w / base,
+            FitMode::Width => avail_w / PAGE_WIDTH,
             FitMode::Page => {
                 let (pw, ph) = self
                     .dims
@@ -1499,7 +1499,7 @@ impl PdfView {
                     .filter(|(w, h)| *w > 0.0 && *h > 0.0)
                     .unwrap_or((612.0, 792.0));
                 let avail_h = (vh - 2.0 * PAGE_PAD_Y).max(50.0);
-                (avail_h / (base * (ph / pw))).min(avail_w / base)
+                (avail_h / (PAGE_WIDTH * (ph / pw))).min(avail_w / PAGE_WIDTH)
             }
         };
         self.apply_zoom(zoom, cx);
