@@ -5991,6 +5991,40 @@ export default class Probe extends View {
     }
 
     #[test]
+    fn closing_a_canvas_space_last_terminals_needs_confirmed() {
+        in_own_process("last_terminals_confirm");
+    }
+
+    /// On a canvas a space outlives its terminals, but `tab.close` on its last tab still ends
+    /// them, so a command must say `confirmed: true`, like `space.close`.
+    #[gpui::test]
+    fn last_terminals_confirm(cx: &mut TestAppContext) {
+        use serde_json::json;
+        if !running_alone("last_terminals_confirm") { return; }
+        let (view, cx) = open_window(cx, "last-terminals", "", json!({"id":"root", "type":"canvas"}));
+        cx.run_until_parked();
+        cx.update(|window, cx| view.update(cx, |this, cx| {
+            this.model.add_space("sp1", "", "/tmp", crate::model::Tab::new("tb1", "", "p1", "t1"));
+            this.model.add_tab("sp1", crate::model::Tab::new("tb2", "", "p2", "t2"));
+            // As a command from an agent (not the person); tests have no core documents.
+            let close = |this: &mut super::AppWindow, args, window: &mut gpui::Window, cx: &mut gpui::Context<super::AppWindow>| {
+                this.reply = None;
+                this.dispatch("tab.close", &args, false, window, cx);
+                this.reply.take()
+            };
+            // Not the last tab: it closes at once.
+            assert_eq!(close(this, json!({"id":"tb2"}), window, cx), None);
+            assert!(this.model.tab("tb2").is_none());
+            let refused = close(this, json!({"id":"tb1"}), window, cx).unwrap();
+            assert!(refused["error"].as_str().is_some_and(|e| e.contains("confirmed: true")), "{refused}");
+            assert!(this.model.tab("tb1").is_some());
+            assert_eq!(close(this, json!({"id":"tb1", "confirmed": true}), window, cx), None);
+            assert!(this.model.tab("tb1").is_none());
+            assert!(this.model.space("sp1").is_some_and(|s| s.tabs.is_empty()), "the space stays open");
+        }));
+    }
+
+    #[test]
     fn canvas_mouse_works_like_figma() {
         in_own_process("figma_mouse");
     }
