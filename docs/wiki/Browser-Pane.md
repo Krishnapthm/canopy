@@ -135,7 +135,7 @@ Tabs, Back, Forward, Reload, the address field, the ⋯ menu and the Web Inspect
 
 ## Cookies and site data
 
-Browser panes and pop-outs share a website data store on disk for this Canopy home, and local files use it too, so their storage follows **Keep cookies** like any site. Persistent cookies need macOS 14 or later.
+Browser panes and pop-outs share a website data store on disk for this Canopy home, and local files use it too, so their storage follows **Keep cookies** like any site. Persistent cookies need macOS 14 or later. Before macOS 14, web pages use a private store that keeps nothing, and local files use WebKit's default store for Canopy.
 
 - **Keep cookies: Until quit** (default) deletes the store when Canopy quits and again on the next start, including after a crash.
 - **Keep cookies: Forever** keeps the store across restarts.

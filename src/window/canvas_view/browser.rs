@@ -1749,9 +1749,14 @@ impl AppWindow {
             let local_url = local.as_ref().map(|(address, _, _)| address.clone());
             let is_local = local.is_some();
             let download_error = send(Event::LoadError);
-            // Local pages share the web store: in an incognito store their live view never drew.
-            let builder = browser_store(wry::WebViewBuilder::new());
-            let builder = if is_local { builder } else { builder.with_url(url) };
+            // Local pages never use an incognito store, where their live view never drew: the
+            // shared web store, or WebKit's default one where that is unsupported (before macOS
+            // 14). Their own content rules still block network loads.
+            let builder = match (is_local, persistent_browser_store()) {
+                (true, true) => browser_store(wry::WebViewBuilder::new()),
+                (true, false) => wry::WebViewBuilder::new(),
+                (false, _) => browser_store(wry::WebViewBuilder::new()).with_url(url),
+            };
             let webview = builder
                 .with_navigation_handler(move |url| {
                     let permitted = permits_navigation(local_url.as_deref(), &url);
