@@ -575,8 +575,9 @@ The main ones:
   that exits with a nonzero code within two seconds of launch shows an error
   toast with its exit code and last output lines. Or `tab.new {name?, space?, mod,
   props?}` for a tab whose only pane is a mod (a file, a board; split a shell
-  in beside it like any tab), `tab.close {id?, confirmed?}` (closing the last tab
-  closes its space and asks first unless confirmed),
+  in beside it like any tab), `tab.close {id?, confirmed?}` (in a classic layout,
+  closing the last tab closes its space and asks first unless confirmed; on a canvas
+  the space stays open without terminals, and only `space.close` removes it),
   `tab.rename {id?, name}` ("": its number again), `tab.move {id, index}`,
   `tab.select {index | id}`, `tab.next`, `tab.prev`,
   `tab.settle {id?}`, `tab.unsettle {id?}` (index, next and prev

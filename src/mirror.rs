@@ -268,7 +268,7 @@ mod tests {
         doc.replace(&mut m, None);
         assert_eq!(m.focused_pane().as_deref(), Some("p"));
         let mut other = model();
-        other.remove_pane("p");
+        other.remove_pane("p", false);
         Document::capture(&other, None).replace(&mut m, None);
         assert!(m.active_space().is_none());
     }

@@ -2466,7 +2466,7 @@ impl AppWindow {
                 return self.sync(window, cx);
             }
             if closed && self.model.address_of(block).as_deref() == Some(t.address.as_str()) {
-                self.model.remove_pane(block);
+                self.model.remove_pane(block, self.has_canvas());
                 return self.sync(window, cx);
             }
         }
@@ -2696,7 +2696,7 @@ impl AppWindow {
                 };
                 if closed {
                     self.notify_launch_failure(&addr, window, cx);
-                    self.model.remove_pane(&pane);
+                    self.model.remove_pane(&pane, self.has_canvas());
                     changed = true;
                 }
             }
@@ -2809,7 +2809,7 @@ impl AppWindow {
                 if let Some(pane) = self.model.pane_of(&address) { self.model.focus_pane(&pane); }
             }
             TerminalChange::Park => {
-                if let Some(pane) = self.model.pane_of(&address) { self.model.remove_pane(&pane); }
+                if let Some(pane) = self.model.pane_of(&address) { self.model.remove_pane(&pane, self.has_canvas()); }
             }
         }
         if !self.draining {
@@ -3225,13 +3225,15 @@ impl AppWindow {
             "tab.close" => {
                 let Some(id) = Self::owned(a, "id").or(active_ctx) else { return self.fail("no tab to close") };
                 let Some(p) = self.model.space_of(&id) else { return self.fail(format!("no tab {id:?}")) };
-                // The last tab takes its space with it: ask like closing the space.
-                if p.tabs.len() == 1 {
+                // In a classic layout the last tab takes its space with it: ask like closing the
+                // space. On a canvas the space stays open without terminals.
+                let canvas = self.has_canvas();
+                if p.tabs.len() == 1 && !canvas {
                     let mut args = json!({ "id": p.id });
                     args["confirmed"] = a.get("confirmed").cloned().unwrap_or(Value::Null);
                     return self.dispatch("space.close", &args, person, window, cx);
                 }
-                let (addrs, _) = self.model.remove_tab(&id);
+                let (addrs, _) = self.model.remove_tab(&id, canvas);
                 self.kill(&addrs, cx);
             }
             "tab.rename" => {
@@ -3301,7 +3303,7 @@ impl AppWindow {
                     return self.dispatch("tab.close", &json!({ "id": id }), person, window, cx);
                 }
                 let addr = self.model.address_of(&pane);
-                self.model.remove_pane(&pane);
+                self.model.remove_pane(&pane, self.has_canvas());
                 self.kill(&addr.into_iter().collect::<Vec<_>>(), cx);
             }
             "pane.zoom" => {
