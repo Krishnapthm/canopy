@@ -58,7 +58,9 @@ middle-click it to close it. Right-click a tab for **Open in** your browser and
 the active tab of the selected browser pane, or of the one in the Files panel when you last clicked there.
 
 Browser tabs look like the Files panel tabs, in the panel, on the canvas and in a
-pop-out window. Tabs are up to 180 px wide
+pop-out window. As in Chrome, tabs sit a little below the top of their strip with
+small gaps between them, and the active tab shares its color with the row below
+it, so it flows into the address row. Tabs are up to 180 px wide
 and shrink evenly, to 96 px, as more open. Each shows a
 globe and its title: Canopy never loads a page's own icon, because that would be a
 request outside the page.

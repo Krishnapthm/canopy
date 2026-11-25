@@ -3825,7 +3825,8 @@ impl AppWindow {
         let browser_space = state.browser_tab.as_ref().and_then(|id| state.doc.panes.iter().find(|p| &p.id == id)).and_then(|p| p.space.clone())
             .filter(|id| self.model.spaces.iter().any(|s| s.id == *id && !root_space(s)));
         let mut browser_tab = self.browser_tab_strip(c(bg), c(strip), cx);
-        let mut space_tabs = div().id("canvas-space-tabs").role(gpui::Role::TabList).flex().min_w_0().h_full().overflow_x_scroll();
+        // Room at the ends for the active tab's outward curves, which the scroll clip would cut.
+        let mut space_tabs = div().id("canvas-space-tabs").role(gpui::Role::TabList).flex().min_w_0().h_full().overflow_x_scroll().px(px(ui::RADIUS));
         for space in self.model.spaces.iter().filter(|s| !root_space(s)) {
             let active = state.doc.room.as_ref() == Some(&space.id) && state.browser_tab.is_none();
             let id = space.id.clone();
@@ -3959,7 +3960,7 @@ impl AppWindow {
             }
             let mut browser_actions = None;
             let mut tabs = div().id("canvas-tabs").role(gpui::Role::TabList).flex().flex_1().min_w_0().h_full().items_center().overflow_x_scroll()
-                .when(!expanded, |d| d.pl(px(TAB_INSET)));
+                .pr(px(ui::RADIUS)).when(!expanded, |d| d.pl(px(TAB_INSET)));
             for tab in &state.doc.panel.tabs {
                 let tab = tab.clone();
                 let active = state.file.as_ref() == Some(&tab);
@@ -4335,6 +4336,9 @@ fn action_binding(keys: &[(String, String, String)], command: &str) -> Option<St
 /// rounded on the corner facing the tab. `group` is its id and hover group.
 /// Inactive tabs end in a 1 px divider, hidden next to the active or hovered tab: the active
 /// tab's curves paint over its left neighbour's divider, a hovered tab masks it.
+/// The space above every strip tab.
+const TAB_GAP: f32 = 6.;
+
 fn strip_tab(group: impl Into<SharedString>, active: bool, fill: Hsla, strip: Hsla) -> Stateful<Div> {
     let group = group.into();
     let curve = |left: bool| {
@@ -4344,8 +4348,12 @@ fn strip_tab(group: impl Into<SharedString>, active: bool, fill: Hsla, strip: Hs
                 .map(|d| if left { d.rounded_br(px(ui::RADIUS)) } else { d.rounded_bl(px(ui::RADIUS)) }))
     };
     let line = || div().absolute().top(px(10.)).bottom(px(10.)).w(px(1.));
-    div().id(group.clone()).group(group.clone()).relative().rounded_t(px(ui::RADIUS))
-        .when(active, |d| d.bg(fill).child(curve(true)).child(curve(false)))
+    // As in Chrome: space above the tab and between tabs. The fill starts below the gap, so
+    // callers keep sizing the tab to the strip's full height.
+    div().id(group.clone()).group(group.clone()).relative().pt(px(TAB_GAP)).mx(px(2.))
+        .when(active, |d| d
+            .child(div().absolute().top(px(TAB_GAP)).bottom_0().left_0().right_0().rounded_t(px(ui::RADIUS)).bg(fill))
+            .child(curve(true)).child(curve(false)))
         .when(!active, |d| d
             .child(line().right_0().bg(c("border")).group_hover(group.clone(), |d| d.opacity(0.)))
             .child(line().left(px(-1.)).bg(strip).opacity(0.).group_hover(group, |d| d.opacity(1.))))

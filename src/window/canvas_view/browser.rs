@@ -603,6 +603,12 @@ impl AppWindow {
     }
 
     /// The browser's page tabs. In the Files strip they share its horizontal scroll area.
+    /// The tab strip's color and the active tab's fill, which the navigation row shares so the
+    /// tab flows into it. Docked, the tabs sit on the Files strip and flow into the panel body.
+    fn browser_tab_colors(&self, docked: bool) -> (&'static str, &str) {
+        if docked { ("chrome", self.person.canvas_color.as_deref().unwrap_or("canvas")) } else { ("surface", "hover") }
+    }
+
     pub(super) fn browser_tabs(&self, id: &str, host: Host, cx: &mut Context<Self>) -> Option<AnyElement> {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
         let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return None };
@@ -610,11 +616,12 @@ impl AppWindow {
         let tint = docked.then(|| self.docked_tab(id, cx).2).flatten();
         // Docked, the tabs sit on the Files strip and the active one flows into the panel body;
         // in a pane or pop-out header they sit on the header.
-        let (strip_color, fill) = if docked { ("chrome", self.person.canvas_color.as_deref().unwrap_or("canvas")) } else { ("surface", "hover") };
+        let (strip_color, fill) = self.browser_tab_colors(docked);
         let mut strip = div().id(SharedString::from(format!("{id}-tabs")))
             .flex().items_center().h_full()
             .when(docked, |d| d.flex_none())
-            .when(!docked, |d| d.role(gpui::Role::TabList).min_w_0().flex_shrink_1().overflow_hidden());
+            // Room for the active tab's outward curves, which the clip would otherwise cut off.
+            .when(!docked, |d| d.role(gpui::Role::TabList).min_w_0().flex_shrink_1().overflow_hidden().px(px(ui::RADIUS)));
         for (i, tab) in tabs.iter().enumerate() {
             let selected = i == *active;
             let title = if !tab.title.is_empty() { tab.title.clone() } else if !tab.url.is_empty() { tab.url.clone() } else { "New tab".to_owned() };
@@ -686,7 +693,9 @@ impl AppWindow {
         let reset = id.to_owned();
         let annotate = id.to_owned();
         let picker = self.annotation_picker(id);
+        let docked = host == Host::Pane && self.canvas_state.doc.docked(id);
         div().id("browser-navigation").flex().items_center().h(px(32.)).min_w_0().overflow_x_scroll().px(px(8.)).gap(px(4.))
+            .bg(c(self.browser_tab_colors(docked).1))
             .child(self.browser_button(id, "browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
             .child(self.browser_button(id, "browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
             .child(self.browser_button(id, "browser-reload", "icons/rotate-cw.svg", "Reload", "canvas.browser_reload", cx))
@@ -719,8 +728,10 @@ impl AppWindow {
     /// in the top row can still drag the pane or window.
     pub(super) fn browser_chrome(&self, id: &str, host: Host, cx: &mut Context<Self>) -> AnyElement {
         let Some(tabs) = self.browser_tabs(id, host, cx) else { return div().into_any_element() };
-        let row = div().flex().items_center().h(px(30.)).pr(px(8.)).pl(px(super::TAB_INSET)).gap(px(4.))
-            .when(host == Host::Window, |d| d.pl(px(super::bar_inset(true, false))).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
+        // The tabs take what the navigation row leaves, so it always meets the page.
+        let row = div().flex().items_center().flex_1().min_h_0().pr(px(8.)).pl(px(super::TAB_INSET - ui::RADIUS)).gap(px(4.))
+            // The strip's own padding makes up the inset.
+            .when(host == Host::Window, |d| d.pl(px(super::bar_inset(true, false) - ui::RADIUS)).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
                 if e.click_count == 2 { window.titlebar_double_click(); } else { window.start_window_move(); }
             }))
             .child(tabs)
