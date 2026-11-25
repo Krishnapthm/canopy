@@ -1553,7 +1553,10 @@ impl AppWindow {
         let revealed = tab_shown && !self.tab_shown;
         self.tab_shown = tab_shown;
         if self.has_canvas() && !self.canvas_state.mode && let Some(t) = self.focused_cell() {
-            if no_dialog && !self.focus.is_focused(window) { t.focus.focus(window, cx); }
+            // Only from nobody or another terminal: a text field (a browser address, a rename)
+            // keeps the keyboard, or releasing Cmd after a paste would pull it out mid-edit.
+            let free = window.focused(cx).is_none_or(|f| self.terms.values().any(|term| term.focus == f));
+            if no_dialog && free { t.focus.focus(window, cx); }
         } else if terminal_block(&self.chrome, focused.as_deref()).is_some() {
             if pane_changed && no_dialog && let Some(f) = focused.as_deref().and_then(|p| self.pane_focus(p, cx)) {
                 f.focus(window, cx);
