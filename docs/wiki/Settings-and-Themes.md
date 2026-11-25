@@ -61,7 +61,7 @@ See [Cookies and site data](Browser-Pane#cookies-and-site-data) for data control
 2. Select **System**, **Light** or **Dark** under **Appearance**.
 3. Click a theme under **Dark** or **Light**.
 
-Each layout keeps its own light and dark theme.
+Each layout keeps its own light and dark theme. Terminal programs that support color scheme reports can follow the terminal background when the theme changes. Programs with a fixed theme keep their own choice.
 The four built-in Canopy and Herdr themes are **Canopy Dark**, **Canopy Light**, **Herdr Dark** and **Herdr Light**.
 The default themes are **Canopy Dark** and **Canopy Light**.
 

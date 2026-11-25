@@ -294,10 +294,12 @@ impl Grid {
 
     fn refresh_theme(&mut self, theme: &vt::Theme, cell: (u32, u32)) {
         self.vt.set_theme(theme.clone());
-        if let Some(chan) = self.channel
-            && let Some(facts) = display_update(&mut self.told_display, theme, cell)
-        {
-            self.core.facts(chan, &facts);
+        if let Some(chan) = self.channel {
+            if let Some(facts) = display_update(&mut self.told_display, theme, cell) {
+                self.core.facts(chan, &facts);
+            }
+            let replies = self.vt.take_replies();
+            self.core.automatic_input(chan, &replies);
         }
     }
 

@@ -149,6 +149,7 @@ struct Shared {
     title_changed: bool,
     /// Replies the terminal writes back to the program (e.g. kitty graphics acks).
     replies: Vec<u8>,
+    color_scheme: GhosttyColorScheme,
     clipboard_write: bool,
     clipboard: [Option<String>; 2],
 }
@@ -389,6 +390,11 @@ unsafe extern "C" fn on_write_pty(_t: GhosttyTerminal, userdata: *mut c_void, da
     if !data.is_null() && len > 0 {
         shared.replies.extend_from_slice(unsafe { std::slice::from_raw_parts(data, len) });
     }
+}
+
+unsafe extern "C" fn on_color_scheme(_t: GhosttyTerminal, userdata: *mut c_void, scheme: *mut GhosttyColorScheme) -> bool {
+    unsafe { *scheme = (*(userdata as *const Shared)).color_scheme };
+    true
 }
 
 const MAX_CLIPBOARD_BYTES: usize = 1 << 20;
@@ -677,7 +683,7 @@ impl Vt {
             ok(ghostty_mouse_event_new(std::ptr::null(), &mut mouse_event), "mouse_event_new");
 
             install_png_decoder();
-            let mut shared = Box::new(Shared { state, size: GhosttySizeReportSize { rows: rows.max(1), columns: cols.max(1), cell_width: 0, cell_height: 0 }, held_since: None, title_changed: false, replies: Vec::new(), clipboard_write: true, clipboard: [None, None] });
+            let mut shared = Box::new(Shared { state, size: GhosttySizeReportSize { rows: rows.max(1), columns: cols.max(1), cell_width: 0, cell_height: 0 }, held_since: None, title_changed: false, replies: Vec::new(), color_scheme: GHOSTTY_COLOR_SCHEME_DARK, clipboard_write: true, clipboard: [None, None] });
             let ud = &mut *shared as *mut Shared as *const c_void;
             ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_USERDATA, ud);
             let hold: GhosttyTerminalRenderHoldFn = Some(on_render_hold);
@@ -688,6 +694,8 @@ impl Vt {
             ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_SIZE, std::mem::transmute(size));
             let write: GhosttyTerminalWritePtyFn = Some(on_write_pty);
             ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_WRITE_PTY, std::mem::transmute(write));
+            let scheme: GhosttyTerminalColorSchemeFn = Some(on_color_scheme);
+            ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_COLOR_SCHEME, std::mem::transmute(scheme));
             let clipboard: GhosttyTerminalClipboardWriteFn = Some(on_clipboard_write);
             ghostty_terminal_set(term, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, std::mem::transmute::<GhosttyTerminalClipboardWriteFn, *const c_void>(clipboard));
             let max_clipboard: usize = MAX_CLIPBOARD_BYTES;
@@ -751,8 +759,15 @@ impl Vt {
     /// Switches colors live (settings.json changed).
     pub fn set_theme(&mut self, theme: Theme) {
         if self.theme != theme {
+            let old_scheme = self.shared.color_scheme;
             self.theme = theme;
             self.apply_theme();
+            if old_scheme != self.shared.color_scheme && self.mode(2031) {
+                let mut buf = [0u8; 16];
+                let mut len = 0;
+                let result = unsafe { ghostty_color_scheme_report_encode(self.shared.color_scheme, buf.as_mut_ptr().cast(), buf.len(), &mut len) };
+                if result == GHOSTTY_SUCCESS { self.shared.replies.extend_from_slice(&buf[..len]); }
+            }
             // Rows carry the theme's own colors too (the selection's).
             self.seen.clear();
         }
@@ -762,6 +777,8 @@ impl Vt {
         let c = |rgb: Rgb| GhosttyColorRgb { r: rgb.0, g: rgb.1, b: rgb.2 };
         let t = &self.theme;
         let (fg, bg, cur) = (c(t.fg), c(t.bg), c(t.cursor));
+        let Rgb(r, g, b) = t.bg;
+        self.shared.color_scheme = if 0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32 > 127.5 { GHOSTTY_COLOR_SCHEME_LIGHT } else { GHOSTTY_COLOR_SCHEME_DARK };
         let mut palette = self.base_palette;
         for (i, rgb) in t.palette16.iter().enumerate() {
             palette[i] = c(*rgb);
@@ -2131,6 +2148,34 @@ mod tests {
         vt.write(b"\x1b]4;1;rgb:12/34/56\x1b\\");
         let recolored = vt.frame();
         assert!(!Rc::ptr_eq(&after.rows[0], &recolored.rows[0]), "a palette change reads every row");
+    }
+
+    #[test]
+    fn color_scheme_query_and_change_follow_terminal_background() {
+        let mut vt = Vt::new(20, 4);
+        let mut colors = theme();
+        colors.bg = Rgb(0, 0, 0);
+        vt.set_theme(colors.clone());
+        assert!(vt.take_replies().is_empty());
+        vt.write(b"\x1b[?996n");
+        assert_eq!(vt.take_replies(), b"\x1b[?997;1n");
+        colors.bg = Rgb(255, 255, 255);
+        vt.set_theme(colors.clone());
+        assert!(vt.take_replies().is_empty());
+        vt.write(b"\x1b[?996n\x1b[?2031h");
+        assert_eq!(vt.take_replies(), b"\x1b[?997;2n");
+        colors.bg = Rgb(0, 0, 0);
+        vt.set_theme(colors.clone());
+        assert_eq!(vt.take_replies(), b"\x1b[?997;1n");
+        colors.bg = Rgb(1, 1, 1);
+        vt.set_theme(colors.clone());
+        assert!(vt.take_replies().is_empty());
+        vt.write(b"\x1b[?2031l");
+        colors.bg = Rgb(255, 255, 255);
+        vt.set_theme(colors);
+        assert!(vt.take_replies().is_empty());
+        vt.write(b"\x1b]11;?\x1b\\");
+        assert_eq!(vt.take_replies(), b"\x1b]11;rgb:ffff/ffff/ffff\x1b\\");
     }
 
     #[test]
