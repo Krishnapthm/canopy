@@ -4653,15 +4653,13 @@ impl AppWindow {
                 None => self.render_slot(&o.slot, cx),
             };
             let bounds = self.bounds.clone();
-            // The menu mod reports its painted boxes itself (`gpui_shell::menu_covers`), so its empty frame stays clickable.
-            let is_menu = self.copies.get(&o.slot).is_some_and(|copy| copy.inst.name == "menu");
             let cover = format!("cover:overlay:{}", o.id);
             let mut measure = Some(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {})
                 .absolute().size_full());
             let body = div()
                 .id(SharedString::from(format!("ov-{}", o.id)))
                 .relative()
-                .children(if o.kind == OverlayKind::Dialog || is_menu { None } else { measure.take() })
+                .children(if o.kind == OverlayKind::Dialog { None } else { measure.take() })
                 .track_focus(&o.focus)
                 // Esc stays with terminals (agents use it to interrupt) and windows.
                 .when(o.layout.is_none() && o.kind.modal_keys(), |d| d.key_context("Overlay"))
