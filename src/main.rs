@@ -25,6 +25,8 @@ mod skill;
 mod place;
 mod persist;
 #[cfg(target_os = "macos")]
+mod usage;
+#[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
 mod macos_check;

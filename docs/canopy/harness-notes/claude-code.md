@@ -121,3 +121,7 @@ output at turn completion or a permission prompt still needs a session.
 - The reported Auto-mode screenshot showed a finished alert with permission
   text in its body. Live Auto-mode desktop delivery and the exact
   AskUserQuestion report kind on hc 0.1.22 still need isolated verification.
+
+## Usage help, 2026-11-24 (2.1.322)
+
+`claude --help` does not document a read-only non-interactive `/usage` interface. Its `--bare` mode explicitly excludes OAuth and keychain reads. No session or authenticated request was started, so a safe isolated way to read usage remains unverified.

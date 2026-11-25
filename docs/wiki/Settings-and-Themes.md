@@ -32,7 +32,9 @@ See [Canvas](Canvas) and [Terminals](Terminals) for their settings.
 
 **Run in Background** keeps Canopy available while its windows are hidden, so you can leave your agents working and return to them later. It is on by default.
 
-Press `Cmd+Q` or choose **Quit Canopy** to hide the app. Click the Canopy icon in the macOS menu bar to bring it back. Right-click that icon and choose **Quit Canopy Completely** to exit, or **Show Canopy** to bring the window forward. **Quit** in the Dock also exits the app.
+Press `Cmd+Q` or choose **Quit Canopy** to hide the app. Click the Canopy icon in the macOS menu bar and choose **Show Canopy** to bring the window forward, or **Quit Canopy** to exit. **Quit** in the Dock also exits the app.
+
+The menu also lists the agent programs in your open spaces. For the local Codex CLI account, it shows used percentages and time until reset when the CLI provides them. Open the menu again after **Refresh Usage** to see the latest result. Canopy rechecks a cached result when it is over a minute old and you open the menu. Other programs show **Unavailable** when Canopy cannot read their usage.
 
 Open **Settings** > **Look** > **App** to turn off **Run in Background**, or set `run_in_background` to `false` in `settings.json`. **Quit Canopy** then exits the app, and Canopy removes its menu bar icon.
 

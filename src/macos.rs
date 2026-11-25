@@ -3,13 +3,13 @@ use crate::keys::CommandBinding;
 use gpui::*;
 use gpui_shell::action::ShellAction;
 use objc2::rc::Retained;
-use objc2::runtime::NSObject;
+use objc2::runtime::{AnyObject, NSObject};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSEventMask, NSEventModifierFlags, NSEventType, NSImage, NSMenu,
+    NSApplication, NSEventMask, NSFont, NSFontAttributeName, NSImage, NSMenu,
     NSStatusBar, NSStatusBarButton, NSStatusItem, NSVariableStatusItemLength,
 };
-use objc2_foundation::{NSData, NSPoint, NSSize, ns_string};
+use objc2_foundation::{NSAttributedString, NSData, NSDictionary, NSPoint, NSSize, NSString, ns_string};
 
 actions!(herdr, [Quit, Hide, HideOthers, ShowAll, Settings, Minimize, Zoom, ToggleFullScreen]);
 
@@ -65,24 +65,50 @@ define_class!(
         #[unsafe(method(statusClick:))]
         fn status_click(&self, button: &NSStatusBarButton) {
             let mtm = self.mtm();
-            let app = NSApplication::sharedApplication(mtm);
-            let menu_click = app.currentEvent().is_some_and(|e| {
-                e.r#type() == NSEventType::RightMouseUp
-                    || e.modifierFlags().contains(NSEventModifierFlags::Control)
-            });
-            if menu_click {
-                let menu = NSMenu::new(mtm);
+            let menu = NSMenu::new(mtm);
+            let programs = crate::mods::usage_programs();
+            for (key, name, executable, local) in &programs {
+                let rows = if key == "codex" && *local {
+                    crate::usage::codex(executable, false)
+                } else {
+                    vec!["Unavailable".into()]
+                };
                 unsafe {
-                    menu.addItemWithTitle_action_keyEquivalent(
-                        ns_string!("Show Canopy"), Some(sel!(showCanopy:)), ns_string!(""),
-                    ).setTarget(Some(self));
-                    menu.addItemWithTitle_action_keyEquivalent(
-                        ns_string!("Quit Canopy Completely"), Some(sel!(quitCompletely:)), ns_string!(""),
-                    ).setTarget(Some(self));
+                    let label = if key == "codex" && *local { format!("{name} · Local CLI account") } else { name.clone() };
+                    menu.addItemWithTitle_action_keyEquivalent(&NSString::from_str(&label), None, ns_string!("")).setEnabled(false);
+                    let font = NSFont::monospacedSystemFontOfSize_weight(12., 0.);
+                    let attrs = NSDictionary::<NSString, AnyObject>::from_slices(&[NSFontAttributeName], &[&font]);
+                    for row in rows {
+                        let title = NSString::from_str(&row);
+                        let item = menu.addItemWithTitle_action_keyEquivalent(&title, None, ns_string!(""));
+                        item.setIndentationLevel(1);
+                        item.setAttributedTitle(Some(&NSAttributedString::initWithString_attributes(
+                            NSAttributedString::alloc(), &title, Some(&attrs),
+                        )));
+                        item.setEnabled(false);
+                    }
                 }
-                menu.popUpMenuPositioningItem_atLocation_inView(None, NSPoint::new(0.0, 0.0), Some(button));
-            } else {
-                self.show_canopy();
+            }
+            unsafe {
+                if programs.iter().any(|(key, _, _, local)| key == "codex" && *local) {
+                    menu.addItemWithTitle_action_keyEquivalent(ns_string!("Refresh Usage"), Some(sel!(refreshUsage:)), ns_string!("")).setTarget(Some(self));
+                }
+                menu.addItemWithTitle_action_keyEquivalent(
+                    ns_string!("Show Canopy"), Some(sel!(showCanopy:)), ns_string!(""),
+                ).setTarget(Some(self));
+                menu.addItemWithTitle_action_keyEquivalent(
+                    ns_string!("Quit Canopy"), Some(sel!(quitCompletely:)), ns_string!(""),
+                ).setTarget(Some(self));
+            }
+            menu.popUpMenuPositioningItem_atLocation_inView(None, NSPoint::new(0.0, 0.0), Some(button));
+        }
+
+        #[unsafe(method(refreshUsage:))]
+        fn refresh_usage(&self, _: &NSObject) {
+            if let Some((_, _, executable, _)) = crate::mods::usage_programs().into_iter()
+                .find(|(key, _, _, local)| key == "codex" && *local)
+            {
+                crate::usage::codex(&executable, true);
             }
         }
 
@@ -121,7 +147,7 @@ fn create_status_item(
     let mtm = MainThreadMarker::new().expect("macOS status item runs on the main thread");
     let data = NSData::with_bytes(include_bytes!("../assets/icons/canopy-status.pdf"));
     let image = NSImage::initWithData(NSImage::alloc(), &data)?;
-    image.setSize(NSSize::new(18.0, 18.0));
+    image.setSize(NSSize::new(18.0, 18.0 * 832.0 / 892.0));
     image.setTemplate(true);
     image.setAccessibilityDescription(Some(ns_string!("Canopy")));
     let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
