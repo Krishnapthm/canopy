@@ -60,6 +60,10 @@ Give a space a color to recognize its panes at a glance. For example, choose **t
 
 Select **Delete space** (or click **Close space** on its tab), then click **Delete** in the confirmation dialog.
 
+Closing the last terminal in a space does not delete it. The space stays open with its files, browsers and other panes until you delete it.
+
+Home lists up to five recently closed spaces under its shortcut hints, each with its folder. Click one to open it again in that folder. A space that is already open is not listed.
+
 ## Worktree spaces
 
 A worktree space is a space for a separate Git checkout of the same repository, on its own branch. Use one when you want agents to work on two branches at once without touching each other's files. The [Parallel Branches](Parallel-Branches) guide shows the whole workflow.
