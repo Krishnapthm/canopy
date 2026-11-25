@@ -243,8 +243,23 @@ impl AppWindow {
             let y = d.pointer.y - ob.origin.y - size.height * d.grab.1;
             return div().absolute().inset_0().child(outer.absolute().left(x).top(y).opacity(0.92)).into_any_element();
         }
-        let mut layer = div().absolute().inset_0().p(settings::z(MARGIN)).flex();
+        let margin = settings::z(MARGIN);
+        let mut layer = div().absolute().inset_0().p(margin).flex();
         layer = if f.edge.vertical() { layer.flex_row() } else { layer.flex_col() };
+        // Longer than its owner along its edge: it scrolls in a lane across the owner instead
+        // of clipping its ends. The lane's padding keeps the frame's shadow.
+        let frame = (pad + border) * 2.0;
+        let overflow = natural.zip(bounds.get(owner_bounds)).is_some_and(|(n, ob)| if f.edge.vertical() {
+            n.height + frame > ob.size.height - margin * 2.0
+        } else {
+            n.width + frame > ob.size.width - margin * 2.0
+        });
+        let outer = if overflow {
+            let lane = div().id(SharedString::from(format!("float-lane:{}", f.id))).flex().p(margin);
+            let lane = if f.edge.vertical() { lane.h_full().flex_col().overflow_y_scroll() } else { lane.w_full().overflow_x_scroll() };
+            layer = layer.p(px(0.0));
+            lane.child(outer).into_any_element()
+        } else { outer.into_any_element() };
         layer = match f.edge {
             Edge::Left | Edge::Top => layer.justify_start(),
             Edge::Right | Edge::Bottom => layer.justify_end(),

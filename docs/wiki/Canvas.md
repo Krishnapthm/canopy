@@ -12,8 +12,8 @@ An empty space (or Home with no spaces) shows shortcut hints for new terminal, n
 
 - **Pan:** scroll over the canvas (two fingers on a trackpad), drag with the middle mouse button, or hold `Space` and drag. You can also turn on the **Hand** tool on the toolbar and drag with the left button.
 - **Zoom:** hold `Cmd` (`Ctrl` on Linux and Windows) and scroll, or pinch. Zoom follows the pointer.
-- **Zoom limits:** zooming in stops while the biggest pane still fits the window with a margin, and zooming out stops once everything fits (or at 100% if everything already fits). Zoom stops right at the limit, with no bounce. Panning has no limit.
-- **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
+- **Zoom limits:** zooming in stops while the biggest pane still fits the canvas the toolbar leaves open, with a margin, and zooming out stops once everything fits (or at 100% if everything already fits). Zoom stops right at the limit, with no bounce. Panning has no limit.
+- **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, clear of the toolbar, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
 
 Zooming the canvas scales what panes show like a picture: terminal text, PDF pages, web pages, file previews and images grow and shrink with their panes, so nothing reflows or rewraps. A terminal keeps its columns and rows. Pane headers and notes keep their screen size. A PDF's own zoom (its percentage) and a terminal's text zoom are separate and stay as you set them.
 

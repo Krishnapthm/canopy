@@ -1568,8 +1568,8 @@ impl AppWindow {
 
     /// How far the camera may zoom in this place (see `canvas::zoom_range`).
     fn zoom_range(&self, window: &Window, cx: &App) -> [f32; 2] {
-        let size = self.canvas_bounds().map(|b| b.size).unwrap_or(window.viewport_size());
-        canvas::zoom_range(&self.place_rects(|_| true, cx), [f32::from(size.width), f32::from(size.height)])
+        let [_, _, w, h] = self.open_canvas(window);
+        canvas::zoom_range(&self.place_rects(|_| true, cx), [w, h])
     }
 
     /// `zoom_range` widened to hold the current zoom, for gestures and zoom steps: a zoom left
@@ -2753,16 +2753,9 @@ impl AppWindow {
                 return;
             }
         }
-        let bounds = self
-            .bounds
-            .borrow()
-            .get("canopy-canvas")
-            .copied()
-            .unwrap_or(Bounds::new(point(px(0.), px(0.)), window.viewport_size()));
-        let anchor = [
-            f32::from(bounds.size.width) / 2.,
-            f32::from(bounds.size.height) / 2.,
-        ];
+        // Zoom and fit around the middle of the canvas the toolbar leaves open.
+        let open = self.open_canvas(window);
+        let anchor = [open[0] + open[2] / 2., open[1] + open[3] / 2.];
         // Fit the selection, else everything in the current place.
         let fit_rects = if name.starts_with("canvas.fit") {
             let all = name == "canvas.fit_all" || self.canvas_state.selected.is_empty();
@@ -2793,8 +2786,7 @@ impl AppWindow {
             }
             "canvas.zoom_reset" => state.doc.camera.zoom_at(1f32.clamp(range[0], range[1]), anchor),
             "canvas.fit" | "canvas.fit_all" => {
-                canvas::focus_fit(&mut state.doc.camera, &mut state.previous_camera,
-                    &fit_rects, [anchor[0] * 2., anchor[1] * 2.]);
+                canvas::focus_fit(&mut state.doc.camera, &mut state.previous_camera, &fit_rects, open);
             }
             _ => state
                 .doc
@@ -3019,7 +3011,11 @@ impl AppWindow {
             let list = (!recent.is_empty()).then(|| div().w(px(480.)).mt(px(20.)).flex().flex_col()
                 .child(div().h(px(28.)).px(px(8.)).flex().items_center().text_size(px(11.)).text_color(c("muted-foreground")).child("Recent"))
                 .children(recent));
-            div().absolute().inset_0().flex().items_center().justify_center()
+            // Centred in the canvas the toolbar leaves open, so it never sits under the toolbar.
+            let [x, y, w, h] = self.open_canvas_in(Size::default());
+            let place = div().absolute();
+            let place = if w > 0. && h > 0. { place.left(px(x)).top(px(y)).w(px(w)).h(px(h)) } else { place.inset_0() };
+            place.flex().items_center().justify_center()
                 .child(div().flex().flex_col().items_center().child(div().flex().flex_col().children(rows)).children(list))
                 .into_any_element()
         })

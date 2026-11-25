@@ -187,14 +187,17 @@ pub fn reveal(camera: Camera, rect: Rect, visible: Point) -> Option<Camera> {
     Some(Camera { x: rect[0] + rect[2] / 2. - visible[0] / 2. / z, y: rect[1] + rect[3] / 2. - visible[1] / 2. / z, zoom: z })
 }
 
-/// Toggle a space fit in the visible canvas: a second press restores the camera from before
-/// the fit, unless the camera moved since, in which case it fits again.
-pub fn focus_fit(camera: &mut Camera, previous: &mut Option<(Camera, Camera)>, rects: &[Rect], visible: Point) {
+/// Toggle a space fit in the visible canvas (`[x, y, w, h]` screen px, the part no chrome
+/// covers): a second press restores the camera from before the fit, unless the camera moved
+/// since, in which case it fits again.
+pub fn focus_fit(camera: &mut Camera, previous: &mut Option<(Camera, Camera)>, rects: &[Rect], visible: Rect) {
     match previous.take() {
         Some((before, fitted)) if *camera == fitted => *camera = before,
         _ if !rects.is_empty() => {
             let before = *camera;
-            camera.fit(rects, visible);
+            camera.fit(rects, [visible[2], visible[3]]);
+            camera.x -= visible[0] / camera.zoom;
+            camera.y -= visible[1] / camera.zoom;
             *previous = Some((before, *camera));
         }
         _ => {}
@@ -2277,14 +2280,14 @@ mod keyboard_tests {
         let mut camera = original;
         let mut previous = None;
         let space = [500., 200., 900., 600.];
-        let visible = [800., 700.]; // A 1200 px window with a 400 px file panel.
+        let visible = [0., 0., 800., 700.]; // A 1200 px window with a 400 px file panel.
         focus_fit(&mut camera, &mut previous, &[space], visible);
         assert_eq!(previous.map(|p| p.0), Some(original));
         let center = camera.to_screen([space[0] + space[2] / 2., space[1] + space[3] / 2.]);
-        assert!((center[0] - visible[0] / 2.).abs() < 0.001);
-        assert!((center[1] - visible[1] / 2.).abs() < 0.001);
-        assert!(space[2] * camera.zoom <= visible[0] - 48.);
-        assert!(space[3] * camera.zoom <= visible[1] - 48.);
+        assert!((center[0] - visible[2] / 2.).abs() < 0.001);
+        assert!((center[1] - visible[3] / 2.).abs() < 0.001);
+        assert!(space[2] * camera.zoom <= visible[2] - 48.);
+        assert!(space[3] * camera.zoom <= visible[3] - 48.);
         focus_fit(&mut camera, &mut previous, &[space], visible);
         assert_eq!(camera, original);
         assert_eq!(previous, None);
@@ -2295,6 +2298,16 @@ mod keyboard_tests {
         let fitted = camera;
         camera.x += 50.;
         focus_fit(&mut camera, &mut previous, &[space], visible);
+        assert_eq!(camera, fitted);
+        // A toolbar over the top 60 px: the space centres in the open part below it.
+        let (mut camera, mut previous) = (original, None);
+        focus_fit(&mut camera, &mut previous, &[space], [0., 60., 800., 640.]);
+        let center = camera.to_screen([space[0] + space[2] / 2., space[1] + space[3] / 2.]);
+        assert!((center[0] - 400.).abs() < 0.001 && (center[1] - 380.).abs() < 0.001);
+        let fitted = camera;
+        focus_fit(&mut camera, &mut previous, &[space], [0., 60., 800., 640.]);
+        assert_eq!(camera, original);
+        focus_fit(&mut camera, &mut previous, &[space], [0., 60., 800., 640.]);
         assert_eq!(camera, fitted);
     }
 }
