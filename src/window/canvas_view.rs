@@ -1373,10 +1373,12 @@ impl AppWindow {
         }).detach();
     }
 
-    /// The folder of the space last clicked on the canvas.
+    /// The folder the canvas file tree shows: the room being shown, else the Home card last
+    /// clicked, else the most recently entered space.
     fn panel_root(&self) -> Option<String> {
-        let space = self.canvas_state.doc.panel.space.as_deref()?;
-        self.model.space(space).map(|s| s.folder.clone())
+        let state = &self.canvas_state;
+        let mut ids = state.doc.room.iter().chain(state.doc.panel.space.iter()).chain(state.recent.iter());
+        ids.find_map(|id| self.model.space(id)).map(|s| s.folder.clone())
     }
     /// The space a window position belongs to: the room being shown, else the Home card under it.
     fn space_at(&self, position: Point<Pixels>) -> Option<String> {
