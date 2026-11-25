@@ -32,8 +32,10 @@ WebKit can read only the opened file by default. If styles, scripts or images
 are missing, choose **⋯** > **Allow folder assets…** and pick a folder containing
 both the file and its assets. This grant lasts for the current file in that tab
 until you close the tab, navigate to a different address or quit. Local pages
-load their assets from disk and block network resources. To follow a link to
-another page, enter its address yourself.
+load their assets from disk and block network resources. The blocking rules are
+in place before the file loads. Canopy compiles them once into
+`<app home>/browser/content-rules` and reuses them for every local page after that.
+To follow a link to another page, enter its address yourself.
 
 The browser opens any file WebKit can display, including HTML, SVG, text, PDF
 and images. If WebKit cannot display a format, Canopy shows a toast and blocks
@@ -55,7 +57,9 @@ middle-click it to close it. Right-click a tab for **Open in** your browser and
 **Close tab**. In [canvas mode](Canvas), `Cmd+W` also closes
 the active tab of the selected browser pane.
 
-Tabs are up to 160 px wide and shrink evenly, to 72 px, as more open. Each shows a
+Browser tabs look like the Files panel tabs, in the panel, on the canvas and in a
+pop-out window. Tabs are up to 180 px wide
+and shrink evenly, to 96 px, as more open. Each shows a
 globe and its title: Canopy never loads a page's own icon, because that would be a
 request outside the page.
 
@@ -79,6 +83,8 @@ A browser pane is either resting or live:
 - **Resting**, it shows a snapshot of the page. This keeps the canvas fast when you have several browsers open.
 - **Click the page** to make it live. Scroll, click and type as in any browser. The page stays live while you pan, zoom or resize the pane. The canvas clips the page at its edges, and panes, helper bars and menus in front of the page remain visible and clickable.
 - **Click outside the pane** to rest the page and take a fresh snapshot.
+
+A page lays out at the size its pane is drawn: the Files panel body, or the pane at the current canvas zoom. So the first snapshot of a new page already fits its pane, with no reload. Zooming the canvas changes a responsive page's layout width but not its text size. Choosing another **Viewport** refits a resting page and retakes its snapshot.
 
 ## The header
 

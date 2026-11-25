@@ -196,11 +196,12 @@ fn fixed_viewport(pane: &canvas::Pane) -> Option<[f32; 2]> {
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn page_zoom(pane: &canvas::Pane, camera: canvas::Camera, body: [f32; 2]) -> f64 {
+/// A fixed viewport scales to fit its body; a responsive page keeps its own zoom, so the
+/// canvas camera changes its layout width, not its text size.
+fn page_zoom(pane: &canvas::Pane, body: [f32; 2]) -> f64 {
     match fixed_viewport(pane) {
         Some([w, h]) => (f64::from(body[0]) / f64::from(w)).min(f64::from(body[1]) / f64::from(h)),
-        _ if pane.pinned.is_some() => 1.,
-        _ => f64::from(camera.zoom),
+        None => 1.,
     }
 }
 
@@ -549,7 +550,7 @@ impl AppWindow {
                 let zoom_changed = at.0.zoom != next.0.zoom || (preset && at.1[2..] != next.1[2..]);
                 let zoom = zoom_changed.then(|| {
                     let [_, _, width, height] = pane_body(pane, camera);
-                    page_zoom(pane, camera, [width, height])
+                    page_zoom(pane, [width, height])
                 });
                 cx.defer(move |cx| this.update(cx, |this, _| {
                     let Some(page) = this.canvas_state.browsers.pages.get_mut(&key) else { return };
@@ -606,8 +607,10 @@ impl AppWindow {
         let canvas::Kind::Browser { tabs, active, .. } = &pane.kind else { return None };
         let docked = host == Host::Pane && self.canvas_state.doc.docked(id);
         let tint = docked.then(|| self.docked_tab(id, cx).2).flatten();
+        // The background behind the tabs: the Files strip, else the pane or pop-out header.
+        let strip_color = if docked { self.person.canvas_color.as_deref().unwrap_or("canvas") } else { "surface" };
         let mut strip = div().id(SharedString::from(format!("{id}-tabs")))
-            .flex().items_center().gap(px(2.))
+            .flex().items_center().h_full()
             .when(docked, |d| d.flex_none())
             .when(!docked, |d| d.role(gpui::Role::TabList).min_w_0().flex_shrink_1().overflow_hidden());
         for (i, tab) in tabs.iter().enumerate() {
@@ -618,12 +621,11 @@ impl AppWindow {
             let (menu_pane, menu_tab) = (id.to_owned(), tab.id.clone());
             let group = SharedString::from(format!("{id}-tab-{}", tab.id));
             // shortcut: a globe for every tab, no favicons: loading one would be a request outside WebKit.
-            strip = strip.child(div().id(group.clone()).group(group.clone())
-                .flex().items_center().w(px(160.)).min_w(px(72.)).flex_shrink_1().h(px(26.)).pr(px(4.))
-                .rounded(px(ui::RADIUS_SM)).border_1().border_color(gpui::transparent_black()).text_size(px(12.))
+            // The same tab as the Files strip, so pages and files read as one set of tabs.
+            strip = strip.child(strip_tab(group.clone(), selected, c("hover"), c(strip_color)).group(group.clone())
+                .flex().items_center().h_full().w(px(180.)).min_w(px(96.)).flex_shrink_1().pr(px(4.)).text_size(px(12.))
                 .text_color(c(if selected { "foreground" } else { "muted-foreground" }))
-                .when(selected, |d| d.bg(c("surface")).border_color(c("border")))
-                .when(!selected, |d| d.hover(|d| d.bg(c("hover"))))
+                .hover(|d| d.text_color(c("foreground")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();
@@ -1051,6 +1053,8 @@ impl AppWindow {
         let waiting = std::mem::take(&mut page.waiting);
         let resting = page.live.is_none();
         self.note_browser_url(key, cx);
+        // The host may have been measured since the view was made: read and snapshot at its size.
+        if resting { self.fit_resting(key, cx); }
         for ask in waiting { self.answer_browser(key, ask); }
         if resting { self.rest_page(key, cx); }
         cx.notify();
@@ -1409,16 +1413,18 @@ impl AppWindow {
         {
             *viewport = size;
         }
+        // A live page rescales in place; a resting one lays out again and retakes its snapshot.
         #[cfg(target_os = "macos")]
-        if state.browser_tab.is_none()
-            && let Some(page) = key.as_ref().and_then(|key| state.browsers.pages.get(key)).filter(|p| p.live.is_some())
-            && let Some(native) = &page.native
-        {
-            let camera = state.doc.camera;
-            let pane = state.shown.as_ref().and_then(|doc| doc.panes.iter().find(|p| p.id == id)).unwrap_or(pane);
-            let [_, _, w, h] = pane_body(pane, camera);
-            let zoom = page_zoom(pane, camera, [w, h]);
-            if zoom > 0. { let _ = native.raw.raw().zoom(zoom); }
+        if state.browser_tab.is_none() {
+            let live = key.as_ref().and_then(|key| state.browsers.pages.get(key)).filter(|p| p.live.is_some())
+                .and_then(|page| page.native.as_ref()).map(|native| native.raw.clone());
+            match live {
+                Some(raw) => {
+                    let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap();
+                    let _ = raw.raw().zoom(self.host_frame(pane).1);
+                }
+                None => self.resize_resting_browser(id, cx),
+            }
         }
         self.canvas_changed(cx);
         cx.notify();
@@ -1519,6 +1525,58 @@ impl Page {
     }
 }
 
+/// The local-file rule list, compiled once into the app's store and looked up after that.
+/// Opens that arrive while it loads wait for the same lookup or compile. Bump the version
+/// when the rules change, so a stale compiled list is never reused.
+#[cfg(target_os = "macos")]
+fn local_rules(
+    store: objc2::rc::Retained<objc2_web_kit::WKContentRuleListStore>,
+    done: impl FnOnce(Option<objc2::rc::Retained<objc2_web_kit::WKContentRuleList>>) + 'static,
+) {
+    use objc2::rc::Retained;
+    use objc2_foundation::{NSError, NSString};
+    use objc2_web_kit::WKContentRuleList;
+    type Waiter = Box<dyn FnOnce(Option<Retained<WKContentRuleList>>)>;
+    enum Rules { Unloaded, Loading(Vec<Waiter>), Ready(Retained<WKContentRuleList>) }
+    thread_local! { static RULES: std::cell::RefCell<Rules> = const { std::cell::RefCell::new(Rules::Unloaded) }; }
+    const ID: &str = "canopy-local-files-v1";
+    const SOURCE: &str = r#"[{"trigger":{"url-filter":"^[a-z]+://"},"action":{"type":"block"}},{"trigger":{"url-filter":"^file://"},"action":{"type":"ignore-previous-rules"}}]"#;
+    let mut done: Option<Waiter> = Some(Box::new(done));
+    // Ok(true): this call starts the lookup; Ok(false): it waits for one already running.
+    let start = RULES.with_borrow_mut(|rules| match rules {
+        Rules::Ready(list) => Err(list.clone()),
+        Rules::Loading(waiters) => { waiters.extend(done.take()); Ok(false) }
+        Rules::Unloaded => { *rules = Rules::Loading(done.take().into_iter().collect()); Ok(true) }
+    });
+    match start {
+        Err(list) => return done.take().unwrap()(Some(list)),
+        Ok(false) => return,
+        Ok(true) => {}
+    }
+    let finish = block2::RcBlock::new(|list: *mut WKContentRuleList, _: *mut NSError| {
+        // SAFETY: WebKit passes a live list (or null) for the duration of its completion.
+        let list = unsafe { Retained::retain(list) };
+        // A failed compile is not cached, so the next open tries again.
+        let next = list.clone().map_or(Rules::Unloaded, Rules::Ready);
+        let waiters = RULES.with_borrow_mut(|rules| match std::mem::replace(rules, next) {
+            Rules::Loading(waiters) => waiters,
+            Rules::Unloaded | Rules::Ready(_) => Vec::new(),
+        });
+        for waiter in waiters { waiter(list.clone()); }
+    });
+    let lookup = block2::RcBlock::new({
+        let (store, finish) = (store.clone(), finish.clone());
+        move |list: *mut WKContentRuleList, error: *mut NSError| {
+            if !list.is_null() { return finish.call((list, error)); }
+            let (id, source) = (NSString::from_str(ID), NSString::from_str(SOURCE));
+            // SAFETY: the store and its completion run on the main thread.
+            unsafe { store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(Some(&id), Some(&source), Some(&finish)); }
+        }
+    });
+    // SAFETY: the store and its completion run on the main thread.
+    unsafe { store.lookUpContentRuleListForIdentifier_completionHandler(Some(&NSString::from_str(ID)), Some(&lookup)); }
+}
+
 /// Local HTML can run its own scripts. Block network resources before loading the file so a
 /// script fetched from the network cannot run with the local page's read access.
 #[cfg(target_os = "macos")]
@@ -1529,8 +1587,8 @@ fn load_local_file(
     alive: std::rc::Weak<()>,
     failed: impl Fn(String) + 'static,
 ) -> Result<(), String> {
-    use objc2_foundation::{NSError, NSString, NSURL};
-    use objc2_web_kit::{WKContentRuleList, WKContentRuleListStore};
+    use objc2_foundation::NSURL;
+    use objc2_web_kit::WKContentRuleListStore;
     use wry::WebViewExtMacOS as _;
     let file = NSURL::from_file_path(path).ok_or("Invalid browser file path")?;
     let access = match folder {
@@ -1545,24 +1603,17 @@ fn load_local_file(
     let store = unsafe { WKContentRuleListStore::storeWithURL(Some(&rules_url), mtm) }
         .ok_or("Cannot open WebKit content rules store")?;
     let view = view.webview();
-    let handler = block2::RcBlock::new(move |rules: *mut WKContentRuleList, _: *mut NSError| {
+    local_rules(store, move |rules| {
         if alive.upgrade().is_none() { return; }
-        // SAFETY: WebKit passes a valid compiled rule list or null.
-        let Some(rules) = (unsafe { rules.as_ref() }) else {
-            return failed("WebKit could not restrict local file access".into());
-        };
+        let Some(rules) = rules else { return failed("WebKit could not restrict local file access".into()) };
+        // SAFETY: the rules apply before the file loads, on the main thread.
         unsafe {
-            view.configuration().userContentController().addContentRuleList(rules);
+            view.configuration().userContentController().addContentRuleList(&rules);
             if view.loadFileURL_allowingReadAccessToURL(&file, &access).is_none() {
                 failed("WebKit could not open the local file".into());
             }
         }
     });
-    let identifier = NSString::from_str("canopy-local-files");
-    let rules = NSString::from_str(r#"[{"trigger":{"url-filter":"^[a-z]+://"},"action":{"type":"block"}},{"trigger":{"url-filter":"^file://"},"action":{"type":"ignore-previous-rules"}}]"#);
-    unsafe {
-        store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(Some(&identifier), Some(&rules), Some(&handler));
-    }
     Ok(())
 }
 
@@ -1587,15 +1638,15 @@ fn destroy(native: Native) {
     wv.webview().removeFromSuperview();
 }
 
-/// Lays a resting view out at its pane's body size, zoom 1. gpui-wry sizes a view only while it
-/// is drawn; a resting page still lays out (read) and snapshots (shot) this way.
+/// Lays a resting view out at `host_frame`'s size and zoom. gpui-wry sizes a view only while
+/// it is drawn; a resting page still lays out (read) and snapshots (shot) this way.
 #[cfg(target_os = "macos")]
-fn fit_view(view: &gpui_wry::WebView, rect: canvas::Rect) {
+fn fit_view(view: &gpui_wry::WebView, ([width, height], zoom): ([f32; 2], f64)) {
     let _ = view.raw().set_bounds(wry::Rect {
         position: wry::dpi::LogicalPosition::new(0., 0.).into(),
-        size: wry::dpi::LogicalSize::new(rect[2] as f64, (rect[3] - canvas::BROWSER_HEADER).max(1.) as f64).into(),
+        size: wry::dpi::LogicalSize::new(f64::from(width), f64::from(height)).into(),
     });
-    let _ = view.raw().zoom(1.);
+    let _ = view.raw().zoom(zoom);
 }
 
 /// A popped-out pane's window: the pane's header over the active tab's page. It holds no state
@@ -1664,7 +1715,7 @@ impl AppWindow {
         let key = self.page_key(id).unwrap();
         if self.canvas_state.browsers.pages.get(&key).is_some_and(Page::has_view) { return Ok(()); }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.url().is_some()).ok_or_else(|| format!("no browser pane {id}"))?;
-        let (url, rect) = (pane.url().unwrap().to_owned(), pane.rect);
+        let (url, frame) = (pane.url().unwrap().to_owned(), self.host_frame(pane));
         let local = if url.starts_with("file:") {
             let path = checked_file(&file_path(&url)?)?;
             // Recheck after rest, pop-out, or restore. A stale folder grant cannot follow a
@@ -1735,7 +1786,7 @@ impl AppWindow {
             let raw = view.update(cx, |v, _| {
                 v.hide();
                 // A popped view is sized by its window as it draws.
-                if popped.is_none() { fit_view(v, rect); }
+                if popped.is_none() { fit_view(v, frame); }
                 v.handle()
             });
             Ok(Native { view, raw, clip, _local_load: local_load })
@@ -1784,9 +1835,9 @@ impl AppWindow {
     /// rested the usual way. Called by every way out: the command, Escape, any space tab, close.
     pub(super) fn collapse_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.canvas_state.browser_tab.take() else { return };
-        let rect = self.canvas_state.doc.panes.iter().find(|p| p.id == id).map(|p| p.rect);
-        if let (Some(rect), Some(native)) = (rect, self.active_page(&id).and_then(|p| p.native.as_ref())) {
-            native.view.update(cx, |v, _| fit_view(v, rect));
+        let frame = self.canvas_state.doc.panes.iter().find(|p| p.id == id).map(|p| self.host_frame(p));
+        if let (Some(frame), Some(native)) = (frame, self.active_page(&id).and_then(|p| p.native.as_ref())) {
+            native.view.update(cx, |v, _| fit_view(v, frame));
         }
         // shortcut: the snapshot is taken right after the resize, so it may predate WebKit's relayout; a rested page re-snapshots when it next loads.
         self.rest_browser(&id, cx);
@@ -1973,7 +2024,7 @@ impl AppWindow {
         if !doc.docked(id) && !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
         let frame = self.body_rect(saved).ok_or("the canvas is not shown")?;
         let [_, _, width, height] = pane_body(&pane, camera);
-        let zoom = page_zoom(&pane, camera, [width, height]);
+        let zoom = page_zoom(&pane, [width, height]);
         self.ensure_view(id, window, cx)?;
         let key = self.page_key(id).unwrap();
         let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
@@ -2342,7 +2393,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     use super::browser_target_url;
     use super::{GRAB_REQUESTS, PRESETS, REACT_GRAB, format_quote, menu_items, open_in, page_script, page_zoom, parse_viewport, permits_navigation, resolve_source, web_url};
-    use crate::canvas::{Camera, Kind, Pane};
+    use crate::canvas::{Kind, Pane};
     use crate::settings::{KeepCookies, OpenLinks};
     use serde_json::json;
 
@@ -2421,7 +2472,6 @@ mod tests {
         }
         assert_eq!(parse_viewport(Some("desktop")), Ok(Some([1280., 800.])));
         assert!(parse_viewport(Some("Mobile")).is_err());
-        let camera = Camera { zoom: 0.75, ..Default::default() };
         let mut pane = Pane {
             id: "p1".into(), kind: Kind::Browser {
                 tabs: vec![crate::canvas::Tab { id: "t1".into(), url: String::new(), title: String::new() }],
@@ -2429,15 +2479,13 @@ mod tests {
             },
             rect: [0., 0., 640., 838.], z: 1, space: None, color: None, pinned: None,
         };
-        assert_eq!(page_zoom(&pane, camera, [640., 800.]), 0.75);
-        pane.pinned = Some(pane.rect);
-        assert_eq!(page_zoom(&pane, camera, [640., 800.]), 1.);
+        assert_eq!(page_zoom(&pane, [640., 800.]), 1., "a responsive page keeps its own zoom");
         let Kind::Browser { viewport, .. } = &mut pane.kind else { unreachable!() };
         *viewport = Some([1280., 800.]);
-        assert_eq!(page_zoom(&pane, camera, [640., 800.]), 0.5);
+        assert_eq!(page_zoom(&pane, [640., 800.]), 0.5);
         let Kind::Browser { viewport, .. } = &mut pane.kind else { unreachable!() };
         *viewport = Some([0., 0.]);
-        assert_eq!(page_zoom(&pane, camera, [640., 800.]), 1.);
+        assert_eq!(page_zoom(&pane, [640., 800.]), 1.);
     }
 
     #[test]
@@ -2514,7 +2562,7 @@ fn pane_body(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
 pub(super) fn viewport_rect(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
     let [x, y, w, h] = pane_body(pane, camera);
     let Some([css_w, css_h]) = fixed_viewport(pane) else { return [x, y, w, h] };
-    let zoom = page_zoom(pane, camera, [w, h]);
+    let zoom = page_zoom(pane, [w, h]);
     let (page_w, page_h) = ((f64::from(css_w) * zoom) as f32, (f64::from(css_h) * zoom) as f32);
     [x + (w - page_w) / 2., y + (h - page_h) / 2., page_w, page_h]
 }
@@ -2555,6 +2603,19 @@ impl AppWindow {
         Some(Bounds::new(origin + point(px(x), px(y)), size(px(w), px(h))))
     }
 
+    /// The size and zoom a page lays out at in its measured host (the Files panel body, or the
+    /// pane at the current camera), so a resting snapshot matches the page when it wakes.
+    /// Before the host is measured, the pane's world size at zoom 1.
+    fn host_frame(&self, pane: &canvas::Pane) -> ([f32; 2], f64) {
+        match self.body_rect(pane).map(|b| [f32::from(b.size.width), f32::from(b.size.height)]) {
+            Some([w, h]) if w >= 1. && h >= 1. => ([w, h], fixed_viewport(pane).map_or(1., |[css_w, _]| f64::from(w / css_w))),
+            _ => {
+                let rect = pane.pinned.unwrap_or(pane.rect);
+                ([rect[2], (rect[3] - canvas::BROWSER_HEADER).max(1.)], 1.)
+            }
+        }
+    }
+
     pub(super) fn live_browser_views(&self) -> impl Iterator<Item = (&str, gpui_wry::WebViewHandle)> {
         self.canvas_state.browsers.pages.iter().filter_map(|(id, page)| {
             page.live?;
@@ -2564,20 +2625,64 @@ impl AppWindow {
 }
 
 impl AppWindow {
-    /// Retakes a resting browser's snapshot at its settled pane size.
+    /// Retakes a resting browser's snapshot at its settled host size.
     pub(super) fn resize_resting_browser(&mut self, id: &str, cx: &mut Context<Self>) {
+        if let Some(key) = self.page_key(id) && self.fit_resting(&key, cx) { self.rest_browser(id, cx); }
+    }
+
+    /// Lays a resting page out at `host_frame`; false when it has no view to fit.
+    fn fit_resting(&self, key: &str, cx: &mut Context<Self>) -> bool {
         #[cfg(target_os = "macos")]
         // A popped page is sized by its own window.
-        if !self.browser_popped(id)
-            && let Some(page) = self.active_page(id).filter(|p| p.live.is_none())
-            && let Some(native) = &page.native
+        if let Some((id, _)) = key.split_once('/')
+            && !self.browser_popped(id)
+            && let Some(native) = self.canvas_state.browsers.pages.get(key).filter(|p| p.live.is_none()).and_then(|p| p.native.as_ref())
             && let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id)
         {
-            let rect = pane.pinned.unwrap_or(pane.rect);
-            native.view.update(cx, |v, _| fit_view(v, rect));
-            self.rest_browser(id, cx);
+            let frame = self.host_frame(pane);
+            native.view.update(cx, |v, _| fit_view(v, frame));
+            return true;
         }
         #[cfg(not(target_os = "macos"))]
-        let _ = (id, cx);
+        let _ = (key, cx);
+        false
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod host_tests {
+    use crate::canvas;
+    use gpui::{Bounds, TestAppContext, point, px, size};
+    use serde_json::json;
+    use crate::window::tests::{in_own_process, open_window, running_alone};
+    const TEST: &str = "window::canvas_view::browser::host_tests::resting_pages_fit_their_measured_host_headless";
+
+    #[test]
+    fn resting_pages_fit_their_measured_host() { in_own_process(TEST); }
+
+    #[gpui::test]
+    fn resting_pages_fit_their_measured_host_headless(cx: &mut TestAppContext) {
+        if !running_alone(TEST) { return; }
+        let (view, cx) = open_window(cx, "browser-host", "", json!({"id":"root","type":"canvas"}));
+        view.update_in(cx, |this, _, _| {
+            this.canvas_state.doc.panes = serde_json::from_value(json!([{"id":"b1","kind":"browser",
+                "props":{"tabs":[{"id":"t1","url":"https://example.com/"}],"active":0,"home":""},"rect":[0,0,964,740],"z":0}])).unwrap();
+            this.bounds.borrow_mut().insert("canopy-canvas".into(), Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(800.))));
+            let pane = this.canvas_state.doc.panes[0].clone();
+            // On the canvas: the camera scales the frame, the page keeps zoom 1 and reflows.
+            this.canvas_state.doc.camera.zoom = 0.5;
+            let ([w, _], zoom) = this.host_frame(&pane);
+            assert_eq!((w, zoom), (480., 1.));
+            // Docked: the measured panel body, not the pane's world size.
+            this.canvas_state.doc.dock("b1");
+            this.canvas_state.file = Some(canvas::PanelTab::Pane("b1".into()));
+            this.bounds.borrow_mut().insert("panel-body:b1".into(), Bounds::new(point(px(624.), px(40.)), size(px(576.), px(700.))));
+            assert_eq!(this.host_frame(&pane), ([576., 700.], 1.));
+            // A fixed viewport scales to fit the body at its own aspect ratio.
+            let canvas::Kind::Browser { viewport, .. } = &mut this.canvas_state.doc.panes[0].kind else { unreachable!() };
+            *viewport = Some([288., 350.]);
+            let pane = this.canvas_state.doc.panes[0].clone();
+            assert_eq!(this.host_frame(&pane), ([576., 700.], 2.));
+        });
     }
 }
