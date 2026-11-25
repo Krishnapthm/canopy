@@ -498,7 +498,7 @@ impl AppWindow {
             Some([x, y, w, h]) if !state.resizing_pane() && bounds.contains(&pointer) => {
                 let camera = state.doc.camera;
                 let [sx, sy] = camera.to_screen([x, y]);
-                edge_push(Bounds::new(bounds.origin + point(px(sx), px(sy)), size(px(w * camera.zoom), px(h * camera.zoom))), bounds)
+                edge_push(Bounds::new(bounds.origin + point(px(sx), px(sy)), size(px(w * camera.zoom), px(h * camera.zoom))), bounds, pointer)
             }
             _ => edge_pan(pointer, bounds),
         }
@@ -4218,21 +4218,33 @@ const WHEEL_GESTURE: Duration = Duration::from_millis(150);
 /// Screen pixels per second to pan while dragging within 32 pixels of an edge.
 fn edge_pan(pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
     if !bounds.contains(&pointer) { return [0., 0.]; }
+    full_speed([pointer_ramp(pointer.x, bounds.left(), bounds.right()), pointer_ramp(pointer.y, bounds.top(), bounds.bottom())])
+}
+
+/// -1..1 along one axis: toward 1 as `at` nears `start`, toward -1 as it nears `end`.
+fn pointer_ramp(at: Pixels, start: Pixels, end: Pixels) -> f32 {
     let ramp = |distance: Pixels| (1. - f32::from(distance) / 32.).max(0.);
-    let x = ramp(pointer.x - bounds.left()) - ramp(bounds.right() - pointer.x);
-    let y = ramp(pointer.y - bounds.top()) - ramp(bounds.bottom() - pointer.y);
+    ramp(at - start) - ramp(end - at)
+}
+
+/// A direction scaled so its strongest pull pans 900 screen px per second.
+fn full_speed([x, y]: canvas::Point) -> canvas::Point {
     let speed = 900. / x.hypot(y).max(1.);
     [x * speed, y * speed]
 }
 
 /// Screen pixels per second to pan while a dragged `rect` touches or passes an edge of `bounds`:
-/// a quarter speed on contact, full speed 36 px past it.
-fn edge_push(rect: Bounds<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
+/// a quarter speed on contact, full speed 36 px past it. On an axis where the pane covers both
+/// edges, a push would never end, so the pointer near an edge pans instead, as in `edge_pan`.
+fn edge_push(rect: Bounds<Pixels>, bounds: Bounds<Pixels>, pointer: Point<Pixels>) -> canvas::Point {
     let push = |over: Pixels| if over < px(0.) { 0. } else { (0.25 + f32::from(over) / 48.).min(1.) };
-    let x = push(bounds.left() - rect.left()) - push(rect.right() - bounds.right());
-    let y = push(bounds.top() - rect.top()) - push(rect.bottom() - bounds.bottom());
-    let speed = 900. / x.hypot(y).max(1.);
-    [x * speed, y * speed]
+    let axis = |before: Pixels, after: Pixels, at: Pixels, start: Pixels, end: Pixels| {
+        if before >= px(0.) && after >= px(0.) { pointer_ramp(at, start, end) } else { push(before) - push(after) }
+    };
+    full_speed([
+        axis(bounds.left() - rect.left(), rect.right() - bounds.right(), pointer.x, bounds.left(), bounds.right()),
+        axis(bounds.top() - rect.top(), rect.bottom() - bounds.bottom(), pointer.y, bounds.top(), bounds.bottom()),
+    ])
 }
 
 /// Edges and corners stay grabbable even when the pane is zoomed out.
@@ -4658,16 +4670,21 @@ mod input_tests {
     #[test]
     fn edge_push_starts_when_a_pane_touches_an_edge() {
         let bounds = Bounds::new(point(px(0.), px(0.)), size(px(400.), px(300.)));
-        let push = |x, y| edge_push(Bounds::new(point(px(x), px(y)), size(px(100.), px(80.))), bounds);
+        let push = |x, y| edge_push(Bounds::new(point(px(x), px(y)), size(px(100.), px(80.))), bounds, point(px(200.), px(150.)));
         assert_eq!(push(150., 100.), [0., 0.]);
         assert_eq!(push(1., 100.), [0., 0.]);
         assert_eq!(push(0., 100.), [225., 0.]);
         assert_eq!(push(-36., 100.), [900., 0.]);
         assert_eq!(push(300., 100.), [-225., 0.]);
         assert_eq!(push(150., 256.), [0., -900.]);
-        // A pane past both side edges pans neither way.
-        let wide = Bounds::new(point(px(-10.), px(100.)), size(px(420.), px(80.)));
-        assert_eq!(edge_push(wide, bounds), [0., 0.]);
+        // A pane past both side edges, more on one side, does not push either way: across
+        // that axis the pointer near an edge decides, as in a plain drag.
+        let wide = Bounds::new(point(px(-60.), px(100.)), size(px(480.), px(80.)));
+        assert_eq!(edge_push(wide, bounds, point(px(200.), px(150.))), [0., 0.]);
+        assert_eq!(edge_push(wide, bounds, point(px(392.), px(150.))), [-675., 0.]);
+        // The other axis still pushes on contact.
+        let tall_wide = Bounds::new(point(px(-60.), px(0.)), size(px(480.), px(80.)));
+        assert_eq!(edge_push(tall_wide, bounds, point(px(200.), px(40.))), [0., 225.]);
     }
 
     const WHEEL: &str = "window::canvas_view::input_tests::wheel_over_panes";
