@@ -106,20 +106,6 @@ pub fn zoom_range(rects: &[Rect], viewport: Point) -> [f32; 2] {
     let min = union(rects).map_or(ZOOMS[0], |b| step_down(fit_zoom(b, viewport))).min(1.).min(max);
     [min, max]
 }
-/// Keeps a non-empty place within reach while allowing the camera to move across it.
-pub fn constrain_camera(camera: &mut Camera, rects: &[Rect], viewport: Point) {
-    let Some(bounds) = union(rects) else { return };
-    let min = step_down(fit_zoom(bounds, viewport)).min(1.);
-    if camera.zoom < min {
-        camera.zoom_at(min, [viewport[0] / 2., viewport[1] / 2.]);
-    }
-    let pad = FIT_PAD / 2. / camera.zoom;
-    for (i, value) in [&mut camera.x, &mut camera.y].into_iter().enumerate() {
-        let a = bounds[i] - pad;
-        let b = bounds[i] + bounds[i + 2] + pad - viewport[i] / camera.zoom;
-        *value = if a <= b { (*value).clamp(a, b) } else { (a + b) / 2. };
-    }
-}
 /// `range` stretched to hold `zoom`, so a zoom already past a limit is not pulled back mid-gesture.
 pub fn widen(range: [f32; 2], zoom: f32) -> [f32; 2] { [range[0].min(zoom), range[1].max(zoom)] }
 /// Screen px a pressed cell must move before the press is a drag; less is a click.
@@ -227,12 +213,6 @@ pub fn nearest(rects: &[Rect], from: Rect, direction: Point) -> Option<usize> {
 pub fn zoom_factor(delta: f32) -> f32 { delta.clamp(-10., 10.).exp() }
 pub fn ease_out(t: f32) -> f32 { 1. - (1. - t.clamp(0., 1.)).powi(3) }
 pub fn friction(dt: f32) -> f32 { 0.92_f32.powf(dt / 0.016) }
-/// Past `range`, a zoom gesture meets growing resistance instead of a hard stop.
-pub fn rubber_band(z: f32, range: [f32; 2]) -> f32 {
-    let limit = z.clamp(range[0], range[1]);
-    let d = z - limit;
-    limit + d / (1. + d.abs() / (limit * 0.08))
-}
 pub fn remember_folder(recent: &mut Vec<String>, folder: &str) {
     if folder.is_empty() { return; }
     recent.retain(|p| p != folder);
@@ -1932,7 +1912,6 @@ mod tests {
         // A pane bigger than the window at any zoom: both ends pin to the smallest zoom.
         assert_eq!(zoom_range(&[[0., 0., 99999., 100.]], view), [ZOOMS[0], ZOOMS[0]]);
         // Left at 2 after the limit fell to 1: zooming out moves freely, not straight to 1.
-        assert_eq!(rubber_band(1.8, widen([0.25, 1.], 2.)), 1.8);
         let mut c = Camera { zoom: 2., ..Camera::default() };
         c.step(1, [0., 0.], widen([0.25, 1.], 2.));
         assert_eq!(c.zoom, 2., "zoom in never zooms out");
@@ -2050,27 +2029,6 @@ mod tests {
         assert!(view_allows(&View::Terminals, false));
         assert!(!view_allows(&View::Terminals, true));
     }
-    #[test]
-    fn camera_constraints_keep_content_in_reach_and_empty_canvas_free() {
-        let rects = [[100., 200., 200., 150.], [700., 650., 200., 150.]];
-        let viewport = [400., 300.];
-        let mut camera = Camera { x: 10000., y: -10000., zoom: 1. };
-        constrain_camera(&mut camera, &rects, viewport);
-        assert_eq!([camera.x, camera.y], [540., 160.]);
-        camera.zoom = ZOOMS[0];
-        constrain_camera(&mut camera, &rects, viewport);
-        assert_eq!(camera.zoom, zoom_range(&rects, viewport)[0]);
-        assert!(camera.zoom > ZOOMS[0]);
-        let small = [[500., 500., 100., 100.]];
-        let mut centered = Camera::default();
-        constrain_camera(&mut centered, &small, viewport);
-        assert_eq!([centered.x, centered.y], [350., 400.]);
-        let before = Camera { x: 10000., y: -10000., zoom: 0.25 };
-        let mut free = before;
-        constrain_camera(&mut free, &[], viewport);
-        assert_eq!(free, before);
-    }
-
     #[test]
     fn fit_uses_largest_fitting_zoom_step() {
         let mut c = Camera::default();
@@ -2236,10 +2194,6 @@ mod motion_tests {
         assert!((zoom_factor(2_f32.ln()) - 2.).abs() < 0.0001);
         assert_eq!(ease_out(0.), 0.); assert_eq!(ease_out(1.), 1.);
         assert!((friction(0.032) - friction(0.016).powi(2)).abs() < 0.0001);
-        let range = [ZOOMS[0], ZOOMS[11]];
-        assert_eq!(rubber_band(1., range), 1.);
-        assert!(rubber_band(100., range) > 2. && rubber_band(100., range) < 2.16);
-        assert!(rubber_band(0.01, range) > 0.23);
         let mut c = Camera::default(); let anchor = [142., 91.];
         let world = c.to_world(anchor); c.zoom_at(1.037, anchor);
         assert_eq!(c.to_world(anchor), world);

@@ -415,7 +415,6 @@ mod sticky_tests {
         let (view, cx) = open_window(cx, "wire-input", "", json!({"id":"root","type":"canvas"}));
         cx.run_until_parked();
         view.update_in(cx, |this, window, cx| {
-            this.person.canvas_constrain = false;
             this.model.add_space("root", "Canvas", &crate::window::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
             this.model.space_mut("root").unwrap().tabs.push(crate::model::Tab::new("tab2", "", "pane2", "t2"));
             this.canvas_state.doc.panes = serde_json::from_value(json!([

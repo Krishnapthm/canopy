@@ -5108,7 +5108,6 @@ impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_browser_inputs(window, cx);
         self.release_pdf_drops(window, cx);
-        if !self.canvas_state.moving_geometry() { self.constrain_camera(window, cx); }
         self.pin_panes();
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
@@ -5993,7 +5992,6 @@ export default class Probe extends View {
         let (view, cx) = open_window(cx, "canvas-mouse", "", json!({"id":"root", "type":"canvas"}));
         cx.run_until_parked();
         cx.update(|window, cx| view.update(cx, |this, cx| {
-            this.person.canvas_constrain = false;
             this.model.add_space("root", "Canvas", &super::home(), crate::model::Tab::new("tab1", "", "pane1", "t1"));
             this.model.space_mut("root").unwrap().tabs.push(crate::model::Tab::new("tab2", "", "pane2", "t2"));
             this.live.insert("t1".into(), json!({"state":"live", "pid":1}));
