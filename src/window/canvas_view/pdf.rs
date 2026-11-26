@@ -213,10 +213,7 @@ impl AppWindow {
             .to_string_lossy()
             .into_owned();
         let detail = path.parent().unwrap_or(path).to_string_lossy().into_owned();
-        // The page scales with the canvas like a picture; a pinned pane keeps its screen size.
-        let scale = if card.pinned.is_some() { 1. } else { camera.zoom() };
-        let crisp = self.camera_rested();
-        view.update(cx, |view, cx| view.set_display_scale(scale, crisp, cx));
+        // `sync_panes` set the page scale to the pane's.
         let body = div()
             .size_full()
             .child(view.clone())

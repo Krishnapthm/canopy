@@ -31,6 +31,7 @@
 pub mod camera;
 #[cfg(any(test, debug_assertions))]
 pub mod check;
+pub mod layout;
 pub mod motion;
 pub mod rules;
 pub mod step;
@@ -40,6 +41,7 @@ pub mod units;
 mod tests;
 
 pub use camera::{Camera, focus_fit, reveal, visible, widen, zoom_range};
+pub use layout::{Layout, layout};
 pub use rules::{arrange, cascade, child_position, free_spot, solve, tile};
 pub use motion::Motion;
 pub use step::{Effects, Intent, Viewport, derive_pinned, step};

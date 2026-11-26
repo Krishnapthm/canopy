@@ -5125,6 +5125,7 @@ impl Render for AppWindow {
         self.sync_browser_inputs(window, cx);
         self.release_pdf_drops(window, cx);
         self.sync_viewport(window);
+        self.sync_panes(cx);
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
         crate::bench::frame_start();

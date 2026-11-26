@@ -41,8 +41,6 @@ impl Camera {
     pub fn len_to_screen(self, world: f32) -> f32 { world * self.zoom }
     /// A screen length in world px.
     pub fn len_to_world(self, screen: f32) -> f32 { screen / self.zoom }
-    /// A world size in screen px.
-    pub fn size_to_screen(self, s: Point) -> Point { [s[0] * self.zoom, s[1] * self.zoom] }
     /// A screen-px move or size in world px.
     pub fn size_to_world(self, s: Point) -> Point { [s[0] / self.zoom, s[1] / self.zoom] }
     /// A world rect as `[x, y, w, h]` screen px.

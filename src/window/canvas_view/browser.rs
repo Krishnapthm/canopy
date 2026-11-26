@@ -197,8 +197,8 @@ fn fixed_viewport(pane: &canvas::Pane) -> Option<[f32; 2]> {
 
 #[cfg(any(target_os = "macos", test))]
 /// A fixed viewport scales to fit its body (screen px); a responsive page zooms so its CSS
-/// width stays `width`, the body's width at zoom 1, and it never reflows as the canvas zooms.
-/// Its CSS height follows the drawn body, since the header keeps its screen size.
+/// width stays `width`, the body's world width, and it never reflows as the canvas zooms.
+/// The header scales with the pane too, so its CSS height is the world body's height.
 fn page_zoom(pane: &canvas::Pane, body: [f32; 2], width: f32) -> f64 {
     match fixed_viewport(pane) {
         Some([w, h]) => (f64::from(body[0]) / f64::from(w)).min(f64::from(body[1]) / f64::from(h)),
@@ -243,7 +243,7 @@ struct Page {
     shot: Option<Arc<RenderImage>>,
     title: String,
     /// While live: the last placement used to set WebKit zoom.
-    live: Option<(canophy::Camera, canophy::Rect)>,
+    live: Option<canophy::Layout>,
     loading: bool,
     /// Replies held until the page finishes loading.
     waiting: Vec<Ask>,
@@ -515,15 +515,15 @@ impl AppWindow {
     }
 
     /// Draws New tab, the live web view, or the resting snapshot. Click a resting page to wake it.
-    pub(super) fn browser_body(&self, pane: &canvas::Pane, camera: canophy::Camera, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn browser_body(&self, pane: &canvas::Pane, layout: canophy::Layout, cx: &mut Context<Self>) -> AnyElement {
         let id = pane.id.clone();
         let page = self.active_page(&id);
         if self.browser_popped(&id) {
             let id = id.clone();
-            return div().size_full().flex().flex_col().items_center().justify_center().gap(px(12.)).p(px(16.)).bg(c("canvas")).text_color(c("muted-foreground"))
+            return div().size_full().flex().flex_col().items_center().justify_center().gap(wpx(12.)).p(wpx(16.)).bg(c("canvas")).text_color(c("muted-foreground"))
                 .child("Popped out")
                 .child(div().id(SharedString::from(format!("browser-{id}-back"))).role(gpui::Role::Button).aria_label("Bring back")
-                    .px(px(12.)).py(px(4.)).rounded(px(ui::RADIUS_SM)).border_1().border_color(c("border")).text_color(c("foreground")).cursor_pointer()
+                    .px(wpx(12.)).py(wpx(4.)).rounded(wpx(ui::RADIUS_SM)).border_1().border_color(c("border")).text_color(c("foreground")).cursor_pointer()
                     .hover(|d| d.bg(c("hover"))).child("Bring back")
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_pop", json!({"pane": id}), window, cx))))
@@ -531,10 +531,10 @@ impl AppWindow {
         }
         if self.browser_url(&id) == Ok("") {
             return div().id(SharedString::from(format!("browser-{id}"))).size_full()
-                .flex().flex_col().items_center().justify_center().gap(px(8.)).bg(c("canvas")).cursor_pointer()
-                .child(svg().path("icons/globe.svg").size(px(32.)).text_color(c("muted-foreground")))
-                .child(div().text_size(px(15.)).text_color(c("foreground")).child("Browse the web"))
-                .child(div().text_size(px(13.)).text_color(c("muted-foreground")).child("Type a URL to open a site."))
+                .flex().flex_col().items_center().justify_center().gap(wpx(8.)).bg(c("canvas")).cursor_pointer()
+                .child(svg().path("icons/globe.svg").size(wpx(32.)).text_color(c("muted-foreground")))
+                .child(div().text_size(wpx(15.)).text_color(c("foreground")).child("Browse the web"))
+                .child(div().text_size(wpx(13.)).text_color(c("muted-foreground")).child("Type a URL to open a site."))
                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
                     cx.stop_propagation();
                     if let Err(error) = this.focus_browser_url(&id, cx) {
@@ -544,15 +544,12 @@ impl AppWindow {
         }
         #[cfg(target_os = "macos")]
         if let Some(page) = page && let (Some(Native { view, .. }), Some(at)) = (&page.native, page.live) {
-            let next = placement(pane, camera);
+            let next = layout;
             let preset = fixed_viewport(pane).is_some();
             if at != next {
                 let (this, key) = (cx.entity(), self.page_key(&id).unwrap());
-                let zoom_changed = at.0.zoom() != next.0.zoom() || (preset && at.1[2..] != next.1[2..]);
-                let zoom = zoom_changed.then(|| {
-                    let [_, _, width, height] = pane_body(pane, camera);
-                    page_zoom(pane, [width, height], css_width(pane, camera))
-                });
+                let zoom_changed = at.scale != next.scale || (preset && at.body_size() != next.body_size());
+                let zoom = zoom_changed.then(|| page_zoom(pane, next.body_size(), next.body_world[0]));
                 cx.defer(move |cx| this.update(cx, |this, _| {
                     let Some(page) = this.canvas_state.browsers.pages.get_mut(&key) else { return };
                     if page.live == Some(at) && let Some(native) = &page.native {
@@ -563,20 +560,18 @@ impl AppWindow {
             }
             let frame = self.measured_webview(self.page_key(&id).unwrap(), view);
             let body = if preset {
-                let [_, _, width, height] = viewport_rect(pane, camera);
+                let [_, _, width, height] = viewport_rect(pane, &layout);
                 div().size_full().bg(c("canvas")).flex().items_center().justify_center()
                     .child(div().flex_none().w(px(width)).h(px(height)).child(frame))
             } else {
                 div().size_full().bg(gpui::white()).child(frame)
             };
             let body = body.relative().child(self.browser_measure(format!("web-body:{id}")));
-            return self.annotate_body(pane, body.into_any_element(), super::annotate::card_body(pane, camera.zoom()), cx);
+            return self.annotate_body(pane, body.into_any_element(), layout.body_size(), cx);
         }
-        #[cfg(not(target_os = "macos"))]
-        let _ = camera;
         let body = match page.and_then(|p| p.shot.clone()) {
             Some(shot) => div().size_full().bg(gpui::white()).child(img(ImageSource::Render(shot)).size_full().object_fit(gpui::ObjectFit::Cover)),
-            None => div().size_full().flex().items_center().justify_center().p(px(16.)).text_color(c("muted-foreground"))
+            None => div().size_full().flex().items_center().justify_center().p(wpx(16.)).text_color(c("muted-foreground"))
                 .child(if page.is_some_and(|p| p.loading) { "Loading…".to_owned() } else { "Click to load the page".to_owned() }),
         };
         let body = body.id(SharedString::from(format!("browser-{id}"))).cursor_pointer()
@@ -584,7 +579,7 @@ impl AppWindow {
                 cx.stop_propagation();
                 this.wake_browser(&id, window, cx);
             })).into_any_element();
-        self.annotate_body(pane, body, super::annotate::card_body(pane, camera.zoom()), cx)
+        self.annotate_body(pane, body, layout.body_size(), cx)
     }
 
     /// The active tab's title, falling back to its address or New tab.
@@ -621,7 +616,7 @@ impl AppWindow {
             .flex().items_center().h_full()
             .when(docked, |d| d.flex_none())
             // Room for the active tab's outward curves, which the clip would otherwise cut off.
-            .when(!docked, |d| d.role(gpui::Role::TabList).min_w_0().flex_shrink_1().overflow_hidden().px(px(ui::RADIUS)));
+            .when(!docked, |d| d.role(gpui::Role::TabList).min_w_0().flex_shrink_1().overflow_hidden().px(wpx(ui::RADIUS)));
         for (i, tab) in tabs.iter().enumerate() {
             let selected = i == *active;
             let title = if !tab.title.is_empty() { tab.title.clone() } else if !tab.url.is_empty() { tab.url.clone() } else { "New tab".to_owned() };
@@ -632,7 +627,7 @@ impl AppWindow {
             // shortcut: a globe for every tab, no favicons: loading one would be a request outside WebKit.
             // The same tab as the Files strip, so pages and files read as one set of tabs.
             strip = strip.child(strip_tab(group.clone(), selected, c(fill), c(strip_color))
-                .flex().items_center().h_full().w(px(180.)).min_w(px(96.)).flex_shrink_1().pr(px(4.)).text_size(px(12.))
+                .flex().items_center().h_full().w(wpx(180.)).min_w(wpx(96.)).flex_shrink_1().pr(wpx(4.)).text_size(wpx(12.))
                 .text_color(c(if selected { "foreground" } else { "muted-foreground" }))
                 .hover(|d| d.text_color(c("foreground")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -645,19 +640,19 @@ impl AppWindow {
                     this.browser_tab_menu(&menu_pane, &menu_tab, host, window, cx);
                 }))
                 .child(div().id("select").role(gpui::Role::Tab).aria_selected(selected).aria_label(title.clone())
-                    .flex().items_center().gap(px(6.)).flex_1().min_w_0().h_full().pl(px(8.)).cursor_pointer()
+                    .flex().items_center().gap(wpx(6.)).flex_1().min_w_0().h_full().pl(wpx(8.)).cursor_pointer()
                     .tooltip(strip_tooltip(title.clone(), None))
                     .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_tab_select", select.clone(), window, cx)))
-                    .child(svg().path("icons/globe.svg").flex_none().size(px(14.)).text_color(c("muted-foreground")))
+                    .child(svg().path("icons/globe.svg").flex_none().size(wpx(14.)).text_color(c("muted-foreground")))
                     .child(div().flex_1().min_w_0().truncate().child(title))
-                    .when_some(tint.as_deref().filter(|_| selected), |d, tint| d.child(div().flex_none().size(px(6.)).rounded_full().bg(c(tint)))))
-                .child(div().id("close").role(gpui::Role::Button).aria_label("Close tab").flex_none().size(px(16.))
-                    .flex().items_center().justify_center().rounded(px(ui::RADIUS_SM)).cursor_pointer().hover(|d| d.bg(c("hover")))
+                    .when_some(tint.as_deref().filter(|_| selected), |d, tint| d.child(div().flex_none().size(wpx(6.)).rounded_full().bg(c(tint)))))
+                .child(div().id("close").role(gpui::Role::Button).aria_label("Close tab").flex_none().size(wpx(16.))
+                    .flex().items_center().justify_center().rounded(wpx(ui::RADIUS_SM)).cursor_pointer().hover(|d| d.bg(c("hover")))
                     .when(!selected, |d| d.opacity(0.).group_hover(group.clone(), |d| d.opacity(1.)))
                     .tooltip(strip_tooltip("Close tab".into(), Some("canvas.browser_tab_close")))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_tab_close", close.clone(), window, cx)))
-                    .child(svg().path("icons/x.svg").size(px(12.)).text_color(c("muted-foreground")))));
+                    .child(svg().path("icons/x.svg").size(wpx(12.)).text_color(c("muted-foreground")))));
         }
         Some(strip.into_any_element())
     }
@@ -672,7 +667,7 @@ impl AppWindow {
         let connect = id.to_owned();
         let pop_label = if self.browser_popped(id) { "Bring back" } else { "Pop out" };
         let docked = self.canvas_state.doc.docked(id);
-        div().flex().flex_none().items_center().gap(px(4.))
+        div().flex().flex_none().items_center().gap(wpx(4.))
             .child(self.pane_color_swatch(id, cx))
             .when(host == Host::Pane, |d| d.child(panel_button("browser-connect", "icons/link.svg", c("muted-foreground"), c("hover"))
                 .aria_label("Connect").tooltip(strip_tooltip("Connect".into(), Some("canvas.connect")))
@@ -694,13 +689,13 @@ impl AppWindow {
         let annotate = id.to_owned();
         let picker = self.annotation_picker(id);
         let docked = host == Host::Pane && self.canvas_state.doc.docked(id);
-        div().id("browser-navigation").flex().items_center().h(px(32.)).min_w_0().overflow_x_scroll().px(px(8.)).gap(px(4.))
+        div().id("browser-navigation").flex().items_center().h(wpx(32.)).min_w_0().overflow_x_scroll().px(wpx(8.)).gap(wpx(4.))
             .bg(c(self.browser_tab_colors(docked).1))
             .child(self.browser_button(id, "browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
             .child(self.browser_button(id, "browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
             .child(self.browser_button(id, "browser-reload", "icons/rotate-cw.svg", "Reload", "canvas.browser_reload", cx))
-            .child(div().flex().flex_1().min_w_0().h(px(24.)).px(px(8.)).items_center().overflow_hidden()
-                .rounded(px(ui::RADIUS_SM)).bg(c("canvas")).border_1().border_color(c("border"))
+            .child(div().flex().flex_1().min_w_0().h(wpx(24.)).px(wpx(8.)).items_center().overflow_hidden()
+                .rounded(wpx(ui::RADIUS_SM)).bg(c("canvas")).border_1().border_color(c("border"))
                 // Typing in the field is not a pane drag.
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .capture_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
@@ -708,15 +703,15 @@ impl AppWindow {
                 }))
                 .children(field.map(|input| gpui_base::Input::new(&input))))
             .children(picker.map(|name| div().id("browser-annotate-agent").role(gpui::Role::Button).aria_label("Send annotation to")
-                .flex().flex_none().items_center().gap(px(4.)).h(px(24.)).px(px(8.)).rounded(px(ui::RADIUS_SM)).border_1().border_color(c("border"))
-                .text_size(px(12.)).text_color(c("foreground")).cursor_pointer().hover(|d| d.bg(c("hover")))
+                .flex().flex_none().items_center().gap(wpx(4.)).h(wpx(24.)).px(wpx(8.)).rounded(wpx(ui::RADIUS_SM)).border_1().border_color(c("border"))
+                .text_size(wpx(12.)).text_color(c("foreground")).cursor_pointer().hover(|d| d.bg(c("hover")))
                 .tooltip(strip_tooltip("Send annotation to".into(), Some("canvas.annotate_agent")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener({ let pane = id.to_owned(); move |this, _, window, cx| this.run_key("canvas.annotate_agent", json!({"pane": pane}), window, cx) }))
-                .child(div().max_w(px(128.)).truncate().child(name))))
+                .child(div().max_w(wpx(128.)).truncate().child(name))))
             .child(div().id("browser-annotate").role(gpui::Role::Button).aria_label("Annotate")
-                .flex().flex_none().items_center().gap(px(4.)).h(px(24.)).px(px(8.)).rounded(px(ui::RADIUS_SM)).border_1().border_color(c("border"))
-                .text_size(px(12.)).text_color(c("muted-foreground")).cursor_pointer().hover(|d| d.bg(c("hover")).text_color(c("foreground")))
+                .flex().flex_none().items_center().gap(wpx(4.)).h(wpx(24.)).px(wpx(8.)).rounded(wpx(ui::RADIUS_SM)).border_1().border_color(c("border"))
+                .text_size(wpx(12.)).text_color(c("muted-foreground")).cursor_pointer().hover(|d| d.bg(c("hover")).text_color(c("foreground")))
                 .tooltip(strip_tooltip("Annotate".into(), Some("canvas.browser_annotate")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_annotate", json!({"pane": annotate}), window, cx)))
@@ -729,16 +724,16 @@ impl AppWindow {
     pub(super) fn browser_chrome(&self, id: &str, host: Host, cx: &mut Context<Self>) -> AnyElement {
         let Some(tabs) = self.browser_tabs(id, host, cx) else { return div().into_any_element() };
         // The tabs take what the navigation row leaves, so it always meets the page.
-        let row = div().flex().items_center().flex_1().min_h_0().pr(px(8.)).pl(px(super::TAB_INSET - ui::RADIUS)).gap(px(4.))
+        let row = div().flex().items_center().flex_1().min_h_0().pr(wpx(8.)).pl(wpx(super::TAB_INSET - ui::RADIUS)).gap(wpx(4.))
             // The strip's own padding makes up the inset.
-            .when(host == Host::Window, |d| d.pl(px(super::bar_inset(true, false) - ui::RADIUS)).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
+            .when(host == Host::Window, |d| d.pl(wpx(super::bar_inset(true, false) - ui::RADIUS)).on_mouse_down(MouseButton::Left, |e: &MouseDownEvent, window, _| {
                 if e.click_count == 2 { window.titlebar_double_click(); } else { window.start_window_move(); }
             }))
             .child(tabs)
             .child(self.browser_tab_add(id, cx))
             .child(div().flex_1())
             .child(self.browser_tab_actions(id, host, cx));
-        div().flex().flex_col().w_full().h(px(canvas::BROWSER_HEADER)).min_w_0().text_color(c("foreground"))
+        div().flex().flex_col().w_full().h(wpx(canvas::BROWSER_HEADER)).min_w_0().text_color(c("foreground"))
             .when(host == Host::Window, |d| d.bg(c("surface")).border_b_1().border_color(c("border")))
             .child(row).child(self.browser_navigation(id, host, cx)).into_any_element()
     }
@@ -1709,7 +1704,8 @@ impl Render for BrowserWindow {
             self.title = title;
         }
         div().relative().size_full().flex().flex_col().bg(c("canvas")).text_color(c("foreground")).font_family(".SystemUIFont")
-            .child(chrome)
+            // The chrome is written in pane units (`wpx`); here they are window px.
+            .child(ScaledPane::new(1., chrome))
             .child(div().flex_1().min_h_0().child(body))
             .children(menu)
             .into_any_element()
@@ -1850,9 +1846,9 @@ impl AppWindow {
         let key = self.page_key(id).unwrap();
         let others: Vec<String> = self.canvas_state.browsers.pages.iter().filter(|(k, p)| k.as_str() != key && p.live.is_some()).map(|(k, _)| k.clone()).collect();
         for other in others { self.rest_page(&other, cx); }
-        let camera = self.canvas_state.doc.camera;
+        let layout = canophy::layout(self.canvas_state.doc.camera, &pane);
         let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
-        page.live = Some((camera, pane.rect.array()));
+        page.live = Some(layout);
         (page.told, page.watch) = (false, false);
         page.native.as_ref().unwrap().view.update(cx, |v, _| {
             show_view(v, frame, 1.);
@@ -2059,19 +2055,21 @@ impl AppWindow {
         let doc = &self.canvas_state.doc;
         let saved = doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
         // A docked page is placed by the panel body, not the canvas camera.
-        let docked = self.docked_view(id);
-        let (pane, camera) = match docked {
-            Some((view, _)) => (view, canophy::Camera::default()),
-            None => (self.canvas_state.shown.as_ref().and_then(|shown| shown.panes.iter().find(|p| p.id == id)).unwrap_or(saved).clone(), self.canvas_state.doc.camera),
+        let (pane, layout) = match self.docked_view(id) {
+            Some((layout, _)) => (saved.clone(), layout),
+            None => {
+                let pane = self.canvas_state.shown.as_ref().and_then(|shown| shown.panes.iter().find(|p| p.id == id)).unwrap_or(saved).clone();
+                let layout = canophy::layout(doc.camera, &pane);
+                (pane, layout)
+            }
         };
         if !doc.docked(id) && !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
         let frame = self.body_rect(saved).ok_or("the canvas is not shown")?;
-        let [_, _, width, height] = pane_body(&pane, camera);
-        let zoom = page_zoom(&pane, [width, height], css_width(&pane, camera));
+        let zoom = page_zoom(&pane, layout.body_size(), layout.body_world[0]);
         self.ensure_view(id, window, cx)?;
         let key = self.page_key(id).unwrap();
         let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
-        page.live = Some(placement(&pane, camera));
+        page.live = Some(layout);
         (page.told, page.watch) = (false, false);
         page.native.as_ref().unwrap().view.update(cx, |v, _| show_view(v, frame, zoom));
         self.select_browser_pane(id);
@@ -2583,34 +2581,12 @@ mod tests {
     }
 }
 
-/// Where a live page sits: the camera and rect, or for a pinned pane just its screen rect, so
-/// panning or zooming the canvas under a pinned page leaves it live.
-#[cfg(target_os = "macos")]
-fn placement(pane: &canvas::Pane, camera: canophy::Camera) -> (canophy::Camera, canophy::Rect) {
-    match pane.pinned {
-        Some(screen) => (canophy::Camera::default(), screen),
-        None => (camera, pane.rect.array()),
-    }
-}
-
-/// The CSS width a responsive page keeps: its body's width at zoom 1.
-#[cfg(target_os = "macos")]
-fn css_width(pane: &canvas::Pane, camera: canophy::Camera) -> f32 { placement(pane, camera).1[2] - 2. }
-
-/// The pane body in canvas screen pixels, excluding the border and fixed-height header.
-#[cfg(target_os = "macos")]
-fn pane_body(pane: &canvas::Pane, camera: canophy::Camera) -> canophy::Rect {
-    let [x, y, w, h] = super::browser_mask::screen_rect(pane, pane.rect.array(), camera);
-    let header = canvas::header_height(&pane.kind);
-    [x + 1., y + header + 1., (w - 2.).max(0.), (h - header - 2.).max(0.)]
-}
-
 /// A fixed viewport fits inside the body at its original aspect ratio.
 #[cfg(target_os = "macos")]
-pub(super) fn viewport_rect(pane: &canvas::Pane, camera: canophy::Camera) -> canophy::Rect {
-    let [x, y, w, h] = pane_body(pane, camera);
+pub(super) fn viewport_rect(pane: &canvas::Pane, layout: &canophy::Layout) -> canophy::Rect {
+    let [x, y, w, h] = layout.body;
     let Some([css_w, css_h]) = fixed_viewport(pane) else { return [x, y, w, h] };
-    let zoom = page_zoom(pane, [w, h], css_width(pane, camera));
+    let zoom = page_zoom(pane, [w, h], layout.body_world[0]);
     let (page_w, page_h) = ((f64::from(css_w) * zoom) as f32, (f64::from(css_h) * zoom) as f32);
     [x + (w - page_w) / 2., y + (h - page_h) / 2., page_w, page_h]
 }
@@ -2644,29 +2620,27 @@ impl AppWindow {
     /// Window-space bounds of the live element, including the viewport's centering offset.
     pub(super) fn body_rect(&self, pane: &canvas::Pane) -> Option<Bounds<Pixels>> {
         if self.canvas_state.doc.docked(&pane.id) {
-            let (view, panel) = self.docked_view(&pane.id)?;
-            let [x, y, w, h] = viewport_rect(&view, canophy::Camera::default());
+            let (layout, panel) = self.docked_view(&pane.id)?;
+            let [x, y, w, h] = viewport_rect(pane, &layout);
             return Some(Bounds::new(panel.origin + point(px(x), px(y)), size(px(w), px(h))));
         }
         let origin = self.bounds.borrow().get("canopy-canvas")?.origin;
-        let [x, y, w, h] = viewport_rect(pane, self.canvas_state.doc.camera);
+        let [x, y, w, h] = viewport_rect(pane, &canophy::layout(self.canvas_state.doc.camera, pane));
         Some(Bounds::new(origin + point(px(x), px(y)), size(px(w), px(h))))
     }
 
     /// The size and zoom a page lays out at in its measured host (the Files panel body, or the
     /// pane at the current camera, zoomed with it), so a resting snapshot matches the page when
-    /// it wakes. Before the host is measured, the pane's world size at zoom 1.
+    /// it wakes. Before the host is measured, the pane's world body at zoom 1.
     fn host_frame(&self, pane: &canvas::Pane) -> ([f32; 2], f64) {
         let docked = self.canvas_state.doc.docked(&pane.id);
+        let body_world = canophy::layout(self.canvas_state.doc.camera, pane).body_world;
         match self.body_rect(pane).map(|b| [f32::from(b.size.width), f32::from(b.size.height)]) {
             Some([w, h]) if w >= 1. && h >= 1. => {
-                let width = if docked { w } else { css_width(pane, self.canvas_state.doc.camera) };
+                let width = if docked { w } else { body_world[0] };
                 ([w, h], fixed_viewport(pane).map_or(f64::from(w / width), |[css_w, _]| f64::from(w / css_w)))
             }
-            _ => {
-                let rect = pane.pinned.unwrap_or(pane.rect.array());
-                ([rect[2], (rect[3] - canvas::BROWSER_HEADER).max(1.)], 1.)
-            }
+            _ => (body_world.map(|v| v.max(1.)), 1.),
         }
     }
 

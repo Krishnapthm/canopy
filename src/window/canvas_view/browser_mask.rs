@@ -70,14 +70,6 @@ fn visible_in_host(frame: R, clip: Option<R>, above: &[R]) -> Vec<R> {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn screen_rect(pane: &canvas::Pane, rect: R, camera: canophy::Camera) -> R {
-    // Document::pin puts the clamped screen origin into the world rect used to draw the pane.
-    let [x, y, w, h] = camera.rect_to_screen(rect);
-    let [w, h] = pane.pinned.map_or([w, h], |[_, _, w, h]| [w, h]);
-    [x, y, w, h]
-}
-
-#[cfg(target_os = "macos")]
 fn rect(bounds: Bounds<Pixels>) -> R {
     [
         bounds.origin.x.into(),
@@ -101,25 +93,16 @@ impl AppWindow {
 
         // shortcut: GPUI tooltips lack cover bounds, measure them if they need to overlap live pages.
         // shortcut: rectangular holes leave square corners, use pane-shaped paths if the corners matter.
-        let [x, y, w, h] = screen_rect(page, page.rect.array(), camera);
-        let (edge, corner) = resize_zone_sizes(camera.zoom());
-        let (x, y, w, h) = (x + 1., y + 1., w - 2., h - 2.);
-        // WebKit's native hit test also needs to leave the GPUI resize zones exposed.
-        let grips = [
-            [x + corner, y, w - 2. * corner, edge],
-            [x + corner, y + h - edge, w - 2. * corner, edge],
-            [x, y + corner, edge, h - 2. * corner],
-            [x + w - edge, y + corner, edge, h - 2. * corner],
-            [x, y, corner, corner],
-            [x + w - corner, y, corner, corner],
-            [x, y + h - corner, corner, corner],
-            [x + w - corner, y + h - corner, corner, corner],
-        ];
+        let [x, y, w, h] = canophy::layout(camera, page).screen;
+        // WebKit's native hit test also needs to leave the GPUI resize grips exposed.
+        let border = canophy::layout::BORDER;
+        let grips: Vec<R> = grip_rects([w - 2. * border, h - 2. * border]).into_iter()
+            .map(|(_, [gx, gy, gw, gh])| [x + border + gx, y + border + gy, gw, gh]).collect();
         let panes = doc.panes.iter()
             .filter(|p| doc.shown(p) && paint_order(p) > paint_order(page))
             .filter_map(|p| self.pane_screen_bounds(p).map(rect))
             .collect();
-        (panes, grips.to_vec())
+        (panes, grips)
     }
 
     /// Runs after the canvas, controls and the native content slots measure this frame.

@@ -273,12 +273,7 @@ impl AppWindow {
 
     /// A pane's actual screen footprint, relative to the canvas viewport.
     pub(super) fn pane_screen_bounds(&self, pane: &canvas::Pane) -> Option<Bounds<Pixels>> {
-        let camera = self.canvas_state.doc.camera;
-        let [x, y, w, h] = self.wire_cell_rect(pane)?;
-        let [x, y] = camera.to_screen([x, y]);
-        let [w, h] = pane
-            .pinned
-            .map_or(camera.size_to_screen([w, h]), |[_, _, w, h]| [w, h]);
+        let [x, y, w, h] = canophy::layout::screen(self.canvas_state.doc.camera, pane, self.wire_cell_rect(pane)?);
         Some(Bounds::new(point(px(x), px(y)), size(px(w), px(h))))
     }
 }

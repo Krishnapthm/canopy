@@ -17,6 +17,8 @@ mod annotate;
 mod image_pane;
 mod pdf;
 mod sim;
+mod scaled;
+pub(in crate::window) use scaled::{ScaledPane, wpx};
 #[cfg(target_os = "macos")]
 mod sim_screen;
 
@@ -1563,6 +1565,39 @@ impl AppWindow {
     /// Measures the canvas from the last frame (the window before the first one) and, when its
     /// size or uncovered part changed, tells canophy, which re-derives pinned panes. Runs before
     /// each render; it writes nothing while the window stays the same size.
+    /// Pushes each pane's layout into the views that draw it: a terminal's scale and world body
+    /// (its grid reflows only once nothing moves the camera or the pane), and a PDF's page
+    /// scale. Runs before each render, after `sync_viewport`, so render only reads.
+    pub(in crate::window) fn sync_panes(&mut self, cx: &mut Context<Self>) {
+        let rested = self.camera_rested();
+        let state = &self.canvas_state;
+        let camera = state.doc.camera;
+        let doc = state.shown.as_ref().unwrap_or(&state.doc);
+        for card in doc.panes.iter().filter(|p| doc.shown(p)) {
+            let layout = canophy::layout(camera, card);
+            match &card.kind {
+                canvas::Kind::Terminal { size: Some(_) } if !state.popped.contains_key(&card.id) => {
+                    let Some(t) = self.terms.get(&cell_slot(&card.id)) else { continue };
+                    let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.id);
+                    // A pinch or a corner drag reflows the program once, when it settles.
+                    let reflow = rested && !resizing && !terminal_compact(state, card);
+                    let [w, h] = layout.body_world;
+                    t.view.update(cx, |v, cx| {
+                        // Unentered cells let the wheel through, so the canvas pans over them.
+                        v.wheel_needs_focus = true;
+                        v.set_scale(layout.scale, size(px(w), px(h)), reflow, cx);
+                    });
+                }
+                canvas::Kind::Pdf { .. } => {
+                    let Some(view) = state.pdfs.get(&card.id) else { continue };
+                    view.update(cx, |view, cx| view.set_display_scale(layout.scale, rested, cx));
+                }
+                canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } | canvas::Kind::File { .. } | canvas::Kind::Image { .. }
+                | canvas::Kind::Mod { .. } | canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. } => {}
+            }
+        }
+    }
+
     pub(in crate::window) fn sync_viewport(&mut self, window: &Window) {
         let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
         let view = canophy::Viewport { size: [f32::from(size.width), f32::from(size.height)], open: self.open_canvas_in(window.viewport_size()) };
@@ -2790,10 +2825,9 @@ impl AppWindow {
         let quote_pane = card.id.clone();
         let quote_path = file.to_owned();
         let quote_view = view.clone();
-        // The text scales with the canvas like a picture; a pinned pane keeps its screen size.
-        let z = if card.pinned.is_some() { 1. } else { camera.zoom() };
-        let body = div().flex_1().min_h_0().overflow_hidden().px(px(16. * z)).py(px(12. * z))
-            .text_size(px(crate::settings::ui_font_size() * z)).child(gpui_base::TextView::new(view).scrollable(true)
+        // The text scales with the pane like a picture (`ScaledPane` in `pane_card`).
+        let body = div().flex_1().min_h_0().overflow_hidden().px(wpx(16.)).py(wpx(12.))
+            .child(gpui_base::TextView::new(view).scrollable(true)
                     .image_source(|_| {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
                         gpui::ImageSource::Image(BLANK.clone())
@@ -2803,10 +2837,11 @@ impl AppWindow {
         self.pane_card(card, "mods/files/file.svg".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned(), path.parent().unwrap_or(path).to_string_lossy().into_owned(), None, body, camera, cx)
     }
 
-    /// A pane header: a fixed screen-size row (icon 16, gap 8, text 13/18) at any zoom. Callers
-    /// add their children and listeners; overflowing text is cut by the pane's own clipping.
+    /// A pane header row (icon 16, gap 8, text 13/18 world px): drawn in a `ScaledPane`, it
+    /// scales with the pane. Callers add their children and listeners; overflowing text is cut
+    /// by the pane's own clipping.
     fn pane_header() -> Div {
-        div().flex().items_start().px(px(12.)).py(px(9.)).gap(px(8.)).text_size(px(13.)).line_height(px(18.))
+        div().flex().items_start().px(wpx(12.)).py(wpx(9.)).gap(wpx(8.)).text_size(wpx(13.)).line_height(wpx(18.))
             .text_color(c("foreground")).overflow_hidden()
     }
 
@@ -2820,17 +2855,17 @@ impl AppWindow {
         }
     }
 
-    /// A fixed-size button that shows the pane's current color and opens its choices.
+    /// A button (18 world px) that shows the pane's current color and opens its choices.
     fn pane_color_swatch(&self, id: &str, cx: &mut Context<Self>) -> gpui::Stateful<Div> {
         let color = self.canvas_state.doc.effective_color(id);
         let fill = color.map_or_else(|| c("surface"), |hue| c(&hue.tint_token()));
         let value = color.map(|hue| hue.name());
         let palette: Vec<_> = self.canvas_state.doc.pane_palette.iter().map(|hue| hue.name()).collect();
         let id = id.to_owned();
-        div().id(SharedString::from(format!("pane-color-{id}"))).size(px(18.)).flex_none()
-            .flex().items_center().justify_center().cursor_pointer().rounded(px(ui::RADIUS_SM))
+        div().id(SharedString::from(format!("pane-color-{id}"))).size(wpx(18.)).flex_none()
+            .flex().items_center().justify_center().cursor_pointer().rounded(wpx(ui::RADIUS_SM))
             .role(gpui::Role::Button).aria_label("Pane color").hover(|d| d.bg(c("hover")))
-            .child(div().size(px(12.)).rounded_full().border_1().border_color(c("muted-foreground")).bg(fill))
+            .child(div().size(wpx(12.)).rounded_full().border_1().border_color(c("muted-foreground")).bg(fill))
             .tooltip(strip_tooltip("Pane color".into(), None))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
@@ -2843,7 +2878,8 @@ impl AppWindow {
     /// replaces the icon, title and detail inside the same header.
     #[allow(clippy::too_many_arguments)]
     fn pane_card(&self, card: &canvas::Pane, icon: SharedString, title: String, detail: String, header: Option<AnyElement>, body: AnyElement, camera: canophy::Camera, cx: &mut Context<Self>) -> AnyElement {
-        let [px0, py0, pw, ph] = camera.rect_to_screen(card.rect);
+        let layout = canophy::layout(camera, card);
+        let [px0, py0, pw, ph] = layout.screen;
         let drag = card.id.clone();
         let color_menu = drag.clone();
         let raise = drag.clone();
@@ -2852,9 +2888,9 @@ impl AppWindow {
         let pane_menu = card.id.clone();
         #[cfg(target_os = "macos")]
         let rest = card.id.clone();
-        let card_element = div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(px0)).top(px(py0))
+        let card_element = div().id(SharedString::from(format!("preview-{}", card.id))).debug_selector(|| "pane-card".into()).absolute().left(px(px0)).top(px(py0))
                 .w(px(pw)).h(px(ph))
-                .flex().flex_col().bg(c("surface")).border_1().border_color(self.pane_frame_color(&card.id)).rounded(px(ui::RADIUS)).overflow_hidden()
+                .flex().flex_col().text_size(rems(1.)).bg(c("surface")).border_1().border_color(self.pane_frame_color(&card.id)).rounded(wpx(ui::RADIUS)).overflow_hidden()
                 .occlude()
                 // Capture phase: raise and select before the body handles input and can take focus.
                 .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, window, cx| {
@@ -2890,8 +2926,8 @@ impl AppWindow {
                 }
             }),
         ));
-        card_element
-                .when(canvas::header_height(&card.kind) > 0., |d| d.child(Self::pane_header().h(px(canvas::header_height(&card.kind))).flex_none().border_b_1().border_color(c("border"))
+        let card_element = card_element
+                .when(layout.header > 0., |d| d.child(Self::pane_header().debug_selector(|| "pane-header".into()).h(wpx(canvas::header_height(&card.kind))).flex_none().border_b_1().border_color(c("border"))
                     .when(browser, |head| head.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                         this.open_menu("canvas-colors", json!({"pane":color_menu}), Some(e.position), window, cx);
                         cx.stop_propagation();
@@ -2904,14 +2940,14 @@ impl AppWindow {
                         Some(header) => head.p(px(0.))
                             .child(div().flex_1().min_w_0().child(header)),
                         None => head
-                            .child(div().flex_none().mt(px(1.)).child(svg().path(icon).size(px(16.)).text_color(c("foreground"))))
+                            .child(div().flex_none().mt(wpx(1.)).debug_selector(|| "pane-icon".into()).child(svg().path(icon).size(wpx(16.)).text_color(c("foreground"))))
                             .child(div().min_w_0().truncate().child(title))
                             .child(div().flex_1().min_w_0().truncate().text_color(c("muted-foreground")).child(detail))
                             .child(self.pane_color_swatch(&card.id, cx)),
                     })))
                 .child(div().flex_1().min_h_0().overflow_hidden().child(body))
-                .children(Self::resize_zones(card, camera.zoom(), cx))
-                .into_any_element()
+                .children(Self::resize_zones(card, &layout, cx));
+        ScaledPane::new(layout.scale, card_element).into_any_element()
     }
 
     /// Starts a boxed pane move from its header or shared helper bar.
@@ -2921,26 +2957,24 @@ impl AppWindow {
         self.canvas_state.preview_drag = Some((id.to_owned(), None, position));
     }
 
-    /// Eight resize hitboxes shared by expanded terminals and boxed panes.
-    fn resize_zones(card: &canvas::Pane, zoom: f32, cx: &mut Context<Self>) -> [gpui::Stateful<Div>; 8] {
-        let (edge, corner) = resize_zone_sizes(zoom);
+    /// Eight resize hitboxes shared by expanded terminals and boxed panes: overlay chrome, so
+    /// the same screen size at every zoom, and none on a pane too small to grab (`GRIP_MIN`).
+    fn resize_zones(card: &canvas::Pane, layout: &canophy::Layout, cx: &mut Context<Self>) -> Vec<gpui::Stateful<Div>> {
         let boxed = card.boxed();
         let browser = card.url().is_some();
         let [_, _, width, height] = card.pinned.unwrap_or(card.rect.array());
-        [(-1i8, -1i8), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].map(|zone| {
+        let inside = [layout.screen[2] - 2. * canophy::layout::BORDER, layout.screen[3] - 2. * canophy::layout::BORDER];
+        grip_rects(inside).into_iter().map(|(zone, [x, y, w, h])| {
             let id = card.id.clone();
-            let thick = |other: i8| px(if other == 0 { edge } else { corner });
             let cursor = match zone {
                 (0, _) => CursorStyle::ResizeUpDown,
                 (_, 0) => CursorStyle::ResizeLeftRight,
                 (a, b) if a == b => CursorStyle::ResizeUpLeftDownRight,
                 _ => CursorStyle::ResizeUpRightDownLeft,
             };
-            let d = div().id(SharedString::from(format!("canvas-resize-{id}-{}-{}", zone.0, zone.1)))
-                .absolute().cursor(cursor).block_mouse_except_scroll();
-            let d = match zone.0 { -1 => d.left_0().w(thick(zone.1)), 1 => d.right_0().w(thick(zone.1)), _ => d.left(px(corner)).right(px(corner)) };
-            let d = match zone.1 { -1 => d.top_0().h(thick(zone.0)), 1 => d.bottom_0().h(thick(zone.0)), _ => d.top(px(corner)).bottom(px(corner)) };
-            d.when(boxed && zone == (1, 1), |d| d.rounded_br(px(ui::RADIUS))
+            div().id(SharedString::from(format!("canvas-resize-{id}-{}-{}", zone.0, zone.1)))
+                .absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).cursor(cursor).block_mouse_except_scroll()
+                .when(boxed && zone == (1, 1), |d| d.rounded_br(wpx(ui::RADIUS))
                 .border_r_2().border_b_2().border_color(c("muted-foreground"))
                 .hover(|d| d.border_color(c("foreground"))))
                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -2959,7 +2993,7 @@ impl AppWindow {
                     cx.stop_propagation();
                     cx.notify();
                 }))
-        })
+        }).collect()
     }
 
     /// Shortcut hints for an empty canvas, like VS Code's empty editor: only actions that have a key.
@@ -3323,8 +3357,8 @@ impl AppWindow {
                 (n, 0) => format!("{n} terminal{}", if n == 1 { "" } else { "s" }),
                 (n, w) => format!("{n} terminal{} · {w} working", if n == 1 { "" } else { "s" }),
             };
-            let z = camera.zoom();
-            let [x, y] = camera.to_screen([space.rect[0], space.rect[1]]);
+            // The card scales like a pane; its name above it keeps its screen size, as in Figma.
+            let ([x, y, sw, sh], scale) = canophy::layout::surface(camera, space.rect);
             let selected = state.selected.contains(&id);
             let rename_id = id.clone();
             let color = c(&space.color.name());
@@ -3348,19 +3382,19 @@ impl AppWindow {
                         cx.stop_propagation();
                     }
                 }));
-            area = area.child(
+            area = area.child(ScaledPane::new(scale,
                 div()
                     .id(SharedString::from(format!("space-card-{id}")))
                     .absolute()
                     .left(px(x))
                     .top(px(y))
-                    .w(px(space.rect[2] * z))
-                    .h(px(space.rect[3] * z))
-                    .rounded(px(ui::RADIUS_LG * z))
+                    .w(px(sw))
+                    .h(px(sh))
+                    .rounded(wpx(ui::RADIUS_LG))
                     .border_1()
                     .border_color(if selected { c("ring") } else { color.opacity(0.35) })
                     .bg(color.opacity(self.person.space_fill))
-                    .p(px(12. * z))
+                    .p(wpx(12.))
                     .flex()
                     .flex_col()
                     .justify_end()
@@ -3369,10 +3403,10 @@ impl AppWindow {
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(6. * z))
-                            .text_size(px(12. * z))
+                            .gap(wpx(6.))
+                            .text_size(wpx(12.))
                             .text_color(c("muted-foreground"))
-                            .when(blocked, |d| d.child(svg().path("frame/settings/bell.svg").size(px(12. * z)).text_color(c("muted-foreground"))))
+                            .when(blocked, |d| d.child(svg().path("frame/settings/bell.svg").size(wpx(12.)).text_color(c("muted-foreground"))))
                             .child(summary),
                     )
                     .capture_key_down(cx.listener(|this, e: &KeyDownEvent, window, cx| {
@@ -3411,7 +3445,7 @@ impl AppWindow {
                             cx.stop_propagation();
                         }),
                     ),
-            );
+            ));
         }
         // Every pane kind joins one z-sorted list, so overlapping panes stack the same whatever they are.
         let mut pills: Vec<((bool, u64), AnyElement)> = Vec::new();
@@ -3434,22 +3468,24 @@ impl AppWindow {
                 canvas::Kind::Browser { .. } => {
                     drawn_pages.extend(self.page_key(&card.id));
                     let header = self.browser_chrome(&card.id, browser::Host::Pane, cx);
-                    let body = self.browser_body(card, camera, cx);
+                    let body = self.browser_body(card, canophy::layout(camera, card), cx);
                     self.pane_card(card, SharedString::default(), String::new(), String::new(), Some(header), body, camera, cx)
                 }
                 canvas::Kind::Mod { .. } => {
                     let name = card.mod_name().unwrap();
                     let (icon, title, body) = if let Some(hint) = self.folders.get(name).and_then(|f| f.hint.pane.as_ref()) {
-                        (SharedString::from(hint.icon.clone()), hint.label.clone(), self.render_slot(&format!("pane:{}", card.id), cx))
+                        // A mod lays out at screen size inside the scaling pane: GPUI cannot scale
+                        // its px lengths, so its text does not scale either.
+                        (SharedString::from(hint.icon.clone()), hint.label.clone(), div().size_full().text_size(px(settings::ui_font_size())).child(self.render_slot(&format!("pane:{}", card.id), cx)).into_any_element())
                     } else {
-                        ("icons/x.svg".into(), card.kind_name().to_owned(), div().p(px(12.)).text_color(c("muted-foreground")).child(format!("Mod {name} is not installed")).into_any_element())
+                        ("icons/x.svg".into(), card.kind_name().to_owned(), div().p(wpx(12.)).text_color(c("muted-foreground")).child(format!("Mod {name} is not installed")).into_any_element())
                     };
                     self.pane_card(card, icon, title, String::new(), None, body, camera, cx)
                 }
                 canvas::Kind::Sim { .. } => {
                     drawn_sims.push(card.id.clone());
                     let (title, detail) = self.sim_title(card, cx);
-                    let body = self.sim_card_body(card, camera, cx);
+                    let body = self.sim_card_body(card, canophy::layout(camera, card), cx);
                     self.pane_card(card, "icons/smartphone.svg".into(), title, detail, None, body, camera, cx)
                 }
             };
@@ -3507,14 +3543,14 @@ impl AppWindow {
         for (parent, sub, card) in sub_pills {
             let key = card.id.clone();
             let color_menu = key.clone();
-            let [x, y, w, h] = camera.rect_to_screen(card.rect);
-            let z = camera.zoom();
+            let layout = canophy::layout(camera, &card);
+            let [x, y, w, h] = layout.screen;
             let (icon, tint) = program_icon(&json!({"program":sub.program}));
             let mut pill = Self::pane_header().id(SharedString::from(format!("canvas-sub-{parent}-{}", sub.id)))
                 .absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h))
-                .rounded(px(ui::RADIUS * z)).border_1().border_color(self.pane_frame_color(&key)).bg(c("surface"))
+                .rounded(wpx(ui::RADIUS)).border_1().border_color(self.pane_frame_color(&key)).bg(c("surface"))
                 .when(sub.done, |d| d.opacity(0.5)).occlude()
-                .child(div().flex_none().mt(px(1.)).child(icon_element(&icon, tint, px(16.), c("foreground"))));
+                .child(div().flex_none().mt(wpx(1.)).child(icon_element(&icon, tint, wpx(16.), c("foreground"))));
             let text = div().flex_1().min_w_0().child(div().text_ellipsis().when(sub.done, |d| d.text_color(c("muted-foreground")))
                 .child(format!("{} · {}", sub.name, if sub.done { "done" } else { "working" })));
             pill = pill.child(text).child(self.pane_color_swatch(&card.id, cx));
@@ -3534,7 +3570,7 @@ impl AppWindow {
                 this.open_menu("canvas-colors", json!({"pane":color_menu}), Some(e.position), window, cx);
                 cx.stop_propagation();
             }));
-            pills.push((paint_order(&card), pill.into_any_element()));
+            pills.push((paint_order(&card), ScaledPane::new(layout.scale, pill).into_any_element()));
         }
         let mut shown = shown;
         shown.sort_by_key(|c| c.z);
@@ -3544,22 +3580,21 @@ impl AppWindow {
             let rec = self.live.get(&addr).unwrap_or(&Value::Null);
             let agent = canvas_agent(rec);
             let name = self.pill_name(&addr);
-            let [x, y] = camera.to_screen([card.rect.x, card.rect.y]);
-            let z = camera.zoom();
-            // An expanded cell is a pill (its header) over a terminal; it keeps its world size at every zoom.
+            // A pill, or an expanded cell (a pill over a terminal), is a picture of its world rect.
+            let layout = canophy::layout(camera, &card);
+            let [x, y, sw, sh] = layout.screen;
             let expanded = card.size().is_some();
-            let [cw, ch] = [card.rect.w, card.rect.h];
             let is_synced = synced.contains(&addr);
             let frame_color = if is_synced { c("accent") } else { self.pane_frame_color(&addr) };
-            // A collapsed pill is a box at world size; its header contents keep their screen size, clipped.
             let mut pill = Self::pane_header()
                 .id(SharedString::from(format!("canvas-{addr}")))
-                .when(!expanded, |d| d.absolute().left(px(x)).top(px(y)).rounded(px(ui::RADIUS * z)).border_1().border_color(frame_color).bg(c("surface")).occlude())
-                .w(px(cw * z))
-                .h(px(if expanded { canvas::HEADER } else { ch * z }));
+                .debug_selector(|| "cell-pill".into())
+                .when(!expanded, |d| d.absolute().left(px(x)).top(px(y)).rounded(wpx(ui::RADIUS)).border_1().border_color(frame_color).bg(c("surface")).occlude())
+                .w(px(sw))
+                .map(|d| if expanded { d.h(wpx(canvas::HEADER)) } else { d.h(px(sh)) });
             let (icon, tint) = program_icon(rec);
             // Glyphs sit on the first line, so a two-line name keeps its icon top-left.
-            pill = pill.child(div().flex_none().mt(px(1.)).child(icon_element(&icon, tint, px(16.), c("foreground"))));
+            pill = pill.child(div().flex_none().mt(wpx(1.)).debug_selector(|| "cell-icon".into()).child(icon_element(&icon, tint, wpx(16.), c("foreground"))));
             // On an expanded cell, double-clicking the name edits its tab's name in place (a pill enters instead).
             let tab_id = self.model.pane_of(&addr).and_then(|p| self.model.tab_of(&p)).map(|t| t.id.clone()).filter(|_| expanded);
             let editing = tab_id.as_ref().and_then(|id| state.rename.as_ref().filter(|(t, _, _)| *t == Rename::Tab(id.clone())));
@@ -3567,8 +3602,8 @@ impl AppWindow {
                 .when_some(editing, |d, (_, input, _)| d.child(gpui_base::Input::new(input)))
                 .when(editing.is_none(), |d| d.child(name.clone()))
                 .id(SharedString::from(format!("canvas-name-{addr}")));
-            let pill_badge = is_synced.then(|| div().flex_none().px(px(5.)).rounded(px(3.)).border_1().border_color(c("accent"))
-                .text_size(px(10.)).line_height(px(16.)).font_weight(FontWeight::SEMIBOLD).text_color(c("accent")).child("SYNC"));
+            let pill_badge = is_synced.then(|| div().flex_none().px(wpx(5.)).rounded(wpx(3.)).border_1().border_color(c("accent"))
+                .text_size(wpx(10.)).line_height(wpx(16.)).font_weight(FontWeight::SEMIBOLD).text_color(c("accent")).child("SYNC"));
             pill = pill.child(match tab_id {
                 Some(id) => name_box.on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     let editing = this.canvas_state.rename.as_ref().is_some_and(|(t, _, _)| *t == Rename::Tab(id.clone()));
@@ -3583,8 +3618,8 @@ impl AppWindow {
                 pill = pill.child(
                     svg()
                         .path("mods/workspace-chrome/spinner.svg")
-                        .size(px(12.))
-                        .mt(px(3.))
+                        .size(wpx(12.))
+                        .mt(wpx(3.))
                         .text_color(c("muted-foreground"))
                         .with_animation(
                             "working",
@@ -3598,8 +3633,8 @@ impl AppWindow {
                 pill = pill.child(
                     svg()
                         .path("frame/settings/bell.svg")
-                        .size(px(12.))
-                        .mt(px(3.))
+                        .size(wpx(12.))
+                        .mt(wpx(3.))
                         .text_color(c("muted-foreground")),
                 );
             }
@@ -3607,8 +3642,8 @@ impl AppWindow {
                 pill = pill.child(
                     svg()
                         .path("icons/external-link.svg")
-                        .size(px(12.))
-                        .mt(px(3.))
+                        .size(wpx(12.))
+                        .mt(wpx(3.))
                         .text_color(c("muted-foreground")),
                 );
             }
@@ -3662,28 +3697,13 @@ impl AppWindow {
                 }),
             );
             if !expanded {
-                pills.push((paint_order(&card), pill.into_any_element()));
+                pills.push((paint_order(&card), ScaledPane::new(layout.scale, pill).into_any_element()));
                 continue;
             }
-            // The terminal scales with the canvas like a picture: its grid comes from the body at
-            // zoom 1, drawn at the scale that fits it under the header, and waits for `settled`.
+            // The terminal is drawn at the pane's scale; `sync_panes` gave it its grid.
             let slot = cell_slot(&card.id);
-            let entered = state.entered() == Some(card.id.as_str());
             let live = self.terms.get(&slot);
-            let ([bw, bh], drawn) = terminal_body(cw, ch, z);
-            let body_size = size(px(bw), px(bh));
-            // A tile squeezed below readable size shows who it is instead, and its program keeps its grid.
-            let compact = state.tile.is_some() && !entered && (cw < canvas::TILE_COMPACT[0] || ch < canvas::TILE_COMPACT[1]);
-            if let Some(t) = live {
-                let resizing = state.cell_resize.as_ref().is_some_and(|(key, _)| key == &card.id);
-                // The grid follows the cell only once the zoom rests, else a pinch resizes the program every frame.
-                let settled = !resizing && !compact && self.camera_rested();
-                t.view.update(cx, |v, cx| {
-                    // Unentered cells let the wheel through, so the canvas pans over them.
-                    v.wheel_needs_focus = true;
-                    v.set_scale(drawn, settled.then_some(body_size), (!self.person.canvas_resize_terminals).then_some(body_size), cx);
-                });
-            }
+            let compact = terminal_compact(state, &card);
             let (select_addr, mode_addr) = (card.id.clone(), card.id.clone());
             let body = div()
                 .id(SharedString::from(format!("canvas-body-{}", card.id)))
@@ -3726,21 +3746,22 @@ impl AppWindow {
                 }))
                 .child(match live.filter(|_| !compact) {
                     Some(t) => shown_terminal(&t.view, cx),
-                    None if compact => div().size_full().flex().flex_col().items_center().justify_center().gap(px(8. * z)).p(px(8. * z))
-                        .bg(c("surface")).text_size(px(13. * z)).text_color(c("foreground"))
-                        .child(icon_element(&icon, tint, px(28. * z), c("foreground")))
+                    None if compact => div().size_full().flex().flex_col().items_center().justify_center().gap(wpx(8.)).p(wpx(8.))
+                        .bg(c("surface")).text_size(wpx(13.)).text_color(c("foreground"))
+                        .child(icon_element(&icon, tint, wpx(28.), c("foreground")))
                         .child(div().max_w_full().truncate().child(name.clone()))
                         .into_any_element(),
                     None => div().size_full().bg(crate::terminal::hsla(crate::vt::theme().bg)).into_any_element(),
                 });
-            pills.push((paint_order(&card), div()
+            pills.push((paint_order(&card), ScaledPane::new(layout.scale, div()
                 .id(SharedString::from(format!("canvas-cell-{}", card.id)))
                 .absolute()
                 .left(px(x))
                 .top(px(y))
-                .w(px(camera.len_to_screen(card.rect.w)))
-                .h(px(camera.len_to_screen(card.rect.h)))
-                .rounded(px(ui::RADIUS * z))
+                .w(px(sw))
+                .h(px(sh))
+                .text_size(rems(1.))
+                .rounded(wpx(ui::RADIUS))
                 .when(is_synced, |d| d.border_2()).when(!is_synced, |d| d.border_1())
                 .border_color(frame_color)
                 .bg(c("surface"))
@@ -3751,7 +3772,7 @@ impl AppWindow {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(pill)
                 .child(body)
-                .children(Self::resize_zones(&card, z, cx))
+                .children(Self::resize_zones(&card, &layout, cx)))
                 .into_any_element()));
         }
         pills.sort_by_key(|(z, _)| *z);
@@ -4207,15 +4228,6 @@ fn full_speed([x, y]: canophy::Point) -> canophy::Point {
     [x * speed, y * speed]
 }
 
-/// A terminal pane's body in world px as at zoom 1, so its grid never depends on the zoom, and
-/// the scale that fits that body into the one drawn at zoom `z`: the header and border keep
-/// their screen size, so the drawn body is not the world body times `z`.
-fn terminal_body(cw: f32, ch: f32, z: f32) -> ([f32; 2], f32) {
-    let body = [(cw - 2.).max(1.), (ch - canvas::HEADER - 2.).max(1.)];
-    let fit = ((cw * z - 2.) / body[0]).min((ch * z - canvas::HEADER - 2.) / body[1]);
-    (body, fit.max(0.01))
-}
-
 /// Screen pixels per second to pan while a dragged `rect` touches or passes an edge of `bounds`:
 /// a quarter speed on contact, full speed 36 px past it. On an axis where the pane covers both
 /// edges, a push would never end, so the pointer near an edge pans instead, as in `edge_pan`.
@@ -4230,10 +4242,35 @@ fn edge_push(rect: Bounds<Pixels>, bounds: Bounds<Pixels>, pointer: Point<Pixels
     ])
 }
 
-/// Edges and corners stay grabbable even when the pane is zoomed out.
-fn resize_zone_sizes(zoom: f32) -> (f32, f32) {
-    ((6. * zoom).max(8.), (12. * zoom).max(8.))
+/// Whether an expanded terminal is a tile squeezed below readable size: it shows who it is
+/// instead of its text, and its program keeps its grid.
+fn terminal_compact(state: &State, card: &canvas::Pane) -> bool {
+    state.tile.is_some() && state.entered() != Some(card.id.as_str())
+        && (card.rect.w < canvas::TILE_COMPACT[0] || card.rect.h < canvas::TILE_COMPACT[1])
 }
+
+/// A pane's eight resize grips inside its frame (`size`, screen px), each with its zone and
+/// `[x, y, w, h]` from the frame's inner top-left. Overlay chrome: the same screen size at
+/// every zoom, and none when the pane is too small to grab (`GRIP_MIN`). The browser mask
+/// leaves these same rects to GPUI.
+pub(super) fn grip_rects([w, h]: canophy::Point) -> Vec<((i8, i8), canophy::Rect)> {
+    if w < GRIP_MIN || h < GRIP_MIN { return vec![]; }
+    let (edge, corner) = (GRIP_EDGE, GRIP_CORNER);
+    let thick = |other: i8| if other == 0 { edge } else { corner };
+    // Along one axis: start and length for this zone side, `across` being the other side's zone.
+    let span = |side: i8, across: i8, len: f32| match side { -1 => (0., thick(across)), 1 => (len - thick(across), thick(across)), _ => (corner, len - 2. * corner) };
+    [(-1i8, -1i8), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].into_iter().map(|zone| {
+        let ((x, gw), (y, gh)) = (span(zone.0, zone.1, w), span(zone.1, zone.0, h));
+        (zone, [x, y, gw, gh])
+    }).collect()
+}
+
+/// A pane's resize edges and corners, in screen px at every zoom (overlay chrome).
+pub(super) const GRIP_EDGE: f32 = 8.;
+pub(super) const GRIP_CORNER: f32 = 12.;
+/// Below this screen size (either side) a pane shows no resize grips or helper bar: they
+/// would cover it.
+pub(super) const GRIP_MIN: f32 = 48.;
 
 /// Panes paint by z, with pinned panes over every canvas pane.
 pub(super) fn paint_order(p: &canvas::Pane) -> (bool, u64) { (p.pinned.is_some(), p.z) }
@@ -4314,21 +4351,21 @@ const TAB_GAP: f32 = 6.;
 fn strip_tab(group: impl Into<SharedString>, active: bool, fill: Hsla, strip: Hsla) -> Stateful<Div> {
     let group = group.into();
     let curve = |left: bool| {
-        div().absolute().bottom_0().size(px(ui::RADIUS)).bg(fill)
-            .map(|d| if left { d.left(px(-ui::RADIUS)) } else { d.right(px(-ui::RADIUS)) })
+        div().absolute().bottom_0().size(wpx(ui::RADIUS)).bg(fill)
+            .map(|d| if left { d.left(wpx(-ui::RADIUS)) } else { d.right(wpx(-ui::RADIUS)) })
             .child(div().size_full().bg(strip)
-                .map(|d| if left { d.rounded_br(px(ui::RADIUS)) } else { d.rounded_bl(px(ui::RADIUS)) }))
+                .map(|d| if left { d.rounded_br(wpx(ui::RADIUS)) } else { d.rounded_bl(wpx(ui::RADIUS)) }))
     };
-    let line = || div().absolute().top(px(10.)).bottom(px(10.)).w(px(1.));
+    let line = || div().absolute().top(wpx(10.)).bottom(wpx(10.)).w(wpx(1.));
     // As in Chrome: space above the tab and between tabs. The fill starts below the gap, so
     // callers keep sizing the tab to the strip's full height.
-    div().id(group.clone()).group(group.clone()).relative().pt(px(TAB_GAP)).mx(px(2.))
+    div().id(group.clone()).group(group.clone()).relative().pt(wpx(TAB_GAP)).mx(wpx(2.))
         .when(active, |d| d
-            .child(div().absolute().top(px(TAB_GAP)).bottom_0().left_0().right_0().rounded_t(px(ui::RADIUS)).bg(fill))
+            .child(div().absolute().top(wpx(TAB_GAP)).bottom_0().left_0().right_0().rounded_t(wpx(ui::RADIUS)).bg(fill))
             .child(curve(true)).child(curve(false)))
         .when(!active, |d| d
             .child(line().right_0().bg(c("border")).group_hover(group.clone(), |d| d.opacity(0.)))
-            .child(line().left(px(-1.)).bg(strip).opacity(0.).group_hover(group, |d| d.opacity(1.))))
+            .child(line().left(wpx(-1.)).bg(strip).opacity(0.).group_hover(group, |d| d.opacity(1.))))
 }
 
 /// A 24 px plain icon button for canvas and panel controls.
@@ -4337,16 +4374,16 @@ fn panel_button(id: &'static str, icon: &'static str, fg: Hsla, hover: Hsla) -> 
         .id(id)
         .group(id)
         .role(gpui::Role::Button)
-        .size(px(24.))
+        .size(wpx(24.))
         .flex_none()
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(ui::RADIUS_SM))
+        .rounded(wpx(ui::RADIUS_SM))
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
-        .child(svg().path(icon).size(px(14.)).text_color(fg).group_hover(id, |s| s.text_color(c("foreground"))))
+        .child(svg().path(icon).size(wpx(14.)).text_color(fg).group_hover(id, |s| s.text_color(c("foreground"))))
 }
 
 /// What a terminal is called on its pill, panel tab and quote row: a name the
@@ -4386,7 +4423,7 @@ fn program_icon(rec: &Value) -> (String, bool) {
 }
 
 /// Tinted glyphs are one-color masks; brand icons keep their colors as images.
-fn icon_element(icon: &str, tint: bool, size: Pixels, color: Hsla) -> AnyElement {
+fn icon_element(icon: &str, tint: bool, size: impl Into<gpui::Length> + std::marker::Copy, color: Hsla) -> AnyElement {
     if tint {
         svg().path(SharedString::from(icon.to_owned())).size(size).flex_none().text_color(color).into_any_element()
     } else {
@@ -4626,7 +4663,7 @@ mod layout_answer_tests {
 
 #[cfg(test)]
 mod input_tests {
-    use super::{AppWindow, WHEEL_GESTURE, edge_pan, edge_push, terminal_body, wheel_claimed};
+    use super::{AppWindow, WHEEL_GESTURE, edge_pan, edge_push, wheel_claimed};
     use super::super::tests::{in_own_process, open_window, running_alone};
     use gpui::{Bounds, Entity, Modifiers, MouseButton, MouseDownEvent, PinchEvent, ScrollDelta,
         ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, point, px, size};
@@ -4675,20 +4712,6 @@ mod input_tests {
         // The other axis still pushes on contact.
         let tall_wide = Bounds::new(point(px(-60.), px(0.)), size(px(480.), px(80.)));
         assert_eq!(edge_push(tall_wide, bounds, point(px(200.), px(40.))), [0., 225.]);
-    }
-
-    #[test]
-    fn terminal_grid_body_ignores_the_zoom() {
-        // The body that sizes the PTY grid is the same at every zoom: the header's screen size
-        // never feeds it, so zooming out keeps the rows.
-        let (body, fit) = terminal_body(800., 600., 1.);
-        assert_eq!((body, fit), ([798., 562.], 1.));
-        for z in [0.1, 0.5, 2.] {
-            let (at, fit) = terminal_body(800., 600., z);
-            assert_eq!(at, body);
-            // Drawn at `fit`, that body fits under the header of the pane drawn at `z`.
-            assert!(at[0] * fit <= 800. * z - 2. + 1e-3 && at[1] * fit <= 600. * z - crate::canvas::HEADER - 2. + 1e-3);
-        }
     }
 
     const WHEEL: &str = "window::canvas_view::input_tests::wheel_over_panes";
@@ -5188,5 +5211,49 @@ mod hint_tests {
             rows.pop();
         }
         assert_eq!(super::action_key(&rows, "canvas.close"), None);
+    }
+}
+
+#[cfg(test)]
+mod scale_tests {
+    use super::{TestAppContext, json};
+    use super::super::tests::{in_own_process, open_window, running_alone};
+    use crate::canophy::{Camera, Intent};
+    use gpui::{Bounds, Pixels, VisualTestContext};
+    const TEST: &str = "window::canvas_view::scale_tests::panes_scale_as_pictures_headless";
+    /// Every pane part these name: a mod pane's card, header and icon, and a terminal pill.
+    const PARTS: [&str; 5] = ["pane-card", "pane-header", "pane-icon", "cell-pill", "cell-icon"];
+
+    #[test]
+    fn panes_scale_as_pictures() { in_own_process(TEST); }
+
+    /// The picture law: drawn at 50%, each part of a pane sits at its 100% place and size
+    /// halved (to a pixel, the frame being 1 screen px at every zoom). A length left in `px`
+    /// inside a pane breaks this.
+    #[gpui::test]
+    fn panes_scale_as_pictures_headless(cx: &mut TestAppContext) {
+        if !running_alone(TEST) { return; }
+        let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"canvas"}));
+        view.update_in(cx, |this, _, _| {
+            this.canvas_state.doc.panes = serde_json::from_value(json!([
+                {"id":"m1","kind":"mod:none","props":{},"rect":[100,100,400,300],"z":0},
+                {"id":"t1","kind":"terminal","props":{},"rect":[100,500,220,36],"z":1}
+            ])).unwrap();
+        });
+        let at = |cx: &mut VisualTestContext, zoom: f32| -> Vec<Bounds<Pixels>> {
+            view.update(cx, |this, cx| { this.canvas_state.step(Intent::Camera(Camera::new(0., 0., zoom))); cx.notify(); });
+            cx.run_until_parked();
+            let origin = view.read_with(cx, |this, _| this.bounds.borrow()["canopy-canvas"].origin);
+            PARTS.map(|part| {
+                let b = cx.debug_bounds(part).unwrap_or_else(|| panic!("{part} is not drawn"));
+                Bounds::new(b.origin - origin, b.size)
+            }).to_vec()
+        };
+        let (full, half) = (at(cx, 1.), at(cx, 0.5));
+        for ((part, f), h) in PARTS.iter().zip(full).zip(half) {
+            let close = |a: Pixels, b: Pixels| (f32::from(a) * 0.5 - f32::from(b)).abs() <= 1.;
+            assert!(close(f.origin.x, h.origin.x) && close(f.origin.y, h.origin.y) && close(f.size.width, h.size.width) && close(f.size.height, h.size.height),
+                "{part}: {f:?} at 100% but {h:?} at 50%");
+        }
     }
 }
