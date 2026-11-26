@@ -98,6 +98,10 @@ without skill support.
 
 ## Panes and floating helpers
 
+- Canvas geometry lives in src/canophy. Render reads Layout. New pane kinds
+  declare Traits. Read docs/canopy/canophy.md before touching zoom, resize or
+  dock.
+
 - Everything on the canvas is a **pane**: terminal, agent, browser, PDF,
   image, note, or a community pane from a mod. Say "pane" in UI, CLI, APIs
   and docs.

@@ -34,7 +34,7 @@ The pane header shows the iOS version and the state: **Live**, **Connecting**, *
 
 ## Resize the pane
 
-For a docked simulator, drag the Files panel's edge to change the available width. Use **Move to canvas** to resize the pane directly. Drag any edge or corner of the canvas pane. When you release it, the pane fits the device and its bezel. Use the zoom buttons on the helper bar for smaller steps, **Actual size** for the device's point size at the canvas zoom, or **Default size** to reset the pane to 340 × 700 on screen. **Actual size** is available after the live screen connects.
+For a docked simulator, drag the Files panel's edge to change the available width. Use **Move to canvas** to resize the pane directly. Drag any edge or corner of the canvas pane. When you release it, the pane fits the device and its bezel. Use the zoom buttons on the helper bar for smaller steps, **Actual size** to show the device at its real size, or **Default size** to reset the pane to 340 × 700 at 100% zoom. **Actual size** makes the pane one canvas pixel per device point, so an iPhone 16 screen is 393 points wide, and eases the camera to 100% so that is also its size on your screen. **Actual size** is available after the live screen connects.
 
 ## Shut down or close
 
@@ -73,7 +73,7 @@ Click **Stop annotating** or press `Esc` to leave. With marks or comments on the
 | Button | What it does |
 |---|---|
 | **Zoom out**, **Zoom in** | Scales the device down by 0.8 or up by 1.25. |
-| **Actual size**, **Default size** | Fits the live device at its point size or resets the pane to its opening size. |
+| **Actual size**, **Default size** | Shows the live device at its point size at 100% zoom, or resets the pane to its opening size. |
 | **Pop out** | Moves the device to its own window. **Bring back** returns it. |
 | **Choose simulator** | Shows every simulator. Xcode's version is at the top. |
 | **Open in Device Hub** | Opens Xcode's Device Hub. |

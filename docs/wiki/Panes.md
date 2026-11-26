@@ -25,6 +25,8 @@ Everything on the canvas is a pane: a terminal, an agent, a file, a note, an ima
 - Ask an agent. Agents open panes with [`canopy pane new`](Agent-Pane-Commands), usually wired to themselves so you both see the same thing.
 - Browsers and simulators open docked in the [files panel](Files-Panel), not on the canvas. A docked pane is a tab there. **Move to canvas** on its helper bar puts it on the canvas, and **Open in panel** docks it again.
 
+A pane you open on the canvas brings the camera to 100% with the pane in view. A pane an agent opens leaves your view alone, and a toast tells you when it lands out of view (see [Canvas](Canvas#where-the-camera-goes)).
+
 ## The helper bar
 
 Hover or select any pane and a small bar of buttons appears above its top-left corner. It holds that pane kind's common actions, such as **Reload** on a browser or **Annotate** on a simulator, plus **Connect** to draw a wire and **Close**. Hover a button to see its name and shortcut. See [Toolbar and Helper Bar](Toolbar-and-Helper-Bar).
@@ -76,7 +78,7 @@ Commands and wires name panes by ID. You see these in `canopy wire`, `canopy pan
 - Sub-agents use `sub:<parent>:<id>`.
 - Every other pane uses `p<N>`, such as `p1`. Canopy never reuses a number, so an old ID cannot point at a new pane.
 
-Pane headers keep their screen size at any zoom. Resize a pane by dragging an edge or corner. The pointer shows the resize direction when it is over a resize area.
+A pane's header scales with the canvas zoom along with everything in it (see [Canvas](Canvas#how-panes-behave-when-you-zoom)). Resize a pane by dragging an edge or corner. The pointer shows the resize direction when it is over a resize area.
 
 ## See also
 

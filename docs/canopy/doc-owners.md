@@ -74,3 +74,11 @@ Guides tell the story and link to feature pages for each control.
 | Build-from-Source | Building, testing and the isolated development window. |
 
 README owns install, update and uninstall. Link to it, never copy it.
+
+## Developer pages
+
+Pages in `docs/canopy/` for people changing Canopy itself.
+
+| Page | Owns | Sources |
+|---|---|---|
+| canophy.md | The canvas laws, the canophy pieces, adding a pane kind or a law. | `src/canophy/`, `src/window/canvas_view/scaled.rs` |

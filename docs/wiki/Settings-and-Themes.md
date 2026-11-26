@@ -74,6 +74,7 @@ Canopy keeps personal theme files in `themes/` in the app home.
 - **Invalid JSON:** A toast names the file, line and column. Canopy keeps the last good values for `settings.json`, `keys.json` and `programs.json`.
 - **Invalid range:** A rejected value in `settings.json` raises an error toast. Canopy keeps the last good settings.
 - **Unknown setting:** A warning toast names the key and may suggest a correction. The rest of `settings.json` still applies.
+- **Retired setting:** Settings Canopy no longer reads load without a warning, so an older `settings.json` keeps working. `canvas_resize_terminals` is one: a terminal's grid now always refits when you resize its pane and never changes when you zoom (see [Terminals](Terminals)).
 
 Errors appear in `settings.error`, `keys.error` or `programs.error` in the app home.
 Correct the file and save it. A successful reload removes its `.error` file.

@@ -15,7 +15,7 @@ An empty space (or Home with no spaces) shows shortcut hints for new terminal, n
 - **Zoom limits:** zooming in stops while the biggest pane still fits the canvas the toolbar leaves open, with a margin, and zooming out stops once everything fits (or at 100% if everything already fits). Zoom stops right at the limit, with no bounce. Panning has no limit.
 - **Fit:** press `Shift+1` in canvas mode to fit everything in the space on screen, clear of the toolbar, and `Shift+0` to return to 100% zoom (or the nearest zoom inside the limits).
 
-Zooming the canvas scales what panes show like a picture: terminal text, PDF pages, web pages, file previews and images grow and shrink with their panes, so nothing reflows or rewraps. A terminal keeps its columns and rows. Pane headers and notes keep their screen size. A PDF's own zoom (its percentage) and a terminal's text zoom are separate and stay as you set them.
+Zooming the canvas scales each pane like a picture (see [How panes behave when you zoom](#how-panes-behave-when-you-zoom)).
 
 Pan and zoom work over empty canvas and over any pane you have not entered. An entered terminal keeps plain scroll for its output. Pinch and `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) still zoom the canvas over a terminal.
 
@@ -97,6 +97,26 @@ Sync input sends your typing to several terminals at once. Use it when you need 
 
 Synced panes show an accent border and a **SYNC** badge. Clicking into one to type keeps the group together. A pane you deselect leaves the group, and sync stops when fewer than two remain or when you press `Esc` in canvas mode.
 
+## How panes behave when you zoom
+
+Zoom out to see every agent at once, zoom in to read one. Either way, a pane looks the same as it did at 100%, only smaller or larger, so you never lose your place in it.
+
+- **Everything in a pane scales together.** Its header, title, tabs, terminal text, web page, PDF page, file preview, image and device screen grow and shrink as one picture. Nothing reflows or rewraps.
+- **Zoom never changes a terminal's columns and rows.** A program running at 120 × 40 keeps that layout at 25% and at 200%, so a full-screen tool such as `htop` or an agent's TUI does not redraw. Resizing the pane is what changes the grid: when you let go of an edge or corner, the terminal refits its columns and rows once.
+- **Controls drawn over panes stay readable.** The helper bar, resize handles, selection outline, wires and the selection box keep their screen size. Below about 48 pixels on screen a pane hides its helper bar and resize handles; zoom in to use them.
+- **Mod panes.** The pane's box and header scale; what the mod draws inside keeps its screen size.
+- **Pinned panes** keep their screen size while you pan and zoom.
+
+A PDF's own zoom (its percentage) and a terminal's text zoom are separate from the canvas zoom and stay as you set them.
+
+### Where the camera goes
+
+When you open a pane yourself (a new terminal, a file from `Cmd+O`, a drop, a toolbar button, a link you click in a terminal), the camera eases to 100% with the new pane in the middle of the canvas, so you can read it right away.
+
+Panes an agent opens never move the camera, so an agent cannot pull you away from what you are reading. When an agent's pane, or a helper it spawns, lands out of view, a toast says so; click it to go there.
+
+When the canvas gets narrower, for example when you open or widen the [files panel](Files-Panel), its left edge stays where it was. If that covers the pane you are working in, the camera recenters on it at the same zoom.
+
 ## Settings that change the canvas
 
 Edit these in `settings.json` (see [Settings and Themes](Settings-and-Themes)).
@@ -118,6 +138,8 @@ The dot beside the branch uses the [space's color](Spaces#rename-recolor-or-dele
 ## How it works
 
 Arrange moves panes for good and remembers the layout you chose. Tile view and focus fit are temporary views: they remember the previous positions or view only until you leave them or close the window.
+
+Every pane has a position and size in canvas pixels, the size it has at 100% zoom. Canopy draws each pane at that size times the zoom, which is why a pane and everything in it scale together, and why zooming never changes a terminal's grid while resizing does.
 
 ## See also
 
