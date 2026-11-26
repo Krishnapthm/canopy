@@ -359,7 +359,9 @@ struct Overlay {
     above: bool,
     /// As designed; drawn at the current zoom. Up to 1: a share of the window.
     size: Size<f32>,
-    expires: Option<Instant>,
+    /// A toast's deadline and its full timeout, which restarts when the pointer leaves it.
+    /// None: it stays until closed (any other overlay, or a toast its mod kept).
+    expires: Option<(Instant, Duration)>,
     focus: FocusHandle,
     /// Blocks instead of one mod (terminals too), ids prefixed with the overlay's.
     layout: Option<Node>,
@@ -3887,7 +3889,8 @@ impl AppWindow {
         props["overlay"] = json!(id);
         let num = |k: &str, d: f32| spec.get(k).and_then(Value::as_f64).map_or(d, |v| v as f32);
         let size = match kind {
-            OverlayKind::Toast => size(340.0, num("height", 72.0)),
+            // As tall as its text (an expanded toast), up to `height`.
+            OverlayKind::Toast => size(340.0, num("height", 0.6)),
             // No size: as big as its content (0 = unset).
             OverlayKind::Window => size(num("width", 0.0), num("height", 0.0)),
             // No height: as tall as the content, up to most of the window.
@@ -3902,7 +3905,7 @@ impl AppWindow {
             _ => above.unwrap_or(self.pointer),
         };
         let top = (spec.get("at").and_then(Value::as_str) == Some("top")).then(|| num("offset", 0.0));
-        let fit = layout.is_none() && (kind == OverlayKind::Popup || (matches!(kind, OverlayKind::Dialog | OverlayKind::Window) && spec.get("height").is_none()));
+        let fit = layout.is_none() && (matches!(kind, OverlayKind::Popup | OverlayKind::Toast) || (matches!(kind, OverlayKind::Dialog | OverlayKind::Window) && spec.get("height").is_none()));
         if kind == OverlayKind::Window && place.is_none() && spec.get("at").is_some_and(|v| v.get("x").is_some()) {
             place = Some(at);
         }
@@ -3935,7 +3938,7 @@ impl AppWindow {
             at,
             above: above.is_some(),
             size,
-            expires: (kind == OverlayKind::Toast).then(|| Instant::now() + Duration::from_millis(timeout as u64)),
+            expires: (kind == OverlayKind::Toast).then(|| { let t = Duration::from_millis(timeout as u64); (Instant::now() + t, t) }),
             focus,
             layout,
             top,
@@ -4002,6 +4005,26 @@ impl AppWindow {
     }
 
     /// Closes an overlay; a kept window stays closed on the next start too.
+    /// Closes toasts whose time is up. One under the pointer is being read: its full timeout
+    /// starts again instead, so it leaves that long after the pointer does.
+    fn expire_toasts(&mut self, pointer: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let bounds = self.bounds.borrow();
+        let mut expired = vec![];
+        for o in &mut self.overlays {
+            let Some((deadline, timeout)) = o.expires else { continue };
+            if bounds.get(&format!("cover:overlay:{}", o.id)).is_some_and(|b| b.contains(&pointer)) {
+                o.expires = Some((now + timeout, timeout));
+            } else if deadline <= now {
+                expired.push(o.id.clone());
+            }
+        }
+        drop(bounds);
+        for id in expired {
+            self.close_overlay(&id, window, cx);
+        }
+    }
+
     fn close_overlay(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(k) = self.overlays.iter().find(|o| o.id == id).and_then(|o| o.key.clone()) {
             movable::forget(&self.layout_name, &k);
@@ -4068,6 +4091,7 @@ impl AppWindow {
             Request::Run { name, args } => self.run(&name, args, window, cx),
             Request::OpenOverlay { id, spec } => self.open_overlay(id, spec, window, cx),
             Request::CloseOverlay { id } => self.close_overlay(&id, window, cx),
+            Request::KeepOverlay { id } => if let Some(o) = self.overlays.iter_mut().find(|o| o.id == id) { o.expires = None },
             Request::Refresh => self.refresh_mods(cx),
             #[cfg(target_os = "macos")]
             Request::FocusNotification { address } => self.focus_notification(address, window, cx),
@@ -4194,11 +4218,7 @@ impl AppWindow {
             self.check_layout_file(window, cx);
             self.sync_folders(window, cx);
         }
-        let now = Instant::now();
-        let expired: Vec<String> = self.overlays.iter().filter(|o| o.expires.is_some_and(|e| e <= now)).map(|o| o.id.clone()).collect();
-        for id in expired {
-            self.close_overlay(&id, window, cx);
-        }
+        self.expire_toasts(window.mouse_position(), window, cx);
         let active = window.is_window_active();
         if active != self.window_active {
             self.window_active = active;
@@ -4725,7 +4745,9 @@ impl AppWindow {
                 }
                 OverlayKind::Toast => {
                     out.push(div().absolute().right(settings::z(16.0)).bottom(settings::z(toast_y)).child(body).into_any_element());
-                    toast_y += o.size.height + 8.0;
+                    // Its height as last drawn (an expanded toast is taller); 72 before the first frame.
+                    let drawn = self.bounds.borrow().get(&format!("cover:overlay:{}", o.id)).map(|b| f32::from(b.size.height) / settings::zoom());
+                    toast_y += drawn.unwrap_or(72.0) + 8.0;
                 }
             }
         }
@@ -6769,6 +6791,28 @@ export default class SystemToast extends View {
         let (id, name) = notify(cx);
         assert_eq!(name, "toast");
         assert!(shown(&id, cx), "an unknown mod falls back to the shipped toast, which stays");
+
+        // A toast under the pointer waits; one away from it times out; a kept one never does.
+        let [read, missed] = [(); 2].map(|_| view.update_in(cx, |this, window, cx| {
+            let id = crate::mods::new_overlay_id();
+            this.open_overlay(id.clone(), json!({ "kind": "toast", "notification": { "title": "t", "timeout": 1 } }), window, cx);
+            id
+        }));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let pointer = point(px(10.), px(10.));
+        view.update_in(cx, |this, window, cx| {
+            this.bounds.borrow_mut().insert(format!("cover:overlay:{read}"), gpui::Bounds::new(point(px(0.), px(0.)), gpui::size(px(340.), px(72.))));
+            this.expire_toasts(pointer, window, cx);
+            assert!(this.overlays.iter().any(|o| o.id == read), "the toast being read stays");
+            assert!(!this.overlays.iter().any(|o| o.id == missed), "the other one timed out");
+            this.handle(crate::mods::Request::KeepOverlay { id: read.clone() }, window, cx);
+            this.bounds.borrow_mut().clear();
+        });
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        view.update_in(cx, |this, window, cx| {
+            this.expire_toasts(pointer, window, cx);
+            assert!(this.overlays.iter().any(|o| o.id == read), "a kept toast stays until closed");
+        });
     }
 
     #[test]

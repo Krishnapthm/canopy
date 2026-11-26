@@ -450,6 +450,8 @@ pub enum Request {
     Run { name: String, args: Value },
     OpenOverlay { id: String, spec: Value },
     CloseOverlay { id: String },
+    /// A toast stays until closed (its mod's reader expanded it).
+    KeepOverlay { id: String },
     Refresh,
     #[cfg(target_os = "macos")]
     FocusNotification { address: String },
@@ -1174,6 +1176,10 @@ fn module(inst: Instance, copy: u64) -> HostModule {
         })
         .function("closeOverlay", |a| {
             request(Request::CloseOverlay { id: a.string(0)?.to_owned() });
+            Ok(HostValue::Null)
+        })
+        .function("keepOverlay", |a| {
+            request(Request::KeepOverlay { id: a.string(0)?.to_owned() });
             Ok(HostValue::Null)
         })
         .function("notify", |a| {

@@ -275,7 +275,10 @@ Properties any node can have:
   (Canopy's own and every `notify()`), in place of the shipped `toast`; an
   unknown mod logs a warning and falls back to `toast`. It gets the same
   `props()`: `{title, body, level, icon, action, timeout, overlay}` (`timeout`
-  is optional). A mod that hands them to the system instead
+  is optional). The window pauses a toast's timer while the pointer is over
+  it; a mod that shows more on request calls `keepOverlay(props().overlay)` so
+  the toast stays until closed, as the shipped one does when expanded. A mod
+  that hands them to the system instead
   (`exec("notify-send", ...)`) closes itself at once
   with `closeOverlay(props().overlay)`.
 - Colors are theme names (`border`, `accent`, `surface`, ...) or `#rrggbb[aa]`.

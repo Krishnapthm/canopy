@@ -398,8 +398,14 @@ export function openOverlay(spec: OverlaySpec): string;
  *  dialog or popup. A kept window closed this way stays closed. */
 export function closeOverlay(id: string): null;
 
+/** Keeps a toast up until it is closed (the toast mod calls it when you expand one to read it).
+ *  Other overlays already stay until closed. */
+export function keepOverlay(id: string): null;
+
 /** Posts a notification. Shown by the `toast` mod (replaceable), which runs `action` when clicked.
- *  Canopy posts one itself when an agent needs you or finished while you weren't looking. Returns its id. */
+ *  Canopy posts one itself when an agent needs you or finished while you weren't looking. Returns its id.
+ *  It leaves after `timeout` ms (default 5000, 8000 for errors and warnings); the time starts again
+ *  while the pointer is over it, and an expanded toast stays until closed. */
 export function notify(n: {
   title: string;
   body?: string;
