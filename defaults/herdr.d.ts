@@ -250,6 +250,19 @@ export interface CanvasBrowserPane extends CanvasPane {
  *  the panes of tab layouts. */
 export function canvasPanes(): CanvasPane[];
 
+/** The `pane` block in a mod.json manifest. */
+export interface ModPaneManifest {
+  label: string;
+  icon: string;
+  actions?: { icon: string; label: string; command: string; args?: unknown }[];
+  /** Show the standard header. Defaults to true. */
+  header?: boolean;
+  /** Opening width and height in world px. Defaults to [320, 240]. */
+  size?: [number, number];
+  /** Minimum resize width and height in world px. Defaults to [240, 120]. */
+  min?: [number, number];
+}
+
 /** Pane kinds and the `canopy pane` verbs they answer. Open image and pdf through kind file.
  *  Mod kinds carry their label and icon. */
 export function paneKinds(): { kind: string; verbs: string[]; label?: string; icon?: string }[];

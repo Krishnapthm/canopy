@@ -267,7 +267,7 @@ mod tests {
         view.update_in(cx, |this, window, cx| {
             this.folders.insert("note".into(), crate::mods::Found {
                 id: "note".into(), dir: std::path::PathBuf::from("/tmp/note"),
-                hint: crate::mods::Hint { pane: Some(crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![] }), ..Default::default() },
+                hint: crate::mods::Hint { pane: Some(crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![], ..Default::default() }), ..Default::default() },
                 stamp: std::time::UNIX_EPOCH,
             });
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);

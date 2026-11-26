@@ -270,7 +270,7 @@ fn traits_keep_the_sizes_the_app_used() {
     use super::traits::{Content, traits};
     use crate::canvas::{Kind, header_height};
     let browser = Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None };
-    let note = Kind::Mod { kind: "mod:note".into(), props: Default::default() };
+    let unknown = Kind::Mod { kind: "mod:unknown-traits-test".into(), props: Default::default() };
     let file = Kind::File { path: "/a.md".into() };
     let terminal = Kind::Terminal { size: None };
     assert_eq!(<[f32; 2]>::from(traits(&terminal).min), [330., 108.]);
@@ -278,8 +278,8 @@ fn traits_keep_the_sizes_the_app_used() {
     assert_eq!(<[f32; 2]>::from(traits(&browser).default), [960., 680.]);
     assert_eq!(<[f32; 2]>::from(traits(&Kind::Sim { udid: String::new() }).default), [340., 700.]);
     assert_eq!(<[f32; 2]>::from(traits(&Kind::Pdf { path: String::new(), highlights: vec![] }).default), [560., 720.]);
-    assert_eq!(<[f32; 2]>::from(traits(&note).default), [320., 240.]);
-    assert_eq!((header_height(&browser), header_height(&note), header_height(&file)), (66., 0., 36.));
+    assert_eq!(<[f32; 2]>::from(traits(&unknown).default), [320., 240.]);
+    assert_eq!((header_height(&browser), header_height(&unknown), header_height(&file)), (66., 36., 36.));
     assert_eq!((traits(&terminal).content, traits(&browser).dockable, traits(&file).dockable), (Content::Grid, true, false));
 }
 

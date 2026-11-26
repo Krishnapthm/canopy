@@ -31,8 +31,7 @@ pub struct Traits {
     pub min: WorldSize,
     /// Width over height when the shape is locked; None when it is free.
     pub aspect: Option<f32>,
-    /// The header strip's height, None when it has none. Screen px at every zoom today; it
-    /// becomes world px once panes scale as one picture (plan phase 3).
+    /// The header strip's height in world px. None when there is no header.
     pub header: Option<f32>,
     /// Whether it pushes and is pushed by neighbours (see `rules::solve`).
     pub pushable: bool,
@@ -41,8 +40,8 @@ pub struct Traits {
     pub content: Content,
 }
 
-/// Every pane but a terminal stops shrinking here.
-const MIN: WorldSize = WorldSize::new(240., 120.);
+/// The standard minimum resize size.
+pub(crate) const MIN: WorldSize = WorldSize::new(240., 120.);
 /// Where a file or image preview opens, and an image is fitted inside.
 pub const PREVIEW: WorldSize = WorldSize::new(560., 420.);
 /// Where a browser pane opens, and the size Web Inspector grows it to.
@@ -60,8 +59,10 @@ pub fn traits(kind: &Kind) -> Traits {
         Kind::File { .. } => base,
         Kind::Image { .. } => Traits { content: Content::Picture, ..base },
         Kind::Pdf { .. } => Traits { default: WorldSize::new(560., 720.), content: Content::Document, ..base },
-        // shortcut: the note mod is named here, until mods declare their own header (plan phase 4).
-        Kind::Mod { kind, .. } => Traits { default: WorldSize::new(320., 240.), header: (kind != "mod:note").then_some(HEADER), content: Content::Mod, ..base },
+        Kind::Mod { kind, .. } => {
+            let shape = crate::mods::pane_shape(kind).unwrap_or_default();
+            Traits { default: shape.size, min: shape.min, header: shape.header.then_some(HEADER), content: Content::Mod, ..base }
+        }
         Kind::Browser { .. } => Traits { default: BROWSER, header: Some(BROWSER_HEADER), dockable: true, content: Content::Page, ..base },
         Kind::Sim { .. } => Traits { default: SIM, dockable: true, content: Content::Device, ..base },
     }

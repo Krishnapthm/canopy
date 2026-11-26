@@ -278,7 +278,7 @@ mod helper_bar_tests {
         assert_eq!(commands(&pane), ["preview.open", "canvas.connect", "canvas.close"]);
         assert_eq!(pane_actions(&pane, None, false)[0].args, json!({"path":"/tmp/a.md"}));
         pane.kind = canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() };
-        let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }] };
+        let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }], ..Default::default() };
         assert_eq!(pane_actions(&pane, Some(&hint), false).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = serde_json::from_value(json!({"kind":"browser","props":{"url":"http://localhost:3000","home":"http://localhost:3000"}})).unwrap();
