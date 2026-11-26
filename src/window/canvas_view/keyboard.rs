@@ -240,11 +240,9 @@ impl AppWindow {
 const CASCADE_STEP: f32 = 32.;
 
 impl State {
+    /// Moves one pane a gap in `direction`: world px on the canvas, the same screen px when pinned.
     fn nudge(&mut self, key: &str, direction: canophy::Point, gap: f32) -> bool {
-        let rect = self.doc.panes.iter_mut().find(|c| c.id == key).map(|c| &mut c.rect);
-        let Some(rect) = rect else { return false };
-        rect.x += direction[0] * gap;
-        rect.y += direction[1] * gap;
-        true
+        let d = [direction[0] * gap, direction[1] * gap];
+        self.step(canophy::Intent::Move { ids: vec![key.to_owned()], world: d, screen: d }).panes
     }
 }

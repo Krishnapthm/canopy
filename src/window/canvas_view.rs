@@ -884,7 +884,7 @@ impl AppWindow {
         let links: Vec<_> = doc.wires.iter().filter_map(|w| Some((at(&w.a)?, at(&w.b)?)))
             .chain(parents.iter().enumerate().filter_map(|(i, p)| Some((i, (*p)?))))
             .collect();
-        let arranged = canophy::arrange(&rects, &parents, &links, &layout);
+        let arranged = canophy::arrange(&rects, &parents, &links, &layout, self.person.canvas_gap);
         let before = self.canvas_state.doc.clone();
         self.canvas_state.undo = Some(canvas::Rest::capture(&before));
         let places = indices.iter().zip(arranged).map(|(i, r)| (ids[*i].clone(), r.into())).collect();

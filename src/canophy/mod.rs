@@ -13,7 +13,10 @@
 //! 3. **push**: pushable neighbours make room (`rules::solve`, the canvas push setting).
 //! 4. **camera laws**: the zoom stays inside `ZOOMS` and the place's `zoom_range`, and a pane
 //!    the person opens is revealed (`camera`).
-//! 5. **check**: in debug builds the invariants in `check` hold.
+//! 5. **check**: debug builds run `check::document` after every step. A broken invariant
+//!    panics with the violation, the intent that broke it and the last 256 intents (the
+//!    replay ring), so the bug can be reproduced by feeding those intents to `step`. Release
+//!    builds skip the check and the ring.
 //!
 //! Every camera and pane-geometry change goes through `step(doc, Intent, &Viewport)`, which runs
 //! steps 1, 2, 4 and 5 in that order. Push (step 3) needs each pill's measured size, so the

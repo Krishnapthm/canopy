@@ -119,9 +119,9 @@ pub(super) fn separated(a: Rect, b: Rect, gap: f32) -> bool {
 
 
 /// Arrange cells in reading order, or breadth-first parent layers, preserving their sizes.
-/// Cells joined by `links` (wires, either way) come together, connected groups first.
-pub fn arrange(rects: &[Rect], parents: &[Option<usize>], links: &[(usize, usize)], layout: &str) -> Vec<Rect> {
-    let gap = crate::settings::get().canvas_gap;
+/// Cells joined by `links` (wires, either way) come together, connected groups first, `gap`
+/// world px apart.
+pub fn arrange(rects: &[Rect], parents: &[Option<usize>], links: &[(usize, usize)], layout: &str, gap: f32) -> Vec<Rect> {
     let Some(bounds) = union(rects) else {
         return vec![];
     };

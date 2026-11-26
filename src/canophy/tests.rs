@@ -36,15 +36,15 @@ fn arrange_layouts_keep_gap_sizes_and_parent_layers() {
     let rects = [[80.,30.,100.,40.],[0.,0.,70.,90.],[0.,50.,150.,60.],[0.,50.,30.,100.]];
     let parents = [None,Some(0),Some(0),Some(1)];
     for layout in ["tidy","row","column","wires"] {
-        let result = arrange(&rects,&parents,&[],layout);
-        assert_eq!(result,arrange(&rects,&parents,&[],layout));
+        let result = arrange(&rects,&parents,&[], layout, 24.);
+        assert_eq!(result,arrange(&rects,&parents,&[], layout, 24.));
         for i in 0..result.len() {
             assert_eq!(&result[i][2..],&rects[i][2..]);
             for j in 0..i { assert!(separated(result[i],result[j],GAP),"{layout}: {result:?}"); }
         }
         if layout == "wires" { assert!(result[0][0]<result[1][0] && result[1][0]<result[3][0]); assert_eq!(result[1][0],result[2][0]); }
     }
-    let cycle = arrange(&rects,&[Some(1),Some(0),Some(2),None],&[],"wires");
+    let cycle = arrange(&rects,&[Some(1),Some(0),Some(2),None],&[], "wires", 24.);
     for i in 0..cycle.len() { for j in 0..i { assert!(separated(cycle[i],cycle[j],GAP)); } }
 }
 
@@ -52,7 +52,7 @@ fn arrange_layouts_keep_gap_sizes_and_parent_layers() {
 fn tidy_puts_wired_cells_next_to_each_other() {
     // Four in reading order; 0 is wired to 3, so 3 comes second, beside 0 in the 2-column grid.
     let rects = [[0.,0.,100.,40.],[200.,0.,100.,40.],[0.,100.,100.,40.],[200.,100.,100.,40.]];
-    let out = arrange(&rects,&[None;4],&[(3,0)],"tidy");
+    let out = arrange(&rects,&[None;4],&[(3,0)],"tidy", 24.);
     assert_eq!(out[3][1],out[0][1]);
     assert!(out[3][0] > out[0][0]);
 }
@@ -384,8 +384,8 @@ fn apply(doc: &mut Document, view: &mut Viewport, op: &Op) -> Result<(), Violati
         }
         Op::Arrange(layout) => {
             let free_ids: Vec<_> = doc.panes.iter().filter(|p| p.pinned.is_none()).map(|p| p.id.clone()).collect();
-            let out = arrange(&free, &vec![None; free.len()], &[], layout);
-            check::apart(&out, crate::settings::get().canvas_gap)?;
+            let out = arrange(&free, &vec![None; free.len()], &[], layout, 24.);
+            check::apart(&out, 24.)?;
             step(doc, Intent::Place(free_ids.into_iter().zip(out.into_iter().map(Into::into)).collect()), view);
         }
         Op::Tile(tiles, active) => {

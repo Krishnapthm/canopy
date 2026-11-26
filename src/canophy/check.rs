@@ -1,6 +1,5 @@
-//! The invariants (I-numbers from the plan's Enforcement list) that the pure functions here
-//! promise today. Tests run them after every step; phase 2 runs them in debug builds after
-//! every change. Each returns the first violation it finds.
+//! The invariants (I-numbers from the plan's Enforcement list). Debug builds run `document`
+//! after every `step`; the tests run the rest too. Each returns the first violation it finds.
 // Debug builds call only `document`; the rest serve the tests.
 #![cfg_attr(not(test), allow(dead_code))]
 use super::camera::{Camera, ZOOMS};
