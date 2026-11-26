@@ -21,11 +21,12 @@ pub(super) fn device_room([w, h]: [f32; 2]) -> [f32; 2] {
 }
 
 /// The world size of a sim pane whose device (`outer` points, bezel included) draws at `scale`
-/// world px per point, with its margin, frame, header and device bar row.
+/// world px per point. The header is in world px. The margin, frame and device bar row
+/// are in screen px and convert to world px at the pane's `zoom`.
 #[cfg(target_os = "macos")]
-fn sim_pane_size(outer: [f32; 2], scale: f32) -> [f32; 2] {
-    let padding = 2. * super::sim_screen::MARGIN + 2.;
-    [outer[0] * scale + padding, outer[1] * scale + padding + canvas::HEADER + DEVICE_BAR_ROW]
+fn sim_pane_size(outer: [f32; 2], scale: f32, zoom: f32) -> [f32; 2] {
+    let fixed = (2. * super::sim_screen::MARGIN + 2.) / zoom;
+    [outer[0] * scale + fixed, outer[1] * scale + fixed + canvas::HEADER + DEVICE_BAR_ROW / zoom]
 }
 
 #[cfg(target_os = "macos")]
@@ -432,19 +433,19 @@ impl AppWindow {
         } else {
             let s = self.canvas_state.sims.get(id).and_then(|v| v.live.as_ref())
                 .ok_or("The device size is not known yet")?.read(cx);
-            let (scale, points) = match step {
+            let (scale, points, zoom) = match step {
                 "in" | "out" => {
                     let step = if step == "in" { 1.25 } else { 0.8 };
                     // The drawn scale is screen px per point; the pane's own is world px per point.
                     let pane_scale = self.canvas_state.doc.panes.iter().find(|p| p.id == id).map_or(1., |p| canophy::layout(self.canvas_state.doc.camera, p).scale);
-                    ((s.scale().unwrap_or(1.) / pane_scale * step).clamp(0.2, 3.), s.points())
+                    ((s.scale().unwrap_or(1.) / pane_scale * step).clamp(0.2, 3.), s.points(), pane_scale)
                 }
                 // One world px per device point: the device's own size at 100%.
-                "actual" => (1., s.live_points()),
+                "actual" => (1., s.live_points(), 1.),
                 other => return Err(format!("Unknown simulator size {other:?}")),
             };
             let points = points.ok_or("The device size is not known yet")?;
-            (sim_pane_size(s.outer_points(points), scale), json!({"scale":scale}))
+            (sim_pane_size(s.outer_points(points), scale, zoom), json!({"scale":scale}))
         };
         self.set_sim_size(id, size);
         self.solve_layout(Some(id), None, cx);
@@ -461,9 +462,11 @@ impl AppWindow {
         let Some(s) = self.canvas_state.sims.get(id).and_then(|v| v.live.as_ref()).map(|s| s.read(cx)) else { return };
         let Some(points) = s.points() else { return };
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
-        let room = device_room(canophy::layout(self.canvas_state.doc.camera, pane).body_world);
+        let layout = canophy::layout(self.canvas_state.doc.camera, pane);
+        let room = device_room(layout.body_size());
         let Some(fit) = s.fit(room) else { return };
-        self.set_sim_size(id, sim_pane_size(s.outer_points(points), fit.scale));
+        let scale = fit.scale / layout.scale;
+        self.set_sim_size(id, sim_pane_size(s.outer_points(points), scale, layout.scale));
         self.solve_layout(Some(id), None, cx);
         self.canvas_changed(cx);
     }
@@ -819,9 +822,11 @@ mod tests {
     fn pane_size_keeps_the_requested_device_scale_after_fit() {
         let points = [402., 874.];
         let scale = 0.75;
-        let [w, h] = sim_pane_size(points, scale);
-        let room = device_room([w - 2., h - crate::canvas::HEADER - 2.]);
-        assert_eq!(fit(room, points, None, super::super::sim_screen::MARGIN).scale, scale);
+        for z in [0.5, 1., 2.] {
+            let [w, h] = sim_pane_size(points, scale, z);
+            let room = device_room([w * z - 2., (h - crate::canvas::HEADER) * z - 2.]);
+            assert!((fit(room, points, None, super::super::sim_screen::MARGIN).scale - scale * z).abs() < 1e-4);
+        }
     }
 
     #[test]

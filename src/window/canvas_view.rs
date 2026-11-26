@@ -1539,8 +1539,7 @@ impl AppWindow {
         }
         let room = self.canvas_state.doc.room.clone();
         match self.add_file_pane(std::path::Path::new(path), point, room, window, cx) {
-            Ok((id, ..)) if person => self.show_full_size(&id, window, cx),
-            Ok(_) => {}
+            Ok((id, ..)) => if person { self.show_full_size(&id, window, cx) } else { self.toast_out_of_view(&id, window, cx) },
             Err(e) => self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx),
         }
     }
@@ -2200,7 +2199,7 @@ impl AppWindow {
                         state.step(canophy::Intent::Place(vec![(addr.to_owned(), canophy::WorldRect { w: size[0], h: size[1], ..rect })]));
                         if !cascade { self.solve_layout(Some(addr), None, cx); }
                         self.canvas_changed(cx);
-                        if person { self.show_full_size(addr, window, cx); }
+                        if person { self.show_full_size(addr, window, cx); } else { self.toast_out_of_view(addr, window, cx); }
                     }
                 }
             }
@@ -4314,8 +4313,7 @@ pub(super) fn grip_rects([w, h]: canophy::Point) -> Vec<((i8, i8), canophy::Rect
 /// A pane's resize edges and corners, in screen px at every zoom (overlay chrome).
 pub(super) const GRIP_EDGE: f32 = 8.;
 pub(super) const GRIP_CORNER: f32 = 12.;
-/// Below this screen size (either side) a pane shows no resize grips or helper bar: they
-/// would cover it.
+/// Below this screen size (either side) a pane shows no resize grips: they would cover it.
 pub(super) const GRIP_MIN: f32 = 48.;
 
 /// Panes paint by z, with pinned panes over every canvas pane.

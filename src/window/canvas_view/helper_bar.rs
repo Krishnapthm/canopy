@@ -167,8 +167,6 @@ impl AppWindow {
         targets.into_iter().filter_map(|pane| {
             let id = &pane.id;
             let host = self.pane_screen_bounds(pane)?;
-            // Overlay chrome: a pane too small to grab gets no bar, which would cover it.
-            if host.size.width < px(GRIP_MIN) || host.size.height < px(GRIP_MIN) { return None; }
             // The bar follows the pane's scale only between 75% and 100%, so it stays usable.
             let scale = canophy::layout(doc.camera, pane).scale.clamp(0.75, 1.0);
             let actions = self.helper_actions(pane, cx);

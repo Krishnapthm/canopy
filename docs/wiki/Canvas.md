@@ -103,7 +103,7 @@ Zoom out to see every agent at once, zoom in to read one. Either way, a pane loo
 
 - **Everything in a pane scales together.** Its header, title, tabs, terminal text, web page, PDF page, file preview, image and device screen grow and shrink as one picture. Nothing reflows or rewraps.
 - **Zoom never changes a terminal's columns and rows.** A program running at 120 × 40 keeps that layout at 25% and at 200%, so a full-screen tool such as `htop` or an agent's TUI does not redraw. Resizing the pane is what changes the grid: when you let go of an edge or corner, the terminal refits its columns and rows once.
-- **Controls drawn over panes stay readable.** The helper bar, resize handles, selection outline, wires and the selection box keep their screen size. Below about 48 pixels on screen a pane hides its helper bar and resize handles; zoom in to use them.
+- **Controls drawn over panes stay readable.** The helper bar, resize handles, selection outline, wires and the selection box keep their screen size. Below about 48 pixels on screen a pane hides its resize handles; zoom in to use them.
 - **Mod panes.** The pane's box and header scale; what the mod draws inside keeps its screen size.
 - **Pinned panes** keep their screen size while you pan and zoom.
 

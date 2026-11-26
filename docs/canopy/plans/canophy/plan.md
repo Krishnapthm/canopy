@@ -197,7 +197,7 @@ The work runs on branch `integration/canophy`. Each phase is one PR into it from
   - PDF: display scale = z
   - sim, image: fit the body
 - Delete the setting and keep-path. Old `settings.json` files that still contain the key must keep loading (verify that `parse_person` tolerates unknown keys).
-- Overlay chrome is screen-fixed: grips 8 px, 1 px outline, helper bar keeps its declared 0.75–1 clamp. Grips and helper bar hide when a pane is below 48 screen px.
+- Overlay chrome is screen-fixed: grips 8 px, 1 px outline, helper bar keeps its declared 0.75–1 clamp. Grips hide when a pane is below 48 screen px.
 - Move the render-time writes into `sync`.
 - Add the scale-equivalence test.
 
