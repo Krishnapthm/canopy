@@ -92,7 +92,9 @@ impl Helper {
     pub fn start(udid: &str, events: async_channel::Sender<Event>) -> Result<Self, String> {
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let developer = developer_dir().ok_or("Can't find Xcode (xcode-select -p)")?;
-        let exe = std::env::current_exe().map_err(|e| format!("Can't find canopy itself: {e}"))?;
+        // The sandbox matches the resolved executable path, including through /tmp.
+        let exe = std::env::current_exe().and_then(std::fs::canonicalize)
+            .map_err(|e| format!("Can't find canopy itself: {e}"))?;
         let name = format!("dev.canopy.sim.{}.{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let port = unsafe { canopy_sim_listen(cstr(&name).as_ptr()) };
         if port == 0 { return Err("Can't open a port for the simulator screen".into()); }
