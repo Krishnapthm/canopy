@@ -38,24 +38,12 @@ impl Home {
     }
 }
 
-/// A copy of `pane` sized so the geometry code (placement, zoom, fixed viewports) sees its body as
-/// exactly `body`, like a pinned pane whose body starts at the origin.
-pub(super) fn fit_to_body(mut pane: canvas::Pane, body: Size<Pixels>) -> canvas::Pane {
-    let (w, h) = (f32::from(body.width), f32::from(body.height));
-    let header = canvas::header_height(&pane.kind);
-    pane.rect = [-1., -(header + 1.), w + 2., h + header + 2.];
-    pane.pinned = Some([0., 0., w + 2., h + header + 2.]);
-    pane
-}
-
 impl AppWindow {
-    /// The docked pane as the panel body draws it, with that body's window bounds. None unless
+    /// The docked pane's layout in the panel body, with that body's window bounds. None unless
     /// the pane is the panel's active tab and its body has been measured.
-    pub(super) fn docked_view(&self, id: &str) -> Option<(canvas::Pane, Bounds<Pixels>)> {
-        let state = &self.canvas_state;
+    pub(super) fn docked_view(&self, id: &str) -> Option<(canophy::Layout, Bounds<Pixels>)> {
         let body = self.docked_bounds(id)?;
-        let pane = state.doc.panes.iter().find(|p| p.id == id)?.clone();
-        Some((fit_to_body(pane, body.size), body))
+        Some((canophy::Layout::docked([f32::from(body.size.width), f32::from(body.size.height)]), body))
     }
 
     /// The measured body of the panel's active pane.
@@ -95,7 +83,7 @@ impl AppWindow {
         let center = self.view_center(window);
         let state = &mut self.canvas_state;
         let was_active = state.active_panel_pane() == Some(id);
-        state.doc.undock(id, center);
+        state.step(canophy::Intent::Undock { id: id.to_owned(), center });
         state.panel_expanded = false;
         if was_active { state.file = state.doc.panel.tabs.last().cloned(); }
         self.raise_pane(id, cx);
@@ -151,12 +139,11 @@ impl AppWindow {
     /// The body's bounds are recorded as `panel-body:<id>`.
     pub(super) fn docked_panel(&self, id: &str, cx: &mut Context<Self>) -> Option<(AnyElement, AnyElement)> {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
-        let measured = self.bounds.borrow().get(&format!("panel-body:{id}")).map(|b| b.size);
-        let view = fit_to_body(pane.clone(), measured.unwrap_or(size(px(400.), px(500.))));
-        let camera = canvas::Camera::default();
+        let measured = self.bounds.borrow().get(&format!("panel-body:{id}")).map_or([400., 500.], |b| [f32::from(b.size.width), f32::from(b.size.height)]);
+        let layout = canophy::Layout::docked(measured);
         let (chrome, body, title) = match &pane.kind {
-            canvas::Kind::Browser { .. } => (Some(self.browser_navigation(id, browser::Host::Pane, cx)), self.browser_body(&view, camera, cx), self.browser_title(pane).0),
-            canvas::Kind::Sim { .. } => (None, self.sim_card_body(&view, camera, cx), self.sim_title(pane, cx).0),
+            canvas::Kind::Browser { .. } => (Some(self.browser_navigation(id, browser::Host::Pane, cx)), self.browser_body(pane, layout, cx), self.browser_title(pane).0),
+            canvas::Kind::Sim { .. } => (None, self.sim_card_body(pane, layout, cx), self.sim_title(pane, cx).0),
             _ => return None,
         };
         let wired = self.wired_agent(id);

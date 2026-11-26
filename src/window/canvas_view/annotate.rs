@@ -447,12 +447,6 @@ impl AppWindow {
     pub(super) fn annotate_body(&self, _: &canvas::Pane, body: AnyElement, _: Pos, _: &mut Context<Self>) -> AnyElement { body }
 }
 
-/// A canvas card's body size on screen at `zoom`: the pane minus its frame and header.
-pub(super) fn card_body(pane: &canvas::Pane, zoom: f32) -> Pos {
-    let [w, h] = pane.pinned.map_or([pane.rect[2] * zoom, pane.rect[3] * zoom], |p| [p[2], p[3]]);
-    [(w - 2.).max(1.), (h - canvas::header_height(&pane.kind) - 2.).max(1.)]
-}
-
 #[cfg(target_os = "macos")]
 fn render_image(mut still: image::RgbaImage) -> Arc<RenderImage> {
     for pixel in still.pixels_mut() { pixel.0.swap(0, 2); }
@@ -478,8 +472,8 @@ impl AppWindow {
         // A popped-out page is annotated in its own window, whatever space the canvas shows.
         let popped = self.browser_popped(id);
         if !popped && !self.canvas_state.shows_pane(&pane) { return Err("Bring the pane into view to annotate it".into()); }
-        let zoom = self.canvas_state.doc.camera.zoom;
-        let width = pane.pinned.map_or(pane.rect[2] * zoom, |p| p[2]) - 2.;
+        let layout = canophy::layout(self.canvas_state.doc.camera, &pane);
+        let (zoom, width) = (layout.scale, layout.body[2]);
         let docked = self.canvas_state.doc.docked(id);
         let needs_room = !docked && (width < 520. || zoom < 0.75);
         let url = pane.url().unwrap_or_default().to_owned();
@@ -880,7 +874,7 @@ fn paint_mark(mark: &Mark, origin: Point<Pixels>, scale: f32, window: &mut Windo
 #[cfg(target_os = "macos")]
 impl AppWindow {
     /// Draws the still over the host body, or the native content while Space is held.
-    /// `[w, h]` is the body's screen size: a card's (`card_body`) or the pop-out window's.
+    /// `[w, h]` is the body's screen size: a card's (`canophy::Layout::body`) or the pop-out window's.
     pub(super) fn annotate_body(&self, pane: &canvas::Pane, native: AnyElement, [w, h]: Pos, cx: &mut Context<Self>) -> AnyElement {
         let id = &pane.id;
         let Some(a) = self.canvas_state.annotations.get(id) else { return native };

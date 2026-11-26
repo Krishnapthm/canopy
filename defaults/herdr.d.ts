@@ -250,6 +250,19 @@ export interface CanvasBrowserPane extends CanvasPane {
  *  the panes of tab layouts. */
 export function canvasPanes(): CanvasPane[];
 
+/** The `pane` block in a mod.json manifest. */
+export interface ModPaneManifest {
+  label: string;
+  icon: string;
+  actions?: { icon: string; label: string; command: string; args?: unknown }[];
+  /** Show the standard header. Defaults to true. */
+  header?: boolean;
+  /** Opening width and height in world px. Defaults to [320, 240]. */
+  size?: [number, number];
+  /** Minimum resize width and height in world px. Defaults to [240, 120]. */
+  min?: [number, number];
+}
+
 /** Pane kinds and the `canopy pane` verbs they answer. Open image and pdf through kind file.
  *  Mod kinds carry their label and icon. */
 export function paneKinds(): { kind: string; verbs: string[]; label?: string; icon?: string }[];
@@ -385,8 +398,14 @@ export function openOverlay(spec: OverlaySpec): string;
  *  dialog or popup. A kept window closed this way stays closed. */
 export function closeOverlay(id: string): null;
 
+/** Keeps a toast up until it is closed (the toast mod calls it when you expand one to read it).
+ *  Other overlays already stay until closed. */
+export function keepOverlay(id: string): null;
+
 /** Posts a notification. Shown by the `toast` mod (replaceable), which runs `action` when clicked.
- *  Canopy posts one itself when an agent needs you or finished while you weren't looking. Returns its id. */
+ *  Canopy posts one itself when an agent needs you or finished while you weren't looking. Returns its id.
+ *  It leaves after `timeout` ms (default 5000, 8000 for errors and warnings); the time starts again
+ *  while the pointer is over it, and an expanded toast stays until closed. */
 export function notify(n: {
   title: string;
   body?: string;

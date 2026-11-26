@@ -164,10 +164,11 @@ impl AppWindow {
             priority(b).cmp(&priority(a)).then_with(|| a.id.cmp(&b.id))
         });
 
-        let scale = doc.camera.zoom.clamp(0.75, 1.0);
         targets.into_iter().filter_map(|pane| {
             let id = &pane.id;
             let host = self.pane_screen_bounds(pane)?;
+            // The bar follows the pane's scale only between 75% and 100%, so it stays usable.
+            let scale = canophy::layout(doc.camera, pane).scale.clamp(0.75, 1.0);
             let actions = self.helper_actions(pane, cx);
             if actions.is_empty() { return None; }
             let bar = self.bar(id, actions, scale, connect_active(id, wiring, &edges), cx)
@@ -266,7 +267,7 @@ mod helper_bar_tests {
 
     #[test]
     fn actions_follow_the_pane_kind() {
-        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.], z: 1, space: None, color: None, pinned: None };
+        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.].into(), z: 1, space: None, color: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None, false).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.enter", "canvas.expand", "canvas.connect", "canvas.close"]);
         *pane.size_mut().unwrap() = Some([800., 500.]);
@@ -275,7 +276,7 @@ mod helper_bar_tests {
         assert_eq!(commands(&pane), ["preview.open", "canvas.connect", "canvas.close"]);
         assert_eq!(pane_actions(&pane, None, false)[0].args, json!({"path":"/tmp/a.md"}));
         pane.kind = canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() };
-        let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }] };
+        let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }], ..Default::default() };
         assert_eq!(pane_actions(&pane, Some(&hint), false).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = serde_json::from_value(json!({"kind":"browser","props":{"url":"http://localhost:3000","home":"http://localhost:3000"}})).unwrap();
@@ -304,7 +305,7 @@ mod helper_bar_tests {
     }
     #[test]
     fn viewer_actions_include_clear_only_when_there_are_marks() {
-        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None };
+        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4].into(), z: 0, space: None, color: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None, false).into_iter().map(|a| a.command).collect::<Vec<_>>();
         let image = commands(&pane);
         assert_eq!(image[0], "canvas.pane_quote");

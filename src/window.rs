@@ -5,7 +5,7 @@
 //! terminal is a mod. Commands (commands.rs) are the one way to change
 //! anything: keys, mods, menus and agents all run them.
 
-use crate::{canvas, hc::Core};
+use crate::{canophy, canvas, hc::Core};
 mod floats;
 mod canvas_view;
 pub(crate) use canvas_view::browser::forget_browser_data_if_until_quit;
@@ -359,7 +359,9 @@ struct Overlay {
     above: bool,
     /// As designed; drawn at the current zoom. Up to 1: a share of the window.
     size: Size<f32>,
-    expires: Option<Instant>,
+    /// A toast's deadline and its full timeout, which restarts when the pointer leaves it.
+    /// None: it stays until closed (any other overlay, or a toast its mod kept).
+    expires: Option<(Instant, Duration)>,
     focus: FocusHandle,
     /// Blocks instead of one mod (terminals too), ids prefixed with the overlay's.
     layout: Option<Node>,
@@ -1426,7 +1428,7 @@ impl AppWindow {
         let Some(space) = self.canvas_state.doc.panes.iter().find(|c| c.id == addr).map(|c| c.space.clone()) else { return };
         self.go_room(space, window, cx);
         self.canvas_state.selected = vec![addr.clone()];
-        self.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+        self.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
         // After entering: the expanded cell is what must be on screen.
         self.reveal_pane(&addr, window, cx);
     }
@@ -2101,7 +2103,7 @@ impl AppWindow {
         let (block, addr) = (block.to_owned(), address.to_owned());
         cx.subscribe_in(view, window, move |this, _, ev: &TerminalEvent, window, cx| match ev {
             TerminalEvent::Preview(path) => {
-                if this.has_canvas() { this.open_preview(json!({"path":path}), window, cx); }
+                if this.has_canvas() { this.open_preview(json!({"path":path}), true, window, cx); }
                 else { crate::links::open(&crate::links::Target::File(path.clone())); }
             }
             TerminalEvent::OpenUrl(url) => this.open_link(&addr, url.clone(), window, cx),
@@ -2163,7 +2165,7 @@ impl AppWindow {
         if listed { self.refresh_sub_hooks(); }
         self.sync_canvas(window,cx);
         if listed {
-            if self.canvas_state.doc.sync_subs(&self.canvas_state.subs) { self.canvas_changed(cx); }
+            if self.canvas_state.step(canophy::Intent::SyncSubs(canvas::sub_ids(&self.canvas_state.subs))).panes { self.canvas_changed(cx); }
             self.watch_subs(cx);
             cx.notify();
         }
@@ -2977,7 +2979,7 @@ impl AppWindow {
         if person && name == "space.new" && args.get("folder").is_none() && Self::arg(&args, "machine").is_none_or(str::is_empty) {
             if !args.is_object() { args = json!({}); }
             args["kind"] = json!("space");
-            self.create_canvas(args, window, cx);
+            self.create_canvas(args, person, window, cx);
             return json!({"asked":"space"});
         }
         if person && name == "canvas.pane_open" && args["target"].is_null() {
@@ -3062,7 +3064,7 @@ impl AppWindow {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "canvas.fit_all" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
-            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.select_all" | "canvas.collapse" | "canvas.connect" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
+            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.select_all" | "canvas.collapse" | "canvas.connect" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, person, window, cx),
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
             "canvas.tile" => self.tile_canvas(true, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
@@ -3076,15 +3078,15 @@ impl AppWindow {
             "canvas.note_new" => {
                 let mut args = json!({"kind":"mod:note"});
                 if let Some(point) = a.get("point") { args["point"] = point.clone(); }
-                self.pane_command("canvas.pane_new", &args, window, cx);
+                self.pane_command("canvas.pane_new", &args, person, window, cx);
             }
-            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" | "canvas.pane_dock" => self.pane_command(name, a, window, cx),
+            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" | "canvas.pane_dock" => self.pane_command(name, a, person, window, cx),
             "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" | "canvas.annotate_agent" => self.annotation_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
             | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
             | "canvas.browser_cookies" | "canvas.browser_links" | "canvas.browser_clear" | "canvas.browser_inspect" | "canvas.browser_open_file" | "canvas.browser_allow_folder"
             | "canvas.browser_tab_new" | "canvas.browser_tab_select" | "canvas.browser_tab_close" => self.browser_command(name, a, person, window, cx),
-            name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
+            name if name.starts_with("canvas.sim_") => self.sim_command(name, a, person, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
             "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_zoom_out" | "canvas.pdf_zoom_reset" | "canvas.pdf_zoom_in" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
             "app.menu" => {
@@ -3097,7 +3099,7 @@ impl AppWindow {
                 let anchor = None;
                 self.open_menu("primary", target, anchor, window, cx);
             }
-            "quote.menu" | "quote.send" => self.quote_command(name, a, window, cx),
+            "quote.menu" | "quote.send" => self.quote_command(name, a, person, window, cx),
             "panel.open" => {
                 let Some(addr)=Self::arg(a,"terminal").filter(|a|self.live.contains_key(*a)) else {return self.fail("no running terminal")};
                 if self.canvas_state.popped.contains_key(addr) { self.pop_canvas(addr.to_owned(), false, window, cx); return; }
@@ -3125,14 +3127,14 @@ impl AppWindow {
             }
             "panel.editor" => self.panel_editor(a, window, cx),
             "preview.external" => self.open_in_preview(a, window, cx),
-            "preview.open" => self.open_preview(a.clone(), window, cx),
+            "preview.open" => self.open_preview(a.clone(), person, window, cx),
             "canvas.hand" => {
                 self.canvas_state.hand = a["on"].as_bool().unwrap_or(!self.canvas_state.hand);
                 if mods::publish_window(self.window_json(window)) { self.refresh_snapshot_mods(cx); }
                 cx.notify();
             }
             "canvas.create" => {
-                self.create_canvas(a.clone(), window, cx);
+                self.create_canvas(a.clone(), person, window, cx);
             }
             "canvas.space_style" => {
                 let Some(color) = Self::arg(a, "color").and_then(canvas::Hue::from_name) else { return self.fail("invalid space color") };
@@ -3887,7 +3889,8 @@ impl AppWindow {
         props["overlay"] = json!(id);
         let num = |k: &str, d: f32| spec.get(k).and_then(Value::as_f64).map_or(d, |v| v as f32);
         let size = match kind {
-            OverlayKind::Toast => size(340.0, num("height", 72.0)),
+            // As tall as its text (an expanded toast), up to `height`.
+            OverlayKind::Toast => size(340.0, num("height", 0.6)),
             // No size: as big as its content (0 = unset).
             OverlayKind::Window => size(num("width", 0.0), num("height", 0.0)),
             // No height: as tall as the content, up to most of the window.
@@ -3902,7 +3905,7 @@ impl AppWindow {
             _ => above.unwrap_or(self.pointer),
         };
         let top = (spec.get("at").and_then(Value::as_str) == Some("top")).then(|| num("offset", 0.0));
-        let fit = layout.is_none() && (kind == OverlayKind::Popup || (matches!(kind, OverlayKind::Dialog | OverlayKind::Window) && spec.get("height").is_none()));
+        let fit = layout.is_none() && (matches!(kind, OverlayKind::Popup | OverlayKind::Toast) || (matches!(kind, OverlayKind::Dialog | OverlayKind::Window) && spec.get("height").is_none()));
         if kind == OverlayKind::Window && place.is_none() && spec.get("at").is_some_and(|v| v.get("x").is_some()) {
             place = Some(at);
         }
@@ -3935,7 +3938,7 @@ impl AppWindow {
             at,
             above: above.is_some(),
             size,
-            expires: (kind == OverlayKind::Toast).then(|| Instant::now() + Duration::from_millis(timeout as u64)),
+            expires: (kind == OverlayKind::Toast).then(|| { let t = Duration::from_millis(timeout as u64); (Instant::now() + t, t) }),
             focus,
             layout,
             top,
@@ -4002,6 +4005,26 @@ impl AppWindow {
     }
 
     /// Closes an overlay; a kept window stays closed on the next start too.
+    /// Closes toasts whose time is up. One under the pointer is being read: its full timeout
+    /// starts again instead, so it leaves that long after the pointer does.
+    fn expire_toasts(&mut self, pointer: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let bounds = self.bounds.borrow();
+        let mut expired = vec![];
+        for o in &mut self.overlays {
+            let Some((deadline, timeout)) = o.expires else { continue };
+            if bounds.get(&format!("cover:overlay:{}", o.id)).is_some_and(|b| b.contains(&pointer)) {
+                o.expires = Some((now + timeout, timeout));
+            } else if deadline <= now {
+                expired.push(o.id.clone());
+            }
+        }
+        drop(bounds);
+        for id in expired {
+            self.close_overlay(&id, window, cx);
+        }
+    }
+
     fn close_overlay(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(k) = self.overlays.iter().find(|o| o.id == id).and_then(|o| o.key.clone()) {
             movable::forget(&self.layout_name, &k);
@@ -4068,6 +4091,7 @@ impl AppWindow {
             Request::Run { name, args } => self.run(&name, args, window, cx),
             Request::OpenOverlay { id, spec } => self.open_overlay(id, spec, window, cx),
             Request::CloseOverlay { id } => self.close_overlay(&id, window, cx),
+            Request::KeepOverlay { id } => if let Some(o) = self.overlays.iter_mut().find(|o| o.id == id) { o.expires = None },
             Request::Refresh => self.refresh_mods(cx),
             #[cfg(target_os = "macos")]
             Request::FocusNotification { address } => self.focus_notification(address, window, cx),
@@ -4194,11 +4218,7 @@ impl AppWindow {
             self.check_layout_file(window, cx);
             self.sync_folders(window, cx);
         }
-        let now = Instant::now();
-        let expired: Vec<String> = self.overlays.iter().filter(|o| o.expires.is_some_and(|e| e <= now)).map(|o| o.id.clone()).collect();
-        for id in expired {
-            self.close_overlay(&id, window, cx);
-        }
+        self.expire_toasts(window.mouse_position(), window, cx);
         let active = window.is_window_active();
         if active != self.window_active {
             self.window_active = active;
@@ -4725,7 +4745,9 @@ impl AppWindow {
                 }
                 OverlayKind::Toast => {
                     out.push(div().absolute().right(settings::z(16.0)).bottom(settings::z(toast_y)).child(body).into_any_element());
-                    toast_y += o.size.height + 8.0;
+                    // Its height as last drawn (an expanded toast is taller); 72 before the first frame.
+                    let drawn = self.bounds.borrow().get(&format!("cover:overlay:{}", o.id)).map(|b| f32::from(b.size.height) / settings::zoom());
+                    toast_y += drawn.unwrap_or(72.0) + 8.0;
                 }
             }
         }
@@ -5124,7 +5146,8 @@ impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_browser_inputs(window, cx);
         self.release_pdf_drops(window, cx);
-        self.pin_panes();
+        self.sync_viewport(window);
+        self.sync_panes(cx);
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
         crate::bench::frame_start();
@@ -6059,7 +6082,7 @@ export default class Probe extends View {
         let none = Modifiers::default();
         let state = |cx: &mut gpui::VisualTestContext| view.update(cx, |this, _| (
             this.canvas_state.selected.clone(), this.canvas_state.mode,
-            this.canvas_state.doc.panes.iter().map(|c| [c.rect[0], c.rect[1]]).collect::<Vec<_>>()));
+            this.canvas_state.doc.panes.iter().map(|c| [c.rect.x, c.rect.y]).collect::<Vec<_>>()));
 
         cx.simulate_mouse_down(at(50., 150.), MouseButton::Left, none);
         cx.simulate_mouse_move(at(800., 300.), MouseButton::Left, none);
@@ -6122,7 +6145,7 @@ export default class Probe extends View {
         // Hints also work with a terminal focused, without swallowing its key down.
         cx.update(|window, cx| view.update(cx, |this, cx| {
             this.canvas_state.selected = vec!["t1".into()];
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             this.canvas_state.settle_for_test();
             window.refresh();
         }));
@@ -6146,10 +6169,10 @@ export default class Probe extends View {
         let keys = crate::keys::DEFAULTS.replace("\"layout:main\"", "\"layout:test\"");
         cx.update(|_, cx| crate::keys::install(crate::keys::parse(&keys).unwrap(), cx));
         cx.simulate_keystrokes("shift-1");
-        assert!(view.update(cx, |this, _| this.canvas_state.motion_target_for_test().zoom > 0.), "Shift+1 starts a fit");
+        assert!(view.update(cx, |this, _| this.canvas_state.motion_target_for_test().zoom() > 0.), "Shift+1 starts a fit");
         cx.update(|window, cx| view.update(cx, |this, cx| {
             this.canvas_state.selected = vec!["t2".into()];
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             this.canvas_state.settle_for_test();
         }));
         assert!(!state(cx).1);
@@ -6179,7 +6202,7 @@ export default class Probe extends View {
                 {"id":"t2","kind":"terminal","props":{}, "rect":[500,0,220,36], "z":1}
             ])).unwrap();
             crate::keys::install(crate::keys::parse(r#"{"global":{"l":"canvas.close"},"canvas-mode":{"l":"canvas.go:right","escape":"canvas.leave"}}"#).unwrap(), cx);
-            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.mode", &json!({}), true, window, cx);
             assert!(this.canvas_state.mode);
             assert_eq!(this.canvas_state.selected, ["t1"]);
             assert!(this.canvas_key(&gpui::Keystroke::parse("q").unwrap(), window, cx), "unbound keys are swallowed");
@@ -6198,34 +6221,34 @@ export default class Probe extends View {
             assert_eq!(this.canvas_state.selected, ["t2"]);
             assert!(!this.overlays.iter().any(|o| o.kind.modal_keys()), "global close did not take the mode key");
             assert!(this.canvas_state.doc.panes.iter().all(|c| c.size().is_none()));
-            this.canvas_keyboard("canvas.nudge", &json!({"direction":"right"}), window, cx);
-            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 500. + this.person.canvas_gap);
+            this.canvas_keyboard("canvas.nudge", &json!({"direction":"right"}), true, window, cx);
+            assert_eq!(this.canvas_state.doc.panes[1].rect.x, 500. + this.person.canvas_gap);
             this.undo_canvas(window, cx);
-            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 500.);
+            assert_eq!(this.canvas_state.doc.panes[1].rect.x, 500.);
             this.undo_canvas(window, cx);
-            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 500., "only one undo step");
-            this.canvas_keyboard("canvas.connect", &json!({}), window, cx);
-            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), window, cx);
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            assert_eq!(this.canvas_state.doc.panes[1].rect.x, 500., "only one undo step");
+            this.canvas_keyboard("canvas.connect", &json!({}), true, window, cx);
+            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), true, window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             assert_eq!(this.canvas_state.doc.wires.len(), 1);
             assert!(this.canvas_state.mode);
-            this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.leave", &json!({}), true, window, cx);
             assert!(this.canvas_state.mode && this.canvas_state.selected.is_empty(), "Escape clears the selection; the canvas keeps the keyboard");
             assert!(this.focus.is_focused(window));
-            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), window, cx);
+            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), true, window, cx);
             assert_eq!(this.canvas_state.selected, ["t1"]);
-            this.canvas_keyboard("canvas.connect", &json!({}), window, cx);
-            this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.connect", &json!({}), true, window, cx);
+            this.canvas_keyboard("canvas.leave", &json!({}), true, window, cx);
             assert!(this.canvas_state.mode, "Escape cancels the connection before leaving mode");
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             assert!(!this.canvas_state.mode);
             assert!(this.focused_cell().unwrap().focus.is_focused(window));
             this.model.focus_pane("pane2");
-            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.mode", &json!({}), true, window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             assert_eq!(this.model.focused_pane().as_deref(), Some("pane1"));
-            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
-            this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.mode", &json!({}), true, window, cx);
+            this.canvas_keyboard("canvas.leave", &json!({}), true, window, cx);
             this.sync(window, cx);
             assert!(this.focus.is_focused(window), "Escape keeps canvas focus across later syncs");
             this.set_expanded("t1", false, window, cx);
@@ -6285,7 +6308,7 @@ export default class Probe extends View {
             this.watched.settings = None;
             this.reload_config(window, cx);
             assert_eq!(this.person.canvas_gap, 60.);
-            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 260.);
+            assert_eq!(this.canvas_state.doc.panes[1].rect.x, 260.);
             assert_eq!(crate::settings::get().canvas_gap, 60.);
             assert_eq!(crate::settings::get().space_fill, 0.08);
             assert_eq!(crate::settings::get().canvas_push, crate::settings::CanvasPush::Drop);
@@ -6768,6 +6791,28 @@ export default class SystemToast extends View {
         let (id, name) = notify(cx);
         assert_eq!(name, "toast");
         assert!(shown(&id, cx), "an unknown mod falls back to the shipped toast, which stays");
+
+        // A toast under the pointer waits; one away from it times out; a kept one never does.
+        let [read, missed] = [(); 2].map(|_| view.update_in(cx, |this, window, cx| {
+            let id = crate::mods::new_overlay_id();
+            this.open_overlay(id.clone(), json!({ "kind": "toast", "notification": { "title": "t", "timeout": 1 } }), window, cx);
+            id
+        }));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let pointer = point(px(10.), px(10.));
+        view.update_in(cx, |this, window, cx| {
+            this.bounds.borrow_mut().insert(format!("cover:overlay:{read}"), gpui::Bounds::new(point(px(0.), px(0.)), gpui::size(px(340.), px(72.))));
+            this.expire_toasts(pointer, window, cx);
+            assert!(this.overlays.iter().any(|o| o.id == read), "the toast being read stays");
+            assert!(!this.overlays.iter().any(|o| o.id == missed), "the other one timed out");
+            this.handle(crate::mods::Request::KeepOverlay { id: read.clone() }, window, cx);
+            this.bounds.borrow_mut().clear();
+        });
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        view.update_in(cx, |this, window, cx| {
+            this.expire_toasts(pointer, window, cx);
+            assert!(this.overlays.iter().any(|o| o.id == read), "a kept toast stays until closed");
+        });
     }
 
     #[test]

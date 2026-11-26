@@ -2,17 +2,18 @@
 //! Mods: folders of JavaScript under ~/.config/canopy/mods that agents write and
 //! Canopy runs live (gpui-shell), plus the `herdr` module they import.
 
+use crate::canophy::{WorldSize, traits::MIN};
 use crate::layout::Node;
 use gpui::App;
 use gpui_shell::{Capabilities, ExecuteGrant, HostError, HostModule, HostObject, HostValue, NetworkGrant};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::rc::{Rc, Weak};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 use std::time::{Duration, SystemTime};
 
 include!(concat!(env!("OUT_DIR"), "/default_mods.rs"));
@@ -328,14 +329,41 @@ pub struct Hint {
     pub focusable: bool,
 }
 
-/// mod.json "pane": the mod draws canvas panes of kind mod:<name>. docs/wiki/Layouts-and-Mods.md.
-#[derive(Deserialize, Clone, Debug, PartialEq)]
+/// The `pane` declaration in mod.json for canvas panes of kind `mod:<name>`.
+#[derive(Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct PaneHint {
     pub label: String,
     pub icon: String,
     #[serde(default)]
     pub actions: Vec<PaneAction>,
+    /// None when the declared geometry is invalid.
+    #[serde(flatten, deserialize_with = "parse_pane_shape")]
+    pub shape: Option<PaneShape>,
 }
+
+/// A mod pane's standard header and its opening and minimum sizes in world px.
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
+#[serde(default)]
+pub struct PaneShape {
+    pub header: bool,
+    pub size: WorldSize,
+    pub min: WorldSize,
+}
+
+impl Default for PaneShape {
+    fn default() -> Self {
+        Self { header: true, size: WorldSize::new(320., 240.), min: MIN }
+    }
+}
+
+fn parse_pane_shape<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<PaneShape>, D::Error> {
+    Ok(PaneShape::deserialize(deserializer).ok().filter(|shape| {
+        [(shape.min.w, shape.size.w), (shape.min.h, shape.size.h)]
+            .into_iter()
+            .all(|(min, size)| min.is_finite() && size.is_finite() && 0. < min && min <= size)
+    }))
+}
+
 /// One helper bar button a mod pane declares: an app command run with the pane selected.
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 pub struct PaneAction {
@@ -354,11 +382,42 @@ pub struct Found {
     pub stamp: SystemTime,
 }
 
-/// Every mod folder that has a main.js.
+// Keep invalid entries so rescanning a broken declaration does not repeat its toast.
+static PANE_SHAPES: RwLock<BTreeMap<String, Option<PaneShape>>> = RwLock::new(BTreeMap::new());
+
+/// The last scanned shape for a declared mod pane kind, with defaults for invalid shapes.
+pub fn pane_shape(kind: &str) -> Option<PaneShape> {
+    PANE_SHAPES.read().unwrap().get(kind).map(|shape| shape.unwrap_or_default())
+}
+
+/// Every mod folder that has a main.js. Refreshes the canvas pane shapes.
 pub fn scan() -> Vec<Found> {
     let mut found = scan_dir(&mods_dir(), "");
     found.extend(scan_dir(&frame_dir(), "frame-"));
     found.sort_by(|a, b| a.id.cmp(&b.id));
+    let shapes = found.iter().filter_map(|f| {
+        let pane = f.hint.pane.as_ref()?;
+        Some((format!("mod:{}", f.id), pane.shape))
+    }).collect();
+    let previous = std::mem::replace(&mut *PANE_SHAPES.write().unwrap(), shapes);
+    for f in &found {
+        if f.hint.pane.as_ref().is_some_and(|pane| pane.shape.is_none())
+            && previous.get(&format!("mod:{}", f.id)) != Some(&None)
+        {
+            let path = f.dir.join("mod.json").canonicalize().ok();
+            let action = path.as_deref().and_then(Path::to_str)
+                .map(|path| json!({"name":"preview.open", "args":{"path":path}}));
+            request(Request::OpenOverlay {
+                id: new_overlay_id(),
+                spec: json!({"kind":"toast", "notification":{
+                    "title":format!("{} mod.json uses default pane geometry", f.id),
+                    "body":"Use a boolean header and positive, finite size and min pairs. Min must fit within size.",
+                    "level":"error",
+                    "action":action
+                }}),
+            });
+        }
+    }
     found
 }
 
@@ -391,6 +450,8 @@ pub enum Request {
     Run { name: String, args: Value },
     OpenOverlay { id: String, spec: Value },
     CloseOverlay { id: String },
+    /// A toast stays until closed (its mod's reader expanded it).
+    KeepOverlay { id: String },
     Refresh,
     #[cfg(target_os = "macos")]
     FocusNotification { address: String },
@@ -1117,6 +1178,10 @@ fn module(inst: Instance, copy: u64) -> HostModule {
             request(Request::CloseOverlay { id: a.string(0)?.to_owned() });
             Ok(HostValue::Null)
         })
+        .function("keepOverlay", |a| {
+            request(Request::KeepOverlay { id: a.string(0)?.to_owned() });
+            Ok(HostValue::Null)
+        })
         .function("notify", |a| {
             let id = new_overlay_id();
             let n = from_host(a.value(0)?);
@@ -1240,6 +1305,25 @@ pub fn prepare_load(inst: &Instance) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mod_pane_shape_uses_world_sizes_and_falls_back_as_a_unit() {
+        let parse = |json: &str| serde_json::from_str::<Hint>(json).unwrap().pane.unwrap();
+        let defaults = PaneShape { header: true, size: WorldSize::new(320., 240.), min: WorldSize::new(240., 120.) };
+        assert_eq!(parse(r#"{"pane":{"label":"Test","icon":"test.svg"}}"#).shape, Some(defaults));
+        let note = parse(include_str!("../defaults/mods/note/mod.json"));
+        assert_eq!(note.shape, Some(PaneShape { header: false, ..defaults }));
+
+        let custom = parse(r#"{"pane":{"label":"Test","icon":"test.svg","header":false,"size":[500,200],"min":[100,200]}}"#);
+        assert_eq!(custom.shape, Some(PaneShape { header: false, size: WorldSize::new(500., 200.), min: WorldSize::new(100., 200.) }));
+
+        for fields in [r#""min":[100,201]"#, r#""min":[-1,100]"#, r#""min":[1e39,100]"#, r#""min":[100]"#] {
+            let invalid = parse(&format!(r#"{{"pane":{{"label":"Test","icon":"test.svg","header":false,"size":[500,200],{fields}}}}}"#));
+            assert_eq!(invalid.label, "Test");
+            assert_eq!(invalid.shape, None, "{fields}");
+            assert_eq!(invalid.shape.unwrap_or_default(), defaults);
+        }
+    }
 
     #[test]
     fn exec_timeout_defaults_caps_and_rejects_invalid_values() {

@@ -79,13 +79,12 @@ fn pad() -> (f32, f32) {
     (p[0] * zoom, p[1] * zoom)
 }
 
-/// The columns and rows that fill a pane `rest` big in world pixels at canvas zoom `scale`,
-/// with the text drawn at `font` (the zoom times the terminal's own text zoom).
-/// Measured with the cell as drawn (glyph advances round to whole pixels per scale), so
-/// the grid fills the body at every zoom instead of leaving a strip on the right.
-fn grid_at_scale(rest: Size<Pixels>, scale: f32, font: f32, window: &Window) -> (u16, u16) {
+/// The columns and rows that fill a canvas body `rest` world px big, with the text at `font`
+/// (the terminal's own text zoom). Measured at scale 1, so the grid never depends on the
+/// canvas zoom; the drawn grid is fitted to the body at each zoom instead.
+fn grid_at(rest: Size<Pixels>, font: f32, window: &Window) -> (u16, u16) {
     let _drawn = Scaled::new(font);
-    grid_size(size(rest.width * scale, rest.height * scale), cell_size(window))
+    grid_size(rest, cell_size(window))
 }
 
 /// The pane size that holds `cols` x `rows` at scale 1.
@@ -186,16 +185,16 @@ pub struct TerminalView {
     /// The link under the pointer while the link modifier is held.
     link: Option<LinkTarget>,
     grid: Rc<RefCell<Grid>>,
-    /// The canvas zoom this terminal is drawn at (see `Scaled`).
+    /// The canvas scale this terminal is drawn at (see `Scaled`).
     scale: f32,
-    /// None fits the PTY to what is drawn. Some: the canvas body (world px) and the scale its PTY grid was measured at.
-    rest: Option<(Size<Pixels>, f32)>,
+    /// On the canvas: the pane body now, in world px. None (a tab pane) fits the PTY to what
+    /// is drawn.
+    body: Option<Size<Pixels>>,
+    /// On the canvas: the body (world px) the PTY grid was last fitted to. It follows `body`
+    /// only when the canvas says the pane settled, so zoom never changes the grid.
+    rest: Option<Size<Pixels>>,
     /// In-memory text zoom of this terminal (1 = the app's font size); the grid refits to it.
     font_zoom: f32,
-    /// Canvas only, with `canvas_resize_terminals` false: the body (world px) the kept grid is scaled to fit.
-    keep_in: Option<Size<Pixels>>,
-    /// The grid kept in that mode: measured once, and again after a text zoom.
-    kept: Option<(u16, u16)>,
     /// The wheel only scrolls this terminal while it has the keyboard (the canvas pans otherwise).
     pub wheel_needs_focus: bool,
     focus: FocusHandle,
@@ -386,10 +385,10 @@ impl TerminalView {
                 painted_with: (0, Size::default(), String::new(), 0, false),
             })),
             scale: 1.0,
+            body: None,
             rest: None,
             font_zoom: 1.0,
-            keep_in: None,
-            kept: None,
+
             wheel_needs_focus: false,
             focus: cx.focus_handle(),
             was_focused: false,
@@ -580,16 +579,13 @@ impl TerminalView {
         &self.focus
     }
 
-    /// Draws at `scale` (the canvas zoom). `rest` is the body size (world px) whose PTY grid is
-    /// measured at this scale; None keeps the last grid, so a zoom gesture or a corner drag
-    /// changes the program's size once, when it settles.
-    /// `keep_in` is Some (the body in world px) when the grid is kept and scaled to fit the body instead of refit.
-    pub fn set_scale(&mut self, scale: f32, rest: Option<Size<Pixels>>, keep_in: Option<Size<Pixels>>, cx: &mut Context<Self>) {
-        let rest = rest.map(|r| (r, scale)).or(self.rest);
-        if self.scale != scale || self.rest != rest || self.keep_in != keep_in {
-            self.scale = scale;
-            self.rest = rest;
-            self.keep_in = keep_in;
+    /// A canvas terminal: draws at `scale` in a pane whose body is `body` world px. With
+    /// `reflow` the grid refits to that body (at scale 1, so never to the zoom); without it the
+    /// grid stays and is drawn to fit, so a pinch or a corner drag reflows once, when it settles.
+    pub fn set_scale(&mut self, scale: f32, body: Size<Pixels>, reflow: bool, cx: &mut Context<Self>) {
+        let rest = if reflow || self.rest.is_none() { Some(body) } else { self.rest };
+        if self.scale != scale || self.body != Some(body) || self.rest != rest {
+            (self.scale, self.body, self.rest) = (scale, Some(body), rest);
             cx.notify();
         }
     }
@@ -597,7 +593,6 @@ impl TerminalView {
     /// Multiplies this terminal's text size by `factor` (clamped 0.5..4), or resets it with None.
     pub fn zoom_text(&mut self, factor: Option<f32>, cx: &mut Context<Self>) {
         self.font_zoom = factor.map_or(1.0, |f| (self.font_zoom * f).clamp(0.5, 4.0));
-        self.kept = None;
         cx.notify();
     }
 
@@ -2355,20 +2350,18 @@ impl Render for TerminalView {
                 g.core.focus(ch, focused);
             }
         }
-        let (zoom, rest, font_zoom) = (self.scale, self.rest, self.font_zoom);
-        if self.keep_in.is_some() && self.kept.is_none() {
-            self.kept = rest.map(|(rest, at)| grid_at_scale(rest, at, at * font_zoom, window));
-        }
-        // A kept grid is drawn at the scale that fits it into the body, centered; else the zoom and text zoom.
-        let kept = self.keep_in.zip(self.kept);
-        let (scale, fit_box) = match kept {
-            Some((body, (cols, rows))) => {
-                let grid = size_of_grid_at(cols, rows, font_zoom, window);
-                let fit = (body.width / grid.width).min(body.height / grid.height);
-                let drawn = zoom * fit * font_zoom;
-                (drawn, Some(size_of_grid_at(cols, rows, drawn, window)))
+        let (zoom, font_zoom) = (self.scale, self.font_zoom);
+        // On the canvas the grid fills the rest body at scale 1, whatever the zoom.
+        let kept = self.rest.map(|rest| grid_at(rest, font_zoom, window));
+        // Drawn at the pane's scale, smaller only where the grid would overflow the body: glyph
+        // rounding at this scale, or a pane shrunk since the grid was fitted.
+        let scale = match (self.body, kept) {
+            (Some(body), Some((cols, rows))) => {
+                let drawn = zoom * font_zoom;
+                let grid = size_of_grid_at(cols, rows, drawn, window);
+                drawn * (body.width * zoom / grid.width).min(body.height * zoom / grid.height).min(1.)
             }
-            None => (zoom * font_zoom, None),
+            _ => zoom * font_zoom,
         };
         let cell = {
             let _scaled = Scaled::new(scale);
@@ -2405,7 +2398,6 @@ impl Render for TerminalView {
             .key_context("Terminal")
             .size_full()
             .relative()
-            .when(fit_box.is_some(), |d| d.flex().items_center().justify_center())
             // Below 1, the layout's background shows through (cells a program colors stay solid).
             .bg(hsla(vt::theme().bg).opacity(crate::settings::get().terminal_opacity))
             .on_action(cx.listener(|this, a: &gpui_shell::action::ShellAction, window, cx| {
@@ -2512,7 +2504,7 @@ impl Render for TerminalView {
                 canvas(
                     move |bounds, window, _cx| {
                         let _scaled = Scaled::new(scale);
-                        let (cols, rows) = kept.map(|(_, grid)| grid).unwrap_or_else(|| rest.map_or_else(|| grid_size(bounds.size, cell), |(rest, at)| grid_at_scale(rest, at, at * font_zoom, window)));
+                        let (cols, rows) = kept.unwrap_or_else(|| grid_size(bounds.size, cell));
                         grid.borrow_mut().fit(cols, rows, cell, window.scale_factor());
                     },
                     move |bounds, _, window, cx| {
@@ -2579,7 +2571,7 @@ impl Render for TerminalView {
                         }
                     },
                 )
-                .map(|c| match fit_box { Some(b) => c.w(b.width).h(b.height), None => c.size_full() }),
+                .size_full(),
             )
             .when_some(search_input, |d, input| {
                 d.child(

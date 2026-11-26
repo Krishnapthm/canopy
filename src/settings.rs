@@ -402,7 +402,6 @@ person_settings! {
     browser_keep_cookies: KeepCookies = KeepCookies::UntilQuit => "Browser pane cookies and site data: until_quit (deleted when Canopy quits or starts) or forever.";
     #[serde(skip_serializing_if = "OpenLinks::is_built_in")]
     browser_open_links: OpenLinks = OpenLinks::BuiltIn => "Where HTTP and HTTPS links clicked in terminals open: built_in (a new browser tab) or default (the system browser).";
-    canvas_resize_terminals: bool = true => "Refit a canvas terminal's grid to its cell as the cell resizes (no longer in Settings; false keeps the grid and scales it).";
     space_fill: f32 = 0.04 => "Space card tint on Home (0..1).";
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
     zoom: f32 = 1.0 => "Whole app scale (0.5..3).";
@@ -523,8 +522,6 @@ pub struct Settings {
     pub canvas_push: CanvasPush,
     pub browser_keep_cookies: KeepCookies,
     pub browser_open_links: OpenLinks,
-    /// Whether canvas terminals refit their grid to the cell.
-    pub canvas_resize_terminals: bool,
     /// Space background opacity.
     pub space_fill: f32,
     /// Columns and rows of a newly expanded terminal.
@@ -589,7 +586,6 @@ impl Default for Settings {
             canvas_push: person.canvas_push,
             browser_keep_cookies: person.browser_keep_cookies,
             browser_open_links: person.browser_open_links,
-            canvas_resize_terminals: person.canvas_resize_terminals,
             space_fill: person.space_fill,
             terminal_size: person.terminal_size,
             font_family: DEFAULT_FONT.into(),
@@ -636,7 +632,6 @@ impl Settings {
             canvas_push: person.canvas_push,
             browser_keep_cookies: person.browser_keep_cookies,
             browser_open_links: person.browser_open_links,
-            canvas_resize_terminals: person.canvas_resize_terminals,
             space_fill: person.space_fill,
             terminal_size: person.terminal_size,
             // The layout's own, else the person's, else Canopy's.
@@ -779,7 +774,7 @@ fn parse_person(text: &str) -> Result<Person, String> {
 }
 
 /// Settings removed from the app, still allowed in old files without a warning.
-const RETIRED_KEYS: &[&str] = &["wire_limit", "wire_budget", "canvas_constrain"];
+const RETIRED_KEYS: &[&str] = &["wire_limit", "wire_budget", "canvas_constrain", "canvas_resize_terminals"];
 
 /// The keys of settings.json that no setting reads, each with a close spelling when there is
 /// exactly one. A warning only: the rest of the file still applies.
@@ -1165,9 +1160,10 @@ mod tests {
         let defaults = parse_person("{}").unwrap();
         assert_eq!(defaults.canvas_gap, 24.);
         assert_eq!(defaults.canvas_push, CanvasPush::Live);
-        assert!(defaults.canvas_resize_terminals);
-        assert_eq!(parse_person(r#"{"canvas_push":"off","canvas_resize_terminals":false}"#).map(|p| (p.canvas_push, p.canvas_resize_terminals)),
-            Ok((CanvasPush::Off, false)));
+        // A removed setting in an old file still loads, without a warning.
+        let old = r#"{"canvas_push":"off","canvas_resize_terminals":false}"#;
+        assert_eq!(parse_person(old).map(|p| p.canvas_push), Ok(CanvasPush::Off));
+        assert_eq!(unknown_keys(old), None);
         assert_eq!(defaults.space_fill, 0.04);
         assert_eq!(defaults.terminal_size, [100, 30]);
         for invalid in [r#"{"canvas_gap":-1}"#, r#"{"canvas_gap":1025}"#,

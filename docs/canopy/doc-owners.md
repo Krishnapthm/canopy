@@ -32,7 +32,7 @@ Guides tell the story and link to feature pages for each control.
 
 | Page | Owns | Sources |
 |---|---|---|
-| Canvas | Pan, zoom, selection, moving, Arrange, tile view, focus fit, sync input, canvas settings. | `src/canvas.rs`, `src/window/canvas_view*` |
+| Canvas | Pan, zoom, selection, moving, Arrange, tile view, focus fit, sync input, canvas settings. | `src/canvas.rs`, `src/canophy/`, `src/window/canvas_view*` |
 | Spaces | Spaces, Home, the top strip, switching, worktree dialogs. | `defaults/mods/space-new`, `spaces`, `worktree` |
 | Panes | Pane kinds, opening, closing rules, stacking, pane IDs, what `canvas.json` keeps. | `src/panes.rs` |
 | Toolbar-and-Helper-Bar | Toolbar buttons and the shared helper bar. | `defaults/mods/toolbar`, `helper_bar.rs` |
@@ -74,3 +74,11 @@ Guides tell the story and link to feature pages for each control.
 | Build-from-Source | Building, testing and the isolated development window. |
 
 README owns install, update and uninstall. Link to it, never copy it.
+
+## Developer pages
+
+Pages in `docs/canopy/` for people changing Canopy itself.
+
+| Page | Owns | Sources |
+|---|---|---|
+| canophy.md | The canvas laws, the canophy pieces, adding a pane kind or a law. | `src/canophy/`, `src/window/canvas_view/scaled.rs` |

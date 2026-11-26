@@ -7,7 +7,9 @@
 //! once (and again only if it changes), then writes `f` per presented frame: nothing moves while
 //! the simulator's screen is still.
 use std::io::{BufRead, Write};
+use std::os::unix::process::ExitStatusExt;
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 /// What a helper reports, in order.
 pub enum Event {
@@ -90,7 +92,9 @@ impl Helper {
     pub fn start(udid: &str, events: async_channel::Sender<Event>) -> Result<Self, String> {
         static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let developer = developer_dir().ok_or("Can't find Xcode (xcode-select -p)")?;
-        let exe = std::env::current_exe().map_err(|e| format!("Can't find canopy itself: {e}"))?;
+        // The sandbox matches the resolved executable path, including through /tmp.
+        let exe = std::env::current_exe().and_then(std::fs::canonicalize)
+            .map_err(|e| format!("Can't find canopy itself: {e}"))?;
         let name = format!("dev.canopy.sim.{}.{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let port = unsafe { canopy_sim_listen(cstr(&name).as_ptr()) };
         if port == 0 { return Err("Can't open a port for the simulator screen".into()); }
@@ -102,7 +106,7 @@ impl Helper {
             .arg("-D").arg(format!("DEVELOPER={developer}"))
             .arg("-D").arg(format!("RENDEZVOUS={name}"))
             .arg(&exe).args(["--sim-helper", &developer, udid, &name])
-            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
+            .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped())
             .spawn();
         let mut child = match spawned {
             Ok(child) => child,
@@ -126,7 +130,24 @@ impl Helper {
 /// The helper's stdout, line by line, until it exits.
 fn read(stdout: std::process::ChildStdout, mut child: Child, port: u32, events: async_channel::Sender<Event>, pending: std::sync::Arc<std::sync::atomic::AtomicBool>) {
     use std::sync::atomic::Ordering;
+    let stderr = child.stderr.take().unwrap();
+    let last = Arc::new(Mutex::new(None));
+    let last_line = Arc::clone(&last);
+    let drain = std::thread::Builder::new().name("sim-helper-err".into()).spawn(move || {
+        let mut stderr = std::io::BufReader::new(stderr);
+        let mut bytes = Vec::new();
+        while stderr.read_until(b'\n', &mut bytes).is_ok_and(|n| n > 0) {
+            let line = String::from_utf8_lossy(&bytes);
+            let line = line.trim();
+            if !line.is_empty() { *last_line.lock().unwrap() = Some(line.to_owned()); }
+            bytes.clear();
+        }
+    });
     let mut reason = None;
+    if let Err(e) = &drain {
+        reason = Some(format!("Can't read the simulator helper's stderr: {e}"));
+        let _ = child.kill();
+    }
     for line in std::io::BufReader::new(stdout).lines() {
         let Ok(line) = line else { break };
         let event = match line.split_once(' ').unwrap_or((&line, "")) {
@@ -149,8 +170,29 @@ fn read(stdout: std::process::ChildStdout, mut child: Child, port: u32, events: 
     let _ = child.kill();
     let status = child.wait();
     unsafe { canopy_sim_close(port) };
-    if reason.is_none() && !status.is_ok_and(|s| s.success()) { reason = Some("The simulator helper stopped".into()); }
+    if let Ok(drain) = drain { let _ = drain.join(); }
+    if reason.is_none() {
+        reason = match status {
+            Ok(status) if status.success() => None,
+            Ok(status) => Some(stopped_reason(status.code(), status.signal(), last.lock().unwrap().as_deref())),
+            Err(_) => Some(stopped_reason(None, None, last.lock().unwrap().as_deref())),
+        };
+    }
     let _ = events.send_blocking(Event::Exit(reason));
+}
+
+fn stopped_reason(code: Option<i32>, signal: Option<i32>, last: Option<&str>) -> String {
+    let mut reason = "The simulator helper stopped".to_owned();
+    if let Some(code) = code {
+        reason.push_str(&format!(" (exit {code})"));
+    } else if let Some(signal) = signal {
+        reason.push_str(&format!(" (signal {signal})"));
+    }
+    if let Some(line) = last {
+        reason.push_str(": ");
+        reason.push_str(line);
+    }
+    reason
 }
 
 /// Xcode's developer folder, once per run.
@@ -477,6 +519,12 @@ pub fn type_text(text: &str) -> (Vec<(u32, bool)>, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stopped_reason_includes_exit_or_signal_and_last_stderr_line() {
+        assert_eq!(stopped_reason(Some(2), None, Some("screen unavailable")), "The simulator helper stopped (exit 2): screen unavailable");
+        assert_eq!(stopped_reason(None, Some(9), None), "The simulator helper stopped (signal 9)");
+    }
 
     #[test]
     fn input_lines_match_the_helper() {

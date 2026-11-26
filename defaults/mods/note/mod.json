@@ -1,1 +1,1 @@
-{ "place": "none", "title": "Note", "pane": { "label": "Note", "icon": "mods/note/sticky-note.svg" } }
+{ "place": "none", "title": "Note", "pane": { "label": "Note", "icon": "mods/note/sticky-note.svg", "header": false } }

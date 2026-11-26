@@ -9,7 +9,7 @@ use super::helper_bar::{pane_actions, sim_device_actions};
 #[cfg(target_os = "macos")]
 use super::sim_screen::{AgentStep, By, Live, SimEvent, SimScreen};
 
-const DEFAULT_SIZE: [f32; 2] = [340., 700.];
+const DEFAULT_SIZE: [f32; 2] = [canophy::traits::SIM.w, canophy::traits::SIM.h];
 
 /// Space for the shared pill and its bottom margin, even when the pill is hidden.
 #[cfg(target_os = "macos")]
@@ -20,10 +20,13 @@ pub(super) fn device_room([w, h]: [f32; 2]) -> [f32; 2] {
     [w, (h - DEVICE_BAR_ROW).max(1.)]
 }
 
+/// The world size of a sim pane whose device (`outer` points, bezel included) draws at `scale`
+/// world px per point. The header is in world px. The margin, frame and device bar row
+/// are in screen px and convert to world px at the pane's `zoom`.
 #[cfg(target_os = "macos")]
-fn sim_pane_size(outer: [f32; 2], scale: f32) -> [f32; 2] {
-    let padding = 2. * super::sim_screen::MARGIN + 2.;
-    [outer[0] * scale + padding, outer[1] * scale + padding + canvas::HEADER + DEVICE_BAR_ROW]
+fn sim_pane_size(outer: [f32; 2], scale: f32, zoom: f32) -> [f32; 2] {
+    let fixed = (2. * super::sim_screen::MARGIN + 2.) / zoom;
+    [outer[0] * scale + fixed, outer[1] * scale + fixed + canvas::HEADER + DEVICE_BAR_ROW / zoom]
 }
 
 #[cfg(target_os = "macos")]
@@ -126,14 +129,13 @@ impl AppWindow {
     }
 
     /// Adds a sim pane (udid empty: it lists simulators to pick) and starts showing it.
-    pub(super) fn add_sim_pane(&mut self, udid: String, point: canvas::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> String {
+    pub(super) fn add_sim_pane(&mut self, udid: String, point: canophy::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> String {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-        // A phone in its bezel (about 1:2) under the 36 px header, that size on screen at this zoom.
-        let size = DEFAULT_SIZE;
-        let zoom = doc.camera.zoom;
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], size[0] / zoom, size[1] / zoom], z, space, color: None, pinned: None });
+        // A phone in its bezel (about 1:2) under the header, in world px like every pane.
+        let [w, h] = DEFAULT_SIZE;
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: canophy::WorldRect::new(point[0], point[1], w, h), z, space, color: None, pinned: None });
         self.canvas_changed(cx);
         self.refresh_sim(&id, true, window, cx);
         id
@@ -343,7 +345,7 @@ impl AppWindow {
 
     /// The `canvas.sim_*` commands; all but sim_hub, sim_reveal and sim_input act on the sim
     /// pane named by `pane`, else the selected one.
-    pub(in crate::window) fn sim_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::window) fn sim_command(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         let toast = |this: &mut Self, e: &str, window: &mut Window, cx: &mut Context<Self>| this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx);
         match name {
             "canvas.sim_hub" => {
@@ -376,7 +378,7 @@ impl AppWindow {
             }
             #[cfg(target_os = "macos")]
             "canvas.sim_zoom" => {
-                let result = self.zoom_sim(&id, a["step"].as_str().unwrap_or("actual"), cx);
+                let result = self.zoom_sim(&id, a["step"].as_str().unwrap_or("actual"), person, window, cx);
                 return self.answer(result);
             }
             "canvas.sim_device" => return self.sim_picker(&id, window, cx),
@@ -424,26 +426,31 @@ impl AppWindow {
 
     /// Resets the pane or sizes its device in canvas points. In and out step the drawn scale.
     #[cfg(target_os = "macos")]
-    fn zoom_sim(&mut self, id: &str, step: &str, cx: &mut Context<Self>) -> Result<Value, String> {
+    fn zoom_sim(&mut self, id: &str, step: &str, person: bool, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
         if self.canvas_state.doc.docked(id) { return Err("Move the simulator to the canvas to change its size".into()); }
         let (size, result) = if step == "default" {
             (DEFAULT_SIZE, json!({}))
         } else {
             let s = self.canvas_state.sims.get(id).and_then(|v| v.live.as_ref())
                 .ok_or("The device size is not known yet")?.read(cx);
-            let (scale, points) = match step {
+            let (scale, points, zoom) = match step {
                 "in" | "out" => {
                     let step = if step == "in" { 1.25 } else { 0.8 };
-                    ((s.scale().unwrap_or(1.) * step).clamp(0.2, 3.), s.points())
+                    // The drawn scale is screen px per point; the pane's own is world px per point.
+                    let pane_scale = self.canvas_state.doc.panes.iter().find(|p| p.id == id).map_or(1., |p| canophy::layout(self.canvas_state.doc.camera, p).scale);
+                    ((s.scale().unwrap_or(1.) / pane_scale * step).clamp(0.2, 3.), s.points(), pane_scale)
                 }
-                "actual" => (self.canvas_state.doc.camera.zoom, s.live_points()),
+                // One world px per device point: the device's own size at 100%.
+                "actual" => (1., s.live_points(), 1.),
                 other => return Err(format!("Unknown simulator size {other:?}")),
             };
             let points = points.ok_or("The device size is not known yet")?;
-            (sim_pane_size(s.outer_points(points), scale), json!({"scale":scale}))
+            (sim_pane_size(s.outer_points(points), scale, zoom), json!({"scale":scale}))
         };
         self.set_sim_size(id, size);
         self.solve_layout(Some(id), None, cx);
+        // Actual size is one world px per point, so it is only true on screen at 100%.
+        if step == "actual" && person { self.show_full_size(id, window, cx); }
         self.canvas_changed(cx);
         cx.notify();
         Ok(result)
@@ -455,20 +462,24 @@ impl AppWindow {
         let Some(s) = self.canvas_state.sims.get(id).and_then(|v| v.live.as_ref()).map(|s| s.read(cx)) else { return };
         let Some(points) = s.points() else { return };
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
-        let room = device_room(annotate::card_body(pane, self.canvas_state.doc.camera.zoom));
+        let layout = canophy::layout(self.canvas_state.doc.camera, pane);
+        let room = device_room(layout.body_size());
         let Some(fit) = s.fit(room) else { return };
-        self.set_sim_size(id, sim_pane_size(s.outer_points(points), fit.scale));
+        let scale = fit.scale / layout.scale;
+        self.set_sim_size(id, sim_pane_size(s.outer_points(points), scale, layout.scale));
         self.solve_layout(Some(id), None, cx);
         self.canvas_changed(cx);
     }
 
     #[cfg(target_os = "macos")]
+    /// Sizes a sim pane to `[w, h]` world px (a pinned pane draws at scale 1, so the same
+    /// numbers in screen px).
     fn set_sim_size(&mut self, id: &str, [w, h]: [f32; 2]) {
-        let doc = &mut self.canvas_state.doc;
-        if let Some(pane) = doc.panes.iter_mut().find(|p| p.id == id) {
-            pane.rect[2..].copy_from_slice(&[w / doc.camera.zoom, h / doc.camera.zoom]);
-            if let Some(pinned) = &mut pane.pinned { pinned[2..].copy_from_slice(&[w, h]); }
-        }
+        let state = &mut self.canvas_state;
+        let Some(pane) = state.doc.panes.iter().find(|p| p.id == id) else { return };
+        let (rect, pinned) = (canophy::WorldRect { w, h, ..pane.rect }, pane.pinned);
+        state.step(canophy::Intent::Place(vec![(id.to_owned(), rect)]));
+        if let Some([x, y, ..]) = pinned { state.step(canophy::Intent::Pin { id: id.to_owned(), screen: Some([x, y, w, h]) }); }
     }
 
     /// Pops a sim pane's device out into its own window, or brings it back.
@@ -552,7 +563,7 @@ impl AppWindow {
 
     /// The shared controls below the phone in the canvas or Files panel.
     #[cfg(target_os = "macos")]
-    pub(super) fn sim_bottom_bar(&self, pane: &canvas::Pane, zoom: f32, cx: &mut Context<Self>) -> Option<Div> {
+    pub(super) fn sim_bottom_bar(&self, pane: &canvas::Pane, layout: &canophy::Layout, cx: &mut Context<Self>) -> Option<Div> {
         let state = &self.canvas_state;
         let id = &pane.id;
         let udid = pane.sim().filter(|udid| !udid.is_empty())?;
@@ -571,8 +582,8 @@ impl AppWindow {
         if self.sim_device(pane).is_some_and(|device| device.booted) {
             actions.push(super::helper_bar::sim_shutdown_action(id));
         }
-        // A pinned pane keeps its screen size, so its bar does too.
-        let s = bottom_bar_scale(if pane.pinned.is_some() { 1. } else { zoom }, annotate::card_body(pane, zoom)[0], actions.len())?;
+        // A pinned pane keeps its screen size (scale 1), so its bar does too.
+        let s = bottom_bar_scale(layout.scale, layout.body[2], actions.len())?;
         let actions = self.sim_relabel(id, actions, cx);
         Some(self.bar(id, actions, s, false, cx).occlude())
     }
@@ -608,16 +619,16 @@ impl AppWindow {
 
     /// A sim pane's whole body as the canvas card and the panel draw it: the device, Annotate, and
     /// the bottom bar of device actions.
-    pub(super) fn sim_card_body(&self, card: &canvas::Pane, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn sim_card_body(&self, card: &canvas::Pane, layout: canophy::Layout, cx: &mut Context<Self>) -> AnyElement {
         let body = self.sim_body(card, cx);
         #[cfg(not(target_os = "macos"))]
-        let _ = camera;
+        let _ = layout;
         #[cfg(target_os = "macos")]
         if self.has_device_row(card, cx) {
             let body = div().absolute().top_0().left_0().right_0().bottom(px(DEVICE_BAR_ROW)).child(body);
-            let body = self.annotate_body(card, body.into_any_element(), annotate::card_body(card, camera.zoom), cx);
+            let body = self.annotate_body(card, body.into_any_element(), layout.body_size(), cx);
             return div().relative().size_full().child(body)
-                .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(
+                .when_some(self.sim_bottom_bar(card, &layout, cx), |d, bar| d.child(
                     div().id("sim-device-controls").absolute().bottom(px(12.)).left_0().right_0()
                         .flex().items_center().overflow_x_scroll()
                         .child(bar.flex_none().map(|mut bar| {
@@ -811,9 +822,11 @@ mod tests {
     fn pane_size_keeps_the_requested_device_scale_after_fit() {
         let points = [402., 874.];
         let scale = 0.75;
-        let [w, h] = sim_pane_size(points, scale);
-        let room = device_room([w - 2., h - crate::canvas::HEADER - 2.]);
-        assert_eq!(fit(room, points, None, super::super::sim_screen::MARGIN).scale, scale);
+        for z in [0.5, 1., 2.] {
+            let [w, h] = sim_pane_size(points, scale, z);
+            let room = device_room([w * z - 2., (h - crate::canvas::HEADER) * z - 2.]);
+            assert!((fit(room, points, None, super::super::sim_screen::MARGIN).scale - scale * z).abs() < 1e-4);
+        }
     }
 
     #[test]

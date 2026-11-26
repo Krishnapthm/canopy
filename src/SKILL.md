@@ -128,7 +128,7 @@ your user's request or approval. `read` cuts at 256 KiB; `shot` needs the pane o
 - Use the pane color swatch to choose a named color or enter a custom hex color. `canvas.pane_color {pane, color}` accepts `#RRGGBB` or a named palette color, and `canvas.pane_color_next {pane}` assigns an unused color in the space.
 - Right-click empty canvas and choose **New Sticky Note**, or press Option+Cmd+N (Ctrl+Alt+N elsewhere). Drag a note by its helper bar grip. `canvas.note_new {point?}` opens the shipped note mod on the canvas.
 
-Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", path?, url?, udid?, wire?, point?, place?, pinned?}` (files need path, browsers open New tab if url is omitted; `place` is "panel", "canvas" or "pinned": browsers and sims default to "panel", a tab in the Files panel, and take `canopy pane new browser <url> --place canvas`; "pinned" (or `pinned: true`) is the screen's top right, where it stays while the canvas moves), `canvas.pane_pin {pane, pinned?}` (pin to the screen or unpin), `canvas.pane_dock {pane, docked?}` (dock a browser or sim in the Files panel, or move it back onto the canvas; a docked pane has no place on the canvas, and no edge is drawn for its wire), `canvas.pane_read {pane}`,
+Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", path?, url?, udid?, wire?, point?, place?, pinned?}` (files need path, browsers open New tab if url is omitted; `place` is "panel", "canvas" or "pinned": browsers and sims default to "panel", a tab in the Files panel, and take `canopy pane new browser <url> --place canvas`; "pinned" (or `pinned: true`) is the screen's top right, where it stays while the canvas moves), `canvas.pane_pin {pane, pinned?}` (pin to the screen or unpin), `canvas.pane_dock {pane, docked?}` (dock a browser or sim in the Files panel, or move it back onto the canvas; a docked pane has no place on the canvas, and no edge is drawn for its wire), `canvas.pane_read {pane}`, A pane the person opens eases their camera to 100%; panes you open with these commands never move the camera, so the person keeps their view.
 `canvas.pane_shot {pane, path?}`, `canvas.pane_open {pane, target, tab?}` (browser panes load the URL in the active tab, or a new tab with `tab: "new"`; sim panes take a udid
 or `booted`), `canvas.close {pane}`. Mods read `canvasPanes()` and `paneKinds()`; `panes()` is
 the tab layouts' panes.
@@ -316,6 +316,7 @@ those files or the generated guide. The app rewrites them on start.
 - Home defaults to `~/.config/canopy`; `HERDR_APP_HOME` selects another.
 - Mods live in `mods/<name>/` with `main.js` and optional `mod.json`.
   They are trusted JavaScript with command and network access.
+  A `"pane"` block may set `header` (true), `size` ([320, 240]) and `min` ([240, 120]) in world px.
   `"focusable": true` in `mod.json` lets `pane.go` move onto a copy; it receives
   `"focus"` from `nextCommand()` and focuses its own keyboard handle.
 - A mod's `watchFolder(dir)` promise has `cancel()`; cancel it when the folder
@@ -374,8 +375,8 @@ automatically. Terminal ids keep core addresses, sub-agent ids are `sub:<parent>
 and file ids are `p<N>`, never reused;
 `canvas_color` in settings.json overrides the theme background (null resets).
 Layouts without a theme use `canopy-dark` or `canopy-light` by appearance. Saved `graphite`/`paper` themes alias `herdr-dark`/`herdr-light`.
-Canvas zoom scales pane content like a picture (terminal grids, PDF pages, web pages and file previews keep their layout); headers and mod panes keep their screen size. Terminal text zoom and PDF page zoom are separate. Hand-edited settings reload live: `canvas_gap` (24, 0..1024 world pixels),
-`tile_gap` (0, tile view cell gap), `tile_focus_grows` (false: equal tiles), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `canvas_resize_terminals` (true: the grid refits to the cell; false keeps it and scales), `space_fill` (0.04, 0..1),
+Canvas zoom scales every pane like a picture, header included: terminal grids, PDF pages, web pages and file previews keep their layout, and zoom never changes a terminal's columns and rows (resizing a pane reflows them once, on release). A mod pane's box and header scale; the mod's own content keeps its screen size. Pinned panes keep their screen size. Terminal text zoom and PDF page zoom are separate. Hand-edited settings reload live: `canvas_gap` (24, 0..1024 world pixels),
+`tile_gap` (0, tile view cell gap), `tile_focus_grows` (false: equal tiles), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `space_fill` (0.04, 0..1),
 and `terminal_size` ([100, 30], columns 20..500 and rows 5..200 for new expansions).
 They do not appear in Settings. `canopy config` prints all defaults and explanations.
 Browser settings are `browser_keep_cookies` ("until_quit" clears site data at quit and on the next start, or "forever" keeps it on macOS 14 or later) and `browser_open_links` ("built_in" opens clicked HTTP and HTTPS terminal links in a browser tab. "default" uses the system browser).

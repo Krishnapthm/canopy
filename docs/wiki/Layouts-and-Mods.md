@@ -64,15 +64,25 @@ Canopy keeps the upstream names `herdr` for the JavaScript module and `HERDR_APP
 
 ## Mod panes
 
-Add a `pane` block to `mod.json` to declare a pane kind named `mod:<name>`:
+Mod panes declare the same geometry traits as built-in panes. Add a `pane` block to `mod.json` to register the kind `mod:<name>`, where `<name>` is the mod's folder. The shipped note mod hides the standard header and uses the default sizes:
 
 ```json
-"pane": { "label": "Note", "icon": "mods/note/sticky-note.svg", "actions": [] }
+{
+  "place": "none",
+  "title": "Note",
+  "pane": { "label": "Note", "icon": "mods/note/sticky-note.svg", "header": false }
+}
 ```
 
-Each action declares `{icon, label, command, args}`.
-Actions run app commands with the pane selected.
-Canopy draws these actions before **Connect** and **Close** in the shared helper bar.
+| Field | What it does | Default |
+|---|---|---|
+| `header` | Shows the standard header when `true`. | `true` |
+| `size` | The opening size, as `[width, height]`. | `[320, 240]` |
+| `min` | The smallest resize, as `[width, height]`. | `[240, 120]` |
+
+Sizes are in canvas pixels, the size at 100% zoom; the pane and its header scale with the canvas like every pane (see [Canvas](Canvas#how-panes-behave-when-you-zoom)). Each number must be positive and finite, and `min` must fit inside `size`. An invalid declaration shows a toast that opens the `mod.json`, and the pane uses the defaults for all three fields.
+
+Each entry in `actions` declares `{icon, label, command, args}` and runs an app command with the pane selected. The shared helper bar shows these actions before **Connect** and **Close**.
 
 ## Check a mod
 

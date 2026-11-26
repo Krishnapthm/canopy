@@ -1,0 +1,204 @@
+{
+  "version": 3,
+  "camera": {
+    "x": -120.5,
+    "y": 64.25,
+    "zoom": 0.75
+  },
+  "view": "all",
+  "spaces": [
+    {
+      "space": "s1",
+      "rect": [
+        0.0,
+        0.0,
+        260.0,
+        120.0
+      ],
+      "color": "teal",
+      "frame": false
+    }
+  ],
+  "panes": [
+    {
+      "id": "t1",
+      "kind": "terminal",
+      "props": {
+        "size": [
+          662.0,
+          420.5
+        ]
+      },
+      "rect": [
+        24.0,
+        24.0,
+        662.0,
+        420.5
+      ],
+      "z": 1,
+      "space": "s1",
+      "color": "blue"
+    },
+    {
+      "id": "sub:t1:a",
+      "kind": "sub",
+      "props": {
+        "parent": "t1",
+        "sub": "a"
+      },
+      "rect": [
+        766.0,
+        24.0,
+        220.0,
+        36.0
+      ],
+      "z": 2,
+      "space": "s1"
+    },
+    {
+      "id": "p1",
+      "kind": "file",
+      "props": {
+        "path": "/tmp/notes.md"
+      },
+      "rect": [
+        -600.25,
+        10.5,
+        560.0,
+        420.0
+      ],
+      "z": 3,
+      "space": "s1"
+    },
+    {
+      "id": "p2",
+      "kind": "image",
+      "props": {
+        "path": "/tmp/shot.png"
+      },
+      "rect": [
+        1000.0,
+        500.0,
+        400.0,
+        236.0
+      ],
+      "z": 4,
+      "space": "s1"
+    },
+    {
+      "id": "p3",
+      "kind": "pdf",
+      "props": {
+        "path": "/tmp/paper.pdf",
+        "highlights": [
+          {
+            "page": 2,
+            "quote": "canopy",
+            "occurrence": 0
+          }
+        ]
+      },
+      "rect": [
+        0.0,
+        900.0,
+        560.0,
+        720.0
+      ],
+      "z": 5,
+      "space": "s1"
+    },
+    {
+      "id": "p4",
+      "kind": "mod:note",
+      "props": {
+        "text": "hi"
+      },
+      "rect": [
+        1500.0,
+        0.0,
+        320.0,
+        240.0
+      ],
+      "z": 6,
+      "space": "s1"
+    },
+    {
+      "id": "p5",
+      "kind": "browser",
+      "props": {
+        "url": "http://localhost:3000",
+        "tabs": [
+          {
+            "id": "t1",
+            "url": "http://localhost:3000",
+            "title": "Dev"
+          }
+        ],
+        "active": 0,
+        "home": "http://localhost:3000",
+        "viewport": [
+          1280.0,
+          800.0
+        ]
+      },
+      "rect": [
+        2000.0,
+        0.0,
+        960.0,
+        680.0
+      ],
+      "z": 7,
+      "space": "s1"
+    },
+    {
+      "id": "p6",
+      "kind": "sim",
+      "props": {
+        "udid": "ABC"
+      },
+      "rect": [
+        3000.0,
+        0.0,
+        340.0,
+        700.0
+      ],
+      "z": 8,
+      "space": "s1",
+      "pinned": [
+        600.0,
+        16.0,
+        340.0,
+        700.0
+      ]
+    }
+  ],
+  "panel": {
+    "tabs": [
+      "pane:p5"
+    ],
+    "tree_hidden": false,
+    "editor": null,
+    "space": "s1",
+    "width": 360.0
+  },
+  "file_ids": 6,
+  "recent_folders": [
+    "/tmp"
+  ],
+  "arrange_layout": "tidy",
+  "wires": [
+    {
+      "a": "t1",
+      "b": "p1",
+      "born": false
+    }
+  ],
+  "room": "s1",
+  "cameras": {
+    "": {
+      "x": 0.0,
+      "y": 0.0,
+      "zoom": 1.0
+    }
+  }
+}

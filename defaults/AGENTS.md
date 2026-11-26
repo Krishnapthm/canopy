@@ -275,7 +275,10 @@ Properties any node can have:
   (Canopy's own and every `notify()`), in place of the shipped `toast`; an
   unknown mod logs a warning and falls back to `toast`. It gets the same
   `props()`: `{title, body, level, icon, action, timeout, overlay}` (`timeout`
-  is optional). A mod that hands them to the system instead
+  is optional). The window pauses a toast's timer while the pointer is over
+  it; a mod that shows more on request calls `keepOverlay(props().overlay)` so
+  the toast stays until closed, as the shipped one does when expanded. A mod
+  that hands them to the system instead
   (`exec("notify-send", ...)`) closes itself at once
   with `closeOverlay(props().overlay)`.
 - Colors are theme names (`border`, `accent`, `surface`, ...) or `#rrggbb[aa]`.
@@ -692,7 +695,6 @@ when there is one); the rest of the file still applies. The corresponding `.erro
 - `run_in_background`: on by default on macOS. Quit hides Canopy; use Quit Canopy from the Canopy menu bar icon to exit. Set it to false in Settings > Look > App to quit normally.
 - `browser_keep_cookies`: "until_quit" (default) clears browser pane cookies and site data at quit and on the next start; "forever" keeps them on macOS 14 or later.
 - `browser_open_links`: "built_in" (initial setting) opens clicked HTTP and HTTPS terminal links in a browser tab. "default" uses the system browser.
-- `canvas_resize_terminals`: true (default) refits a canvas terminal's grid to the cell as it resizes; false keeps the grid and scales it to fit. Settings.json only.
 - `space_fill`: space background opacity (default 0.04, 0..1).
 - `terminal_size`: new expanded cell [columns, rows] (default [100, 30], ranges 20..500 and 5..200).
   These four are hand-edited only, never in Settings.
@@ -822,7 +824,10 @@ has 120 programs (agents, editors, runtimes, tools, databases, infra);
   `props().pane` set to its id. Save props with `canvas.pane_set`; a string
   `props.text` is returned by `canopy pane read`. Actions declare
   `{icon, label, command, args}` and run with the pane selected, before Connect
-  and Close in the shared helper bar. See https://github.com/Krishnapthm/canopy/wiki/Layouts-and-Mods.
+  and Close in the shared helper bar. `header` (true), `size` ([320, 240]) and `min`
+  ([240, 120]) declare the pane's standard header, opening size and smallest resize, in
+  world px at 100% zoom; an invalid size or min falls back to the defaults with a toast.
+  The note mod sets `"header": false`. See https://github.com/Krishnapthm/canopy/wiki/Layouts-and-Mods.
 - `"focusable": true` in `mod.json` lets `pane.go` give a shown copy the keyboard.
   It gets `"focus"` from `nextCommand()`: focus your own handle then
   (`this.handle.focus()`) and handle keys with `on_key_down`. The copy gets `"focus"`
@@ -1247,7 +1252,7 @@ action, x?, y?, x1?, y1?, x2?, y2?, ms?, text?, button?}` (what those verbs send
 `canvas.sim_home`, `canvas.sim_screenshot` (to the Desktop, replies with path),
 `canvas.sim_record` (start, or stop and save a movie on the Desktop), `canvas.sim_annotate`
 (the person draws on a still and sends it to an agent as a quote: you get `@<png path>` and a
-line saying what it shows), `canvas.sim_zoom {step?: "actual" | "default" | "in" | "out"}`,
+line saying what it shows), `canvas.sim_zoom {step?: "actual" | "default" | "in" | "out"}` ("actual" sizes the pane to one world px per device point, the device's real size at 100% zoom),
 `canvas.sim_shutdown {pane?, close?}` (turn off the device and show the picker, or close the
 pane with `close: true`. The result arrives in a toast),
 `canvas.sim_pop` (own window, or back), `canvas.sim_refresh` (new screenshot, retry live),
@@ -1263,7 +1268,7 @@ Use the pane color swatch to choose a named color or enter a custom hex color. `
 
 Right-click empty canvas and choose **New Sticky Note**, or press Option+Cmd+N (Ctrl+Alt+N elsewhere). Drag a note by its helper bar grip. `canvas.note_new {point?}` opens the shipped note mod on the canvas.
 
-Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", path?, url?, udid?, wire?, point?, place?, pinned?}` (files need path, browsers open New tab if url is omitted; `place` is "panel", "canvas" or "pinned": browsers and sims default to "panel", a tab in the Files panel, and take `canopy pane new browser <url> --place canvas`; "pinned" (or `pinned: true`) is the screen's top right, where it stays while the canvas moves), `canvas.pane_pin {pane, pinned?}` (pin to the screen or unpin), `canvas.pane_dock {pane, docked?}` (dock a browser or sim in the Files panel, or move it back onto the canvas; a docked pane has no place on the canvas, and no edge is drawn for its wire), `canvas.pane_read {pane}`,
+Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", path?, url?, udid?, wire?, point?, place?, pinned?}` (files need path, browsers open New tab if url is omitted; `place` is "panel", "canvas" or "pinned": browsers and sims default to "panel", a tab in the Files panel, and take `canopy pane new browser <url> --place canvas`; "pinned" (or `pinned: true`) is the screen's top right, where it stays while the canvas moves), `canvas.pane_pin {pane, pinned?}` (pin to the screen or unpin), `canvas.pane_dock {pane, docked?}` (dock a browser or sim in the Files panel, or move it back onto the canvas; a docked pane has no place on the canvas, and no edge is drawn for its wire), `canvas.pane_read {pane}`, A pane the person opens eases their camera to 100%; panes you open with these commands never move the camera, so the person keeps their view.
 `canvas.pane_shot {pane, path?}`, `canvas.pane_open {pane, target, tab?}` (browser panes load the URL in the active tab, or a new tab with `tab: "new"`; sim panes take a udid
 or `booted`), `canvas.close {pane}`. Mods read `canvasPanes()` and `paneKinds()`; `panes()` is
 the tab layouts' panes. `canvas.pane_set {pane, props}` shallow-merges an object

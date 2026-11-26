@@ -3,9 +3,10 @@ use super::*;
 use gpui::{ObjectFit, StyledImage, img};
 use std::path::Path;
 
-fn pane_size((w, h): (u32, u32)) -> canvas::Point {
+fn pane_size((w, h): (u32, u32)) -> canophy::Point {
     let (w, h) = (w as f32, h as f32);
-    let scale = (560. / w).min(420. / h).min(1.);
+    let fit = canophy::traits::PREVIEW;
+    let scale = (fit.w / w).min(fit.h / h).min(1.);
     [
         (w * scale).max(160.),
         (h * scale).max(160.) + canvas::HEADER,
@@ -65,7 +66,7 @@ impl AppWindow {
         &mut self,
         path: &Path,
         canonical: &str,
-    ) -> image::ImageResult<canvas::Point> {
+    ) -> image::ImageResult<canophy::Point> {
         if let Some(&size) = self.canvas_state.image_sizes.get(canonical) {
             return Ok(pane_size(size));
         }
@@ -137,7 +138,7 @@ impl AppWindow {
         &self,
         card: &canvas::Pane,
         path: &str,
-        camera: canvas::Camera,
+        camera: canophy::Camera,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let ready = self.canvas_state.image_sizes.contains_key(path);

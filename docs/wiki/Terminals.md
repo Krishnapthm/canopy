@@ -28,7 +28,9 @@ While you are in a terminal, the wheel over *other* terminals still pans the can
 
 - Select a terminal and press `Cmd+Enter` (`Ctrl+Shift+Enter` on Linux and Windows) to switch between expanded and collapsed. In canvas mode, `x` collapses the selected terminal.
 - Or right-click the terminal and choose **Expand** or **Collapse**.
-- Drag an expanded pane's edge or corner to resize it. By default, the program's columns and rows refit to the new size.
+- Drag an expanded pane's edge or corner to resize it. When you let go, the program's columns and rows refit to the new size, once.
+
+Zooming the canvas never changes a terminal's columns and rows: the text scales with the pane like a picture, so a program keeps its layout at 25% and at 200%. A pinned terminal keeps its screen size.
 
 You can keep as many terminals expanded as you like.
 
@@ -74,14 +76,13 @@ Edit these in [settings.json](Settings-and-Themes):
 | Setting | Default | What it does |
 |---|---|---|
 | `terminal_size` | `[100, 30]` | Columns and rows for new expanded terminals and for `=`. Columns 20 to 500, rows 5 to 200. |
-| `canvas_resize_terminals` | `true` | Refits columns and rows when you resize a pane. With `false`, resizing scales the existing text instead. |
 | `confirm_close_terminal` | `true` | Asks before closing a plain terminal. Agents always ask. |
 
 ## Troubleshooting
 
 - **Scrolling moves the canvas instead of the output.** The terminal is not entered. Double-click it first.
 - **Typing does nothing.** The terminal is selected but not entered. Double-click it, or press `Enter`.
-- **Resizing makes the text bigger instead of adding columns.** Set `canvas_resize_terminals` to `true`.
+- **The text grows or shrinks while you drag a corner.** That is the old grid drawn to fit; the columns and rows refit when you let go.
 
 ## See also
 

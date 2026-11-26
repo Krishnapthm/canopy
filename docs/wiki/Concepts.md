@@ -136,6 +136,12 @@ Other agent CLIs run fine in Canopy, but know about it only through the project 
 
 Details: [Agent Setup](Agent-Setup).
 
+## Toasts: messages that come to you
+
+A toast is the small message in the bottom right corner. Canopy uses one when something needs you, when an action finishes somewhere you are not looking, and for every error you can do something about. Click a toast to go where it points, for example the agent that needs you.
+
+A toast leaves after a few seconds, or about eight for errors. While your pointer is over it, it waits. When a message is too long for one line, click the chevron to read all of it. An expanded toast stays until you close it with **×**, and **Copy** puts the whole message on the clipboard, which helps when you report an error.
+
 ## Layouts and mods: the window is files
 
 The whole window, from the toolbar to the space tabs, is built from **layouts** (JSON files that arrange the window) and **mods** (small JavaScript programs that draw parts of it or add pane kinds). They live in your app home, `~/.config/canopy`, as plain files.
