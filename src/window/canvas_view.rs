@@ -1483,9 +1483,12 @@ impl AppWindow {
         }
         slots
     }
+    /// Opens a file as a pane (or a panel tab). `person` false is an agent or script, which never
+    /// moves the camera.
     pub(super) fn open_preview(
         &mut self,
         args: Value,
+        person: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1507,7 +1510,7 @@ impl AppWindow {
                 if let Ok(Ok(Some(paths))) = paths.await {
                     if let Some(path) = paths.first() {
                         let _ = this.update_in(cx, |this, window, cx| {
-                            this.open_preview(json!({"path":path,"point":point}), window, cx)
+                            this.open_preview(json!({"path":path,"point":point}), true, window, cx)
                         });
                     }
                 }
@@ -1535,8 +1538,10 @@ impl AppWindow {
             return;
         }
         let room = self.canvas_state.doc.room.clone();
-        if let Err(e) = self.add_file_pane(std::path::Path::new(path), point, room, window, cx) {
-            self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx);
+        match self.add_file_pane(std::path::Path::new(path), point, room, window, cx) {
+            Ok((id, ..)) if person => self.show_full_size(&id, window, cx),
+            Ok(_) => {}
+            Err(e) => self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx),
         }
     }
 
@@ -1603,7 +1608,8 @@ impl AppWindow {
         let view = canophy::Viewport { size: [f32::from(size.width), f32::from(size.height)], open: self.open_canvas_in(window.viewport_size()) };
         if view != self.canvas_state.viewport {
             self.canvas_state.viewport = view;
-            self.canvas_state.step(canophy::Intent::ViewportChanged);
+            let reveal = self.canvas_state.selected.last().cloned();
+            self.canvas_state.step(canophy::Intent::ViewportChanged { reveal });
         }
     }
 
@@ -1641,15 +1647,16 @@ impl AppWindow {
         let path = canonical;
         let doc = &mut self.canvas_state.doc;
         let (id, kind_name) = if let Some(pane) = doc.panes.iter_mut().find(|p| p.path() == Some(path.as_str())) {
-            let rect = canophy::WorldRect { x: point[0], y: point[1], ..pane.rect };
-            let id = pane.id.clone();
-            pane.rect = rect; // shortcut: a reopened file pane moves outside `step`, until opening is the `Open` intent (phase 4).
+            // A reopened file pane moves to where it was opened.
+            let (id, rect) = (pane.id.clone(), canophy::WorldRect { x: point[0], y: point[1], ..pane.rect });
+            let kind_name = pane.kind_name().to_owned();
             // A pane that changes space leaves its wires behind: wires join one space only.
             if pane.space != space {
                 pane.space = space;
                 doc.wires.retain(|w| w.a != id && w.b != id);
             }
-            (id, pane.kind_name().to_owned())
+            self.canvas_state.step(canophy::Intent::Place(vec![(id.clone(), rect)]));
+            (id, kind_name)
         } else {
             let id = doc.next_file_id();
             let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
@@ -1997,12 +2004,41 @@ impl AppWindow {
         self.canvas_state.rename = Some((target, input, sub));
         cx.notify();
     }
-    /// Glides the camera to center a pane at the same zoom when it is not wholly on screen.
+    /// Glides the camera to center a pane at the same zoom when it is not wholly in the part of
+    /// the canvas no chrome covers.
     pub(super) fn reveal_pane(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let view = self.canvas_state.viewport;
-        let rect = self.canvas_state.doc.panes.iter().find(|c| c.id == id).map(|c| c.rect);
-        let from = self.canvas_state.doc.camera;
-        if let Some(rect) = rect && let Some(to) = canophy::reveal(from, rect, view.size) {
+        self.glide_to(id, self.canvas_state.doc.camera.zoom(), window, cx);
+    }
+
+    /// Eases the camera to 100% with pane `id` centered in view: the `Open` law for a pane the
+    /// person opened, and a sim's actual size. Panes agents open never move the camera, so
+    /// callers check who asked. A pinned or docked pane, or one in another place, is already
+    /// where the person sees it.
+    pub(super) fn show_full_size(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.glide_to(id, 1., window, cx);
+    }
+
+    /// A pane an agent opened leaves the camera where it is (the `Open` law), so when the pane
+    /// lands out of view one toast says so, with a jump to it.
+    pub(super) fn toast_out_of_view(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (doc, view) = (&self.canvas_state.doc, self.canvas_state.viewport);
+        let Some(pane) = doc.panes.iter().find(|p| p.id == id) else { return };
+        let in_view = pane.pinned.is_some() || doc.docked(id)
+            || doc.shown(pane) && canophy::reveal(doc.camera, pane.rect, view.open, doc.camera.zoom()).is_none();
+        if in_view { return; }
+        let body = format!("{} pane {id}", pane.kind_name());
+        // A terminal is entered like an agent you jump to; other panes are selected and revealed.
+        let action = if pane.terminal().is_some() { json!({"name":"agent.focus","args":{"terminal":id}}) } else { json!({"name":"pane.focus","args":{"pane":id}}) };
+        let spec = json!({"kind":"toast","notification":{"title":"An agent opened a pane out of view","body":body,"action":action}});
+        self.open_overlay(mods::new_overlay_id(), spec, window, cx);
+    }
+
+    /// Eases the camera to show pane `id` at `zoom` (`canophy::reveal`).
+    fn glide_to(&mut self, id: &str, zoom: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let (doc, view) = (&self.canvas_state.doc, self.canvas_state.viewport);
+        let Some(pane) = doc.panes.iter().find(|p| p.id == id && p.pinned.is_none() && doc.shown(p)) else { return };
+        let from = doc.camera;
+        if let Some(to) = canophy::reveal(from, pane.rect, view.open, zoom) {
             self.canvas_state.motion.camera = canophy::Motion::ease(from, to, view.center(), std::time::Instant::now());
             self.animate_camera(window, cx);
         }
@@ -2057,9 +2093,13 @@ impl AppWindow {
         self.canvas_state.motion.camera = canophy::Motion::ease(from, to, anchor, std::time::Instant::now());
         self.animate_camera(window, cx);
     }
+    /// Starts a terminal (or asks for a space) at `args["point"]`. A terminal the person
+    /// starts eases the camera to it at 100% (the `Open` law); `person` is false for agents and
+    /// scripts, which never move the camera.
     pub(super) fn create_canvas(
         &mut self,
         args: Value,
+        person: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2147,7 +2187,7 @@ impl AppWindow {
                         let mut quote = quote.clone();
                         quote.as_object_mut().unwrap().remove("argv");
                         quote["terminal"] = json!(addr);
-                        self.quote_command("quote.send", &quote, window, cx);
+                        self.quote_command("quote.send", &quote, person, window, cx);
                     }
                     // Terminals first: a new cell opens as a full terminal pane (collapse it by hand).
                     let size = self.default_pane_size(window);
@@ -2160,6 +2200,7 @@ impl AppWindow {
                         state.step(canophy::Intent::Place(vec![(addr.to_owned(), canophy::WorldRect { w: size[0], h: size[1], ..rect })]));
                         if !cascade { self.solve_layout(Some(addr), None, cx); }
                         self.canvas_changed(cx);
+                        if person { self.show_full_size(addr, window, cx); }
                     }
                 }
             }
@@ -2420,6 +2461,8 @@ impl AppWindow {
         state.moves.retain(|key, _| state.doc.panes.iter().any(|c| !c.boxed() && &c.id == key));
         let mut addresses: Vec<_> = self.live.keys().cloned().collect();
         addresses.sort_by_key(|a| (self.live[a]["created_ms"].as_u64().unwrap_or(0), a.clone()));
+        // Helpers an agent spawned; the camera stays put, so each out of view gets a toast.
+        let mut helpers = Vec::new();
         // Parents are placed first even when a snapshot arrives out of order.
         for _ in 0..addresses.len().max(1) {
             let mut progress = false;
@@ -2467,6 +2510,7 @@ impl AppWindow {
                     canophy::free_spot(area, &occupied, sizes[addr])
                 };
                 state.step(canophy::Intent::Adopt { id: addr.clone(), point: [r[0], r[1]], size: [r[2], r[3]] });
+                if parent.is_some_and(|p| p != addr) { helpers.push(addr.clone()); }
                 if let Some(card) = state.doc.panes.iter_mut().find(|c| c.terminal() == Some(addr.as_str())) { card.space = room; }
                 progress = true;
                 changed = true;
@@ -2505,8 +2549,9 @@ impl AppWindow {
             // A cell that opened or closed in a tiled place joins or leaves the tiles.
             self.tile_canvas(false, window, cx);
         }
+        for id in helpers { self.toast_out_of_view(&id, window, cx); }
     }
-    pub(super) fn quote_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn quote_command(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         let (Some(path), Some(text)) = (a["path"].as_str(), a["text"].as_str()) else { return self.fail("quote needs path and text"); };
         // A browser pick points at a URL and may have no text.
         if a["kind"] != "browser" && (!std::path::Path::new(path).is_absolute() || text.is_empty()) { return self.fail("quote needs an absolute path and non-empty text"); }
@@ -2520,7 +2565,7 @@ impl AppWindow {
         if a.get("argv").is_some() && a.get("terminal").is_none() {
             let mut args = json!({"argv":a["argv"],"space":self.canvas_state.doc.panel.space,"quote":a});
             if args["space"].is_null() { args.as_object_mut().unwrap().remove("space"); }
-            self.create_canvas(args, window, cx);
+            self.create_canvas(args, person, window, cx);
             return;
         }
         let Some(addr) = a["terminal"].as_str().map(str::to_owned) else { return self.fail("quote.send needs terminal or argv"); };
@@ -3223,7 +3268,7 @@ impl AppWindow {
                     .camera
                     .to_world([f32::from(p.x), f32::from(p.y)]);
                 for path in paths.paths() {
-                    this.open_preview(json!({"path":path,"point":point}), window, cx);
+                    this.open_preview(json!({"path":path,"point":point}), true, window, cx);
                 }
             }))
             .on_mouse_down(
@@ -3561,7 +3606,7 @@ impl AppWindow {
                 this.canvas_state.drag = Some((Some(key.clone()), e.position));
                 this.focus.focus(window, cx);
                 if let Some(path) = click_sub.transcript.as_ref() {
-                    this.open_preview(json!({"path":path}), window, cx);
+                    this.open_preview(json!({"path":path}), true, window, cx);
                 }
                 cx.notify();
                 cx.stop_propagation();
@@ -3686,7 +3731,7 @@ impl AppWindow {
                         // Double-click enters the cell: it expands and its terminal takes the keyboard.
                         this.canvas_state.selected = vec![drag_addr.clone()];
                         this.canvas_state.drag = None;
-                        this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+                        this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
                         return;
                     }
                     if let Some(p) = this.model.pane_of(&addr) {
@@ -3721,7 +3766,7 @@ impl AppWindow {
                         this.focus.focus(window, cx);
                         if e.click_count == 2 {
                             this.canvas_state.selected = vec![mode_addr.clone()];
-                            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+                            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
                         } else {
                             if e.modifiers.shift {
                                 if this.canvas_state.selected.contains(&mode_addr) { this.canvas_state.selected.retain(|k| k != &mode_addr); }
@@ -4100,6 +4145,7 @@ impl AppWindow {
                                     if let Some(path) = this.canvas_state.file_path().cloned() {
                                         this.open_preview(
                                             json!({"path":path,"place":"canvas"}),
+                                            true,
                                             window,
                                             cx,
                                         );

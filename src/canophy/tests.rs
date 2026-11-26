@@ -14,9 +14,21 @@ const GAP: f32 = 24.;
 #[test]
 fn reveal_centers_a_pane_only_when_it_is_off_screen() {
     let camera = Camera::new(0., 0., 1.);
-    assert_eq!(reveal(camera, [10., 10., 100., 100.], [800., 600.]), None);
-    let to = reveal(camera, [1000., 0., 200., 100.], [800., 600.]).unwrap();
+    assert_eq!(reveal(camera, [10., 10., 100., 100.], [0., 0., 800., 600.], camera.zoom()), None);
+    let to = reveal(camera, [1000., 0., 200., 100.], [0., 0., 800., 600.], camera.zoom()).unwrap();
     assert_eq!(to.to_screen([1100., 50.]), [400., 300.]);
+}
+
+/// The `Open` law: a pane the person opens comes to 100%, centered in the part no chrome covers,
+/// even when it was already on screen at another zoom.
+#[test]
+fn opening_eases_to_full_size_centered_in_the_open_part() {
+    let camera = Camera::new(0., 0., 0.5);
+    let open = [200., 40., 600., 560.];
+    let to = reveal(camera, [100., 100., 200., 100.], open, 1.).unwrap();
+    assert_eq!(to.zoom(), 1.);
+    assert_eq!(to.to_screen([200., 150.]), [500., 320.]);
+    assert_eq!(reveal(to, [100., 100., 200., 100.], open, 1.), None);
 }
 
 #[test]
@@ -307,7 +319,8 @@ enum Op {
     Arrange(&'static str),
     Tile(usize, Option<usize>),
     Pin(usize, Option<Rect>),
-    Resized(Point),
+    /// The window resized with pane `usize` (mod n) entered.
+    Resized(Point, usize),
 }
 
 const MIN: Point = [240., 120.];
@@ -366,7 +379,7 @@ fn apply(doc: &mut Document, view: &mut Viewport, op: &Op) -> Result<(), Violati
         }
         Op::Reveal(i) => {
             if let Some(rect) = free.get(i % free.len().max(1)).copied() {
-                if let Some(to) = reveal(doc.camera, rect, view.size) { step(doc, Intent::Camera(to), view); }
+                if let Some(to) = reveal(doc.camera, rect, [0., 0., view.size[0], view.size[1]], doc.camera.zoom()) { step(doc, Intent::Camera(to), view); }
                 check::revealed(doc.camera, rect, view.size)?;
             }
         }
@@ -394,13 +407,15 @@ fn apply(doc: &mut Document, view: &mut Viewport, op: &Op) -> Result<(), Violati
             check::apart(&out, GAP)?;
         }
         Op::Pin(i, screen) => { step(doc, Intent::Pin { id: doc.panes[i % n].id.clone(), screen }, view); }
-        Op::Resized(size) => {
+        Op::Resized(size, i) => {
             *view = Viewport::whole(size);
-            step(doc, Intent::ViewportChanged, view);
+            let id = doc.panes.get(i % n.max(1)).map(|p| p.id.clone());
+            step(doc, Intent::ViewportChanged { reveal: id.clone() }, view);
+            if let Some(p) = doc.panes.iter().find(|p| Some(&p.id) == id.as_ref() && p.pinned.is_none()) { check::revealed(doc.camera, p.rect.array(), view.size)?; }
         }
     }
     // I12: camera-only actions never touch panes on the canvas.
-    if matches!(op, Op::Pan(_) | Op::ZoomAt(..) | Op::Step(..) | Op::Fit | Op::Reveal(_) | Op::Tile(..) | Op::Resized(_)) {
+    if matches!(op, Op::Pan(_) | Op::ZoomAt(..) | Op::Step(..) | Op::Fit | Op::Reveal(_) | Op::Tile(..) | Op::Resized(..)) {
         check::untouched(&rects_before, &rects(doc))?;
         // I10: pinned panes keep their screen rect while the camera moves.
         if screens(doc) != pinned_before { return Err(Violation::PanesMoved); }
@@ -433,7 +448,7 @@ fn op() -> impl Strategy<Value = Op> {
         prop_oneof![Just("tidy"), Just("row"), Just("column")].prop_map(Op::Arrange),
         (0usize..10, proptest::option::of(0usize..10)).prop_map(|(n, a)| Op::Tile(n, a)),
         (0usize..16, pin).prop_map(|(i, s)| Op::Pin(i, s)),
-        (400f32..2400., 300f32..1400.).prop_map(|(w, h)| Op::Resized([w, h])),
+        (400f32..2400., 300f32..1400., 0usize..16).prop_map(|(w, h, i)| Op::Resized([w, h], i)),
     ]
 }
 
@@ -472,9 +487,19 @@ fn a_viewport_change_keeps_a_pinned_pane_inside_the_window() {
     step(&mut doc, Intent::Pan([300., 40.]), &view);
     assert_eq!(drawn(&doc)[..2], [1000., 16.], "pan leaves it where it sits on screen");
     let narrow = Viewport::whole([900., 800.]);
-    step(&mut doc, Intent::ViewportChanged, &narrow);
+    step(&mut doc, Intent::ViewportChanged { reveal: None }, &narrow);
     assert_eq!(drawn(&doc)[0], 720., "a narrower window keeps it whole on screen");
     assert_eq!(doc.panes[0].pinned, Some([1000., 16., 180., 300.]), "its saved spot is kept");
+}
+
+#[test]
+fn a_viewport_change_reveals_the_entered_pane_and_keeps_the_left_edge() {
+    let (mut doc, _) = world(&[[0., 0., 300., 200.], [900., 0., 200., 200.]], [1200., 800.]);
+    let (left, narrow) = (doc.camera.to_world([0., 0.]), Viewport::whole([600., 800.]));
+    step(&mut doc, Intent::ViewportChanged { reveal: Some("p0".into()) }, &narrow);
+    assert_eq!(doc.camera.to_world([0., 0.]), left, "a pane still in view leaves the camera");
+    step(&mut doc, Intent::ViewportChanged { reveal: Some("p1".into()) }, &narrow);
+    assert!(check::revealed(doc.camera, doc.panes[1].rect.array(), narrow.size).is_ok(), "the covered pane comes back");
 }
 
 #[test]

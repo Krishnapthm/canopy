@@ -56,8 +56,10 @@ pub enum Intent {
     SyncSubs(Vec<(String, Vec<String>)>),
     /// Pin a pane at a screen rect, or unpin it (None).
     Pin { id: String, screen: Option<Rect> },
-    /// The canvas size or its uncovered part changed.
-    ViewportChanged,
+    /// The canvas size or its uncovered part changed. The camera keeps the world point at the
+    /// canvas's top-left (so the left edge stays put), and `reveal` (the entered or selected
+    /// pane) comes back into the uncovered part when it no longer wholly fits there.
+    ViewportChanged { reveal: Option<String> },
 }
 
 /// What a step changed, so the window knows what to redraw and save.
@@ -125,7 +127,10 @@ pub fn step(doc: &mut Document, intent: Intent, view: &Viewport) -> Effects {
         Intent::Pin { id, screen } => {
             if let Some(p) = doc.panes.iter_mut().find(|p| &p.id == id) { p.pinned = *screen; panes = true; }
         }
-        Intent::ViewportChanged => {}
+        Intent::ViewportChanged { reveal } => {
+            let rect = reveal.as_ref().and_then(|id| doc.panes.iter().find(|p| &p.id == id && p.pinned.is_none() && doc.shown(p))).map(|p| p.rect);
+            if let Some(to) = rect.and_then(|r| super::camera::reveal(doc.camera, r, view.open, doc.camera.zoom())) { doc.camera = to; }
+        }
     }
     // Size law: a resized or unpinned pane is at least its kind's minimum on both axes (an
     // unpinned pane's world size was its screen size over the zoom, which can be smaller).
@@ -134,7 +139,7 @@ pub fn step(doc: &mut Document, intent: Intent, view: &Viewport) -> Effects {
     doc.camera = doc.camera.clamped();
     let camera = doc.camera != before;
     // 3. pinned panes follow the camera and the viewport (their world rect is derived).
-    if camera || panes || intent == Intent::ViewportChanged { let c = doc.camera; derive_pinned(doc, c, view); }
+    if camera || panes || matches!(intent, Intent::ViewportChanged { .. }) { let c = doc.camera; derive_pinned(doc, c, view); }
     // 4. check.
     #[cfg(debug_assertions)]
     if let Err(v) = super::check::document(doc) {

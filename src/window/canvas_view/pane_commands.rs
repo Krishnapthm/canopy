@@ -2,10 +2,11 @@
 use super::*;
 
 impl AppWindow {
-    /// Runs one canvas.pane_* command and answers the caller.
-    pub(in crate::window) fn pane_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+    /// Runs one canvas.pane_* command and answers the caller. `person` is false for agents and
+    /// scripts on the control socket.
+    pub(in crate::window) fn pane_command(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         let r = match name {
-            "canvas.pane_new" => self.pane_new(a, window, cx),
+            "canvas.pane_new" => self.pane_new(a, person, window, cx),
             "canvas.pane_pin" => {
                 let id = a["pane"].as_str().map(str::to_owned).or_else(|| self.canvas_state.selected.last().cloned());
                 match id {
@@ -45,7 +46,7 @@ impl AppWindow {
         a["pane"].as_str().is_some_and(|id| self.canvas_state.doc.panes.iter().any(|p| p.id == id && p.url().is_some()))
     }
 
-    fn pane_new(&mut self, a: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
+    fn pane_new(&mut self, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
         let mut kinds = vec!["file".to_owned(), "browser".to_owned()];
         if crate::sim::available() { kinds.push("sim".to_owned()); }
         kinds.extend(self.folders.iter().filter(|(_, f)| f.hint.pane.is_some()).map(|(id, _)| format!("mod:{id}")));
@@ -106,6 +107,7 @@ impl AppWindow {
             self.canvas_state.doc.connect(&id, t);
             self.canvas_changed(cx);
         }
+        if person { self.show_full_size(&id, window, cx); } else { self.toast_out_of_view(&id, window, cx); }
         let mut reply = json!({"pane":id,"kind":kind,"wired":a["wire"].is_string()});
         if home == Home::Pinned { reply["pinned"] = json!(true); }
         if home == Home::Panel { reply["docked"] = json!(true); }
@@ -271,8 +273,8 @@ mod tests {
                 stamp: std::time::UNIX_EPOCH,
             });
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
-            assert_eq!(this.pane_new(&json!({"kind":"mod:nope"}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, browser, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
-            let reply = this.pane_new(&json!({"kind":"mod:note","wire":"t1"}), window, cx).unwrap();
+            assert_eq!(this.pane_new(&json!({"kind":"mod:nope"}), false, window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, browser, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
+            let reply = this.pane_new(&json!({"kind":"mod:note","wire":"t1"}), false, window, cx).unwrap();
             assert_eq!(reply, json!({"pane":"p1","kind":"mod:note","wired":true}));
             assert_eq!(crate::wire::neighbors(&this.canvas_state.doc.wires, "t1"), ["p1"]);
             assert_eq!(this.pane_read(&json!({"pane":"p1"}), cx).unwrap()["text"], canvas::envelope("p1", "mod:note", &[], ""));
@@ -288,7 +290,7 @@ mod tests {
             assert!(this.canvas_state.doc.panes.iter().any(|p| p.id == "p1"));
             this.close_canvas_cell(&json!({"panes":["p1"]}), window, cx);
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == "p1"));
-            let blank = this.pane_new(&json!({"kind":"mod:note"}), window, cx).unwrap();
+            let blank = this.pane_new(&json!({"kind":"mod:note"}), false, window, cx).unwrap();
             this.close_canvas_cell(&json!({"pane":blank["pane"]}), window, cx);
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == blank["pane"]), "a blank note closes without asking");
             assert!(this.canvas_state.doc.wires.is_empty());
@@ -306,7 +308,7 @@ mod tests {
         view.update_in(cx, |this, window, cx| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
-            assert_eq!(this.pane_new(&json!({"kind":"video","path":path}), window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, browser, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
+            assert_eq!(this.pane_new(&json!({"kind":"video","path":path}), false, window, cx).unwrap_err(), format!("canvas.pane_new: kind must be one of: file, browser, {}mod:note", if crate::sim::available() { "sim, " } else { "" }));
             let overlay_count = this.overlays.len();
             assert_eq!(this.run_as("canvas.pane_new", json!({"kind":"browser","place":"canvas"}), true, window, cx), json!({"pane":"p1","kind":"browser","wired":false,"url":""}));
             assert_eq!(this.run_as("canvas.pane_open", json!({"pane":"p1"}), true, window, cx), json!({"asked":"url"}));
@@ -337,10 +339,10 @@ mod tests {
             this.browser_reply("p1", None, window, cx).unwrap();
             assert_eq!(rx.try_recv().unwrap()["text"], canvas::envelope("p1", "browser", &[("url", "")], "New tab"));
             assert_eq!(this.run_as("canvas.pane_new", json!({"kind":"browser","url":null,"place":"canvas"}), false, window, cx)["url"], "");
-            assert!(this.pane_new(&json!({"kind":"browser","url":"file:///etc"}), window, cx).is_err());
+            assert!(this.pane_new(&json!({"kind":"browser","url":"file:///etc"}), false, window, cx).is_err());
             // Dispatch above resyncs the canvas, which drops this test's stand-in terminal.
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
-            let web = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","wire":"t1","place":"canvas"}), window, cx).unwrap();
+            let web = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","wire":"t1","place":"canvas"}), false, window, cx).unwrap();
             assert_eq!(web, json!({"pane":"p3","kind":"browser","wired":true,"url":"http://localhost:3000"}));
             assert_eq!(active(this, "p3").url, "http://localhost:3000");
             let url = "http://localhost:3000/pricing";
@@ -349,12 +351,12 @@ mod tests {
             assert_eq!(this.run_as(new, json!({"pane":"p3"}), false, window, cx)["tab"], "t3");
             let (tx, rx) = std::sync::mpsc::channel();
             this.held_reply = Some(tx);
-            this.pane_command("canvas.pane_read", &json!({"pane":"p3"}), window, cx);
+            this.pane_command("canvas.pane_read", &json!({"pane":"p3"}), false, window, cx);
             assert_eq!(rx.try_recv().unwrap()["text"], canvas::envelope("p3", "browser", &[("url", "")], "New tab"));
             // Pinned: it opens in the top right corner, and nothing on the canvas moves for it.
             let rects = |this: &crate::window::AppWindow| this.canvas_state.doc.panes.iter().filter(|p| p.pinned.is_none()).map(|p| (p.id.clone(), p.rect)).collect::<Vec<_>>();
             let before = rects(this);
-            let pinned = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","pinned":true}), window, cx).unwrap();
+            let pinned = this.pane_new(&json!({"kind":"browser","url":"localhost:3000","pinned":true}), false, window, cx).unwrap();
             let id = pinned["pane"].as_str().unwrap().to_owned();
             assert_eq!(pinned["pinned"], json!(true));
             assert_eq!(rects(this), before);
@@ -370,7 +372,7 @@ mod tests {
             this.canvas_state.doc.panes.retain(|p| p.id != id);
             // Docked is the default: a panel tab that moves nothing on the canvas, until it moves back.
             let before = rects(this);
-            let docked = this.pane_new(&json!({"kind":"browser","url":"localhost:3000"}), window, cx).unwrap();
+            let docked = this.pane_new(&json!({"kind":"browser","url":"localhost:3000"}), false, window, cx).unwrap();
             let did = docked["pane"].as_str().unwrap().to_owned();
             assert_eq!(docked["docked"], json!(true));
             assert!(this.canvas_state.doc.docked(&did));
@@ -428,11 +430,11 @@ mod tests {
             assert!(this.canvas_state.doc.panel.tabs.is_empty() && this.canvas_state.file.is_none());
             assert!(this.browser_reply("p1", None, window, cx).unwrap_err().contains("canopy pane"), "a read with no caller to answer refuses");
             this.close_canvas_cell(&json!({"pane":"p3"}), window, cx);
-            assert_eq!(this.pane_new(&json!({"kind":"file","path":"README.md"}), window, cx).unwrap_err(), "canvas.pane_new: path must be absolute");
-            assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"point":null}), window, cx).unwrap_err(), "invalid canvas point");
-            assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"wire":"missing"}), window, cx).unwrap_err(), "missing is not a terminal pane on the canvas");
+            assert_eq!(this.pane_new(&json!({"kind":"file","path":"README.md"}), false, window, cx).unwrap_err(), "canvas.pane_new: path must be absolute");
+            assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"point":null}), false, window, cx).unwrap_err(), "invalid canvas point");
+            assert_eq!(this.pane_new(&json!({"kind":"file","path":path,"wire":"missing"}), false, window, cx).unwrap_err(), "missing is not a terminal pane on the canvas");
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
-            let reply = this.pane_new(&json!({"kind":"file","path":path,"wire":"t1"}), window, cx).unwrap();
+            let reply = this.pane_new(&json!({"kind":"file","path":path,"wire":"t1"}), false, window, cx).unwrap();
             let id = reply["pane"].as_str().unwrap();
             assert_eq!(reply["wired"], true);
             assert_eq!(crate::wire::neighbors(&this.canvas_state.doc.wires, "t1"), [id]);
@@ -443,7 +445,7 @@ mod tests {
             assert_eq!(this.pane_open(&json!({"pane":id,"target":"x"}), window, cx).unwrap_err(), format!("pane {id} (file) has no verb open"));
             this.canvas_state.doc.room = Some("other".into());
             assert_eq!(this.pane_shot(&json!({"pane":id}), window).unwrap_err(), format!("pane {id} is in another space: go there first"));
-            let moved = this.pane_new(&json!({"kind":"file","path":path,"point":[10000,10000]}), window, cx).unwrap();
+            let moved = this.pane_new(&json!({"kind":"file","path":path,"point":[10000,10000]}), false, window, cx).unwrap();
             assert_eq!(moved["pane"], id);
             assert_eq!(this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap().space.as_deref(), Some("other"));
             assert!(this.canvas_state.doc.wires.is_empty(), "a pane moved to another space leaves its wires");

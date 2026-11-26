@@ -1426,7 +1426,7 @@ impl AppWindow {
         let Some(space) = self.canvas_state.doc.panes.iter().find(|c| c.id == addr).map(|c| c.space.clone()) else { return };
         self.go_room(space, window, cx);
         self.canvas_state.selected = vec![addr.clone()];
-        self.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+        self.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
         // After entering: the expanded cell is what must be on screen.
         self.reveal_pane(&addr, window, cx);
     }
@@ -2101,7 +2101,7 @@ impl AppWindow {
         let (block, addr) = (block.to_owned(), address.to_owned());
         cx.subscribe_in(view, window, move |this, _, ev: &TerminalEvent, window, cx| match ev {
             TerminalEvent::Preview(path) => {
-                if this.has_canvas() { this.open_preview(json!({"path":path}), window, cx); }
+                if this.has_canvas() { this.open_preview(json!({"path":path}), true, window, cx); }
                 else { crate::links::open(&crate::links::Target::File(path.clone())); }
             }
             TerminalEvent::OpenUrl(url) => this.open_link(&addr, url.clone(), window, cx),
@@ -2977,7 +2977,7 @@ impl AppWindow {
         if person && name == "space.new" && args.get("folder").is_none() && Self::arg(&args, "machine").is_none_or(str::is_empty) {
             if !args.is_object() { args = json!({}); }
             args["kind"] = json!("space");
-            self.create_canvas(args, window, cx);
+            self.create_canvas(args, person, window, cx);
             return json!({"asked":"space"});
         }
         if person && name == "canvas.pane_open" && args["target"].is_null() {
@@ -3062,7 +3062,7 @@ impl AppWindow {
         let active_ctx = self.model.active_tab().map(|c| c.id.clone());
         match name {
             "canvas.zoom_in" | "canvas.zoom_out" | "canvas.zoom_reset" | "canvas.fit" | "canvas.fit_all" | "panel.close" | "view.agents" | "view.all" | "view.terminals" => { self.canvas_command(name, window, cx); }
-            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.select_all" | "canvas.collapse" | "canvas.connect" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, window, cx),
+            "canvas.mode" | "canvas.leave" | "canvas.enter" | "canvas.go" | "canvas.space" | "canvas.home" | "canvas.select_all" | "canvas.collapse" | "canvas.connect" | "canvas.nudge" | "canvas.new" | "canvas.agents" => return self.canvas_keyboard(name, a, person, window, cx),
             "canvas.arrange" => self.arrange_canvas(a, window, cx),
             "canvas.tile" => self.tile_canvas(true, window, cx),
             "canvas.undo" => self.undo_canvas(window, cx),
@@ -3076,15 +3076,15 @@ impl AppWindow {
             "canvas.note_new" => {
                 let mut args = json!({"kind":"mod:note"});
                 if let Some(point) = a.get("point") { args["point"] = point.clone(); }
-                self.pane_command("canvas.pane_new", &args, window, cx);
+                self.pane_command("canvas.pane_new", &args, person, window, cx);
             }
-            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" | "canvas.pane_dock" => self.pane_command(name, a, window, cx),
+            "canvas.pane_new" | "canvas.pane_set" | "canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_open" | "canvas.pane_pin" | "canvas.pane_dock" => self.pane_command(name, a, person, window, cx),
             "canvas.browser_annotate" | "canvas.sim_annotate" | "canvas.annotate_send" | "canvas.annotate_action" | "canvas.annotate_agent" => self.annotation_command(name, a, window, cx),
             "canvas.browser_back" | "canvas.browser_forward" | "canvas.browser_reload" | "canvas.browser_home" | "canvas.browser_pick" | "canvas.browser_shot" | "canvas.browser_external"
             | "canvas.browser_copy" | "canvas.browser_viewport" | "canvas.browser_expand" | "canvas.browser_pop"
             | "canvas.browser_cookies" | "canvas.browser_links" | "canvas.browser_clear" | "canvas.browser_inspect" | "canvas.browser_open_file" | "canvas.browser_allow_folder"
             | "canvas.browser_tab_new" | "canvas.browser_tab_select" | "canvas.browser_tab_close" => self.browser_command(name, a, person, window, cx),
-            name if name.starts_with("canvas.sim_") => self.sim_command(name, a, window, cx),
+            name if name.starts_with("canvas.sim_") => self.sim_command(name, a, person, window, cx),
             "canvas.pane_quote" => self.quote_image(window, cx),
             "canvas.pdf_find" | "canvas.pdf_highlight" | "canvas.pdf_prev" | "canvas.pdf_next" | "canvas.pdf_zoom_out" | "canvas.pdf_zoom_reset" | "canvas.pdf_zoom_in" | "canvas.pdf_clear" => self.pdf_command(name, window, cx),
             "app.menu" => {
@@ -3097,7 +3097,7 @@ impl AppWindow {
                 let anchor = None;
                 self.open_menu("primary", target, anchor, window, cx);
             }
-            "quote.menu" | "quote.send" => self.quote_command(name, a, window, cx),
+            "quote.menu" | "quote.send" => self.quote_command(name, a, person, window, cx),
             "panel.open" => {
                 let Some(addr)=Self::arg(a,"terminal").filter(|a|self.live.contains_key(*a)) else {return self.fail("no running terminal")};
                 if self.canvas_state.popped.contains_key(addr) { self.pop_canvas(addr.to_owned(), false, window, cx); return; }
@@ -3125,14 +3125,14 @@ impl AppWindow {
             }
             "panel.editor" => self.panel_editor(a, window, cx),
             "preview.external" => self.open_in_preview(a, window, cx),
-            "preview.open" => self.open_preview(a.clone(), window, cx),
+            "preview.open" => self.open_preview(a.clone(), person, window, cx),
             "canvas.hand" => {
                 self.canvas_state.hand = a["on"].as_bool().unwrap_or(!self.canvas_state.hand);
                 if mods::publish_window(self.window_json(window)) { self.refresh_snapshot_mods(cx); }
                 cx.notify();
             }
             "canvas.create" => {
-                self.create_canvas(a.clone(), window, cx);
+                self.create_canvas(a.clone(), person, window, cx);
             }
             "canvas.space_style" => {
                 let Some(color) = Self::arg(a, "color").and_then(canvas::Hue::from_name) else { return self.fail("invalid space color") };
@@ -6123,7 +6123,7 @@ export default class Probe extends View {
         // Hints also work with a terminal focused, without swallowing its key down.
         cx.update(|window, cx| view.update(cx, |this, cx| {
             this.canvas_state.selected = vec!["t1".into()];
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             this.canvas_state.settle_for_test();
             window.refresh();
         }));
@@ -6150,7 +6150,7 @@ export default class Probe extends View {
         assert!(view.update(cx, |this, _| this.canvas_state.motion_target_for_test().zoom() > 0.), "Shift+1 starts a fit");
         cx.update(|window, cx| view.update(cx, |this, cx| {
             this.canvas_state.selected = vec!["t2".into()];
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             this.canvas_state.settle_for_test();
         }));
         assert!(!state(cx).1);
@@ -6180,7 +6180,7 @@ export default class Probe extends View {
                 {"id":"t2","kind":"terminal","props":{}, "rect":[500,0,220,36], "z":1}
             ])).unwrap();
             crate::keys::install(crate::keys::parse(r#"{"global":{"l":"canvas.close"},"canvas-mode":{"l":"canvas.go:right","escape":"canvas.leave"}}"#).unwrap(), cx);
-            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.mode", &json!({}), true, window, cx);
             assert!(this.canvas_state.mode);
             assert_eq!(this.canvas_state.selected, ["t1"]);
             assert!(this.canvas_key(&gpui::Keystroke::parse("q").unwrap(), window, cx), "unbound keys are swallowed");
@@ -6199,34 +6199,34 @@ export default class Probe extends View {
             assert_eq!(this.canvas_state.selected, ["t2"]);
             assert!(!this.overlays.iter().any(|o| o.kind.modal_keys()), "global close did not take the mode key");
             assert!(this.canvas_state.doc.panes.iter().all(|c| c.size().is_none()));
-            this.canvas_keyboard("canvas.nudge", &json!({"direction":"right"}), window, cx);
+            this.canvas_keyboard("canvas.nudge", &json!({"direction":"right"}), true, window, cx);
             assert_eq!(this.canvas_state.doc.panes[1].rect.x, 500. + this.person.canvas_gap);
             this.undo_canvas(window, cx);
             assert_eq!(this.canvas_state.doc.panes[1].rect.x, 500.);
             this.undo_canvas(window, cx);
             assert_eq!(this.canvas_state.doc.panes[1].rect.x, 500., "only one undo step");
-            this.canvas_keyboard("canvas.connect", &json!({}), window, cx);
-            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), window, cx);
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.connect", &json!({}), true, window, cx);
+            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), true, window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             assert_eq!(this.canvas_state.doc.wires.len(), 1);
             assert!(this.canvas_state.mode);
-            this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.leave", &json!({}), true, window, cx);
             assert!(this.canvas_state.mode && this.canvas_state.selected.is_empty(), "Escape clears the selection; the canvas keeps the keyboard");
             assert!(this.focus.is_focused(window));
-            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), window, cx);
+            this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), true, window, cx);
             assert_eq!(this.canvas_state.selected, ["t1"]);
-            this.canvas_keyboard("canvas.connect", &json!({}), window, cx);
-            this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.connect", &json!({}), true, window, cx);
+            this.canvas_keyboard("canvas.leave", &json!({}), true, window, cx);
             assert!(this.canvas_state.mode, "Escape cancels the connection before leaving mode");
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             assert!(!this.canvas_state.mode);
             assert!(this.focused_cell().unwrap().focus.is_focused(window));
             this.model.focus_pane("pane2");
-            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
-            this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.mode", &json!({}), true, window, cx);
+            this.canvas_keyboard("canvas.enter", &json!({}), true, window, cx);
             assert_eq!(this.model.focused_pane().as_deref(), Some("pane1"));
-            this.canvas_keyboard("canvas.mode", &json!({}), window, cx);
-            this.canvas_keyboard("canvas.leave", &json!({}), window, cx);
+            this.canvas_keyboard("canvas.mode", &json!({}), true, window, cx);
+            this.canvas_keyboard("canvas.leave", &json!({}), true, window, cx);
             this.sync(window, cx);
             assert!(this.focus.is_focused(window), "Escape keeps canvas focus across later syncs");
             this.set_expanded("t1", false, window, cx);

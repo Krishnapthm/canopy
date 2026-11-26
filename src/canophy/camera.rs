@@ -102,13 +102,17 @@ pub fn zoom_range(rects: &[Rect], viewport: Point) -> [f32; 2] {
 /// `range` stretched to hold `zoom`, so a zoom already past a limit is not pulled back mid-gesture.
 pub fn widen(range: [f32; 2], zoom: f32) -> [f32; 2] { [range[0].min(zoom), range[1].max(zoom)] }
 
-/// The camera that centers `rect` at the same zoom when it is not wholly inside `visible`
-/// (screen px); None when it already is.
-pub fn reveal(camera: Camera, rect: impl Into<Rect>, visible: Point) -> Option<Camera> {
+/// The camera that shows `rect` at `zoom`, centered in `open` (`[x, y, w, h]` screen px, the
+/// part of the canvas no chrome covers); None when the camera is already at `zoom` with `rect`
+/// wholly inside `open`. Reveals pass the current zoom; the `Open` law passes 1 (100%).
+pub fn reveal(camera: Camera, rect: impl Into<Rect>, open: Rect, zoom: f32) -> Option<Camera> {
     let rect = rect.into();
+    let [ox, oy, ow, oh] = open;
     let [x, y, w, h] = camera.rect_to_screen(rect);
-    if x >= 0. && y >= 0. && x + w <= visible[0] && y + h <= visible[1] { return None; }
-    Some(Camera::centered([rect[0] + rect[2] / 2., rect[1] + rect[3] / 2.], visible, camera.zoom))
+    if camera.zoom == zoom && x >= ox && y >= oy && x + w <= ox + ow && y + h <= oy + oh { return None; }
+    let mut to = Camera::centered([rect[0] + rect[2] / 2., rect[1] + rect[3] / 2.], [ow, oh], zoom);
+    (to.x, to.y) = (to.x - ox / zoom, to.y - oy / zoom);
+    Some(to)
 }
 
 /// Toggle a space fit in the visible canvas (`[x, y, w, h]` screen px, the part no chrome

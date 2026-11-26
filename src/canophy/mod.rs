@@ -1,6 +1,6 @@
 //! canophy (canopy + physics): the one authority on where panes are, how big they are and how
 //! the canvas is looked at. Pure Rust: no GPUI, no clock, no settings beyond what callers pass.
-//! See docs/canopy/plans/canophy/plan.md for why it exists.
+//! docs/canopy/canophy.md explains the laws and how to extend them.
 //!
 //! # The laws, in their fixed order
 //!
@@ -11,8 +11,11 @@
 //! 2. **size laws**: a pane never shrinks below its kind's `min`, and keeps its `aspect` when it
 //!    has one (`traits`).
 //! 3. **push**: pushable neighbours make room (`rules::solve`, the canvas push setting).
-//! 4. **camera laws**: the zoom stays inside `ZOOMS` and the place's `zoom_range`, and a pane
-//!    the person opens is revealed (`camera`).
+//! 4. **camera laws**: the zoom stays inside `ZOOMS` and the place's `zoom_range`, and a
+//!    viewport change brings the entered pane back into the uncovered part
+//!    (`Intent::ViewportChanged`). The `Open` law (a pane the person opens eases the camera to
+//!    100%; an agent's pane never moves it) is an ease over time, so the window starts it with
+//!    `camera::reveal` and `Motion`, and each frame lands as an `Intent::Camera`.
 //! 5. **check**: debug builds run `check::document` after every step. A broken invariant
 //!    panics with the violation, the intent that broke it and the last 256 intents (the
 //!    replay ring), so the bug can be reproduced by feeding those intents to `step`. Release

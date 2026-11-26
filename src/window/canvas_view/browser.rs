@@ -1242,6 +1242,8 @@ impl AppWindow {
         if let Err(e) = self.new_browser_tab(&id, url, true, window, cx) {
             self.command_error("Open link", &e, window, cx);
         }
+        // The person clicked the link, so this is their open (the `Open` law).
+        self.show_full_size(&id, window, cx);
     }
 
     /// canvas.browser_back | forward | reload | home | pick | shot | external | copy | viewport
@@ -1262,7 +1264,7 @@ impl AppWindow {
         }
         if a["pane"].is_null() && self.selected_browser().is_none() {
             if name == "canvas.browser_tab_new" {
-                return self.canvas_keyboard("canvas.new", &Value::Null, window, cx);
+                return self.canvas_keyboard("canvas.new", &Value::Null, person, window, cx);
             }
             if name == "canvas.browser_tab_close" {
                 if crate::keys::listing().iter().any(|(_, _, action)| {

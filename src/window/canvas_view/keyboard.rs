@@ -75,7 +75,8 @@ impl AppWindow {
     }
 
     /// Handle the canvas keyboard commands, reusing the existing cell and Wire actions.
-    pub(in crate::window) fn canvas_keyboard(&mut self, name: &str, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
+    /// `person` is false for agents and scripts on the control socket (see `create_canvas`).
+    pub(in crate::window) fn canvas_keyboard(&mut self, name: &str, args: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         if !self.has_canvas() { return self.fail("canvas is not shown"); }
         let selected = self.canvas_state.selected.last().cloned();
         match name {
@@ -127,7 +128,7 @@ impl AppWindow {
                     if let Some((parent, id)) = crate::wire::sub_parts(&key) {
                         let path = self.canvas_state.subs.get(parent).into_iter().flatten().find(|s| s.id == id).and_then(|s| s.transcript.clone());
                         let Some(path) = path else { return self.fail("sub-agent transcript is not available yet"); };
-                        self.open_preview(json!({"path":path}), window, cx);
+                        self.open_preview(json!({"path":path}), true, window, cx);
                     } else if self.canvas_state.doc.panes.iter().any(|c| c.id == key && c.terminal().is_some()) {
                         if !self.live.contains_key(&key) { return self.fail("no running terminal"); }
                         if self.canvas_state.popped.contains_key(&key) {
@@ -136,7 +137,7 @@ impl AppWindow {
                         if let Some(pane) = self.model.pane_of(&key) { self.model.focus_pane(&pane); }
                         if let Some(t) = self.focused_cell() { t.focus.focus(window, cx); }
                     } else if let Some(path) = self.canvas_state.doc.panes.iter().find(|p| p.id == key).and_then(|p| p.file()).map(str::to_owned) {
-                        self.open_preview(json!({"path":path}), window, cx);
+                        self.open_preview(json!({"path":path}), true, window, cx);
                     }
                     self.canvas_state.mode = false;
                 } else { self.canvas_state.mode = false; }
@@ -225,7 +226,7 @@ impl AppWindow {
                         let rec = selected.as_deref().and_then(|key| self.live.get(key));
                         if let Some(run) = rec.and_then(|rec| super::like_run(rec, &crate::programs::startable())) { at["argv"] = json!(run); }
                     }
-                    self.create_canvas(at, window, cx);
+                    self.create_canvas(at, person, window, cx);
                 }
             }
             _ => unreachable!(),

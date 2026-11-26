@@ -344,7 +344,7 @@ impl AppWindow {
 
     /// The `canvas.sim_*` commands; all but sim_hub, sim_reveal and sim_input act on the sim
     /// pane named by `pane`, else the selected one.
-    pub(in crate::window) fn sim_command(&mut self, name: &str, a: &Value, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::window) fn sim_command(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
         let toast = |this: &mut Self, e: &str, window: &mut Window, cx: &mut Context<Self>| this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":e}}), window, cx);
         match name {
             "canvas.sim_hub" => {
@@ -377,7 +377,7 @@ impl AppWindow {
             }
             #[cfg(target_os = "macos")]
             "canvas.sim_zoom" => {
-                let result = self.zoom_sim(&id, a["step"].as_str().unwrap_or("actual"), cx);
+                let result = self.zoom_sim(&id, a["step"].as_str().unwrap_or("actual"), person, window, cx);
                 return self.answer(result);
             }
             "canvas.sim_device" => return self.sim_picker(&id, window, cx),
@@ -425,7 +425,7 @@ impl AppWindow {
 
     /// Resets the pane or sizes its device in canvas points. In and out step the drawn scale.
     #[cfg(target_os = "macos")]
-    fn zoom_sim(&mut self, id: &str, step: &str, cx: &mut Context<Self>) -> Result<Value, String> {
+    fn zoom_sim(&mut self, id: &str, step: &str, person: bool, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
         if self.canvas_state.doc.docked(id) { return Err("Move the simulator to the canvas to change its size".into()); }
         let (size, result) = if step == "default" {
             (DEFAULT_SIZE, json!({}))
@@ -448,6 +448,8 @@ impl AppWindow {
         };
         self.set_sim_size(id, size);
         self.solve_layout(Some(id), None, cx);
+        // Actual size is one world px per point, so it is only true on screen at 100%.
+        if step == "actual" && person { self.show_full_size(id, window, cx); }
         self.canvas_changed(cx);
         cx.notify();
         Ok(result)
