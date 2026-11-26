@@ -16,7 +16,7 @@ pub(in crate::window) struct WireUi {
     /// The cell whose side "+" handles show.
     pub(super) hover: Option<String>,
     /// A wire being drawn: the cell it starts at, where it starts (world) and the pointer (window).
-    pub(super) drag: Option<(String, canvas::Point, Point<Pixels>)>,
+    pub(super) drag: Option<(String, canophy::Point, Point<Pixels>)>,
     /// Where the button went down on the "+" handle, to tell a click from a drag.
     down: Point<Pixels>,
     /// The handle (or the helper bar's Connect) was clicked, not dragged: the wire follows the
@@ -31,7 +31,7 @@ pub(in crate::window) struct WireUi {
 pub(super) struct Edge {
     key: (String, String),
     born: bool,
-    path: Vec<canvas::Point>,
+    path: Vec<canophy::Point>,
 }
 
 /// Whether a child's status change glows its edge: the word changed and the edge is drawn.
@@ -49,7 +49,7 @@ fn is_click(down: Point<Pixels>, up: Point<Pixels>) -> bool {
 }
 
 /// The pointer's line while a wire is drawn: a cubic leaving `a` sideways.
-fn bezier(a: canvas::Point, z: canvas::Point) -> [canvas::Point; 2] {
+fn bezier(a: canophy::Point, z: canophy::Point) -> [canophy::Point; 2] {
     [[(a[0] + z[0]) / 2., a[1]], [(a[0] + z[0]) / 2., z[1]]]
 }
 
@@ -59,30 +59,30 @@ impl AppWindow {
     }
 
     /// The drawn rect of a pane the current view shows.
-    pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canvas::Rect> {
+    pub(super) fn wire_cell(&self, doc: &Document, key: &str) -> Option<canophy::Rect> {
         let card = doc.panes.iter().find(|c| c.id == key && doc.shown(c))?;
         self.wire_cell_rect(card)
     }
 
-    pub(super) fn wire_cell_rect(&self, card: &canvas::Pane) -> Option<canvas::Rect> {
+    pub(super) fn wire_cell_rect(&self, card: &canvas::Pane) -> Option<canophy::Rect> {
         let state = &self.canvas_state;
         match &card.kind {
-            canvas::Kind::File { path } => return state.previews.contains_key(path).then_some(card.rect),
-            canvas::Kind::Pdf { .. } => return state.pdfs.contains_key(&card.id).then_some(card.rect),
+            canvas::Kind::File { path } => return state.previews.contains_key(path).then_some(card.rect.array()),
+            canvas::Kind::Pdf { .. } => return state.pdfs.contains_key(&card.id).then_some(card.rect.array()),
             canvas::Kind::Sub { parent, sub } => return (state.doc.view != canvas::View::Terminals
                 && state.subs.get(parent).is_some_and(|subs| subs.iter().any(|item| &item.id == sub)))
-                .then_some(card.rect),
+                .then_some(card.rect.array()),
             canvas::Kind::Image { .. } | canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. }
-            | canvas::Kind::Mod { .. } => return Some(card.rect),
+            | canvas::Kind::Mod { .. } => return Some(card.rect.array()),
             canvas::Kind::Terminal { .. } => {}
         }
         if !canvas::view_allows(&state.doc.view, self.live.get(&card.id).is_some_and(canvas_agent)) { return None; }
         // Match the drawn cell: an expanded one has its own size, a pill its measured one.
         let size = match card.size() {
-            Some(_) => [card.rect[2].max(canvas::PILL_WIDTH), card.rect[3].max(canvas::HEADER)],
-            None => state.pill_sizes.borrow().get(&card.id).map(|v| v.3).unwrap_or([240., 36.]),
+            Some(_) => [card.rect.w.max(canvas::PILL_WIDTH), card.rect.h.max(canvas::HEADER)],
+            None => state.pill_sizes.borrow().get(&card.id).map(|v| v.3).unwrap_or([canvas::PILL_WIDTH, canvas::HEADER]),
         };
-        Some([card.rect[0], card.rect[1], size[0], size[1]])
+        Some([card.rect.x, card.rect.y, size[0], size[1]])
     }
 
     /// A child's status word changed: glow its born edge to `parent` if both cells are on the canvas.
@@ -112,7 +112,7 @@ impl AppWindow {
     }
 
     /// A window position in canvas-local pixels.
-    pub(super) fn wire_local(&self, position: Point<Pixels>) -> canvas::Point {
+    pub(super) fn wire_local(&self, position: Point<Pixels>) -> canophy::Point {
         let origin = self.bounds.borrow().get("canopy-canvas").map(|b| b.origin).unwrap_or_default();
         [f32::from(position.x - origin.x), f32::from(position.y - origin.y)]
     }
@@ -123,7 +123,7 @@ impl AppWindow {
         let doc = self.canvas_state.shown.as_ref().unwrap_or(&self.canvas_state.doc);
         let camera = self.canvas_state.doc.camera;
         let p = camera.to_world(self.wire_local(position));
-        let s = slop / camera.zoom;
+        let s = camera.len_to_world(slop);
         doc.panes.iter().filter(|c| doc.shown(c)).filter(|c| {
             self.wire_cell_rect(c).is_some_and(|r| p[0] >= r[0] - s && p[0] <= r[0] + r[2] + s && p[1] >= r[1] - s && p[1] <= r[1] + r[3] + s)
         }).max_by_key(|c| super::paint_order(c)).map(|c| c.id.clone())
@@ -343,7 +343,7 @@ impl AppWindow {
 
     /// Resting edges paint under panes. A selected wire, a wire with both panes selected,
     /// and a wire being drawn paint above them. Only an active glow requests animation frames.
-    pub(super) fn wire_layer(&self, viewport: canvas::Point, above: bool, edges: &[Edge]) -> AnyElement {
+    pub(super) fn wire_layer(&self, viewport: canophy::Point, above: bool, edges: &[Edge]) -> AnyElement {
         let state = &self.canvas_state;
         let camera = state.doc.camera;
         let mut paint = vec![];
@@ -392,8 +392,8 @@ impl AppWindow {
                 if let Ok(path) = path.build() { window.paint_path(path, color); }
             }
             if let Some(r) = target {
-                let [x, y] = camera.to_screen([r[0], r[1]]);
-                window.paint_quad(outline(Bounds::new(p([x, y]), size(px(r[2] * camera.zoom), px(r[3] * camera.zoom))), c("ring"), BorderStyle::Solid).corner_radii(px(8. * camera.zoom)));
+                let [x, y, w, h] = camera.rect_to_screen(r);
+                window.paint_quad(outline(Bounds::new(p([x, y]), size(px(w), px(h))), c("ring"), BorderStyle::Solid).corner_radii(px(camera.len_to_screen(8.))));
             }
             if animating && !cx.reduce_motion() { window.request_animation_frame(); }
         }).absolute().top_0().left_0().size_full().into_any_element()

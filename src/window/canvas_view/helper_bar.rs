@@ -164,7 +164,7 @@ impl AppWindow {
             priority(b).cmp(&priority(a)).then_with(|| a.id.cmp(&b.id))
         });
 
-        let scale = doc.camera.zoom.clamp(0.75, 1.0);
+        let scale = doc.camera.zoom().clamp(0.75, 1.0);
         targets.into_iter().filter_map(|pane| {
             let id = &pane.id;
             let host = self.pane_screen_bounds(pane)?;
@@ -266,7 +266,7 @@ mod helper_bar_tests {
 
     #[test]
     fn actions_follow_the_pane_kind() {
-        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.], z: 1, space: None, color: None, pinned: None };
+        let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.].into(), z: 1, space: None, color: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None, false).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.enter", "canvas.expand", "canvas.connect", "canvas.close"]);
         *pane.size_mut().unwrap() = Some([800., 500.]);
@@ -304,7 +304,7 @@ mod helper_bar_tests {
     }
     #[test]
     fn viewer_actions_include_clear_only_when_there_are_marks() {
-        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None };
+        let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4].into(), z: 0, space: None, color: None, pinned: None };
         let commands = |pane: &canvas::Pane| pane_actions(pane, None, false).into_iter().map(|a| a.command).collect::<Vec<_>>();
         let image = commands(&pane);
         assert_eq!(image[0], "canvas.pane_quote");

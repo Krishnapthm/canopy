@@ -1,7 +1,7 @@
 //! Canvas mode owns the keyboard until the person leaves it. No timer or key sequences.
 use super::*;
 
-fn direction(value: &str) -> Option<canvas::Point> {
+fn direction(value: &str) -> Option<canophy::Point> {
     match value {
         "left" => Some([-1., 0.]), "right" => Some([1., 0.]),
         "up" => Some([0., -1.]), "down" => Some([0., 1.]), _ => None,
@@ -53,7 +53,7 @@ impl AppWindow {
     }
 
     /// What the keyboard can select in the current place: its cells and previews, and on Home the space cards.
-    pub(super) fn keyboard_cells(&self, cx: &App) -> Vec<(String, canvas::Rect)> {
+    pub(super) fn keyboard_cells(&self, cx: &App) -> Vec<(String, canophy::Rect)> {
         let doc = &self.canvas_state.doc;
         doc.panes.iter().filter(|c| doc.shown(c) && (c.boxed() || canvas::view_allows(&doc.view, matches!(c.kind, canvas::Kind::Sub { .. }) || self.live.get(&c.id).is_some_and(canvas_agent))))
             .map(|c| (c.id.clone(), self.pill_rect(c, cx)))
@@ -206,9 +206,9 @@ impl AppWindow {
                     let camera = self.canvas_state.doc.camera;
                     let (a, b) = (camera.to_world([0., 0.]), camera.to_world([w, h]));
                     let doc = &self.canvas_state.doc;
-                    let taken: Vec<_> = doc.panes.iter().filter(|c| !c.boxed() && doc.shown(c)).map(|c| [c.rect[0], c.rect[1]]).collect();
+                    let taken: Vec<_> = doc.panes.iter().filter(|c| !c.boxed() && doc.shown(c)).map(|c| [c.rect.x, c.rect.y]).collect();
                     let last = self.canvas_state.cascade.as_ref().filter(|(room, _)| *room == space).map(|(_, p)| *p);
-                    let point = canvas::cascade(last, [a[0], a[1], b[0] - a[0], b[1] - a[1]], self.default_pane_size(window), &taken, CASCADE_STEP);
+                    let point = canophy::cascade(last, [a[0], a[1], b[0] - a[0], b[1] - a[1]], self.default_pane_size(window), &taken, CASCADE_STEP);
                     self.canvas_state.cascade = Some((space.clone(), point));
                     at["point"] = json!(point);
                     at["cascade"] = json!(true);
@@ -240,11 +240,11 @@ impl AppWindow {
 const CASCADE_STEP: f32 = 32.;
 
 impl State {
-    fn nudge(&mut self, key: &str, direction: canvas::Point, gap: f32) -> bool {
+    fn nudge(&mut self, key: &str, direction: canophy::Point, gap: f32) -> bool {
         let rect = self.doc.panes.iter_mut().find(|c| c.id == key).map(|c| &mut c.rect);
         let Some(rect) = rect else { return false };
-        rect[0] += direction[0] * gap;
-        rect[1] += direction[1] * gap;
+        rect.x += direction[0] * gap;
+        rect.y += direction[1] * gap;
         true
     }
 }

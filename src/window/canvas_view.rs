@@ -1,5 +1,6 @@
 // Modified for Canopy.
 use super::*;
+use crate::canophy;
 use crate::canvas::{self, Document, PILL_WIDTH};
 use gpui::AnimationExt as _;
 use std::path::Path;
@@ -31,7 +32,7 @@ pub(super) struct State {
     pub(super) mode: bool,
     connecting: Option<String>,
     /// The camera before a focus fit and the camera that fit produced.
-    previous_camera: Option<(canvas::Camera, canvas::Camera)>,
+    previous_camera: Option<(canophy::Camera, canophy::Camera)>,
     rest: Option<canvas::Rest>,
     pending_layout: Option<(Option<String>, Option<String>)>,
     undo: Option<canvas::Rest>,
@@ -54,7 +55,7 @@ pub(super) struct State {
     bar_hover: Option<String>,
     chrome: chrome::Placements,
     // The starting size is present for an edge or corner resize.
-    preview_drag: Option<(String, Option<canvas::Point>, Point<Pixels>)>,
+    preview_drag: Option<(String, Option<canophy::Point>, Point<Pixels>)>,
     /// The panel's active tab (its tabs are `doc.panel.tabs`).
     pub file: Option<canvas::PanelTab>,
     pub(super) editing: Option<String>,
@@ -79,9 +80,9 @@ pub(super) struct State {
     writable: bool,
     save_task: Option<Task<()>>,
     write_result: Option<std::sync::mpsc::Receiver<std::io::Result<()>>>,
-    pill_sizes: RefCell<HashMap<String, (String, String, u8, canvas::Point)>>,
+    pill_sizes: RefCell<HashMap<String, (String, String, u8, canophy::Point)>>,
     pub error: Option<String>,
-    pending_points: HashMap<String, canvas::Point>,
+    pending_points: HashMap<String, canophy::Point>,
     space_drag: Option<(String, bool, Point<Pixels>)>,
     drag: Option<(Option<String>, Point<Pixels>)>,
     /// The current left-button pan moved: its mouse-up is not a click.
@@ -104,8 +105,8 @@ pub(super) struct State {
     /// because drawing takes &self); fewer than two ends it.
     pub(super) synced: RefCell<Vec<String>>,
     /// The room and origin of the last ⌘T pane, for the next one's cascade step.
-    cascade: Option<(Option<String>, canvas::Point)>,
-    /// Which edge or corner the pane resize drags (see `canvas::resize_from`).
+    cascade: Option<(Option<String>, canophy::Point)>,
+    /// Which edge or corner the pane resize drags (see `canophy::resize_from`).
     resize_zone: (i8, i8),
     /// When the camera zoom last moved by gesture: expanded cells draw flat until it has rested.
     zoomed_at: Option<std::time::Instant>,
@@ -153,8 +154,8 @@ pub(super) struct State {
 /// (its top-left is where the tiles start, at zoom 1) and each member's rect and expanded size
 /// from before, by pane id or space id.
 pub(super) struct Tile {
-    camera: canvas::Camera,
-    before: Vec<(String, canvas::Rect, Option<canvas::Point>)>,
+    camera: canophy::Camera,
+    before: Vec<(String, canophy::Rect, Option<canophy::Point>)>,
     /// Keys of the members in layout order, fixed when tile view starts. A selection of two or
     /// more tiles only those (the others stay put, under them); otherwise `all` is set and cells
     /// opened later join at the end. Closed ones drop out.
@@ -163,7 +164,7 @@ pub(super) struct Tile {
 }
 #[derive(Default)]
 struct Motion {
-    target: Option<(canvas::Camera, canvas::Camera, std::time::Instant, canvas::Point)>,
+    target: Option<(canophy::Camera, canophy::Camera, std::time::Instant, canophy::Point)>,
     velocity: [f32; 2],
     sample: Option<std::time::Instant>,
     frame: bool,
@@ -171,7 +172,7 @@ struct Motion {
 
 /// Zoom anchor and, on inputs without an end event, its pending quiet-period timer.
 struct WheelZoom {
-    anchor: canvas::Point,
+    anchor: canophy::Point,
     timeout: Option<Task<()>>,
 }
 impl State {
@@ -292,7 +293,7 @@ impl State {
     }
     /// The requested camera before animation finishes, for keyboard integration tests.
     #[cfg(test)]
-    pub(super) fn motion_target_for_test(&self) -> canvas::Camera {
+    pub(super) fn motion_target_for_test(&self) -> canophy::Camera {
         self.motion.target.unwrap().1
     }
     /// Finish a layout ease at once: test windows draw no frames, so it would never end.
@@ -313,8 +314,8 @@ impl State {
         let mut flipped = vec![];
         for c in &mut self.doc.panes {
             let Some((_, r, size)) = back(&c.id) else { continue };
-            if c.size().is_some() == size.is_some() { c.rect = *r; if let Some(to) = c.size_mut() { *to = *size; } }
-            else { c.rect[0] = r[0]; c.rect[1] = r[1]; flipped.push(c.id.clone()); }
+            if c.size().is_some() == size.is_some() { c.rect = (*r).into(); if let Some(to) = c.size_mut() { *to = *size; } }
+            else { c.rect.x = r[0]; c.rect.y = r[1]; flipped.push(c.id.clone()); }
         }
         for s in &mut self.doc.spaces { if let Some((_, r, _)) = back(&s.space) { s.rect = *r; } }
         flipped
@@ -487,25 +488,25 @@ impl AppWindow {
 
     /// How fast to pan during a drag: a moved pane or space pans once it touches a canvas edge,
     /// a resize when the pointer nears one.
-    fn edge_speed(&self, pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
+    fn edge_speed(&self, pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canophy::Point {
         let state = &self.canvas_state;
         let pane = match (&state.preview_drag, &state.drag) {
-            (Some((id, None, _)), _) | (None, Some((Some(id), _))) => state.doc.panes.iter().find(|p| &p.id == id && p.pinned.is_none()).map(|p| p.rect),
+            (Some((id, None, _)), _) | (None, Some((Some(id), _))) => state.doc.panes.iter().find(|p| &p.id == id && p.pinned.is_none()).map(|p| p.rect.array()),
             _ => None,
         };
         let space = state.space_drag.as_ref().and_then(|(id, _, _)| state.doc.spaces.iter().find(|s| &s.space == id)).map(|s| s.rect);
         match pane.or(space) {
             Some([x, y, w, h]) if !state.resizing_pane() && bounds.contains(&pointer) => {
                 let camera = state.doc.camera;
-                let [sx, sy] = camera.to_screen([x, y]);
-                edge_push(Bounds::new(bounds.origin + point(px(sx), px(sy)), size(px(w * camera.zoom), px(h * camera.zoom))), bounds, pointer)
+                let [sx, sy, sw, sh] = camera.rect_to_screen([x, y, w, h]);
+                edge_push(Bounds::new(bounds.origin + point(px(sx), px(sy)), size(px(sw), px(sh))), bounds, pointer)
             }
             _ => edge_pan(pointer, bounds),
         }
     }
 
     /// Move the carried panes directly. Only neighbours need to ease to their new positions.
-    fn apply_canvas_move(&mut self, pan: canvas::Point, cx: &mut Context<Self>) -> bool {
+    fn apply_canvas_move(&mut self, pan: canophy::Point, cx: &mut Context<Self>) -> bool {
         let state = &mut self.canvas_state;
         let position = state.queued_move.take();
         let Some(previous) = state.move_pointer() else { return false };
@@ -517,8 +518,7 @@ impl AppWindow {
         let pane = state.preview_drag.as_ref().map(|(id, _, _)| id)
             .or_else(|| state.drag.as_ref().and_then(|(id, _)| id.as_ref())).cloned();
         let space = state.space_drag.as_ref().map(|(id, _, _)| id.clone());
-        let zoom = state.doc.camera.zoom;
-        let world = [(delta[0] - pan[0]) / zoom, (delta[1] - pan[1]) / zoom];
+        let world = state.doc.camera.size_to_world([delta[0] - pan[0], delta[1] - pan[1]]);
         state.shown.get_or_insert_with(|| state.doc.clone());
         if let Some(id) = &pane {
             state.group = if state.preview_drag.is_none() && state.selected.contains(id) {
@@ -527,13 +527,13 @@ impl AppWindow {
                 vec![id.clone()]
             };
             for card in state.doc.panes.iter_mut().filter(|card| state.group.contains(&card.id)) {
-                let (rect, d) = if let Some(pinned) = &mut card.pinned {
-                    (pinned, delta)
+                if let Some(pinned) = &mut card.pinned {
+                    pinned[0] += delta[0];
+                    pinned[1] += delta[1];
                 } else {
-                    (&mut card.rect, world)
-                };
-                rect[0] += d[0];
-                rect[1] += d[1];
+                    card.rect.x += world[0];
+                    card.rect.y += world[1];
+                }
             }
         } else if let Some(card) = state.doc.spaces.iter_mut().find(|s| Some(&s.space) == space.as_ref()) {
             state.group.clear();
@@ -564,7 +564,7 @@ impl AppWindow {
         let resize = self.canvas_state.preview_drag.as_ref().and_then(|(id, before, _)| {
             let before = (*before)?;
             let pane = self.canvas_state.doc.panes.iter().find(|p| &p.id == id)?;
-            let [_, _, w, h] = pane.pinned.unwrap_or(pane.rect);
+            let [_, _, w, h] = pane.pinned.unwrap_or(pane.rect.array());
             (before != [w, h]).then(|| id.clone())
         });
         #[cfg(target_os = "macos")]
@@ -587,7 +587,7 @@ impl AppWindow {
     }
 
     /// Resize the held edge in world pixels, or in screen pixels for a pinned pane.
-    fn apply_resize(&mut self, position: Point<Pixels>, pan: canvas::Point, window: &mut Window, cx: &mut Context<Self>) {
+    fn apply_resize(&mut self, position: Point<Pixels>, pan: canophy::Point, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
         let (id, previous) = if let Some((id, previous)) = &mut state.cell_resize {
             (id, previous)
@@ -601,23 +601,24 @@ impl AppWindow {
         if screen == [0., 0.] && pan == [0., 0.] { return; }
 
         let id = id.clone();
-        let z = state.doc.camera.zoom;
-        let world = [(screen[0] - pan[0]) / z, (screen[1] - pan[1]) / z];
+        let world = state.doc.camera.size_to_world([screen[0] - pan[0], screen[1] - pan[1]]);
         state.shown.get_or_insert_with(|| state.doc.clone());
         let Some(card) = state.doc.panes.iter_mut().find(|p| p.id == id) else { return };
         let zone = state.resize_zone;
+        let min = canophy::traits(&card.kind).min.into();
         if let Some(size) = card.size() {
-            let (origin, size) = canvas::resize_from([card.rect[0], card.rect[1]], size, zone, world, [canvas::PILL_WIDTH * 1.5, canvas::HEADER * 3.]);
-            card.rect[..2].copy_from_slice(&origin);
+            let ([x, y], size) = canophy::resize_from([card.rect.x, card.rect.y], size, zone, world, min);
+            (card.rect.x, card.rect.y) = (x, y);
             *card.size_mut().unwrap() = Some(size);
         } else {
-            let (rect, delta) = match &mut card.pinned {
-                Some(rect) => (rect, screen),
-                None => (&mut card.rect, world),
-            };
-            let [x, y, w, h] = *rect;
-            let ([x, y], [w, h]) = canvas::resize_from([x, y], [w, h], zone, delta, [240., 120.]);
-            *rect = [x, y, w, h];
+            // A pinned pane resizes in screen px, one on the canvas in world px.
+            let ([x, y, w, h], delta) = card.pinned.map_or((card.rect.array(), world), |r| (r, screen));
+            let ([x, y], [w, h]) = canophy::resize_from([x, y], [w, h], zone, delta, min);
+            let rect = [x, y, w, h];
+            match &mut card.pinned {
+                Some(pinned) => *pinned = rect,
+                None => card.rect = rect.into(),
+            }
         }
         self.solve_layout(Some(&id), None, cx);
         self.animate_layout(window, cx);
@@ -656,7 +657,7 @@ impl AppWindow {
             .doc
             .panes
             .iter()
-            .map(|c| c.rect)
+            .map(|c| c.rect.array())
             .collect();
         if let Some(rest) = &state.rest {
             rest.restore(&mut state.doc);
@@ -666,7 +667,7 @@ impl AppWindow {
             .panes
             .iter()
             .zip(&sizes)
-            .map(|(c, r)| [c.rect[0], c.rect[1], r[2], r[3]])
+            .map(|(c, r)| [c.rect.x, c.rect.y, r[2], r[3]])
             .collect();
         // The pinned cell, and the rest of a dragged selection, stay where they were put.
         let carried = |i: usize| state.group.contains(&doc.panes[i].id);
@@ -683,7 +684,7 @@ impl AppWindow {
                 .filter(|j| members[*j] == members[i] && doc.panes[*j].pinned.is_none() && !docked(*j))
                 .collect();
             let rects: Vec<_> = indices.iter().map(|j| cells[*j]).collect();
-            let solved = canvas::solve(
+            let solved = canophy::solve(
                 &rects,
                 indices.iter().position(|j| *j == i).unwrap(),
                 cells[i],
@@ -702,7 +703,7 @@ impl AppWindow {
             .or_else(||pinned.and_then(|i|roots.iter().position(|j|*j==i)).map(|i|doc.spaces.len()+i));
         if let Some(i) = top_pin {
             let space_count = doc.spaces.len();
-            let solved = canvas::solve(&rects, i, rects[i], self.person.canvas_gap, |j| {
+            let solved = canophy::solve(&rects, i, rects[i], self.person.canvas_gap, |j| {
                 j.checked_sub(space_count).is_some_and(|j| carried(roots[j]))
             });
             for (space,r) in doc.spaces.iter_mut().zip(&solved) { space.rect = *r; }
@@ -714,7 +715,7 @@ impl AppWindow {
             .map(|c| &mut c.rect)
             .zip(cells)
         {
-            *r = to;
+            *r = to.into();
         }
     }
 
@@ -768,23 +769,13 @@ impl AppWindow {
                 let a = canvas::ease_out(t);
                 let mut shown = state.doc.clone();
                 from.restore(&mut shown);
-                for (r, to) in shown
-                    .panes
-                    .iter_mut()
-                    .map(|c| &mut c.rect)
-                    .zip(state.doc.panes.iter().map(|c| c.rect))
-                    .chain(
-                        shown
-                            .spaces
-                            .iter_mut()
-                            .map(|s| &mut s.rect)
-                            .zip(state.doc.spaces.iter().map(|s| s.rect)),
-                    )
-                {
-                    for k in 0..4 {
-                        r[k] += (to[k] - r[k]) * a;
-                    }
+                let ease = |r: &mut canophy::Rect, to: canophy::Rect| for k in 0..4 { r[k] += (to[k] - r[k]) * a; };
+                for (c, to) in shown.panes.iter_mut().zip(&state.doc.panes) {
+                    let mut r = c.rect.array();
+                    ease(&mut r, to.rect.array());
+                    c.rect = r.into();
                 }
+                for (s, to) in shown.spaces.iter_mut().zip(&state.doc.spaces) { ease(&mut s.rect, to.rect); }
                 if let Some((Some(id), _)) = &state.drag
                     && let (Some(c), Some(target)) = (
                         shown.panes.iter_mut().find(|c| &c.id == id),
@@ -902,11 +893,11 @@ impl AppWindow {
         let links: Vec<_> = doc.wires.iter().filter_map(|w| Some((at(&w.a)?, at(&w.b)?)))
             .chain(parents.iter().enumerate().filter_map(|(i, p)| Some((i, (*p)?))))
             .collect();
-        let arranged = canvas::arrange(&rects, &parents, &links, &layout);
+        let arranged = canophy::arrange(&rects, &parents, &links, &layout);
         let before = self.canvas_state.doc.clone();
         self.canvas_state.undo = Some(canvas::Rest::capture(&before));
         for (i, r) in indices.iter().zip(arranged) {
-            self.canvas_state.doc.panes[*i].rect = r;
+            self.canvas_state.doc.panes[*i].rect = r.into();
         }
         self.solve_layout(Some(&ids[indices[0]]), None, cx);
         self.canvas_state.doc.arrange_layout = layout;
@@ -953,7 +944,7 @@ impl AppWindow {
         let doc = &self.canvas_state.doc;
         let camera = self.canvas_state.motion.target.map_or(doc.camera, |t| t.1);
         let area = self.canvas_state.tile.as_ref().map_or(camera, |t| t.camera);
-        let area = [area.x, area.y];
+        let area = area.origin();
         // What the place shows: expanded cells and previews tile; pills (and space cards on Home) line up.
         let shown = |c: &canvas::Pane| doc.shown(c) && c.pinned.is_none()
             && (c.boxed() || matches!(c.kind, canvas::Kind::Sub { .. }) || canvas::view_allows(&doc.view, self.live.get(&c.id).is_some_and(canvas_agent)));
@@ -963,8 +954,8 @@ impl AppWindow {
             && !self.model.spaces.iter().any(|s| s.id == doc.spaces[*i].space && root_space(s))).collect();
         let count = doc.panes.len();
         // (id, rect, index): an index below `count` is a pane, above it a space.
-        let mut tiles: Vec<(String, canvas::Rect, usize)> = tiled.iter().map(|i| (doc.panes[*i].id.clone(), doc.panes[*i].rect, *i)).collect();
-        let mut lined_up: Vec<(String, canvas::Rect, usize)> = pilled.iter().map(|i| (doc.panes[*i].id.clone(), doc.panes[*i].rect, *i))
+        let mut tiles: Vec<(String, canophy::Rect, usize)> = tiled.iter().map(|i| (doc.panes[*i].id.clone(), doc.panes[*i].rect.array(), *i)).collect();
+        let mut lined_up: Vec<(String, canophy::Rect, usize)> = pilled.iter().map(|i| (doc.panes[*i].id.clone(), doc.panes[*i].rect.array(), *i))
             .chain(spaces.iter().map(|i| (doc.spaces[*i].space.clone(), doc.spaces[*i].rect, count + i))).collect();
         // Who is tiled and in what order is fixed when tile view starts (a selection of two or more,
         // else everything, in reading order); later layouts keep it, so a click or a jitter never swaps tiles.
@@ -993,13 +984,13 @@ impl AppWindow {
         // Every tile the same size unless `tile_focus_grows` lets the selected one take more.
         let active = self.person.tile_focus_grows.then(|| self.canvas_state.selected.iter().rev().find_map(|k| tiles.iter().position(|t| &t.0 == k))).flatten();
         // The canvas starts under the bar, so tiles fill its whole area.
-        let (placed, lined) = canvas::tile([area[0], area[1], visible[0], visible[1]], tiles.len(), active, &pills, self.person.tile_gap);
+        let (placed, lined) = canophy::tile([area[0], area[1], visible[0], visible[1]], tiles.len(), active, &pills, self.person.tile_gap);
         let state = &mut self.canvas_state;
         let unchanged = rects == placed && lined_up.iter().zip(&lined).all(|(a, b)| a.1[0] == b[0] && a.1[1] == b[1]);
         if !toggle && unchanged { return; }
         if started {
             let doc = &mut state.doc;
-            let before = doc.panes.iter().map(|c| (c.id.clone(), c.rect, c.size()))
+            let before = doc.panes.iter().map(|c| (c.id.clone(), c.rect.array(), c.size()))
                 .chain(doc.spaces.iter().map(|s| (s.space.clone(), s.rect, None)))
                 .filter(|(k, ..)| order.contains(k)).collect();
             // Members draw above the cells that stay put.
@@ -1012,15 +1003,17 @@ impl AppWindow {
         if state.shown.is_none() { state.shown = Some(state.doc.clone()); }
         let doc = &mut state.doc;
         for ((_, _, i), r) in tiles.iter().zip(placed) {
-            doc.panes[*i].rect = r;
+            doc.panes[*i].rect = r.into();
             if let Some(size) = doc.panes[*i].size_mut() { *size = Some([r[2], r[3]]); }
         }
         for ((_, _, i), r) in lined_up.iter().zip(lined) {
-            let rect = if *i < count { &mut doc.panes[*i].rect } else { &mut doc.spaces[*i - count].rect };
-            rect[0] = r[0];
-            rect[1] = r[1];
+            if *i < count {
+                (doc.panes[*i].rect.x, doc.panes[*i].rect.y) = (r[0], r[1]);
+            } else {
+                doc.spaces[*i - count].rect[..2].copy_from_slice(&r[..2]);
+            }
         }
-        let to = canvas::Camera { x: area[0], y: area[1], zoom: 1. };
+        let to = canophy::Camera::new(area[0], area[1], 1.);
         if camera != to {
             state.motion.target = Some((doc.camera, to, std::time::Instant::now(), [visible[0] / 2., visible[1] / 2.]));
             self.animate_camera(window, cx);
@@ -1507,7 +1500,7 @@ impl AppWindow {
         cx: &mut Context<Self>,
     ) {
         let point = match args.get("point") {
-            Some(p) => match serde_json::from_value::<canvas::Point>(p.clone()) {
+            Some(p) => match serde_json::from_value::<canophy::Point>(p.clone()) {
                 Ok(p) if p.iter().all(|v| v.is_finite()) => p,
                 _ => return self.fail("invalid canvas point"),
             },
@@ -1559,24 +1552,24 @@ impl AppWindow {
 
     /// The rects of the panes (and, on Home, space cards) in the current place that `pick` keeps.
     /// Pinned panes float over the camera, so zoom limits and fits leave them out.
-    fn place_rects(&self, pick: impl Fn(&String) -> bool, cx: &App) -> Vec<canvas::Rect> {
+    fn place_rects(&self, pick: impl Fn(&String) -> bool, cx: &App) -> Vec<canophy::Rect> {
         let doc = &self.canvas_state.doc;
         doc.panes.iter().filter(|c| doc.shown(c) && c.pinned.is_none() && pick(&c.id)).map(|c| self.pill_rect(c, cx))
             .chain(doc.spaces.iter().filter(|s| doc.room.is_none() && pick(&s.space)).map(|s| s.rect))
             .collect()
     }
 
-    /// How far the camera may zoom in this place (see `canvas::zoom_range`).
+    /// How far the camera may zoom in this place (see `canophy::zoom_range`).
     fn zoom_range(&self, window: &Window, cx: &App) -> [f32; 2] {
         let [_, _, w, h] = self.open_canvas(window);
-        canvas::zoom_range(&self.place_rects(|_| true, cx), [w, h])
+        canophy::zoom_range(&self.place_rects(|_| true, cx), [w, h])
     }
 
     /// `zoom_range` widened to hold the current zoom, for gestures and zoom steps: a zoom left
     /// past a limit (a pane grew, or a sim went to actual size) moves back freely instead of
     /// being yanked to the limit on the next event; `settle_zoom` then eases it inside.
     fn gesture_range(&self, window: &Window, cx: &App) -> [f32; 2] {
-        canvas::widen(self.zoom_range(window, cx), self.canvas_state.doc.camera.zoom)
+        canophy::widen(self.zoom_range(window, cx), self.canvas_state.doc.camera.zoom())
     }
 
     /// Puts pinned panes back where they sit on screen (`canvas::Document::pin`). Runs before
@@ -1590,13 +1583,13 @@ impl AppWindow {
     }
 
     /// The viewport centre in world pixels.
-    pub(super) fn view_center(&self, window: &Window) -> canvas::Point {
+    pub(super) fn view_center(&self, window: &Window) -> canophy::Point {
         let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
         self.canvas_state.doc.camera.to_world([f32::from(size.width) / 2., f32::from(size.height) / 2.])
     }
 
     /// Opens or moves a file-backed pane, returning its id, canonical path and kind.
-    pub(super) fn add_file_pane(&mut self, path: &std::path::Path, point: canvas::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Result<(String, String, String), String> {
+    pub(super) fn add_file_pane(&mut self, path: &std::path::Path, point: canophy::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> Result<(String, String, String), String> {
         let kind = canvas::file_kind(path);
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         match kind {
@@ -1611,19 +1604,19 @@ impl AppWindow {
             "image" => format!("Can't open {name}: not a readable image"),
             _ => format!("Can't open {}: {e}", path.display()),
         })?.to_string_lossy().into_owned();
-        let (kind, size) = match kind {
+        let at_default = |kind: canvas::Kind| (canophy::traits(&kind).default.into(), kind);
+        let (size, kind): (canophy::Point, _) = match kind {
             "image" => {
                 let size = self.open_image(path, &canonical).map_err(|_| format!("Can't open {name}: not a readable image"))?;
-                (canvas::Kind::Image { path: canonical.clone() }, size)
+                (size, canvas::Kind::Image { path: canonical.clone() })
             }
-            "pdf" => (canvas::Kind::Pdf { path: canonical.clone(), highlights: vec![] }, [560., 720.]),
-            _ => (canvas::Kind::File { path: canonical.clone() }, [560., 420.]),
+            "pdf" => at_default(canvas::Kind::Pdf { path: canonical.clone(), highlights: vec![] }),
+            _ => at_default(canvas::Kind::File { path: canonical.clone() }),
         };
         let path = canonical;
         let doc = &mut self.canvas_state.doc;
         let (id, kind_name) = if let Some(pane) = doc.panes.iter_mut().find(|p| p.path() == Some(path.as_str())) {
-            pane.rect[0] = point[0];
-            pane.rect[1] = point[1];
+            (pane.rect.x, pane.rect.y) = (point[0], point[1]);
             let id = pane.id.clone();
             // A pane that changes space leaves its wires behind: wires join one space only.
             if pane.space != space {
@@ -1634,7 +1627,7 @@ impl AppWindow {
         } else {
             let id = doc.next_file_id();
             let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-            let pane = canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], size[0], size[1]], z, space, color: None, pinned: None };
+            let pane = canvas::Pane { id: id.clone(), kind, rect: canophy::WorldRect::at(point.into(), size.into()), z, space, color: None, pinned: None };
             let kind_name = pane.kind_name().to_owned();
             doc.panes.push(pane);
             (id, kind_name)
@@ -1646,11 +1639,13 @@ impl AppWindow {
         Ok((id, path, kind_name))
     }
     /// Opens a mod pane at its own saved rect; its mod copy receives the pane id.
-    fn add_mod_pane(&mut self, kind: String, point: canvas::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
+    fn add_mod_pane(&mut self, kind: String, point: canophy::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Mod { kind, props: serde_json::Map::new() }, rect: [point[0], point[1], 320., 240.], z, space, color: None, pinned: None });
+        let kind = canvas::Kind::Mod { kind, props: serde_json::Map::new() };
+        let rect = canophy::WorldRect::at(point.into(), canophy::traits(&kind).default);
+        doc.panes.push(canvas::Pane { id: id.clone(), kind, rect, z, space, color: None, pinned: None });
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
@@ -1798,7 +1793,7 @@ impl AppWindow {
 
     /// The standard pane size (world px, header and frame included): the `terminal_size` grid.
     /// New panes open at it and `canvas.equalize` returns panes to it.
-    pub(super) fn default_pane_size(&self, window: &Window) -> canvas::Point {
+    pub(super) fn default_pane_size(&self, window: &Window) -> canophy::Point {
         let body = crate::terminal::size_of_grid(self.person.terminal_size[0], self.person.terminal_size[1], window);
         // The 2 px is the frame around the body.
         [f32::from(body.width) + 2., f32::from(body.height) + canvas::HEADER + 2.]
@@ -1931,10 +1926,10 @@ impl AppWindow {
         cx.stop_propagation();
     }
 
-    fn zoom_gesture(&mut self, delta: f32, anchor: canvas::Point, window: &mut Window, cx: &mut Context<Self>) {
+    fn zoom_gesture(&mut self, delta: f32, anchor: canophy::Point, window: &mut Window, cx: &mut Context<Self>) {
         self.canvas_state.motion.target = None;
         self.canvas_state.motion.velocity = [0.; 2];
-        let z = self.canvas_state.doc.camera.zoom * canvas::zoom_factor(delta);
+        let z = self.canvas_state.doc.camera.zoom() * canvas::zoom_factor(delta);
         let [min, max] = self.gesture_range(window, cx);
         self.canvas_state.doc.camera.zoom_at(z.clamp(min, max), anchor);
         self.zoom_moved(window, cx);
@@ -1980,7 +1975,7 @@ impl AppWindow {
         let visible = self.bounds.borrow().get("canopy-canvas").map(|b| [f32::from(b.size.width), f32::from(b.size.height)]);
         let rect = self.canvas_state.doc.panes.iter().find(|c| c.id == id).map(|c| c.rect);
         let from = self.canvas_state.doc.camera;
-        if let (Some(visible), Some(rect)) = (visible, rect) && let Some(to) = canvas::reveal(from, rect, visible) {
+        if let (Some(visible), Some(rect)) = (visible, rect) && let Some(to) = canophy::reveal(from, rect, visible) {
             self.canvas_state.motion.target = Some((from, to, std::time::Instant::now(), [visible[0] / 2., visible[1] / 2.]));
             self.animate_camera(window, cx);
         }
@@ -2005,10 +2000,10 @@ impl AppWindow {
                 if let Some((from, to, start, anchor)) = state.motion.target {
                     let t = start.elapsed().as_secs_f32() / 0.18;
                     let a = canvas::ease_out(t);
-                    let zoom = from.zoom + (to.zoom-from.zoom)*a;
+                    let zoom = from.zoom() + (to.zoom()-from.zoom())*a;
                     let f = from.to_world(anchor);
                     let world = to.to_world(anchor);
-                    state.doc.camera = canvas::Camera { x: f[0]+(world[0]-f[0])*a-anchor[0]/zoom, y: f[1]+(world[1]-f[1])*a-anchor[1]/zoom, zoom };
+                    state.doc.camera = canophy::Camera::anchored([f[0]+(world[0]-f[0])*a, f[1]+(world[1]-f[1])*a], anchor, zoom);
                     active = t < 1.;
                     if !active { state.doc.camera = to; state.motion.target = None; }
                 } else if state.drag.is_none() {
@@ -2029,11 +2024,11 @@ impl AppWindow {
         // Not window.request_animation_frame(): that is paint-only and this runs from events.
         cx.notify();
     }
-    fn settle_zoom(&mut self, anchor: canvas::Point, window: &mut Window, cx: &mut Context<Self>) {
+    fn settle_zoom(&mut self, anchor: canophy::Point, window: &mut Window, cx: &mut Context<Self>) {
         let range = self.zoom_range(window, cx);
         let from = self.canvas_state.doc.camera;
-        let zoom = from.zoom.clamp(range[0], range[1]);
-        if zoom == from.zoom { return; }
+        let zoom = from.zoom().clamp(range[0], range[1]);
+        if zoom == from.zoom() { return; }
         let mut to = from;
         to.zoom_at(zoom, anchor);
         self.canvas_state.motion.target = Some((from, to, std::time::Instant::now(), anchor));
@@ -2054,7 +2049,7 @@ impl AppWindow {
                     .unwrap_or([1200., 800.]);
                 Some(self.canvas_state.doc.camera.to_world([w / 2., h / 2.]))
             }
-            Some(v) => serde_json::from_value::<canvas::Point>(v.clone())
+            Some(v) => serde_json::from_value::<canophy::Point>(v.clone())
                 .ok()
                 .filter(|p| p.iter().all(|v| v.is_finite())),
         };
@@ -2138,7 +2133,7 @@ impl AppWindow {
                         self.fail(error);
                     } else if let Some(card) = self.canvas_state.doc.panes.iter_mut().find(|c| c.id == addr) {
                         *card.size_mut().unwrap() = Some(size);
-                        (card.rect[2], card.rect[3]) = (size[0], size[1]);
+                        (card.rect.w, card.rect.h) = (size[0], size[1]);
                         if !cascade { self.solve_layout(Some(addr), None, cx); }
                         self.canvas_changed(cx);
                     }
@@ -2198,9 +2193,9 @@ impl AppWindow {
         let given = self.model.pane_of(addr).and_then(|p| self.model.tab_of(&p)).map(|t| t.name.as_str());
         pill_label(given, self.live.get(addr).unwrap_or(&Value::Null))
     }
-    fn pill_rect(&self, card: &canvas::Pane, cx: &App) -> canvas::Rect {
-        if card.terminal().is_none() { return card.rect; }
-        if let Some(size) = card.size() { return [card.rect[0], card.rect[1], size[0], size[1]]; }
+    fn pill_rect(&self, card: &canvas::Pane, cx: &App) -> canophy::Rect {
+        if card.terminal().is_none() { return card.rect.array(); }
+        if let Some(size) = card.size() { return [card.rect.x, card.rect.y, size[0], size[1]]; }
         let rec = self.live.get(&card.id).unwrap_or(&Value::Null);
         // Room taken by the trailing status and pop-out glyphs (12 px each plus the gap).
         let trailing = 20 * (canvas_agent(rec) as u8 + self.canvas_state.popped.contains_key(&card.id) as u8);
@@ -2212,7 +2207,7 @@ impl AppWindow {
             && cached_font == &family
             && *cached_trailing == trailing
         {
-            return [card.rect[0], card.rect[1], size[0], size[1]];
+            return [card.rect.x, card.rect.y, size[0], size[1]];
         }
         let run = TextRun {
             len: text.len(),
@@ -2228,13 +2223,13 @@ impl AppWindow {
         let room = PILL_WIDTH - 2. - 24. - 16. - 8. - trailing as f32;
         let size = [PILL_WIDTH, if width > room { 54. } else { 36. }];
         sizes.insert(card.id.clone(), (text, family, trailing, size));
-        [card.rect[0], card.rect[1], size[0], size[1]]
+        [card.rect.x, card.rect.y, size[0], size[1]]
     }
     /// Menus can place a newly created terminal without duplicating membership or geometry rules.
     pub(super) fn place_canvas_card(
         &mut self,
         terminal: &str,
-        point: canvas::Point,
+        point: canophy::Point,
         push: bool,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
@@ -2254,7 +2249,7 @@ impl AppWindow {
             .find(|c| c.id == terminal)
             .cloned()
             .unwrap_or(canvas::Pane { id: terminal.into(), kind: canvas::Kind::Terminal { size: None },
-                rect: [point[0], point[1], 240., 36.],
+                rect: canophy::WorldRect::new(point[0], point[1], PILL_WIDTH, canvas::HEADER),
                 z: 0, space: None, color: None, pinned: None,
             });
         let mut r = self.pill_rect(&card, cx);
@@ -2262,7 +2257,7 @@ impl AppWindow {
         r[1] = point[1];
         self.canvas_state
             .doc
-            .place(terminal, [r[0], r[1]], [card.rect[2], card.rect[3]]);
+            .place(terminal, [r[0], r[1]], [card.rect.w, card.rect.h]);
         if push && self.canvas_state.rest.is_none() { self.solve_layout(Some(terminal),None,cx); }
         self.canvas_changed(cx);
         Ok(())
@@ -2341,7 +2336,7 @@ impl AppWindow {
             .map(|a| {
                 let r = self.pill_rect(
                     &canvas::Pane { id: a.clone(), kind: canvas::Kind::Terminal { size: None },
-                        rect: [0., 0., 240., 36.],
+                        rect: canophy::WorldRect::new(0., 0., PILL_WIDTH, canvas::HEADER),
                         z: 0, space: None, color: None, pinned: None,
                     },
                     cx,
@@ -2350,8 +2345,8 @@ impl AppWindow {
             })
             .collect();
         let effective = |c: &canvas::Pane| {
-            let size = c.size().or_else(|| sizes.get(&c.id).copied()).unwrap_or([240., 36.]);
-            [c.rect[0], c.rect[1], size[0], size[1]]
+            let size = c.size().or_else(|| sizes.get(&c.id).copied()).unwrap_or([PILL_WIDTH, canvas::HEADER]);
+            [c.rect.x, c.rect.y, size[0], size[1]]
         };
         self.canvas_state
             .pill_sizes
@@ -2429,7 +2424,7 @@ impl AppWindow {
                 // Cells land in their own room (None for Home), among that room's cells only.
                 let room = space.filter(|s| !root_space(s)).map(|s| s.id.clone());
                 let occupied: Vec<_> = state.doc.panes.iter().filter(|c| !c.boxed() && c.space == room).map(effective).collect();
-                let area = canvas::union(&occupied).map_or([0., 0., 960., 640.], |u| [u[0] - 24., u[1] - 24., u[2].max(912.) + 48., u[3] + 48.]);
+                let area = canophy::union(&occupied).map_or([0., 0., 960., 640.], |u| [u[0] - 24., u[1] - 24., u[2].max(912.) + 48., u[3] + 48.]);
                 let r = if let Some(p) =
                     parent.and_then(|p| state.doc.panes.iter().find(|c| c.terminal() == Some(p)))
                 {
@@ -2445,9 +2440,9 @@ impl AppWindow {
                         })
                         .map(effective)
                         .collect();
-                    canvas::child_position(effective(p), &siblings, sizes[addr])
+                    canophy::child_position(effective(p), &siblings, sizes[addr])
                 } else {
-                    canvas::free_spot(area, &occupied, sizes[addr])
+                    canophy::free_spot(area, &occupied, sizes[addr])
                 };
                 state.doc.place(addr, [r[0], r[1]], [r[2], r[3]]);
                 if let Some(card) = state.doc.panes.iter_mut().find(|c| c.terminal() == Some(addr.as_str())) { card.space = room; }
@@ -2786,12 +2781,12 @@ impl AppWindow {
             }
             "canvas.zoom_reset" => state.doc.camera.zoom_at(1f32.clamp(range[0], range[1]), anchor),
             "canvas.fit" | "canvas.fit_all" => {
-                canvas::focus_fit(&mut state.doc.camera, &mut state.previous_camera, &fit_rects, open);
+                canophy::focus_fit(&mut state.doc.camera, &mut state.previous_camera, &fit_rects, open);
             }
             _ => state
                 .doc
                 .camera
-                .step(if name == "canvas.zoom_in" { 1 } else { -1 }, anchor, canvas::widen(range, from.zoom)),
+                .step(if name == "canvas.zoom_in" { 1 } else { -1 }, anchor, canophy::widen(range, from.zoom())),
         }
         if name.starts_with("canvas.") {
             let to = state.doc.camera;
@@ -2807,7 +2802,7 @@ impl AppWindow {
         card: &canvas::Pane,
         file: &str,
         view: &Entity<gpui_base::TextViewState>,
-        camera: canvas::Camera,
+        camera: canophy::Camera,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let path = std::path::Path::new(file);
@@ -2815,7 +2810,7 @@ impl AppWindow {
         let quote_path = file.to_owned();
         let quote_view = view.clone();
         // The text scales with the canvas like a picture; a pinned pane keeps its screen size.
-        let z = if card.pinned.is_some() { 1. } else { camera.zoom };
+        let z = if card.pinned.is_some() { 1. } else { camera.zoom() };
         let body = div().flex_1().min_h_0().overflow_hidden().px(px(16. * z)).py(px(12. * z))
             .text_size(px(crate::settings::ui_font_size() * z)).child(gpui_base::TextView::new(view).scrollable(true)
                     .image_source(|_| {
@@ -2866,8 +2861,8 @@ impl AppWindow {
     /// the panes beneath it and raises itself on a click. `header` (a browser pane's controls)
     /// replaces the icon, title and detail inside the same header.
     #[allow(clippy::too_many_arguments)]
-    fn pane_card(&self, card: &canvas::Pane, icon: SharedString, title: String, detail: String, header: Option<AnyElement>, body: AnyElement, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
-        let p = camera.to_screen([card.rect[0], card.rect[1]]);
+    fn pane_card(&self, card: &canvas::Pane, icon: SharedString, title: String, detail: String, header: Option<AnyElement>, body: AnyElement, camera: canophy::Camera, cx: &mut Context<Self>) -> AnyElement {
+        let [px0, py0, pw, ph] = camera.rect_to_screen(card.rect);
         let drag = card.id.clone();
         let color_menu = drag.clone();
         let raise = drag.clone();
@@ -2876,8 +2871,8 @@ impl AppWindow {
         let pane_menu = card.id.clone();
         #[cfg(target_os = "macos")]
         let rest = card.id.clone();
-        let card_element = div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(p[0])).top(px(p[1]))
-                .w(px(card.rect[2] * camera.zoom)).h(px(card.rect[3] * camera.zoom))
+        let card_element = div().id(SharedString::from(format!("preview-{}", card.id))).absolute().left(px(px0)).top(px(py0))
+                .w(px(pw)).h(px(ph))
                 .flex().flex_col().bg(c("surface")).border_1().border_color(self.pane_frame_color(&card.id)).rounded(px(ui::RADIUS)).overflow_hidden()
                 .occlude()
                 // Capture phase: raise and select before the body handles input and can take focus.
@@ -2934,7 +2929,7 @@ impl AppWindow {
                             .child(self.pane_color_swatch(&card.id, cx)),
                     })))
                 .child(div().flex_1().min_h_0().overflow_hidden().child(body))
-                .children(Self::resize_zones(card, camera.zoom, cx))
+                .children(Self::resize_zones(card, camera.zoom(), cx))
                 .into_any_element()
     }
 
@@ -2950,7 +2945,7 @@ impl AppWindow {
         let (edge, corner) = resize_zone_sizes(zoom);
         let boxed = card.boxed();
         let browser = card.url().is_some();
-        let [_, _, width, height] = card.pinned.unwrap_or(card.rect);
+        let [_, _, width, height] = card.pinned.unwrap_or(card.rect.array());
         [(-1i8, -1i8), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)].map(|zone| {
             let id = card.id.clone();
             let thick = |other: i8| px(if other == 0 { edge } else { corner });
@@ -3280,7 +3275,7 @@ impl AppWindow {
                     let area = [p[0], p[1], q[0] - p[0], q[1] - p[1]];
                     let mut picked = base;
                     for (key, rect) in this.keyboard_cells(cx) {
-                        if canvas::intersects(area, rect) && !picked.contains(&key) { picked.push(key); }
+                        if canophy::intersects(area, rect) && !picked.contains(&key) { picked.push(key); }
                     }
                     this.canvas_state.selected = picked;
                     this.canvas_state.marquee = Some((start, e.position, this.canvas_state.marquee.take().map(|m| m.2).unwrap_or_default()));
@@ -3347,7 +3342,7 @@ impl AppWindow {
                 (n, 0) => format!("{n} terminal{}", if n == 1 { "" } else { "s" }),
                 (n, w) => format!("{n} terminal{} · {w} working", if n == 1 { "" } else { "s" }),
             };
-            let z = camera.zoom;
+            let z = camera.zoom();
             let [x, y] = camera.to_screen([space.rect[0], space.rect[1]]);
             let selected = state.selected.contains(&id);
             let rename_id = id.clone();
@@ -3442,7 +3437,7 @@ impl AppWindow {
         let mut drawn_sims = vec![];
         let mut drawn_pages = vec![];
         // An expanded browser fills the canvas area: no other pane is drawn.
-        for card in shown_doc.panes.iter().filter(|p| state.browser_tab.is_none() && shown_doc.shown(p) && canvas::visible(camera, p.rect, viewport)) {
+        for card in shown_doc.panes.iter().filter(|p| state.browser_tab.is_none() && shown_doc.shown(p) && canophy::visible(camera, p.rect, viewport)) {
             let element = match &card.kind {
                 // Drawn by the terminal path below.
                 canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } => continue,
@@ -3499,24 +3494,24 @@ impl AppWindow {
             })
             .map(|card| {
                 // An expanded cell has its own size, eased by the layout motion.
-                let size = card.size().map(|_| [card.rect[2].max(PILL_WIDTH), card.rect[3].max(canvas::HEADER)]).unwrap_or_else(|| state
+                let size = card.size().map(|_| [card.rect.w.max(PILL_WIDTH), card.rect.h.max(canvas::HEADER)]).unwrap_or_else(|| state
                     .pill_sizes
                     .borrow()
                     .get(&card.id)
                     .map(|v| v.3)
-                    .unwrap_or([240., 36.]));
+                    .unwrap_or([PILL_WIDTH, canvas::HEADER]));
                 (
                     card.id.as_str(),
-                    (card, [card.rect[0], card.rect[1], size[0], size[1]]),
+                    (card, [card.rect.x, card.rect.y, size[0], size[1]]),
                 )
             })
             .collect();
         let shown: Vec<_> = cards
             .values()
-            .filter(|(_, rect)| canvas::visible(camera, *rect, viewport))
+            .filter(|(_, rect)| canophy::visible(camera, *rect, viewport))
             .map(|(card, rect)| {
                 let mut card = (*card).clone();
-                card.rect = *rect;
+                card.rect = (*rect).into();
                 card
             })
             .collect();
@@ -3525,18 +3520,17 @@ impl AppWindow {
             for card in state.doc.panes.iter().filter(|c| matches!(c.kind, canvas::Kind::Sub { .. }) && state.doc.shown(c)) {
                 let canvas::Kind::Sub { parent, sub: sub_id } = &card.kind else { continue };
                 let Some(sub) = state.subs.get(parent).into_iter().flatten().find(|s| &s.id == sub_id) else { continue };
-                if canvas::visible(camera, card.rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), card.clone())); }
+                if canophy::visible(camera, card.rect, viewport) { sub_pills.push((parent.clone(), sub.clone(), card.clone())); }
             }
         }
         for (parent, sub, card) in sub_pills {
-            let rect = card.rect;
             let key = card.id.clone();
             let color_menu = key.clone();
-            let [x, y] = camera.to_screen([rect[0], rect[1]]);
-            let z = camera.zoom;
+            let [x, y, w, h] = camera.rect_to_screen(card.rect);
+            let z = camera.zoom();
             let (icon, tint) = program_icon(&json!({"program":sub.program}));
             let mut pill = Self::pane_header().id(SharedString::from(format!("canvas-sub-{parent}-{}", sub.id)))
-                .absolute().left(px(x)).top(px(y)).w(px(rect[2] * z)).h(px(rect[3] * z))
+                .absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h))
                 .rounded(px(ui::RADIUS * z)).border_1().border_color(self.pane_frame_color(&key)).bg(c("surface"))
                 .when(sub.done, |d| d.opacity(0.5)).occlude()
                 .child(div().flex_none().mt(px(1.)).child(icon_element(&icon, tint, px(16.), c("foreground"))));
@@ -3569,11 +3563,11 @@ impl AppWindow {
             let rec = self.live.get(&addr).unwrap_or(&Value::Null);
             let agent = canvas_agent(rec);
             let name = self.pill_name(&addr);
-            let [x, y] = camera.to_screen([card.rect[0], card.rect[1]]);
-            let z = camera.zoom;
+            let [x, y] = camera.to_screen([card.rect.x, card.rect.y]);
+            let z = camera.zoom();
             // An expanded cell is a pill (its header) over a terminal; it keeps its world size at every zoom.
             let expanded = card.size().is_some();
-            let [cw, ch] = [card.rect[2], card.rect[3]];
+            let [cw, ch] = [card.rect.w, card.rect.h];
             let is_synced = synced.contains(&addr);
             let frame_color = if is_synced { c("accent") } else { self.pane_frame_color(&addr) };
             // A collapsed pill is a box at world size; its header contents keep their screen size, clipped.
@@ -3763,8 +3757,8 @@ impl AppWindow {
                 .absolute()
                 .left(px(x))
                 .top(px(y))
-                .w(px(card.rect[2] * z))
-                .h(px(card.rect[3] * z))
+                .w(px(camera.len_to_screen(card.rect.w)))
+                .h(px(camera.len_to_screen(card.rect.h)))
                 .rounded(px(ui::RADIUS * z))
                 .when(is_synced, |d| d.border_2()).when(!is_synced, |d| d.border_1())
                 .border_color(frame_color)
@@ -4218,7 +4212,7 @@ const ZOOM_REST: Duration = Duration::from_millis(160);
 const WHEEL_GESTURE: Duration = Duration::from_millis(150);
 
 /// Screen pixels per second to pan while dragging within 32 pixels of an edge.
-fn edge_pan(pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canvas::Point {
+fn edge_pan(pointer: Point<Pixels>, bounds: Bounds<Pixels>) -> canophy::Point {
     if !bounds.contains(&pointer) { return [0., 0.]; }
     full_speed([pointer_ramp(pointer.x, bounds.left(), bounds.right()), pointer_ramp(pointer.y, bounds.top(), bounds.bottom())])
 }
@@ -4230,7 +4224,7 @@ fn pointer_ramp(at: Pixels, start: Pixels, end: Pixels) -> f32 {
 }
 
 /// A direction scaled so its strongest pull pans 900 screen px per second.
-fn full_speed([x, y]: canvas::Point) -> canvas::Point {
+fn full_speed([x, y]: canophy::Point) -> canophy::Point {
     let speed = 900. / x.hypot(y).max(1.);
     [x * speed, y * speed]
 }
@@ -4247,7 +4241,7 @@ fn terminal_body(cw: f32, ch: f32, z: f32) -> ([f32; 2], f32) {
 /// Screen pixels per second to pan while a dragged `rect` touches or passes an edge of `bounds`:
 /// a quarter speed on contact, full speed 36 px past it. On an axis where the pane covers both
 /// edges, a push would never end, so the pointer near an edge pans instead, as in `edge_pan`.
-fn edge_push(rect: Bounds<Pixels>, bounds: Bounds<Pixels>, pointer: Point<Pixels>) -> canvas::Point {
+fn edge_push(rect: Bounds<Pixels>, bounds: Bounds<Pixels>, pointer: Point<Pixels>) -> canophy::Point {
     let push = |over: Pixels| if over < px(0.) { 0. } else { (0.25 + f32::from(over) / 48.).min(1.) };
     let axis = |before: Pixels, after: Pixels, at: Pixels, start: Pixels, end: Pixels| {
         if before >= px(0.) && after >= px(0.) { pointer_ramp(at, start, end) } else { push(before) - push(after) }
@@ -4760,10 +4754,10 @@ mod input_tests {
         };
         let before = camera(cx);
         wheel(cx, at(520., 220.), 20., TouchPhase::Moved, none);
-        assert_eq!(camera(cx).y, before.y - 20., "empty canvas pans once");
+        assert_eq!(camera(cx).origin()[1], before.origin()[1] - 20., "empty canvas pans once");
         wheel(cx, at(520., 220.), 0., TouchPhase::Ended, none);
         wheel(cx, position, 20., TouchPhase::Moved, none);
-        assert_eq!(camera(cx).y, before.y - 40., "unentered terminal pans once");
+        assert_eq!(camera(cx).origin()[1], before.origin()[1] - 40., "unentered terminal pans once");
         wheel(cx, position, 0., TouchPhase::Ended, none);
 
         cx.simulate_event(MouseDownEvent { position, modifiers: none, button: MouseButton::Left, click_count: 2, first_mouse: false });
@@ -4775,16 +4769,16 @@ mod input_tests {
 
         let zoom = Modifiers { platform: cfg!(target_os = "macos"), control: !cfg!(target_os = "macos"), ..none };
         wheel(cx, position, 1000., TouchPhase::Moved, zoom);
-        let limit = camera(cx).zoom;
-        assert!(limit > before.zoom);
+        let limit = camera(cx).zoom();
+        assert!(limit > before.zoom());
         wheel(cx, position, 1000., TouchPhase::Moved, zoom);
-        assert_eq!(camera(cx).zoom, limit, "zoom stops at the limit instead of stretching past it");
+        assert_eq!(camera(cx).zoom(), limit, "zoom stops at the limit instead of stretching past it");
         wheel(cx, position, 0., TouchPhase::Ended, none);
         assert!(view.update(cx, |this, _| this.canvas_state.motion.target.is_none() && this.canvas_state.wheel_zoom.is_none()), "nothing to spring back from");
 
         let before = camera(cx);
         cx.simulate_event(PinchEvent { position, delta: -0.1, modifiers: none, phase: TouchPhase::Moved });
-        assert!(camera(cx).zoom < before.zoom, "pinch reaches the canvas through an occluding pane");
+        assert!(camera(cx).zoom() < before.zoom(), "pinch reaches the canvas through an occluding pane");
 
         let notch = ScrollWheelEvent { position, delta: ScrollDelta::Lines(point(0., 50.)), modifiers: zoom, touch_phase: TouchPhase::Moved };
         cx.simulate_event(notch.clone());
@@ -4806,7 +4800,7 @@ mod input_tests {
         let at = |x, y| bounds.origin + point(px(x), px(y));
         let none = Modifiers::default();
         let left = MouseButton::Left;
-        let rect = |cx: &mut VisualTestContext, id| view.read_with(cx, |this, _| this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap().rect);
+        let rect = |cx: &mut VisualTestContext, id| view.read_with(cx, |this, _| this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap().rect.array());
 
         cx.simulate_mouse_down(at(104., 188.), left, none);
         cx.simulate_mouse_move(at(150., 188.), left, none);
@@ -4823,13 +4817,13 @@ mod input_tests {
         cx.simulate_mouse_move(position, left, none);
         let before = rect(cx, "t1");
         cx.update(|window, cx| window.simulate_next_frame(cx));
-        let camera_x = view.read_with(cx, |this, _| this.canvas_state.doc.camera.x);
+        let camera_x = view.read_with(cx, |this, _| this.canvas_state.doc.camera.origin()[0]);
         assert!(camera_x < 0.);
         let after = rect(cx, "t1");
         assert!((after[0] - before[0] - camera_x).abs() < 0.001, "the resized edge follows the pointer as the canvas pans");
         cx.simulate_mouse_up(position, left, none);
         cx.update(|window, cx| window.simulate_next_frame(cx));
-        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.doc.camera.x), camera_x, "release stops edge scrolling");
+        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.doc.camera.origin()[0]), camera_x, "release stops edge scrolling");
     }
 }
 
@@ -4900,10 +4894,10 @@ mod settings_tests {
     fn queued_moves(cx: &mut TestAppContext) {
         if !running_alone("window::canvas_view::settings_tests::queued_moves") { return; }
         let (view, cx) = open_window(cx, "probe", "", json!({"id":"root","type":"row","children":[]}));
-        let x = |doc: &crate::canvas::Document| [doc.panes[0].rect[0], doc.panes[1].rect[0]];
+        let x = |doc: &crate::canvas::Document| [doc.panes[0].rect.x, doc.panes[1].rect.x];
         let solves = view.update_in(cx, |this, window, cx| {
             this.person.canvas_push = settings::CanvasPush::Live;
-            this.canvas_state.doc.camera.zoom = 1.;
+            this.canvas_state.doc.camera.zoom_at(1., [0., 0.]);
             this.canvas_state.doc.panes = serde_json::from_value(json!([
                 {"id":"t1","kind":"terminal","props":{"size":[200,100]},"rect":[0,0,200,100],"z":0},
                 {"id":"t2","kind":"terminal","props":{"size":[200,100]},"rect":[300,0,200,100],"z":1},
@@ -4926,7 +4920,7 @@ mod settings_tests {
             assert_eq!(this.canvas_state.layout_solves, solves + 1);
             assert_eq!(x(&this.canvas_state.doc), [200., 500.]);
             assert_eq!(x(this.canvas_state.shown.as_ref().unwrap()), [200., 500.]);
-            assert_ne!(this.canvas_state.doc.panes[2].rect, [520., 0., 200., 100.]);
+            assert_ne!(this.canvas_state.doc.panes[2].rect.array(), [520., 0., 200., 100.]);
 
             assert!(this.queue_canvas_move(point(px(245.), px(0.)), window, cx));
             this.end_canvas_drag(cx);
@@ -4939,7 +4933,7 @@ mod settings_tests {
             assert_eq!(x(&this.canvas_state.doc), [245., 545.]);
             assert_eq!(this.canvas_state.layout_solves, solves + 2);
 
-            this.canvas_state.doc.camera.zoom = 2.;
+            this.canvas_state.doc.camera.zoom_at(2., [0., 0.]);
             this.canvas_state.doc.panes[2].pinned = Some([10., 20., 240., 120.]);
             this.begin_layout();
             this.canvas_state.preview_drag = Some(("t3".into(), None, point(px(0.), px(0.))));
@@ -4967,7 +4961,7 @@ mod settings_tests {
                     *this.canvas_state.doc.panes[0].size_mut().unwrap() = Some([500.,100.]);
                 } else {
                     this.canvas_state.drag = Some((Some("t1".into()), point(px(0.),px(0.))));
-                    this.canvas_state.doc.panes[0].rect[0] = 400.;
+                    this.canvas_state.doc.panes[0].rect.x = 400.;
                 }
                 let neighbour = this.canvas_state.doc.panes[1].rect;
                 this.solve_layout(Some("t1"), None, cx);
@@ -5011,36 +5005,36 @@ mod tile_tests {
             for t in ["t1", "t2", "t3", "t4"] { this.live.insert(t.into(), json!({})); }
             let before: Vec<_> = this.canvas_state.doc.panes.iter().map(|c| (c.rect, c.size())).collect();
             this.person.tile_focus_grows = true;
-            this.canvas_state.doc.camera = crate::canvas::Camera { x: 300., y: -40., zoom: 0.5 };
+            this.canvas_state.doc.camera = crate::canophy::Camera::new(300., -40., 0.5);
             this.canvas_state.selected = vec!["t2".into()];
             this.tile_canvas(true, window, cx);
             this.canvas_state.settle_for_test();
             let cards = &this.canvas_state.doc.panes;
-            let area = |i: usize| cards[i].rect[2] * cards[i].rect[3];
+            let area = |i: usize| cards[i].rect.w * cards[i].rect.h;
             assert!(this.canvas_state.tile.is_some());
             assert!(area(1) > area(0) && area(1) > area(2), "the selected tile is the largest: {:?}", cards.iter().map(|c| c.rect).collect::<Vec<_>>());
-            assert!(cards.iter().take(3).all(|c| c.size() == Some([c.rect[2], c.rect[3]])), "tiles stay expanded at their tile size");
-            assert!(cards.iter().take(3).all(|c| c.rect[1] + c.rect[3] <= cards[3].rect[1]), "the pill lines up below the tiles");
+            assert!(cards.iter().take(3).all(|c| c.size() == Some([c.rect.w, c.rect.h])), "tiles stay expanded at their tile size");
+            assert!(cards.iter().take(3).all(|c| c.rect.y + c.rect.h <= cards[3].rect.y), "the pill lines up below the tiles");
             // Selecting another tile makes it the large one.
             this.canvas_state.selected = vec!["t1".into()];
             this.tile_canvas(false, window, cx);
             this.canvas_state.settle_for_test();
             let cards = &this.canvas_state.doc.panes;
-            assert!(cards[0].rect[2] * cards[0].rect[3] > cards[1].rect[2] * cards[1].rect[3]);
-            assert!(cards[0].rect[0] < cards[1].rect[0] && cards[0].rect[1] < cards[2].rect[1], "the active tile grows in its own slot");
+            assert!(cards[0].rect.w * cards[0].rect.h > cards[1].rect.w * cards[1].rect.h);
+            assert!(cards[0].rect.x < cards[1].rect.x && cards[0].rect.y < cards[2].rect.y, "the active tile grows in its own slot");
             // Jittered rects (a click that nudged tiles) do not reorder them.
             let this_cards = &mut this.canvas_state.doc.panes;
-            this_cards[0].rect[1] += 30.;
-            this_cards[1].rect[1] -= 30.;
+            this_cards[0].rect.y += 30.;
+            this_cards[1].rect.y -= 30.;
             this.tile_canvas(false, window, cx);
             this.canvas_state.settle_for_test();
             let cards = &this.canvas_state.doc.panes;
-            assert!(cards[0].rect[0] < cards[1].rect[0] && cards[0].rect[1] == cards[1].rect[1], "same slots after jitter");
+            assert!(cards[0].rect.x < cards[1].rect.x && cards[0].rect.y == cards[1].rect.y, "same slots after jitter");
             // Off: everything is back where it was.
             this.tile_canvas(true, window, cx);
             this.canvas_state.settle_for_test();
             assert!(this.canvas_state.tile.is_none());
-            assert_eq!(this.canvas_state.motion_target_for_test(), crate::canvas::Camera { x: 300., y: -40., zoom: 0.5 }, "the camera goes back too");
+            assert_eq!(this.canvas_state.motion_target_for_test(), crate::canophy::Camera::new(300., -40., 0.5), "the camera goes back too");
             let after: Vec<_> = this.canvas_state.doc.panes.iter().map(|c| (c.rect, c.size())).collect();
             assert_eq!(after, before);
             // Two selected cells tile alone: the others stay put, under them, and everything returns on exit.

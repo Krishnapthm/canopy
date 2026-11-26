@@ -56,11 +56,11 @@ impl AppWindow {
         let doc = &self.canvas_state.doc;
         let (point, space) = if let Some(t) = a["wire"].as_str() {
             let pane = doc.panes.iter().find(|p| p.id == t && p.terminal().is_some()).ok_or_else(|| format!("{t} is not a terminal pane on the canvas"))?;
-            let r = self.wire_cell(doc, t).unwrap_or(pane.rect);
+            let r = self.wire_cell(doc, t).unwrap_or(pane.rect.array());
             ([r[0] + r[2] + self.person.canvas_gap, r[1]], pane.space.clone())
         } else {
             let point = match a.get("point") {
-                Some(p) => match serde_json::from_value::<canvas::Point>(p.clone()) {
+                Some(p) => match serde_json::from_value::<canophy::Point>(p.clone()) {
                     Ok(p) if p.iter().all(|v| v.is_finite()) => p,
                     _ => return Err("invalid canvas point".into()),
                 },
@@ -146,8 +146,7 @@ impl AppWindow {
         if !pin {
             pane.pinned = None;
         } else if pane.pinned.is_none() {
-            let [x, y] = camera.to_screen([pane.rect[0], pane.rect[1]]);
-            let [w, h] = [pane.rect[2] * camera.zoom, pane.rect[3] * camera.zoom];
+            let [x, y, w, h] = camera.rect_to_screen(pane.rect);
             // It keeps its shape, at most the window's height and (in the corner) 60% of its width.
             let room = if corner { size[0] * 0.6 } else { size[0] - 2. * MARGIN };
             let k = (room / w).min((size[1] - 2. * MARGIN) / h).min(1.);
@@ -207,10 +206,9 @@ impl AppWindow {
             (bounds, [0., 0., f32::from(bounds.size.width), f32::from(bounds.size.height)])
         } else {
             if !doc.shows(pane.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
-            let r = if pane.boxed() { pane.rect } else { self.wire_cell(doc, id).ok_or_else(|| format!("pane {id} is not drawn in this view"))? };
+            let r = if pane.boxed() { pane.rect.array() } else { self.wire_cell(doc, id).ok_or_else(|| format!("pane {id} is not drawn in this view"))? };
             let bounds = self.bounds.borrow().get("canopy-canvas").copied().ok_or("the canvas is not shown")?;
-            let [x, y] = doc.camera.to_screen([r[0], r[1]]);
-            (bounds, [x, y, r[2] * doc.camera.zoom, r[3] * doc.camera.zoom])
+            (bounds, doc.camera.rect_to_screen(r))
         };
         let (x0, y0) = (x.max(0.), y.max(0.));
         let (x1, y1) = ((x + w).min(f32::from(bounds.size.width)), (y + h).min(f32::from(bounds.size.height)));
@@ -296,7 +294,7 @@ mod tests {
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == blank["pane"]), "a blank note closes without asking");
             assert!(this.canvas_state.doc.wires.is_empty());
             // A sim pane before simctl answers: read says what it knows; open needs a target.
-            this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.], z: 9, space: None, color: None, pinned: None });
+            this.canvas_state.doc.panes.push(canvas::Pane { id: "p9".into(), kind: canvas::Kind::Sim { udid: String::new() }, rect: [0., 0., 320., 720.].into(), z: 9, space: None, color: None, pinned: None });
             assert_eq!(this.pane_read(&json!({"pane":"p9"}), cx).unwrap()["text"], canvas::envelope("p9", "sim", &[("udid", "")], "No simulator picked yet."));
             assert_eq!(this.pane_open(&json!({"pane":"p9"}), window, cx).unwrap_err(), "canvas.pane_open needs target");
         });
@@ -368,7 +366,7 @@ mod tests {
             let shown = this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap().rect;
             assert_eq!(this.pin_pane(&id, None, false, window, cx), Ok(false));
             let pane = this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap();
-            assert_eq!((pane.pinned, &pane.rect[..2]), (None, &shown[..2]));
+            assert_eq!((pane.pinned, &pane.rect.array()[..2]), (None, &shown.array()[..2]));
             assert_eq!(this.pin_pane(&id, None, false, window, cx), Ok(true));
             this.canvas_state.doc.panes.retain(|p| p.id != id);
             // Docked is the default: a panel tab that moves nothing on the canvas, until it moves back.

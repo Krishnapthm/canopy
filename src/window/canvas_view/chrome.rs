@@ -244,11 +244,11 @@ impl AppWindow {
     /// The part of the canvas the floating toolbar leaves open, as canvas-local `[x, y, w, h]`
     /// screen px (the window when the canvas is not measured): fitting, zoom limits and the
     /// empty-canvas hints use it, so nothing lands under the toolbar.
-    pub(in crate::window) fn open_canvas(&self, window: &Window) -> canvas::Rect {
+    pub(in crate::window) fn open_canvas(&self, window: &Window) -> canophy::Rect {
         self.open_canvas_in(window.viewport_size())
     }
 
-    pub(in crate::window) fn open_canvas_in(&self, fallback: Size<Pixels>) -> canvas::Rect {
+    pub(in crate::window) fn open_canvas_in(&self, fallback: Size<Pixels>) -> canophy::Rect {
         let canvas = self.canvas_bounds().unwrap_or(Bounds::new(point(px(0.), px(0.)), fallback));
         let bounds = self.bounds.borrow();
         let edge = self.chrome.walk().iter().flat_map(|n| &n.floating).find(|f| f.id == "toolbar" && !f.hidden).map(|f| f.edge);
@@ -278,13 +278,13 @@ impl AppWindow {
         let [x, y] = camera.to_screen([x, y]);
         let [w, h] = pane
             .pinned
-            .map_or([w * camera.zoom, h * camera.zoom], |[_, _, w, h]| [w, h]);
+            .map_or(camera.size_to_screen([w, h]), |[_, _, w, h]| [w, h]);
         Some(Bounds::new(point(px(x), px(y)), size(px(w), px(h))))
     }
 }
 
 /// `size` less the strip from its `edge` to the far side of `cover` (canvas-local), as `[x, y, w, h]`.
-fn uncovered(size: Size<Pixels>, cover: Option<(Bounds<Pixels>, crate::layout::Edge)>) -> canvas::Rect {
+fn uncovered(size: Size<Pixels>, cover: Option<(Bounds<Pixels>, crate::layout::Edge)>) -> canophy::Rect {
     use crate::layout::Edge;
     let [w, h] = [f32::from(size.width), f32::from(size.height)];
     let Some((b, edge)) = cover else { return [0., 0., w, h] };

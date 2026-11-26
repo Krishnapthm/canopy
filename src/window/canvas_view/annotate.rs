@@ -449,7 +449,7 @@ impl AppWindow {
 
 /// A canvas card's body size on screen at `zoom`: the pane minus its frame and header.
 pub(super) fn card_body(pane: &canvas::Pane, zoom: f32) -> Pos {
-    let [w, h] = pane.pinned.map_or([pane.rect[2] * zoom, pane.rect[3] * zoom], |p| [p[2], p[3]]);
+    let [w, h] = pane.pinned.map_or([pane.rect.w * zoom, pane.rect.h * zoom], |p| [p[2], p[3]]);
     [(w - 2.).max(1.), (h - canvas::header_height(&pane.kind) - 2.).max(1.)]
 }
 
@@ -478,8 +478,9 @@ impl AppWindow {
         // A popped-out page is annotated in its own window, whatever space the canvas shows.
         let popped = self.browser_popped(id);
         if !popped && !self.canvas_state.shows_pane(&pane) { return Err("Bring the pane into view to annotate it".into()); }
-        let zoom = self.canvas_state.doc.camera.zoom;
-        let width = pane.pinned.map_or(pane.rect[2] * zoom, |p| p[2]) - 2.;
+        let camera = self.canvas_state.doc.camera;
+        let zoom = camera.zoom();
+        let width = pane.pinned.map_or(camera.len_to_screen(pane.rect.w), |p| p[2]) - 2.;
         let docked = self.canvas_state.doc.docked(id);
         let needs_room = !docked && (width < 520. || zoom < 0.75);
         let url = pane.url().unwrap_or_default().to_owned();

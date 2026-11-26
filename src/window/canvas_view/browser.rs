@@ -39,7 +39,7 @@ const LOAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(15);
 /// How long a loaded page gets to render before reads, shots and picks.
 const SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
 /// Default size of a new browser pane, world px.
-pub(super) const SIZE: [f32; 2] = [960., 680.];
+pub(super) const SIZE: [f32; 2] = [canophy::traits::BROWSER.w, canophy::traits::BROWSER.h];
 
 /// Command name, menu label and fixed CSS size.
 const PRESETS: [(&str, &str, Option<[f32; 2]>); 5] = [
@@ -243,7 +243,7 @@ struct Page {
     shot: Option<Arc<RenderImage>>,
     title: String,
     /// While live: the last placement used to set WebKit zoom.
-    live: Option<(canvas::Camera, canvas::Rect)>,
+    live: Option<(canophy::Camera, canophy::Rect)>,
     loading: bool,
     /// Replies held until the page finishes loading.
     waiting: Vec<Ask>,
@@ -425,7 +425,7 @@ fn find_suffix(root: &std::path::Path, tail: &std::path::Path) -> Option<std::pa
 
 impl AppWindow {
     /// Adds a browser pane at `point` in `space`. An empty URL focuses its New tab field.
-    pub(super) fn add_browser_pane(&mut self, url: String, point: canvas::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
+    pub(super) fn add_browser_pane(&mut self, url: String, point: canophy::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
@@ -433,7 +433,7 @@ impl AppWindow {
         let kind = canvas::Kind::Browser {
             home: url.clone(), tabs: vec![canvas::Tab { id: "t1".into(), url, title: String::new() }], active: 0, viewport: None,
         };
-        doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: [point[0], point[1], SIZE[0], SIZE[1]], z, space, color: None, pinned: None });
+        doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: canophy::WorldRect::new(point[0], point[1], SIZE[0], SIZE[1]), z, space, color: None, pinned: None });
         self.canvas_state.last_browser = Some(id.clone());
         if empty { self.canvas_state.browsers.panes.entry(id.clone()).or_default().focus_url = true; }
         self.canvas_changed(cx);
@@ -515,7 +515,7 @@ impl AppWindow {
     }
 
     /// Draws New tab, the live web view, or the resting snapshot. Click a resting page to wake it.
-    pub(super) fn browser_body(&self, pane: &canvas::Pane, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn browser_body(&self, pane: &canvas::Pane, camera: canophy::Camera, cx: &mut Context<Self>) -> AnyElement {
         let id = pane.id.clone();
         let page = self.active_page(&id);
         if self.browser_popped(&id) {
@@ -548,7 +548,7 @@ impl AppWindow {
             let preset = fixed_viewport(pane).is_some();
             if at != next {
                 let (this, key) = (cx.entity(), self.page_key(&id).unwrap());
-                let zoom_changed = at.0.zoom != next.0.zoom || (preset && at.1[2..] != next.1[2..]);
+                let zoom_changed = at.0.zoom() != next.0.zoom() || (preset && at.1[2..] != next.1[2..]);
                 let zoom = zoom_changed.then(|| {
                     let [_, _, width, height] = pane_body(pane, camera);
                     page_zoom(pane, [width, height], css_width(pane, camera))
@@ -570,7 +570,7 @@ impl AppWindow {
                 div().size_full().bg(gpui::white()).child(frame)
             };
             let body = body.relative().child(self.browser_measure(format!("web-body:{id}")));
-            return self.annotate_body(pane, body.into_any_element(), super::annotate::card_body(pane, camera.zoom), cx);
+            return self.annotate_body(pane, body.into_any_element(), super::annotate::card_body(pane, camera.zoom()), cx);
         }
         #[cfg(not(target_os = "macos"))]
         let _ = camera;
@@ -584,7 +584,7 @@ impl AppWindow {
                 cx.stop_propagation();
                 this.wake_browser(&id, window, cx);
             })).into_any_element();
-        self.annotate_body(pane, body, super::annotate::card_body(pane, camera.zoom), cx)
+        self.annotate_body(pane, body, super::annotate::card_body(pane, camera.zoom()), cx)
     }
 
     /// The active tab's title, falling back to its address or New tab.
@@ -1852,7 +1852,7 @@ impl AppWindow {
         for other in others { self.rest_page(&other, cx); }
         let camera = self.canvas_state.doc.camera;
         let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
-        page.live = Some((camera, pane.rect));
+        page.live = Some((camera, pane.rect.array()));
         (page.told, page.watch) = (false, false);
         page.native.as_ref().unwrap().view.update(cx, |v, _| {
             show_view(v, frame, 1.);
@@ -1900,7 +1900,7 @@ impl AppWindow {
         let app = cx.entity().downgrade();
         let (closed, shown, id) = (id.to_owned(), id.to_owned(), id.to_owned());
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(pane.rect[2].max(640.)), px(pane.rect[3].max(480.))), cx))),
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(pane.rect.w.max(640.)), px(pane.rect.h.max(480.))), cx))),
             titlebar: Some(TitlebarOptions { title: Some(title.clone().into()), appears_transparent: true, traffic_light_position: Some(point(px(12.), px(11.))) }),
             // The header draws the title bar and moves the window itself (`start_window_move`).
             app_owns_titlebar_drag: true,
@@ -2061,7 +2061,7 @@ impl AppWindow {
         // A docked page is placed by the panel body, not the canvas camera.
         let docked = self.docked_view(id);
         let (pane, camera) = match docked {
-            Some((view, _)) => (view, canvas::Camera::default()),
+            Some((view, _)) => (view, canophy::Camera::default()),
             None => (self.canvas_state.shown.as_ref().and_then(|shown| shown.panes.iter().find(|p| p.id == id)).unwrap_or(saved).clone(), self.canvas_state.doc.camera),
         };
         if !doc.docked(id) && !doc.shows(saved.space.as_ref()) { return Err(format!("pane {id} is in another space: go there first")); }
@@ -2257,11 +2257,11 @@ impl AppWindow {
         if w <= 0. || h <= 0. { return; }
         let doc = &mut self.canvas_state.doc;
         let Some(pane) = doc.panes.iter_mut().find(|p| p.id == id && p.pinned.is_none()) else { return };
-        let [x, y, pw, ph] = pane.rect;
+        let [x, y, pw, ph] = pane.rect.array();
         let (pw, ph) = (pw.max(SIZE[0]), ph.max(SIZE[1]));
-        pane.rect = [x, y, pw, ph];
-        let zoom = if pw <= w && ph <= h { 1. } else { ((w - 48.).max(1.) / pw).min((h - 48.).max(1.) / ph) };
-        doc.camera = canvas::Camera { x: x + (pw - w / zoom) / 2., y: y + (ph - h / zoom) / 2., zoom };
+        pane.rect = canophy::WorldRect::new(x, y, pw, ph);
+        let zoom = if pw <= w && ph <= h { 1. } else { ((w - canophy::FIT_PAD).max(1.) / pw).min((h - canophy::FIT_PAD).max(1.) / ph) };
+        doc.camera = canophy::Camera::centered([x + pw / 2., y + ph / 2.], [w, h], zoom);
         self.canvas_changed(cx);
         cx.notify();
     }
@@ -2303,7 +2303,7 @@ impl AppWindow {
         Ok(())
     }
 
-    fn inspect_after_camera(&self, id: String, started: std::time::Instant, target: canvas::Camera, window: &Window, cx: &Context<Self>) {
+    fn inspect_after_camera(&self, id: String, started: std::time::Instant, target: canophy::Camera, window: &Window, cx: &Context<Self>) {
         let entity = cx.entity().downgrade();
         window.on_next_frame(move |window, cx| {
             let _ = entity.update(cx, |this, cx| match this.canvas_state.motion.target {
@@ -2520,7 +2520,7 @@ mod tests {
                 tabs: vec![crate::canvas::Tab { id: "t1".into(), url: String::new(), title: String::new() }],
                 active: 0, home: String::new(), viewport: None,
             },
-            rect: [0., 0., 640., 838.], z: 1, space: None, color: None, pinned: None,
+            rect: [0., 0., 640., 838.].into(), z: 1, space: None, color: None, pinned: None,
         };
         assert_eq!(page_zoom(&pane, [319., 800.], 638.), 0.5, "a responsive page keeps its CSS width");
         let Kind::Browser { viewport, .. } = &mut pane.kind else { unreachable!() };
@@ -2585,28 +2585,28 @@ mod tests {
 /// Where a live page sits: the camera and rect, or for a pinned pane just its screen rect, so
 /// panning or zooming the canvas under a pinned page leaves it live.
 #[cfg(target_os = "macos")]
-fn placement(pane: &canvas::Pane, camera: canvas::Camera) -> (canvas::Camera, canvas::Rect) {
+fn placement(pane: &canvas::Pane, camera: canophy::Camera) -> (canophy::Camera, canophy::Rect) {
     match pane.pinned {
-        Some(screen) => (canvas::Camera::default(), screen),
-        None => (camera, pane.rect),
+        Some(screen) => (canophy::Camera::default(), screen),
+        None => (camera, pane.rect.array()),
     }
 }
 
 /// The CSS width a responsive page keeps: its body's width at zoom 1.
 #[cfg(target_os = "macos")]
-fn css_width(pane: &canvas::Pane, camera: canvas::Camera) -> f32 { placement(pane, camera).1[2] - 2. }
+fn css_width(pane: &canvas::Pane, camera: canophy::Camera) -> f32 { placement(pane, camera).1[2] - 2. }
 
 /// The pane body in canvas screen pixels, excluding the border and fixed-height header.
 #[cfg(target_os = "macos")]
-fn pane_body(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
-    let [x, y, w, h] = super::browser_mask::screen_rect(pane, pane.rect, camera);
+fn pane_body(pane: &canvas::Pane, camera: canophy::Camera) -> canophy::Rect {
+    let [x, y, w, h] = super::browser_mask::screen_rect(pane, pane.rect.array(), camera);
     let header = canvas::header_height(&pane.kind);
     [x + 1., y + header + 1., (w - 2.).max(0.), (h - header - 2.).max(0.)]
 }
 
 /// A fixed viewport fits inside the body at its original aspect ratio.
 #[cfg(target_os = "macos")]
-pub(super) fn viewport_rect(pane: &canvas::Pane, camera: canvas::Camera) -> canvas::Rect {
+pub(super) fn viewport_rect(pane: &canvas::Pane, camera: canophy::Camera) -> canophy::Rect {
     let [x, y, w, h] = pane_body(pane, camera);
     let Some([css_w, css_h]) = fixed_viewport(pane) else { return [x, y, w, h] };
     let zoom = page_zoom(pane, [w, h], css_width(pane, camera));
@@ -2644,7 +2644,7 @@ impl AppWindow {
     pub(super) fn body_rect(&self, pane: &canvas::Pane) -> Option<Bounds<Pixels>> {
         if self.canvas_state.doc.docked(&pane.id) {
             let (view, panel) = self.docked_view(&pane.id)?;
-            let [x, y, w, h] = viewport_rect(&view, canvas::Camera::default());
+            let [x, y, w, h] = viewport_rect(&view, canophy::Camera::default());
             return Some(Bounds::new(panel.origin + point(px(x), px(y)), size(px(w), px(h))));
         }
         let origin = self.bounds.borrow().get("canopy-canvas")?.origin;
@@ -2663,7 +2663,7 @@ impl AppWindow {
                 ([w, h], fixed_viewport(pane).map_or(f64::from(w / width), |[css_w, _]| f64::from(w / css_w)))
             }
             _ => {
-                let rect = pane.pinned.unwrap_or(pane.rect);
+                let rect = pane.pinned.unwrap_or(pane.rect.array());
                 ([rect[2], (rect[3] - canvas::BROWSER_HEADER).max(1.)], 1.)
             }
         }
@@ -2724,7 +2724,7 @@ mod host_tests {
             let pane = this.canvas_state.doc.panes[0].clone();
             // On the canvas: the camera scales the frame and the page zooms with it, so its
             // CSS width stays the body's width at zoom 1 (962 = 964 less the border).
-            this.canvas_state.doc.camera.zoom = 0.5;
+            this.canvas_state.doc.camera.zoom_at(0.5, [0., 0.]);
             let ([w, _], zoom) = this.host_frame(&pane);
             assert_eq!((w, zoom), (480., f64::from(480_f32 / 962.)));
             // Docked: the measured panel body, not the pane's world size.

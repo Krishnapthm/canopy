@@ -6059,7 +6059,7 @@ export default class Probe extends View {
         let none = Modifiers::default();
         let state = |cx: &mut gpui::VisualTestContext| view.update(cx, |this, _| (
             this.canvas_state.selected.clone(), this.canvas_state.mode,
-            this.canvas_state.doc.panes.iter().map(|c| [c.rect[0], c.rect[1]]).collect::<Vec<_>>()));
+            this.canvas_state.doc.panes.iter().map(|c| [c.rect.x, c.rect.y]).collect::<Vec<_>>()));
 
         cx.simulate_mouse_down(at(50., 150.), MouseButton::Left, none);
         cx.simulate_mouse_move(at(800., 300.), MouseButton::Left, none);
@@ -6146,7 +6146,7 @@ export default class Probe extends View {
         let keys = crate::keys::DEFAULTS.replace("\"layout:main\"", "\"layout:test\"");
         cx.update(|_, cx| crate::keys::install(crate::keys::parse(&keys).unwrap(), cx));
         cx.simulate_keystrokes("shift-1");
-        assert!(view.update(cx, |this, _| this.canvas_state.motion_target_for_test().zoom > 0.), "Shift+1 starts a fit");
+        assert!(view.update(cx, |this, _| this.canvas_state.motion_target_for_test().zoom() > 0.), "Shift+1 starts a fit");
         cx.update(|window, cx| view.update(cx, |this, cx| {
             this.canvas_state.selected = vec!["t2".into()];
             this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
@@ -6199,11 +6199,11 @@ export default class Probe extends View {
             assert!(!this.overlays.iter().any(|o| o.kind.modal_keys()), "global close did not take the mode key");
             assert!(this.canvas_state.doc.panes.iter().all(|c| c.size().is_none()));
             this.canvas_keyboard("canvas.nudge", &json!({"direction":"right"}), window, cx);
-            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 500. + this.person.canvas_gap);
+            assert_eq!(this.canvas_state.doc.panes[1].rect.x, 500. + this.person.canvas_gap);
             this.undo_canvas(window, cx);
-            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 500.);
+            assert_eq!(this.canvas_state.doc.panes[1].rect.x, 500.);
             this.undo_canvas(window, cx);
-            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 500., "only one undo step");
+            assert_eq!(this.canvas_state.doc.panes[1].rect.x, 500., "only one undo step");
             this.canvas_keyboard("canvas.connect", &json!({}), window, cx);
             this.canvas_keyboard("canvas.go", &json!({"direction":"left"}), window, cx);
             this.canvas_keyboard("canvas.enter", &json!({}), window, cx);
@@ -6285,7 +6285,7 @@ export default class Probe extends View {
             this.watched.settings = None;
             this.reload_config(window, cx);
             assert_eq!(this.person.canvas_gap, 60.);
-            assert_eq!(this.canvas_state.doc.panes[1].rect[0], 260.);
+            assert_eq!(this.canvas_state.doc.panes[1].rect.x, 260.);
             assert_eq!(crate::settings::get().canvas_gap, 60.);
             assert_eq!(crate::settings::get().space_fill, 0.08);
             assert_eq!(crate::settings::get().canvas_push, crate::settings::CanvasPush::Drop);

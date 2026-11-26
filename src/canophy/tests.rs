@@ -1,0 +1,261 @@
+//! Tests for canophy: the unit laws of each rule.
+use super::camera::{Camera, ZOOMS, focus_fit, reveal, visible, widen, zoom_range};
+use super::rules::*;
+use super::units::Rect;
+
+/// The gap the layout tests leave between panes.
+const GAP: f32 = 24.;
+
+#[test]
+fn reveal_centers_a_pane_only_when_it_is_off_screen() {
+    let camera = Camera::new(0., 0., 1.);
+    assert_eq!(reveal(camera, [10., 10., 100., 100.], [800., 600.]), None);
+    let to = reveal(camera, [1000., 0., 200., 100.], [800., 600.]).unwrap();
+    assert_eq!(to.to_screen([1100., 50.]), [400., 300.]);
+}
+
+#[test]
+fn spacing_is_deterministic_pinned_and_returns_to_rest() {
+    let rest = [[0.,0.,100.,50.],[124.,0.,100.,50.],[248.,0.,100.,50.],[124.,74.,100.,50.]];
+    let pin = [100.,0.,100.,50.];
+    let result = solve(&rest,0,pin,GAP, |_| false);
+    assert_eq!(result,solve(&rest,0,pin,GAP, |_| false));
+    assert_eq!(result[0],pin);
+    for i in 0..result.len() { for j in 0..i { assert!(separated(result[i],result[j],GAP)); } }
+    assert_eq!(solve(&rest,0,rest[0],GAP, |_| false),rest);
+    assert_eq!(solve(&[],0,pin,GAP, |_| false),Vec::<Rect>::new());
+}
+
+#[test]
+fn arrange_layouts_keep_gap_sizes_and_parent_layers() {
+    let rects = [[80.,30.,100.,40.],[0.,0.,70.,90.],[0.,50.,150.,60.],[0.,50.,30.,100.]];
+    let parents = [None,Some(0),Some(0),Some(1)];
+    for layout in ["tidy","row","column","wires"] {
+        let result = arrange(&rects,&parents,&[],layout);
+        assert_eq!(result,arrange(&rects,&parents,&[],layout));
+        for i in 0..result.len() {
+            assert_eq!(&result[i][2..],&rects[i][2..]);
+            for j in 0..i { assert!(separated(result[i],result[j],GAP),"{layout}: {result:?}"); }
+        }
+        if layout == "wires" { assert!(result[0][0]<result[1][0] && result[1][0]<result[3][0]); assert_eq!(result[1][0],result[2][0]); }
+    }
+    let cycle = arrange(&rects,&[Some(1),Some(0),Some(2),None],&[],"wires");
+    for i in 0..cycle.len() { for j in 0..i { assert!(separated(cycle[i],cycle[j],GAP)); } }
+}
+
+#[test]
+fn tidy_puts_wired_cells_next_to_each_other() {
+    // Four in reading order; 0 is wired to 3, so 3 comes second, beside 0 in the 2-column grid.
+    let rects = [[0.,0.,100.,40.],[200.,0.,100.,40.],[0.,100.,100.,40.],[200.,100.,100.,40.]];
+    let out = arrange(&rects,&[None;4],&[(3,0)],"tidy");
+    assert_eq!(out[3][1],out[0][1]);
+    assert!(out[3][0] > out[0][0]);
+}
+
+#[test]
+fn fifty_cells_solve_quickly() {
+    let rest: Vec<_> = (0..50).map(|i|[(i%10) as f32*124.,(i/10) as f32*74.,100.,50.]).collect();
+    let start = std::time::Instant::now();
+    for _ in 0..100 { std::hint::black_box(solve(&rest,0,[124.,74.,100.,50.],GAP, |_| false)); }
+    eprintln!("50-cell solve: {:?} per pass",start.elapsed()/100);
+    let result = solve(&rest,0,[124.,74.,100.,50.],GAP, |_| false);
+    for i in 0..result.len() { for j in 0..i { assert!(separated(result[i],result[j],GAP)); } }
+}
+
+#[test]
+fn camera_round_trip() {
+    let c = Camera::new(-200., 32., 0.5);
+    assert_eq!(c.to_world(c.to_screen([78., 143.])), [78., 143.]);
+}
+
+#[test]
+fn zoom_keeps_cursor_anchor() {
+    let mut c = Camera::default();
+    let anchor = [121., 432.];
+    let world = c.to_world(anchor);
+    c.zoom_at(1.25, anchor);
+    assert_eq!(c.to_world(anchor), world);
+}
+
+#[test]
+fn zoom_step_snaps() {
+    let mut c = Camera::new(0., 0., 0.52);
+    c.step(1, [0., 0.], [ZOOMS[0], ZOOMS[11]]);
+    assert_eq!(c.zoom(), 0.67);
+    c.step(1, [0., 0.], [0.25, 0.7]);
+    assert_eq!(c.zoom(), 0.7);
+    c.step(-1, [0., 0.], [0.25, 0.7]);
+    assert_eq!(c.zoom(), 0.67);
+}
+
+#[test]
+fn zoom_range_keeps_the_biggest_pane_on_screen() {
+    let view = [1080., 880.];
+    // Nothing on the canvas: the whole ZOOMS range.
+    assert_eq!(zoom_range(&[], view), [ZOOMS[0], ZOOMS[11]]);
+    // A 1000 px wide pane fits at 1.0 with padding, not beyond; a small one allows 2.
+    assert_eq!(zoom_range(&[[0., 0., 1000., 400.]], view)[1], 1.);
+    assert_eq!(zoom_range(&[[0., 0., 100., 100.]], view)[1], 2.);
+    // Two panes far apart: zooming out stops at the fit-all step, in at the bigger pane.
+    let r = zoom_range(&[[0., 0., 500., 400.], [3000., 0., 200., 200.]], view);
+    assert_eq!(r, [0.25, 2.]);
+    let r = zoom_range(&[[0., 0., 500., 400.], [1500., 0., 200., 200.]], view);
+    assert_eq!(r, [0.5, 2.]);
+    // A pane bigger than the window at any zoom: both ends pin to the smallest zoom.
+    assert_eq!(zoom_range(&[[0., 0., 99999., 100.]], view), [ZOOMS[0], ZOOMS[0]]);
+    // Left at 2 after the limit fell to 1: zooming out moves freely, not straight to 1.
+    let mut c = Camera::new(0., 0., 2.);
+    c.step(1, [0., 0.], widen([0.25, 1.], 2.));
+    assert_eq!(c.zoom(), 2., "zoom in never zooms out");
+}
+
+#[test]
+fn child_is_beside_parent() {
+    assert_eq!(
+        child_position([24., 24., 160., 36.], &[], [160., 36.]),
+        [264., 24., 160., 36.]
+    );
+}
+
+#[test]
+fn siblings_stack() {
+    assert_eq!(
+        child_position(
+            [24., 24., 160., 36.],
+            &[[264., 24., 160., 36.]],
+            [160., 36.]
+        ),
+        [264., 76., 160., 36.]
+    );
+}
+
+#[test]
+fn tile_fills_the_area_without_overlap_and_grows_the_active_tile() {
+    let area = [0., 0., 1200., 800.];
+    for n in 1..=7 {
+        for active in std::iter::once(None).chain((0..n).map(Some)) {
+            let (out, _) = tile(area, n, active, &[], 24.);
+            for (i, a) in out.iter().enumerate() {
+                assert!(a[0] >= 23.9 && a[1] >= 23.9 && a[0] + a[2] <= 1176.1 && a[1] + a[3] <= 776.1, "n={n} {a:?} leaves the area");
+                for b in &out[i + 1..] { assert!(separated(*a, *b, 23.9), "n={n} {a:?} {b:?} overlap"); }
+            }
+            let area_of = |r: &Rect| r[2] * r[3];
+            if let Some(k) = active && n > 1 {
+                assert!(out.iter().enumerate().all(|(j, r)| j == k || area_of(r) < area_of(&out[k])), "n={n} active {k} is the largest");
+            }
+            // Filled: the tiles and gaps cover the inner area.
+            let covered: f32 = out.iter().map(area_of).sum();
+            assert!(covered > 1152. * 752. * 0.85, "n={n} covers {covered}");
+        }
+    }
+}
+
+#[test]
+fn tile_keeps_the_given_order_and_lines_pills_along_the_bottom() {
+    // The tiles sit in the order given, whichever is active.
+    let pills = [[0., 0., 220., 36.], [0., 0., 220., 36.]];
+    for active in [None, Some(0), Some(1)] {
+        let (out, _) = tile([0., 0., 1000., 600.], 2, active, &pills, 20.);
+        assert!(out[0][0] < out[1][0], "{active:?}");
+    }
+    let (out, placed) = tile([0., 0., 1000., 600.], 2, None, &pills, 20.);
+    assert!(placed.iter().all(|p| p[2] == 220. && p[3] == 36. && p[1] + p[3] <= 580.1 && p[1] > out[0][1] + out[0][3]));
+    assert!(separated(placed[0], placed[1], 19.9));
+    // Pills alone sit at the top of the area.
+    let (_, alone) = tile([0., 0., 1000., 600.], 0, None, &pills, 20.);
+    assert_eq!(alone[0][1], 20.);
+}
+
+#[test]
+fn free_spot_skips_occupied() {
+    assert_eq!(
+        free_spot([0., 0., 960., 640.], &[[24., 24., 160., 36.]], [160., 36.]),
+        [232., 24., 160., 36.]
+    );
+}
+
+#[test]
+fn offscreen_card_is_culled() {
+    assert!(!visible(
+        Camera::default(),
+        [2000., 0., 160., 36.],
+        [800., 600.]
+    ));
+}
+
+#[test]
+fn fit_uses_largest_fitting_zoom_step() {
+    let mut c = Camera::default();
+    c.fit(&[[0., 0., 100., 100.]], [800., 600.]);
+    assert_eq!(c.zoom(), 2.);
+}
+
+#[test]
+fn focus_fit_centres_in_visible_canvas_and_returns_to_exact_camera() {
+    let original = Camera::new(-123., 99., 1.25);
+    let mut camera = original;
+    let mut previous = None;
+    let space = [500., 200., 900., 600.];
+    let visible = [0., 0., 800., 700.]; // A 1200 px window with a 400 px file panel.
+    focus_fit(&mut camera, &mut previous, &[space], visible);
+    assert_eq!(previous.map(|p| p.0), Some(original));
+    let center = camera.to_screen([space[0] + space[2] / 2., space[1] + space[3] / 2.]);
+    assert!((center[0] - visible[2] / 2.).abs() < 0.001);
+    assert!((center[1] - visible[3] / 2.).abs() < 0.001);
+    assert!(space[2] * camera.zoom() <= visible[2] - 48.);
+    assert!(space[3] * camera.zoom() <= visible[3] - 48.);
+    focus_fit(&mut camera, &mut previous, &[space], visible);
+    assert_eq!(camera, original);
+    assert_eq!(previous, None);
+    focus_fit(&mut camera, &mut previous, &[], visible);
+    assert_eq!(previous, None);
+    // Moved after a fit: the next press fits again instead of jumping back.
+    focus_fit(&mut camera, &mut previous, &[space], visible);
+    let fitted = camera;
+    camera = Camera::new(camera.origin()[0] + 50., camera.origin()[1], camera.zoom());
+    focus_fit(&mut camera, &mut previous, &[space], visible);
+    assert_eq!(camera, fitted);
+    // A toolbar over the top 60 px: the space centres in the open part below it.
+    let (mut camera, mut previous) = (original, None);
+    focus_fit(&mut camera, &mut previous, &[space], [0., 60., 800., 640.]);
+    let center = camera.to_screen([space[0] + space[2] / 2., space[1] + space[3] / 2.]);
+    assert!((center[0] - 400.).abs() < 0.001 && (center[1] - 380.).abs() < 0.001);
+    let fitted = camera;
+    focus_fit(&mut camera, &mut previous, &[space], [0., 60., 800., 640.]);
+    assert_eq!(camera, original);
+    focus_fit(&mut camera, &mut previous, &[space], [0., 60., 800., 640.]);
+    assert_eq!(camera, fitted);
+}
+
+#[test]
+fn new_panes_step_down_right_wrap_and_never_share_an_origin() {
+    let view = [0., 0., 1000., 800.];
+    let size = [400., 300.];
+    assert_eq!(cascade(None, view, size, &[], 32.), [32., 32.]);
+    assert_eq!(cascade(Some([32., 32.]), view, size, &[[32., 32.]], 32.), [64., 64.]);
+    // No room at the bottom right: back to the top left.
+    assert_eq!(cascade(Some([580., 480.]), view, size, &[], 32.), [32., 32.]);
+    // The top left is taken: the next free step.
+    assert_eq!(cascade(Some([580., 480.]), view, size, &[[32., 32.], [64., 64.]], 32.), [96., 96.]);
+    // A view smaller than a pane still never stacks two exactly.
+    assert_eq!(cascade(None, [0., 0., 100., 100.], size, &[[32., 32.]], 32.), [64., 64.]);
+}
+
+#[test]
+fn every_edge_and_corner_moves_only_its_own_sides() {
+    let (o, s, d, min) = ([100., 100.], [400., 300.], [10., 20.], [50., 50.]);
+    for (zone, want) in [
+        ((1, 1), ([100., 100.], [410., 320.])),
+        ((-1, -1), ([110., 120.], [390., 280.])),
+        ((1, -1), ([100., 120.], [410., 280.])),
+        ((-1, 1), ([110., 100.], [390., 320.])),
+        ((1, 0), ([100., 100.], [410., 300.])),
+        ((-1, 0), ([110., 100.], [390., 300.])),
+        ((0, 1), ([100., 100.], [400., 320.])),
+        ((0, -1), ([100., 120.], [400., 280.])),
+    ] {
+        assert_eq!(resize_from(o, s, zone, d, min), want, "zone {zone:?}");
+    }
+    // Shrinking past the minimum stops there, and the right/bottom edge stays put.
+    assert_eq!(resize_from(o, s, (-1, -1), [1000., 1000.], min), ([450., 350.], [50., 50.]));
+}

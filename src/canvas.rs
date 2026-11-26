@@ -1,6 +1,8 @@
 // Modified for Canopy.
 //! Canvas geometry and document storage, independent of the window toolkit.
 use serde::{Deserialize, Serialize};
+use crate::canophy::traits::PREVIEW;
+use crate::canophy::{Camera, Point, Rect, WorldRect, WorldSize, child_position, traits, union, visible};
 use std::{io, path::Path};
 
 #[derive(Default)]
@@ -27,181 +29,19 @@ pub const SPACE_CARD: Point = [260., 120.];
 pub const HEADER: f32 = 36.;
 /// A browser pane's header: a row of tabs over a row of navigation and the address field.
 pub const BROWSER_HEADER: f32 = 66.;
-/// The header height of a pane of this kind, in screen px at every zoom.
-pub fn header_height(kind: &Kind) -> f32 {
-    match kind {
-        Kind::Browser { .. } => BROWSER_HEADER,
-        Kind::Mod { kind, .. } if kind == "mod:note" => 0.,
-        _ => HEADER,
-    }
-}
+/// The header height of a pane of this kind, in screen px at every zoom (0 without one).
+pub fn header_height(kind: &Kind) -> f32 { traits(kind).header.unwrap_or(0.) }
 
-pub const ZOOMS: [f32; 12] = [
-    0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1., 1.1, 1.25, 1.5, 1.75, 2.,
-];
-pub type Point = [f32; 2];
-pub type Rect = [f32; 4];
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Camera {
-    pub x: f32,
-    pub y: f32,
-    pub zoom: f32,
-}
-impl Default for Camera {
-    fn default() -> Self {
-        Self {
-            x: 0.,
-            y: 0.,
-            zoom: 1.,
-        }
-    }
-}
-impl Camera {
-    pub fn to_screen(self, p: Point) -> Point {
-        [(p[0] - self.x) * self.zoom, (p[1] - self.y) * self.zoom]
-    }
-    pub fn to_world(self, p: Point) -> Point {
-        [p[0] / self.zoom + self.x, p[1] / self.zoom + self.y]
-    }
-    pub fn pan(&mut self, d: Point) {
-        self.x -= d[0] / self.zoom;
-        self.y -= d[1] / self.zoom;
-    }
-    pub fn zoom_at(&mut self, zoom: f32, anchor: Point) {
-        let p = self.to_world(anchor);
-        self.zoom = zoom;
-        self.x = p[0] - anchor[0] / self.zoom;
-        self.y = p[1] - anchor[1] / self.zoom;
-    }
-    /// Zooms to the next `ZOOMS` step in `direction`, kept inside `range` (see `zoom_range`).
-    pub fn step(&mut self, direction: i32, anchor: Point, range: [f32; 2]) {
-        let next = if direction > 0 {
-            ZOOMS.into_iter().find(|z| *z > self.zoom * 1.01).unwrap_or(ZOOMS[11])
-        } else {
-            ZOOMS.into_iter().rev().find(|z| *z < self.zoom * 0.99).unwrap_or(ZOOMS[0])
-        };
-        self.zoom_at(next.clamp(range[0], range[1]), anchor);
-    }
-    pub fn fit(&mut self, rects: &[Rect], viewport: Point) {
-        let Some(bounds) = union(rects) else { return };
-        self.zoom = step_down(fit_zoom(bounds, viewport));
-        self.x = bounds[0] + bounds[2] / 2. - viewport[0] / self.zoom / 2.;
-        self.y = bounds[1] + bounds[3] / 2. - viewport[1] / self.zoom / 2.;
-    }
-}
-/// Screen px kept clear around panes (both sides together) when fitting or zooming to a limit.
-pub const FIT_PAD: f32 = 80.;
-/// The zoom at which `rect` just fits `viewport` with `FIT_PAD` around it.
-fn fit_zoom(rect: Rect, viewport: Point) -> f32 {
-    ((viewport[0] - FIT_PAD).max(1.) / rect[2].max(1.)).min((viewport[1] - FIT_PAD).max(1.) / rect[3].max(1.))
-}
-/// The largest `ZOOMS` step at or below `z`.
-fn step_down(z: f32) -> f32 { ZOOMS.into_iter().rev().find(|v| *v <= z).unwrap_or(ZOOMS[0]) }
-/// The [min, max] zoom for a place whose panes are `rects`: zooming in stops while the biggest
-/// pane still fits the viewport with padding, zooming out once everything fits (the fit-all
-/// zoom, though never forced above 100%). Both stay inside `ZOOMS`.
-pub fn zoom_range(rects: &[Rect], viewport: Point) -> [f32; 2] {
-    let max = rects.iter().map(|r| fit_zoom(*r, viewport)).fold(ZOOMS[11], f32::min).max(ZOOMS[0]);
-    let min = union(rects).map_or(ZOOMS[0], |b| step_down(fit_zoom(b, viewport))).min(1.).min(max);
-    [min, max]
-}
-/// `range` stretched to hold `zoom`, so a zoom already past a limit is not pulled back mid-gesture.
-pub fn widen(range: [f32; 2], zoom: f32) -> [f32; 2] { [range[0].min(zoom), range[1].max(zoom)] }
 /// Screen px a pressed cell must move before the press is a drag; less is a click.
 pub const DRAG_THRESHOLD: f32 = 3.;
 /// A tile smaller than this (world px) shows its icon and name instead of terminal text.
 pub const TILE_COMPACT: Point = [320., 140.];
-/// The active tile's share of its row, and (at least) its row's share of the height.
-const TILE_ACTIVE: f32 = 0.6;
 
 /// The indices of `rects` in reading order: top to bottom, then left to right.
 pub fn reading(rects: &[Rect]) -> Vec<usize> {
     let mut order: Vec<usize> = (0..rects.len()).collect();
     order.sort_by(|a, b| (rects[*a][1], rects[*a][0]).partial_cmp(&(rects[*b][1], rects[*b][0])).unwrap_or(std::cmp::Ordering::Equal));
     order
-}
-
-/// Tile view: fills `area` with `tiles` tiles like tmux's tiled layout, and lines `pills`
-/// (sizes) up along its bottom. Both are placed in the order given (the caller keeps it, so
-/// nothing swaps when the active one changes or a rect jitters). The `active` tile's row is
-/// taller and the tile wider, so it is always the largest; the rest share what is left.
-/// Returns the tiles' and pills' rects in the order given.
-pub fn tile(area: Rect, tiles: usize, active: Option<usize>, pills: &[Rect], gap: f32) -> (Vec<Rect>, Vec<Rect>) {
-    let [x0, y0, w, h] = [area[0] + gap, area[1] + gap, (area[2] - 2. * gap).max(1.), (area[3] - 2. * gap).max(1.)];
-    // Pills wrap into rows along the bottom; the tiles get what is above them.
-    let mut placed = vec![[0.; 4]; pills.len()];
-    let (mut x, mut row_h, mut rows) = (0., 0., vec![]);
-    for i in 0..pills.len() {
-        let [pw, ph] = [pills[i][2], pills[i][3]];
-        if x > 0. && x + pw > w { rows.push(row_h); x = 0.; row_h = 0.; }
-        placed[i] = [x, rows.iter().map(|r| r + gap).sum::<f32>(), pw, ph];
-        x += pw + gap;
-        row_h = f32::max(row_h, ph);
-    }
-    if !pills.is_empty() { rows.push(row_h); }
-    let strip = rows.iter().sum::<f32>() + gap * rows.len() as f32;
-    for r in &mut placed { r[0] += x0; r[1] += y0 + h - strip + gap; }
-    if !pills.is_empty() && tiles == 0 { for r in &mut placed { r[1] -= h - strip + gap; } }
-    let th = (h - strip).max(1.);
-    // A run of `k` where the active one (if any) takes `big` of it and the others share the rest:
-    // (offset, length) of item `i`, as fractions.
-    let share = |k: usize, i: usize, active: Option<usize>, big: f32| {
-        let size = |j: usize| match active { Some(a) if k > 1 => if j == a { big } else { (1. - big) / (k - 1) as f32 }, _ => 1. / k as f32 };
-        ((0..i).map(size).sum::<f32>(), size(i))
-    };
-    let n = tiles;
-    let mut out = vec![[0.; 4]; n];
-    if n == 0 { return (out, placed); }
-    // tmux's tiled grid: the last row is the short one and stretches.
-    let cols = (n as f32).sqrt().ceil() as usize;
-    let row_count = n.div_ceil(cols);
-    let in_row = |r: usize| cols.min(n - r * cols);
-    let at = active.map(|p| (p / cols, p % cols));
-    // The active row is TILE_ACTIVE tall, or taller when a shorter row's stretched tiles would
-    // otherwise outgrow the active tile.
-    let tall = at.map_or(TILE_ACTIVE, |(r, _)| {
-        let wide = if in_row(r) > 1 { TILE_ACTIVE } else { 1. };
-        let fewest = (0..row_count).filter(|o| *o != r).map(in_row).min().unwrap_or(1) as f32;
-        let needed = 1. / (1. + wide * (row_count - 1) as f32 * fewest);
-        TILE_ACTIVE.max(needed + 0.05).min(0.9)
-    });
-    for p in 0..n {
-        let (r, c) = (p / cols, p % cols);
-        let k = in_row(r);
-        let (ry, rh) = share(row_count, r, at.map(|a| a.0), tall);
-        let (cx, cw) = share(k, c, at.filter(|a| a.0 == r).map(|a| a.1), TILE_ACTIVE);
-        let (aw, ah) = (w - gap * (k - 1) as f32, th - gap * (row_count - 1) as f32);
-        out[p] = [x0 + cx * aw + gap * c as f32, y0 + ry * ah + gap * r as f32, cw * aw, rh * ah];
-    }
-    (out, placed)
-}
-
-/// The camera that centers `rect` at the same zoom when it is not wholly inside `visible`
-/// (screen px); None when it already is.
-pub fn reveal(camera: Camera, rect: Rect, visible: Point) -> Option<Camera> {
-    let [x, y] = camera.to_screen([rect[0], rect[1]]);
-    let (w, h) = (rect[2] * camera.zoom, rect[3] * camera.zoom);
-    if x >= 0. && y >= 0. && x + w <= visible[0] && y + h <= visible[1] { return None; }
-    let z = camera.zoom;
-    Some(Camera { x: rect[0] + rect[2] / 2. - visible[0] / 2. / z, y: rect[1] + rect[3] / 2. - visible[1] / 2. / z, zoom: z })
-}
-
-/// Toggle a space fit in the visible canvas (`[x, y, w, h]` screen px, the part no chrome
-/// covers): a second press restores the camera from before the fit, unless the camera moved
-/// since, in which case it fits again.
-pub fn focus_fit(camera: &mut Camera, previous: &mut Option<(Camera, Camera)>, rects: &[Rect], visible: Rect) {
-    match previous.take() {
-        Some((before, fitted)) if *camera == fitted => *camera = before,
-        _ if !rects.is_empty() => {
-            let before = *camera;
-            camera.fit(rects, [visible[2], visible[3]]);
-            camera.x -= visible[0] / camera.zoom;
-            camera.y -= visible[1] / camera.zoom;
-            *previous = Some((before, *camera));
-        }
-        _ => {}
-    }
 }
 
 /// The nearest centre in a strict half-plane; equal distances keep document order.
@@ -223,155 +63,10 @@ pub fn remember_folder(recent: &mut Vec<String>, folder: &str) {
     recent.truncate(10);
 }
 
-pub fn intersects(a: Rect, b: Rect) -> bool {
-    a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
-}
 /// The topmost space whose rect holds a world point (later spaces draw on top).
 pub fn space_at(spaces: &[Space], p: Point) -> Option<&Space> {
     spaces.iter().rev().find(|s| p[0] >= s.rect[0] && p[1] >= s.rect[1] && p[0] <= s.rect[0] + s.rect[2] && p[1] <= s.rect[1] + s.rect[3])
 }
-#[cfg(test)]
-const GAP: f32 = 24.;
-
-/// Resolve from rest positions, holding the dragged group fixed and placing its neighbours.
-pub fn solve(rest: &[Rect], pinned: usize, rect: Rect, gap: f32, carried: impl Fn(usize) -> bool) -> Vec<Rect> {
-    if pinned >= rest.len() {
-        return rest.to_vec();
-    }
-    let mut out = rest.to_vec();
-    out[pinned] = rect;
-    let (mut fixed, mut order): (Vec<_>, Vec<_>) = (0..rest.len())
-        .filter(|i| *i != pinned)
-        .partition(|i| carried(*i));
-    fixed.insert(0, pinned);
-    let distance = |r: Rect| {
-        (r[0] + r[2] / 2. - rect[0] - rect[2] / 2.).powi(2)
-            + (r[1] + r[3] / 2. - rect[1] - rect[3] / 2.).powi(2)
-    };
-    order.sort_by(|a, b| {
-        distance(rest[*a])
-            .total_cmp(&distance(rest[*b]))
-            .then(a.cmp(b))
-    });
-    for i in order {
-        let r = rest[i];
-        let clear = |r: Rect| fixed.iter().all(|j| separated(r, out[*j], gap));
-        if !clear(r) {
-            let mut best = None;
-            let mut cost = f32::INFINITY;
-            for j in &fixed {
-                let b = out[*j];
-                for (axis, value) in [
-                    (0, b[0] - gap - r[2]),
-                    (0, b[0] + b[2] + gap),
-                    (1, b[1] - gap - r[3]),
-                    (1, b[1] + b[3] + gap),
-                ] {
-                    let d = (value - r[axis]).abs();
-                    if d < cost {
-                        let mut candidate = r;
-                        candidate[axis] = value;
-                        if clear(candidate) {
-                            best = Some(candidate);
-                            cost = d;
-                        }
-                    }
-                }
-            }
-            out[i] = best.expect("an outer obstacle boundary is always free");
-        }
-        fixed.push(i);
-    }
-    out
-}
-fn separated(a: Rect, b: Rect, gap: f32) -> bool {
-    a[0] + a[2] + gap <= b[0]
-        || b[0] + b[2] + gap <= a[0]
-        || a[1] + a[3] + gap <= b[1]
-        || b[1] + b[3] + gap <= a[1]
-}
-
-
-/// Arrange cells in reading order, or breadth-first parent layers, preserving their sizes.
-/// Cells joined by `links` (wires, either way) come together, connected groups first.
-pub fn arrange(rects: &[Rect], parents: &[Option<usize>], links: &[(usize, usize)], layout: &str) -> Vec<Rect> {
-    let gap = crate::settings::get().canvas_gap;
-    let Some(bounds) = union(rects) else {
-        return vec![];
-    };
-    let mut order: Vec<_> = (0..rects.len()).collect();
-    order.sort_by(|a, b| {
-        rects[*a][1]
-            .total_cmp(&rects[*b][1])
-            .then(rects[*a][0].total_cmp(&rects[*b][0]))
-            .then(a.cmp(b))
-    });
-    let order = connected_first(&order, links);
-    let mut layers = vec![None; rects.len()];
-    let mut queue = std::collections::VecDeque::new();
-    if layout == "wires" {
-        for i in &order {
-            if parents
-                .get(*i)
-                .copied()
-                .flatten()
-                .is_none_or(|p| p >= rects.len())
-            {
-                layers[*i] = Some(0);
-                queue.push_back(*i);
-            }
-        }
-        // Cycles have no root: seed each remaining component once.
-        for seed in &order {
-            if queue.is_empty() && layers[*seed].is_none() {
-                layers[*seed] = Some(0);
-                queue.push_back(*seed);
-            }
-            while let Some(i) = queue.pop_front() {
-                for j in &order {
-                    if layers[*j].is_none() && parents.get(*j) == Some(&Some(i)) {
-                        layers[*j] = Some(layers[i].unwrap() + 1);
-                        queue.push_back(*j);
-                    }
-                }
-            }
-        }
-    }
-    let columns = match layout {
-        "row" => rects.len(),
-        "column" => 1,
-        _ => (rects.len() as f32).sqrt().ceil() as usize,
-    };
-    let slots: Vec<_> = order
-        .iter()
-        .enumerate()
-        .map(|(n, i)| {
-            if layout == "wires" {
-                (layers[*i].unwrap(), 0)
-            } else {
-                (n % columns, n / columns)
-            }
-        })
-        .collect();
-    let mut widths = vec![0_f32; rects.len()];
-    for (i, (col, _)) in order.iter().zip(&slots) {
-        widths[*col] = widths[*col].max(rects[*i][2]);
-    }
-    let mut out = rects.to_vec();
-    let mut bottoms = vec![bounds[1]; rects.len()];
-    let height = rects.iter().map(|r| r[3]).fold(0_f32, f32::max);
-    for (i, (col, row)) in order.iter().zip(slots) {
-        out[*i][0] = bounds[0] + widths[..col].iter().map(|w| w + gap).sum::<f32>();
-        out[*i][1] = if layout == "wires" {
-            bottoms[col]
-        } else {
-            bounds[1] + row as f32 * (height + gap)
-        };
-        bottoms[col] = out[*i][1] + rects[*i][3] + gap;
-    }
-    out
-}
-
 /// One layout snapshot; restoring ignores deleted objects and leaves new objects alone.
 #[derive(Clone, Default, PartialEq)]
 pub struct Rest {
@@ -385,7 +80,7 @@ impl Rest {
             panes: doc
                 .panes
                 .iter()
-                .map(|c| (c.id.clone(), c.rect))
+                .map(|c| (c.id.clone(), c.rect.array()))
                 .collect(),
             spaces: doc
                 .spaces
@@ -396,7 +91,7 @@ impl Rest {
     }
     /// Whether the same panes and spaces still have these rectangles.
     pub fn matches(&self, doc: &Document) -> bool {
-        self.panes.iter().map(|(id, rect)| (id, *rect)).eq(doc.panes.iter().map(|p| (&p.id, p.rect)))
+        self.panes.iter().map(|(id, rect)| (id, *rect)).eq(doc.panes.iter().map(|p| (&p.id, p.rect.array())))
             && self.spaces.iter().map(|(id, rect)| (id, *rect)).eq(doc.spaces.iter().map(|s| (&s.space, s.rect)))
     }
 
@@ -414,14 +109,18 @@ impl Rest {
                 *at = *r;
             }
         };
-        for c in &mut doc.panes { back(&self.panes, &moved.panes, &mut c.rect, &c.id); }
+        for c in &mut doc.panes {
+            let mut at = c.rect.array();
+            back(&self.panes, &moved.panes, &mut at, &c.id);
+            c.rect = at.into();
+        }
         for s in &mut doc.spaces { back(&self.spaces, &moved.spaces, &mut s.rect, &s.space); }
     }
     /// Restore geometry of objects that still exist.
     pub fn restore(&self, doc: &mut Document) {
         for c in &mut doc.panes {
             if let Some((_, r)) = self.panes.iter().find(|(id, _)| *id == c.id) {
-                c.rect = *r;
+                c.rect = (*r).into();
             }
         }
         for s in &mut doc.spaces {
@@ -431,77 +130,12 @@ impl Rest {
         }
     }
 }
-pub fn union(rects: &[Rect]) -> Option<Rect> {
-    let mut out = *rects.first()?;
-    for r in &rects[1..] {
-        let x = out[0].min(r[0]);
-        let y = out[1].min(r[1]);
-        out = [
-            x,
-            y,
-            (out[0] + out[2]).max(r[0] + r[2]) - x,
-            (out[1] + out[3]).max(r[1] + r[3]) - y,
-        ];
-    }
-    Some(out)
-}
 /// Where a space made outside the canvas goes on Home: right of every existing space card.
 pub fn new_space_rect(spaces: &[Space]) -> Rect {
     let rects: Vec<Rect> = spaces.iter().map(|s| s.rect).collect();
     let x = union(&rects).map_or(0., |u| u[0] + u[2] + 48.);
     [x, 0., SPACE_CARD[0], SPACE_CARD[1]]
 }
-pub fn child_position(parent: Rect, siblings: &[Rect], size: Point) -> Rect {
-    [
-        parent[0] + parent[2] + 80.,
-        siblings.last().map_or(parent[1], |s| s[1] + s[3] + 16.),
-        size[0],
-        size[1],
-    ]
-}
-pub fn free_spot(space: Rect, occupied: &[Rect], size: Point) -> Rect {
-    let columns = ((space[2] - 48.) / (size[0] + 48.)).floor().max(1.) as usize;
-    let rows = occupied
-        .iter()
-        .map(|r| ((r[1] + r[3] - space[1]).max(0.) / (size[1] + 48.)).ceil() as usize)
-        .max()
-        .unwrap_or(0)
-        + 2;
-    for i in 0..rows * columns {
-        let r = [
-            space[0] + 24. + (i % columns) as f32 * (size[0] + 48.),
-            space[1] + 24. + (i / columns) as f32 * (size[1] + 48.),
-            size[0],
-            size[1],
-        ];
-        if !occupied.iter().any(|other| intersects(r, *other)) {
-            return r;
-        }
-    }
-    unreachable!()
-}
-/// `order` regrouped so linked cells sit next to each other: each connected group
-/// breadth-first from its first cell, groups in `order`, then the unlinked cells.
-fn connected_first(order: &[usize], links: &[(usize, usize)]) -> Vec<usize> {
-    let linked = |i: usize| links.iter().any(|(a, b)| *a == i || *b == i);
-    let mut out: Vec<usize> = vec![];
-    for seed in order.iter().copied().filter(|i| linked(*i)) {
-        if out.contains(&seed) { continue; }
-        let mut queue = std::collections::VecDeque::from([seed]);
-        out.push(seed);
-        while let Some(i) = queue.pop_front() {
-            for j in order.iter().copied() {
-                if !out.contains(&j) && links.iter().any(|l| *l == (i, j) || *l == (j, i)) {
-                    out.push(j);
-                    queue.push_back(j);
-                }
-            }
-        }
-    }
-    out.extend(order.iter().copied().filter(|i| !linked(*i)));
-    out
-}
-
 /// A wire from `a` to `b` as drawn and clicked: one cubic curve from the side of `a` facing
 /// `b` into the side of `b` facing `a`, sideways when they sit side by side, up or down when
 /// stacked. It crosses whatever lies between them. Returns sampled points.
@@ -538,18 +172,6 @@ pub fn path_distance(path: &[Point], p: Point) -> f32 {
         let k = if len2 > 0. { (((p[0] - a[0]) * d[0] + (p[1] - a[1]) * d[1]) / len2).clamp(0., 1.) } else { 0. };
         ((a[0] + d[0] * k - p[0]).powi(2) + (a[1] + d[1] * k - p[1]).powi(2)).sqrt()
     }).fold(f32::INFINITY, f32::min)
-}
-pub fn visible(camera: Camera, rect: Rect, viewport: Point) -> bool {
-    let p = camera.to_world([0., 0.]);
-    intersects(
-        rect,
-        [
-            p[0] - 320.,
-            p[1] - 36.,
-            viewport[0] / camera.zoom + 640.,
-            viewport[1] / camera.zoom + 72.,
-        ],
-    )
 }
 /// The action required before a selected canvas cell can close.
 #[derive(Debug, PartialEq)]
@@ -677,7 +299,7 @@ pub struct Pane {
     pub id: String,
     #[serde(flatten)]
     pub kind: Kind,
-    pub rect: Rect,
+    pub rect: WorldRect,
     pub z: u64,
     /// The space (room) it lives in; None for Home.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1174,9 +796,9 @@ impl Document {
     /// never had one (an empty rect).
     pub fn undock(&mut self, id: &str, center: Point) {
         self.panel.tabs.retain(|t| t.pane().is_none_or(|p| p != id));
-        if let Some(p) = self.panes.iter_mut().find(|p| p.id == id).filter(|p| p.rect[2] <= 0. || p.rect[3] <= 0.) {
-            let [w, h] = [560., 420.];
-            p.rect = [center[0] - w / 2., center[1] - h / 2., w, h];
+        if let Some(p) = self.panes.iter_mut().find(|p| p.id == id).filter(|p| p.rect.w <= 0. || p.rect.h <= 0.) {
+            let WorldSize { w, h } = PREVIEW;
+            p.rect = WorldRect::new(center[0] - w / 2., center[1] - h / 2., w, h);
         }
     }
     /// Whether a pane in `space` is shown in the current place.
@@ -1235,7 +857,8 @@ impl Document {
             let x = s[0].min(viewport[0] - s[2]).max(0.);
             let y = s[1].min(viewport[1] - s[3]).max(0.);
             let [wx, wy] = camera.to_world([x, y]);
-            p.rect = [wx, wy, s[2] / camera.zoom, s[3] / camera.zoom];
+            let [w, h] = camera.size_to_world([s[2], s[3]]);
+            p.rect = WorldRect::new(wx, wy, w, h);
         }
     }
 
@@ -1248,13 +871,13 @@ impl Document {
             .unwrap_or(0)
             .saturating_add(1);
         if let Some(card) = self.panes.iter_mut().find(|c| c.id == terminal) {
-            card.rect[0] = point[0];
-            card.rect[1] = point[1];
+            card.rect.x = point[0];
+            card.rect.y = point[1];
         } else {
             self.panes.push(Pane {
                 id: terminal.into(),
                 kind: Kind::Terminal { size: None },
-                rect: [point[0], point[1], size[0], size[1]],
+                rect: WorldRect::new(point[0], point[1], size[0], size[1]),
                 z,
                 space: self.room.clone(),
                 color: None,
@@ -1273,16 +896,16 @@ impl Document {
         let mut parents: Vec<_> = subs.keys().collect();
         parents.sort();
         for parent in parents {
-            let Some((rect, space)) = self.panes.iter().find(|c| c.terminal() == Some(parent.as_str())).map(|c| (c.rect, c.space.clone())) else { continue };
+            let Some((rect, space)) = self.panes.iter().find(|c| c.terminal() == Some(parent.as_str())).map(|c| (c.rect.array(), c.space.clone())) else { continue };
             let mut children: Vec<_> = subs[parent].iter().collect();
             children.sort_by_key(|s| &s.id);
             for sub in children {
                 if self.panes.iter().any(|c| matches!(&c.kind, Kind::Sub { parent: p, sub: id } if p == parent && id == &sub.id)) { continue; }
-                let siblings: Vec<_> = self.panes.iter().filter(|c| matches!(&c.kind, Kind::Sub { parent: p, .. } if p == parent)).map(|c| c.rect).collect();
+                let siblings: Vec<_> = self.panes.iter().filter(|c| matches!(&c.kind, Kind::Sub { parent: p, .. } if p == parent)).map(|c| c.rect.array()).collect();
                 let z = self.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
                 let child = child_position(rect, &siblings, [PILL_WIDTH, 36.]);
                 // The cell belongs to its parent's space.
-                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child, z, space: space.clone(), color: None, pinned: None });
+                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child.into(), z, space: space.clone(), color: None, pinned: None });
                 changed = true;
             }
         }
@@ -1316,13 +939,11 @@ impl Document {
         }
         if doc.version == 1 { doc.into_rooms(); }
         if doc.version == 2 { doc.into_panes(); }
-        let valid = doc.camera.x.is_finite()
-            && doc.camera.y.is_finite()
-            && doc.camera.zoom.is_finite()
-            && doc.panes.iter().all(|c| valid_rect(c.rect) && c.size().is_none_or(|s| valid_rect([0., 0., s[0], s[1]])))
+        let valid = doc.camera.is_finite()
+            && doc.panes.iter().all(|c| valid_rect(c.rect.array()) && c.size().is_none_or(|s| valid_rect([0., 0., s[0], s[1]])))
             && doc.spaces.iter().all(|s| valid_rect(s.rect))
             && doc.panel.width.is_none_or(|w| w.is_finite() && w > 0.);
-        doc.camera.zoom = doc.camera.zoom.clamp(ZOOMS[0], ZOOMS[11]);
+        doc.camera = doc.camera.clamped();
         Ok(valid.then_some(doc))
     }
     /// Version 1 to 2: a cell belonged to the space frame holding its center; now it says so,
@@ -1343,12 +964,12 @@ impl Document {
                 (None, _) => (terminal, Kind::Terminal { size }),
                 _ => continue,
             };
-            self.panes.push(Pane { id, kind, rect, z, space, color: None, pinned: None });
+            self.panes.push(Pane { id, kind, rect: rect.into(), z, space, color: None, pinned: None });
         }
         let max_z = self.panes.iter().map(|p| p.z).max().unwrap_or(0);
         self.file_ids = self.old_previews.len() as u64;
         for (i, Preview { path, rect, space }) in self.old_previews.drain(..).enumerate() {
-            self.panes.push(Pane { id: format!("p{}", i + 1), kind: Kind::File { path }, rect, z: max_z + 1 + i as u64, space, color: None, pinned: None });
+            self.panes.push(Pane { id: format!("p{}", i + 1), kind: Kind::File { path }, rect: rect.into(), z: max_z + 1 + i as u64, space, color: None, pinned: None });
         }
         self.version = 3;
     }
@@ -1395,6 +1016,10 @@ pub fn view_allows(view: &View, agent: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canophy::{check, intersects, solve};
+
+    /// The gap the layout tests leave between panes.
+    const GAP: f32 = 24.;
 
     #[test]
     fn browser_panes_have_the_taller_header() {
@@ -1436,19 +1061,12 @@ mod tests {
         assert_eq!(serde_json::from_value::<Kind>(serde_json::json!({"kind":"mod:note"})).unwrap(), Kind::Mod { kind: "mod:note".into(), props: Default::default() });
     }
 
-    #[test]
-    fn reveal_centers_a_pane_only_when_it_is_off_screen() {
-        let camera = Camera { x: 0., y: 0., zoom: 1. };
-        assert_eq!(reveal(camera, [10., 10., 100., 100.], [800., 600.]), None);
-        let to = reveal(camera, [1000., 0., 200., 100.], [800., 600.]).unwrap();
-        assert_eq!(to.to_screen([1100., 50.]), [400., 300.]);
-    }
 
     #[test]
     fn stack_raises_one_pane_to_the_front() {
         let mut doc = Document::default();
         for (i, id) in ["a", "b", "c"].into_iter().enumerate() {
-            doc.panes.push(Pane { id: id.into(), kind: Kind::Terminal { size: None }, rect: [0.; 4], z: i as u64, space: None, color: None, pinned: None });
+            doc.panes.push(Pane { id: id.into(), kind: Kind::Terminal { size: None }, rect: [0.; 4].into(), z: i as u64, space: None, color: None, pinned: None });
         }
         assert!(doc.stack(&["a".into()], true));
         assert_eq!(doc.panes.iter().find(|p| p.id == "a").unwrap().z, 2);
@@ -1458,7 +1076,7 @@ mod tests {
     #[test]
     fn next_file_id_counts_mod_panes() {
         let mut doc = Document::default();
-        doc.panes.push(Pane { id: "p5".into(), kind: Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None });
+        doc.panes.push(Pane { id: "p5".into(), kind: Kind::Mod { kind: "mod:note".into(), props: Default::default() }, rect: [0.; 4].into(), z: 0, space: None, color: None, pinned: None });
         assert_eq!(doc.next_file_id(), "p6");
     }
 
@@ -1474,7 +1092,7 @@ mod tests {
 
     #[test]
     fn pane_kinds_and_verbs() {
-        let mut pane = Pane { id: "p1".into(), kind: Kind::File { path: "/a.md".into() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: None };
+        let mut pane = Pane { id: "p1".into(), kind: Kind::File { path: "/a.md".into() }, rect: [0.; 4].into(), z: 0, space: None, color: None, pinned: None };
         assert_eq!(pane.kind_name(), "file");
         assert_eq!(pane.verbs(), ["read", "shot", "close"]);
         pane.kind = Kind::Terminal { size: None };
@@ -1549,8 +1167,8 @@ mod tests {
         let mut doc = version_2_fixture("panes-undo");
         let before = doc.panes.clone();
         let rest = Rest::capture(&doc);
-        doc.panes[0].rect[0] += 100.;
-        doc.panes[2].rect[1] += 100.;
+        doc.panes[0].rect.x += 100.;
+        doc.panes[2].rect.y += 100.;
         rest.restore(&mut doc);
         assert_eq!(doc.panes[0].rect, before[0].rect);
         assert_eq!(doc.panes[2].rect, before[2].rect);
@@ -1561,46 +1179,19 @@ mod tests {
         let mut doc = Document::default();
         let id = doc.next_file_id();
         assert_eq!(id, "p1");
-        doc.panes.push(Pane { id, kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, color: None, pinned: None });
+        doc.panes.push(Pane { id, kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.].into(), z: 1, space: None, color: None, pinned: None });
         doc.panes.remove(0);
         assert_eq!(doc.next_file_id(), "p2");
         let mut doc = Document::default();
         for id in ["p1", "p3"] {
-            doc.panes.push(Pane { id: id.into(), kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.], z: 1, space: None, color: None, pinned: None });
+            doc.panes.push(Pane { id: id.into(), kind: Kind::File { path: "/tmp/a.md".into() }, rect: [0., 0., 560., 420.].into(), z: 1, space: None, color: None, pinned: None });
         }
         assert_eq!(doc.next_file_id(), "p4");
     }
 
-    #[test]
-    fn spacing_is_deterministic_pinned_and_returns_to_rest() {
-        let rest = [[0.,0.,100.,50.],[124.,0.,100.,50.],[248.,0.,100.,50.],[124.,74.,100.,50.]];
-        let pin = [100.,0.,100.,50.];
-        let result = solve(&rest,0,pin,GAP, |_| false);
-        assert_eq!(result,solve(&rest,0,pin,GAP, |_| false));
-        assert_eq!(result[0],pin);
-        for i in 0..result.len() { for j in 0..i { assert!(separated(result[i],result[j],GAP)); } }
-        assert_eq!(solve(&rest,0,rest[0],GAP, |_| false),rest);
-        assert_eq!(solve(&[],0,pin,GAP, |_| false),Vec::<Rect>::new());
-    }
 
     
 
-    #[test]
-    fn arrange_layouts_keep_gap_sizes_and_parent_layers() {
-        let rects = [[80.,30.,100.,40.],[0.,0.,70.,90.],[0.,50.,150.,60.],[0.,50.,30.,100.]];
-        let parents = [None,Some(0),Some(0),Some(1)];
-        for layout in ["tidy","row","column","wires"] {
-            let result = arrange(&rects,&parents,&[],layout);
-            assert_eq!(result,arrange(&rects,&parents,&[],layout));
-            for i in 0..result.len() {
-                assert_eq!(&result[i][2..],&rects[i][2..]);
-                for j in 0..i { assert!(separated(result[i],result[j],GAP),"{layout}: {result:?}"); }
-            }
-            if layout == "wires" { assert!(result[0][0]<result[1][0] && result[1][0]<result[3][0]); assert_eq!(result[1][0],result[2][0]); }
-        }
-        let cycle = arrange(&rects,&[Some(1),Some(0),Some(2),None],&[],"wires");
-        for i in 0..cycle.len() { for j in 0..i { assert!(separated(cycle[i],cycle[j],GAP)); } }
-    }
 
     #[test]
     fn version_one_cells_move_into_their_frames_room() {
@@ -1622,42 +1213,34 @@ mod tests {
     #[test]
     fn going_into_a_room_keeps_each_places_camera() {
         let mut doc = Document::default();
-        doc.camera.x = 5.;
+        doc.camera = Camera::new(5., 0., 1.);
         doc.go(Some("s".into()));
-        assert_eq!((doc.camera.x, doc.room.as_deref()), (0., Some("s")));
-        doc.camera.x = 9.;
+        assert_eq!((doc.camera.origin()[0], doc.room.as_deref()), (0., Some("s")));
+        doc.camera = Camera::new(9., 0., 1.);
         doc.go(None);
-        assert_eq!(doc.camera.x, 5.);
+        assert_eq!(doc.camera.origin()[0], 5.);
         doc.go(Some("s".into()));
-        assert_eq!(doc.camera.x, 9.);
+        assert_eq!(doc.camera.origin()[0], 9.);
         assert!(doc.shows(Some(&"s".to_owned())) && !doc.shows(None));
     }
 
-    #[test]
-    fn tidy_puts_wired_cells_next_to_each_other() {
-        // Four in reading order; 0 is wired to 3, so 3 comes second, beside 0 in the 2-column grid.
-        let rects = [[0.,0.,100.,40.],[200.,0.,100.,40.],[0.,100.,100.,40.],[200.,100.,100.,40.]];
-        let out = arrange(&rects,&[None;4],&[(3,0)],"tidy");
-        assert_eq!(out[3][1],out[0][1]);
-        assert!(out[3][0] > out[0][0]);
-    }
 
     #[test]
     fn undo_restores_geometry_without_resurrecting_deleted_cells() {
         let mut doc = Document::default();
         doc.place("a",[0.,0.],[100.,50.]);
         doc.spaces.push(Space { space:"s".into(),rect:[0.,0.,200.,200.],color:Hue::Blue,frame:true });
-        doc.panes.push(Pane { id: "p1".into(), kind: Kind::File { path: "/tmp/plan.md".into() }, rect: [24.,24.,100.,80.], z: 2, space: None, color: None, pinned: None });
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::File { path: "/tmp/plan.md".into() }, rect: [24.,24.,100.,80.].into(), z: 2, space: None, color: None, pinned: None });
         let rest = Rest::capture(&doc);
         doc.spaces[0].rect = [500.,500.,900.,900.];
-        doc.panes[1].rect[0] = 600.;
-        doc.panes[0].rect[0] = 600.;
+        doc.panes[1].rect.x = 600.;
+        doc.panes[0].rect.x = 600.;
         doc.place("new",[500.,0.],[100.,50.]);
         rest.restore(&mut doc);
-        assert_eq!(doc.panes[0].rect,[0.,0.,100.,50.]);
+        assert_eq!(doc.panes[0].rect.array(),[0.,0.,100.,50.]);
         assert_eq!(doc.spaces[0].rect,[0.,0.,200.,200.]);
-        assert_eq!(doc.panes[1].rect,[24.,24.,100.,80.]);
-        assert_eq!(doc.panes[2].rect[0],500.);
+        assert_eq!(doc.panes[1].rect.array(),[24.,24.,100.,80.]);
+        assert_eq!(doc.panes[2].rect.x,500.);
         doc.panes.remove(0);
         rest.restore(&mut doc);
         assert_eq!(doc.panes.len(),2);
@@ -1670,7 +1253,7 @@ mod tests {
         for (name, r) in [("a", pill(0., 0.)), ("b", pill(244., 0.)), ("c", pill(0., 60.))] {
             doc.place(name, [r[0], r[1]], [r[2], r[3]]);
         }
-        let rects = |doc: &Document| doc.panes.iter().map(|c| c.rect).collect::<Vec<_>>();
+        let rects = |doc: &Document| doc.panes.iter().map(|c| c.rect.array()).collect::<Vec<_>>();
         let base = Rest::capture(&doc);
         // What solving with "a" expanded to 600 x 400 does to its neighbours.
         let expanded = [0., 0., 600., 400.];
@@ -1678,18 +1261,18 @@ mod tests {
         rest[0] = expanded;
         let solved = solve(&rest, 0, expanded, GAP, |_| false);
         assert_eq!(solved[0], expanded);
-        for (card, r) in doc.panes.iter_mut().zip(&solved) { card.rect = *r; }
+        for (card, r) in doc.panes.iter_mut().zip(&solved) { card.rect = (*r).into(); }
         *doc.panes[0].size_mut().unwrap() = Some([600., 400.]);
-        for i in 1..3 { assert!(separated(solved[0], solved[i], GAP)); }
+        for i in 1..3 { assert!(check::apart(&[solved[0], solved[i]], GAP).is_ok()); }
         let moved = base.changed(&Rest::capture(&doc));
         // A neighbour dragged since is left where the person put it.
-        doc.panes[2].rect[0] += 500.;
+        doc.panes[2].rect.x += 500.;
         let dragged = doc.panes[2].rect;
         *doc.panes[0].size_mut().unwrap() = None;
         base.put_back(&moved, &mut doc);
-        assert_eq!(doc.panes[1].rect, pill(244., 0.));
+        assert_eq!(doc.panes[1].rect.array(), pill(244., 0.));
         assert_eq!(doc.panes[2].rect, dragged);
-        assert_eq!(doc.panes[0].rect[..2], [0., 0.]);
+        assert_eq!(doc.panes[0].rect.array()[..2], [0., 0.]);
     }
 
     #[test]
@@ -1706,24 +1289,15 @@ mod tests {
 
     #[test]
     fn undo_keeps_each_sub_agent_cell_apart() {
-        let sub = |id: &str, x| Pane { id: format!("sub:t1:{id}"), kind: Kind::Sub { parent: "t1".into(), sub: id.into() }, rect: [x, 0., 100., 36.], z: 0, space: None, color: None, pinned: None };
+        let sub = |id: &str, x| Pane { id: format!("sub:t1:{id}"), kind: Kind::Sub { parent: "t1".into(), sub: id.into() }, rect: [x, 0., 100., 36.].into(), z: 0, space: None, color: None, pinned: None };
         let mut doc = Document { panes: vec![sub("a", 0.), sub("b", 200.)], ..Document::default() };
         let rest = Rest::capture(&doc);
-        doc.panes[0].rect[0] = 50.;
-        doc.panes[1].rect[0] = 400.;
+        doc.panes[0].rect.x = 50.;
+        doc.panes[1].rect.x = 400.;
         rest.restore(&mut doc);
-        assert_eq!((doc.panes[0].rect[0], doc.panes[1].rect[0]), (0., 200.));
+        assert_eq!((doc.panes[0].rect.x, doc.panes[1].rect.x), (0., 200.));
     }
 
-    #[test]
-    fn fifty_cells_solve_quickly() {
-        let rest: Vec<_> = (0..50).map(|i|[(i%10) as f32*124.,(i/10) as f32*74.,100.,50.]).collect();
-        let start = std::time::Instant::now();
-        for _ in 0..100 { std::hint::black_box(solve(&rest,0,[124.,74.,100.,50.],GAP, |_| false)); }
-        eprintln!("50-cell solve: {:?} per pass",start.elapsed()/100);
-        let result = solve(&rest,0,[124.,74.,100.,50.],GAP, |_| false);
-        for i in 0..result.len() { for j in 0..i { assert!(separated(result[i],result[j],GAP)); } }
-    }
 
     #[test]
     fn space_at_picks_the_topmost_space_holding_the_point() {
@@ -1857,88 +1431,20 @@ mod tests {
         assert!(save.changed());
     }
     #[test]
-    fn camera_round_trip() {
-        let c = Camera {
-            x: -200.,
-            y: 32.,
-            zoom: 0.5,
-        };
-        assert_eq!(c.to_world(c.to_screen([78., 143.])), [78., 143.]);
-    }
-    #[test]
-    fn zoom_keeps_cursor_anchor() {
-        let mut c = Camera::default();
-        let anchor = [121., 432.];
-        let world = c.to_world(anchor);
-        c.zoom_at(1.25, anchor);
-        assert_eq!(c.to_world(anchor), world);
-    }
-    #[test]
-    fn zoom_step_snaps() {
-        let mut c = Camera {
-            zoom: 0.52,
-            ..Camera::default()
-        };
-        c.step(1, [0., 0.], [ZOOMS[0], ZOOMS[11]]);
-        assert_eq!(c.zoom, 0.67);
-        c.step(1, [0., 0.], [0.25, 0.7]);
-        assert_eq!(c.zoom, 0.7);
-        c.step(-1, [0., 0.], [0.25, 0.7]);
-        assert_eq!(c.zoom, 0.67);
-    }
-    #[test]
     fn pinned_panes_follow_the_camera_and_stay_in_view() {
         let mut doc = Document::default();
-        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [0.; 4], z: 0, space: None, color: None, pinned: Some([600., 16., 340., 700.]) });
-        let camera = Camera { x: 100., y: -50., zoom: 2. };
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [0.; 4].into(), z: 0, space: None, color: None, pinned: Some([600., 16., 340., 700.]) });
+        let camera = Camera::new(100., -50., 2.);
         doc.pin(camera, [1000., 800.]);
-        assert_eq!(doc.panes[0].rect, [400., -42., 170., 350.]);
-        assert_eq!(camera.to_screen([doc.panes[0].rect[0], doc.panes[0].rect[1]]), [600., 16.]);
+        assert_eq!(doc.panes[0].rect.array(), [400., -42., 170., 350.]);
+        assert_eq!(camera.to_screen([doc.panes[0].rect.x, doc.panes[0].rect.y]), [600., 16.]);
         // A narrower window keeps it whole on screen; its saved spot is untouched.
         doc.pin(Camera::default(), [800., 800.]);
-        assert_eq!(doc.panes[0].rect[0], 460.);
+        assert_eq!(doc.panes[0].rect.x, 460.);
         assert_eq!(doc.panes[0].pinned, Some([600., 16., 340., 700.]));
     }
-    #[test]
-    fn zoom_range_keeps_the_biggest_pane_on_screen() {
-        let view = [1080., 880.];
-        // Nothing on the canvas: the whole ZOOMS range.
-        assert_eq!(zoom_range(&[], view), [ZOOMS[0], ZOOMS[11]]);
-        // A 1000 px wide pane fits at 1.0 with padding, not beyond; a small one allows 2.
-        assert_eq!(zoom_range(&[[0., 0., 1000., 400.]], view)[1], 1.);
-        assert_eq!(zoom_range(&[[0., 0., 100., 100.]], view)[1], 2.);
-        // Two panes far apart: zooming out stops at the fit-all step, in at the bigger pane.
-        let r = zoom_range(&[[0., 0., 500., 400.], [3000., 0., 200., 200.]], view);
-        assert_eq!(r, [0.25, 2.]);
-        let r = zoom_range(&[[0., 0., 500., 400.], [1500., 0., 200., 200.]], view);
-        assert_eq!(r, [0.5, 2.]);
-        // A pane bigger than the window at any zoom: both ends pin to the smallest zoom.
-        assert_eq!(zoom_range(&[[0., 0., 99999., 100.]], view), [ZOOMS[0], ZOOMS[0]]);
-        // Left at 2 after the limit fell to 1: zooming out moves freely, not straight to 1.
-        let mut c = Camera { zoom: 2., ..Camera::default() };
-        c.step(1, [0., 0.], widen([0.25, 1.], 2.));
-        assert_eq!(c.zoom, 2., "zoom in never zooms out");
-    }
     
     
-    #[test]
-    fn child_is_beside_parent() {
-        assert_eq!(
-            child_position([24., 24., 160., 36.], &[], [160., 36.]),
-            [264., 24., 160., 36.]
-        );
-    }
-    #[test]
-    fn siblings_stack() {
-        assert_eq!(
-            child_position(
-                [24., 24., 160., 36.],
-                &[[264., 24., 160., 36.]],
-                [160., 36.]
-            ),
-            [264., 76., 160., 36.]
-        );
-    }
     #[test]
     fn curve_joins_facing_sides() {
         let ends = |a, b| { let c = curve(a, b); (c[0], *c.last().unwrap()) };
@@ -1952,42 +1458,7 @@ mod tests {
         assert!(path_distance(&c, [200., 125.]) < 1.);
     }
 
-    #[test]
-    fn tile_fills_the_area_without_overlap_and_grows_the_active_tile() {
-        let area = [0., 0., 1200., 800.];
-        for n in 1..=7 {
-            for active in std::iter::once(None).chain((0..n).map(Some)) {
-                let (out, _) = tile(area, n, active, &[], 24.);
-                for (i, a) in out.iter().enumerate() {
-                    assert!(a[0] >= 23.9 && a[1] >= 23.9 && a[0] + a[2] <= 1176.1 && a[1] + a[3] <= 776.1, "n={n} {a:?} leaves the area");
-                    for b in &out[i + 1..] { assert!(separated(*a, *b, 23.9), "n={n} {a:?} {b:?} overlap"); }
-                }
-                let area_of = |r: &Rect| r[2] * r[3];
-                if let Some(k) = active && n > 1 {
-                    assert!(out.iter().enumerate().all(|(j, r)| j == k || area_of(r) < area_of(&out[k])), "n={n} active {k} is the largest");
-                }
-                // Filled: the tiles and gaps cover the inner area.
-                let covered: f32 = out.iter().map(area_of).sum();
-                assert!(covered > 1152. * 752. * 0.85, "n={n} covers {covered}");
-            }
-        }
-    }
 
-    #[test]
-    fn tile_keeps_the_given_order_and_lines_pills_along_the_bottom() {
-        // The tiles sit in the order given, whichever is active.
-        let pills = [[0., 0., 220., 36.], [0., 0., 220., 36.]];
-        for active in [None, Some(0), Some(1)] {
-            let (out, _) = tile([0., 0., 1000., 600.], 2, active, &pills, 20.);
-            assert!(out[0][0] < out[1][0], "{active:?}");
-        }
-        let (out, placed) = tile([0., 0., 1000., 600.], 2, None, &pills, 20.);
-        assert!(placed.iter().all(|p| p[2] == 220. && p[3] == 36. && p[1] + p[3] <= 580.1 && p[1] > out[0][1] + out[0][3]));
-        assert!(separated(placed[0], placed[1], 19.9));
-        // Pills alone sit at the top of the area.
-        let (_, alone) = tile([0., 0., 1000., 600.], 0, None, &pills, 20.);
-        assert_eq!(alone[0][1], 20.);
-    }
 
     #[test]
     fn reading_order_is_top_to_bottom_then_left_to_right() {
@@ -1998,21 +1469,6 @@ mod tests {
     fn path_measures() {
         let path = [[0., 0.], [10., 0.], [10., 10.]];
         assert_eq!(path_distance(&path, [5., 3.]), 3.);
-    }
-    #[test]
-    fn free_spot_skips_occupied() {
-        assert_eq!(
-            free_spot([0., 0., 960., 640.], &[[24., 24., 160., 36.]], [160., 36.]),
-            [232., 24., 160., 36.]
-        );
-    }
-    #[test]
-    fn offscreen_card_is_culled() {
-        assert!(!visible(
-            Camera::default(),
-            [2000., 0., 160., 36.],
-            [800., 600.]
-        ));
     }
     #[test]
     fn crossing_curve_is_kept() {
@@ -2031,12 +1487,6 @@ mod tests {
         assert!(view_allows(&View::All, false));
         assert!(view_allows(&View::Terminals, false));
         assert!(!view_allows(&View::Terminals, true));
-    }
-    #[test]
-    fn fit_uses_largest_fitting_zoom_step() {
-        let mut c = Camera::default();
-        c.fit(&[[0., 0., 100., 100.]], [800., 600.]);
-        assert_eq!(c.zoom, 2.);
     }
     
     #[test]
@@ -2162,18 +1612,18 @@ mod panel_tests {
     #[test]
     fn docking_keeps_the_rect_and_hides_the_pane_from_the_canvas() {
         let mut doc = Document::default();
-        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [10., 20., 300., 400.], z: 0, space: None, color: None, pinned: Some([1., 1., 2., 2.]) });
+        doc.panes.push(Pane { id: "p1".into(), kind: Kind::Sim { udid: String::new() }, rect: [10., 20., 300., 400.].into(), z: 0, space: None, color: None, pinned: Some([1., 1., 2., 2.]) });
         doc.dock("p1");
         assert!(doc.docked("p1") && !doc.shown(&doc.panes[0]) && doc.panes[0].pinned.is_none());
         doc.dock("p1");
         assert_eq!(doc.panel.tabs.len(), 1);
         doc.undock("p1", [500., 500.]);
         assert!(!doc.docked("p1") && doc.shown(&doc.panes[0]));
-        assert_eq!(doc.panes[0].rect, [10., 20., 300., 400.]);
-        doc.panes[0].rect = [0.; 4];
+        assert_eq!(doc.panes[0].rect.array(), [10., 20., 300., 400.]);
+        doc.panes[0].rect = [0.; 4].into();
         doc.dock("p1");
         doc.undock("p1", [500., 500.]);
-        assert_eq!(doc.panes[0].rect, [220., 290., 560., 420.]);
+        assert_eq!(doc.panes[0].rect.array(), [220., 290., 560., 420.]);
     }
     #[test]
     fn breadcrumbs_respect_directory_boundaries() {
@@ -2233,7 +1683,7 @@ mod cell_tests {
         doc.place(&key, [600., 200.], [320., 36.]);
         subs.get_mut("t1").unwrap()[0].done = true;
         assert!(!doc.sync_subs(&subs));
-        assert_eq!(&doc.panes[1].rect[..2], &[600., 200.]);
+        assert_eq!(&doc.panes[1].rect.array()[..2], &[600., 200.]);
         let saved = serde_json::to_value(&doc).unwrap();
         assert_eq!(saved["panes"][1]["props"]["sub"], "a");
         assert_eq!(saved["panes"][1]["props"]["parent"], "t1");
@@ -2274,117 +1724,8 @@ mod keyboard_tests {
         assert_eq!(nearest(&[], from, [1., 0.]), None);
     }
 
-    #[test]
-    fn focus_fit_centres_in_visible_canvas_and_returns_to_exact_camera() {
-        let original = Camera { x: -123., y: 99., zoom: 1.25 };
-        let mut camera = original;
-        let mut previous = None;
-        let space = [500., 200., 900., 600.];
-        let visible = [0., 0., 800., 700.]; // A 1200 px window with a 400 px file panel.
-        focus_fit(&mut camera, &mut previous, &[space], visible);
-        assert_eq!(previous.map(|p| p.0), Some(original));
-        let center = camera.to_screen([space[0] + space[2] / 2., space[1] + space[3] / 2.]);
-        assert!((center[0] - visible[2] / 2.).abs() < 0.001);
-        assert!((center[1] - visible[3] / 2.).abs() < 0.001);
-        assert!(space[2] * camera.zoom <= visible[2] - 48.);
-        assert!(space[3] * camera.zoom <= visible[3] - 48.);
-        focus_fit(&mut camera, &mut previous, &[space], visible);
-        assert_eq!(camera, original);
-        assert_eq!(previous, None);
-        focus_fit(&mut camera, &mut previous, &[], visible);
-        assert_eq!(previous, None);
-        // Moved after a fit: the next press fits again instead of jumping back.
-        focus_fit(&mut camera, &mut previous, &[space], visible);
-        let fitted = camera;
-        camera.x += 50.;
-        focus_fit(&mut camera, &mut previous, &[space], visible);
-        assert_eq!(camera, fitted);
-        // A toolbar over the top 60 px: the space centres in the open part below it.
-        let (mut camera, mut previous) = (original, None);
-        focus_fit(&mut camera, &mut previous, &[space], [0., 60., 800., 640.]);
-        let center = camera.to_screen([space[0] + space[2] / 2., space[1] + space[3] / 2.]);
-        assert!((center[0] - 400.).abs() < 0.001 && (center[1] - 380.).abs() < 0.001);
-        let fitted = camera;
-        focus_fit(&mut camera, &mut previous, &[space], [0., 60., 800., 640.]);
-        assert_eq!(camera, original);
-        focus_fit(&mut camera, &mut previous, &[space], [0., 60., 800., 640.]);
-        assert_eq!(camera, fitted);
-    }
 }
 
-
-/// Where the next ⌘T pane goes: `step` down and right of the last one, back at the view's
-/// top-left when it would leave `view` ([x, y, w, h] world px), never on another pane's origin.
-pub fn cascade(last: Option<Point>, view: Rect, size: Point, taken: &[Point], step: f32) -> Point {
-    let start = [view[0] + step, view[1] + step];
-    let fits = |p: Point| p[0] + size[0] <= view[0] + view[2] && p[1] + size[1] <= view[1] + view[3];
-    let free = |p: Point| !taken.iter().any(|t| (t[0] - p[0]).abs() < 1. && (t[1] - p[1]).abs() < 1.);
-    let mut p = last.map_or(start, |l| [l[0] + step, l[1] + step]);
-    if !fits(p) { p = start; }
-    // At most one step per pane: every free spot is reached before the walk repeats.
-    for _ in 0..=taken.len() {
-        if free(p) { break; }
-        p = [p[0] + step, p[1] + step];
-        if !fits(p) && fits(start) { p = start; }
-    }
-    p
-}
-
-/// Drags a pane edge or corner. `zone` is (-1 left, 0, 1 right) and (-1 top, 0, 1 bottom).
-/// Left and top move the origin so the opposite edge stays put; size never drops below `min`.
-pub fn resize_from(origin: Point, size: Point, zone: (i8, i8), d: Point, min: Point) -> (Point, Point) {
-    let axis = |o: f32, s: f32, z: i8, d: f32, m: f32| match z {
-        1 => (o, (s + d).max(m)),
-        -1 => { let n = (s - d).max(m); (o + s - n, n) }
-        _ => (o, s),
-    };
-    let (x, w) = axis(origin[0], size[0], zone.0, d[0], min[0]);
-    let (y, h) = axis(origin[1], size[1], zone.1, d[1], min[1]);
-    ([x, y], [w, h])
-}
-
-#[cfg(test)]
-mod cascade_tests {
-    use super::cascade;
-
-    #[test]
-    fn new_panes_step_down_right_wrap_and_never_share_an_origin() {
-        let view = [0., 0., 1000., 800.];
-        let size = [400., 300.];
-        assert_eq!(cascade(None, view, size, &[], 32.), [32., 32.]);
-        assert_eq!(cascade(Some([32., 32.]), view, size, &[[32., 32.]], 32.), [64., 64.]);
-        // No room at the bottom right: back to the top left.
-        assert_eq!(cascade(Some([580., 480.]), view, size, &[], 32.), [32., 32.]);
-        // The top left is taken: the next free step.
-        assert_eq!(cascade(Some([580., 480.]), view, size, &[[32., 32.], [64., 64.]], 32.), [96., 96.]);
-        // A view smaller than a pane still never stacks two exactly.
-        assert_eq!(cascade(None, [0., 0., 100., 100.], size, &[[32., 32.]], 32.), [64., 64.]);
-    }
-}
-
-#[cfg(test)]
-mod resize_tests {
-    use super::resize_from;
-
-    #[test]
-    fn every_edge_and_corner_moves_only_its_own_sides() {
-        let (o, s, d, min) = ([100., 100.], [400., 300.], [10., 20.], [50., 50.]);
-        for (zone, want) in [
-            ((1, 1), ([100., 100.], [410., 320.])),
-            ((-1, -1), ([110., 120.], [390., 280.])),
-            ((1, -1), ([100., 120.], [410., 280.])),
-            ((-1, 1), ([110., 100.], [390., 320.])),
-            ((1, 0), ([100., 100.], [410., 300.])),
-            ((-1, 0), ([110., 100.], [390., 300.])),
-            ((0, 1), ([100., 100.], [400., 320.])),
-            ((0, -1), ([100., 120.], [400., 280.])),
-        ] {
-            assert_eq!(resize_from(o, s, zone, d, min), want, "zone {zone:?}");
-        }
-        // Shrinking past the minimum stops there, and the right/bottom edge stays put.
-        assert_eq!(resize_from(o, s, (-1, -1), [1000., 1000.], min), ([450., 350.], [50., 50.]));
-    }
-}
 
 #[cfg(test)]
 mod stacking_tests {

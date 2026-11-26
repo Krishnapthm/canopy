@@ -43,7 +43,7 @@ impl Home {
 pub(super) fn fit_to_body(mut pane: canvas::Pane, body: Size<Pixels>) -> canvas::Pane {
     let (w, h) = (f32::from(body.width), f32::from(body.height));
     let header = canvas::header_height(&pane.kind);
-    pane.rect = [-1., -(header + 1.), w + 2., h + header + 2.];
+    pane.rect = canophy::WorldRect::new(-1., -(header + 1.), w + 2., h + header + 2.);
     pane.pinned = Some([0., 0., w + 2., h + header + 2.]);
     pane
 }
@@ -153,7 +153,7 @@ impl AppWindow {
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
         let measured = self.bounds.borrow().get(&format!("panel-body:{id}")).map(|b| b.size);
         let view = fit_to_body(pane.clone(), measured.unwrap_or(size(px(400.), px(500.))));
-        let camera = canvas::Camera::default();
+        let camera = canophy::Camera::default();
         let (chrome, body, title) = match &pane.kind {
             canvas::Kind::Browser { .. } => (Some(self.browser_navigation(id, browser::Host::Pane, cx)), self.browser_body(&view, camera, cx), self.browser_title(pane).0),
             canvas::Kind::Sim { .. } => (None, self.sim_card_body(&view, camera, cx), self.sim_title(pane, cx).0),

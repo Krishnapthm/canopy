@@ -9,7 +9,7 @@ use super::helper_bar::{pane_actions, sim_device_actions};
 #[cfg(target_os = "macos")]
 use super::sim_screen::{AgentStep, By, Live, SimEvent, SimScreen};
 
-const DEFAULT_SIZE: [f32; 2] = [340., 700.];
+const DEFAULT_SIZE: [f32; 2] = [canophy::traits::SIM.w, canophy::traits::SIM.h];
 
 /// Space for the shared pill and its bottom margin, even when the pill is hidden.
 #[cfg(target_os = "macos")]
@@ -126,14 +126,14 @@ impl AppWindow {
     }
 
     /// Adds a sim pane (udid empty: it lists simulators to pick) and starts showing it.
-    pub(super) fn add_sim_pane(&mut self, udid: String, point: canvas::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> String {
+    pub(super) fn add_sim_pane(&mut self, udid: String, point: canophy::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> String {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
         // A phone in its bezel (about 1:2) under the 36 px header, that size on screen at this zoom.
         let size = DEFAULT_SIZE;
-        let zoom = doc.camera.zoom;
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: [point[0], point[1], size[0] / zoom, size[1] / zoom], z, space, color: None, pinned: None });
+        let [w, h] = doc.camera.size_to_world(size);
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: canophy::WorldRect::new(point[0], point[1], w, h), z, space, color: None, pinned: None });
         self.canvas_changed(cx);
         self.refresh_sim(&id, true, window, cx);
         id
@@ -436,7 +436,7 @@ impl AppWindow {
                     let step = if step == "in" { 1.25 } else { 0.8 };
                     ((s.scale().unwrap_or(1.) * step).clamp(0.2, 3.), s.points())
                 }
-                "actual" => (self.canvas_state.doc.camera.zoom, s.live_points()),
+                "actual" => (self.canvas_state.doc.camera.zoom(), s.live_points()),
                 other => return Err(format!("Unknown simulator size {other:?}")),
             };
             let points = points.ok_or("The device size is not known yet")?;
@@ -455,7 +455,7 @@ impl AppWindow {
         let Some(s) = self.canvas_state.sims.get(id).and_then(|v| v.live.as_ref()).map(|s| s.read(cx)) else { return };
         let Some(points) = s.points() else { return };
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
-        let room = device_room(annotate::card_body(pane, self.canvas_state.doc.camera.zoom));
+        let room = device_room(annotate::card_body(pane, self.canvas_state.doc.camera.zoom()));
         let Some(fit) = s.fit(room) else { return };
         self.set_sim_size(id, sim_pane_size(s.outer_points(points), fit.scale));
         self.solve_layout(Some(id), None, cx);
@@ -466,7 +466,7 @@ impl AppWindow {
     fn set_sim_size(&mut self, id: &str, [w, h]: [f32; 2]) {
         let doc = &mut self.canvas_state.doc;
         if let Some(pane) = doc.panes.iter_mut().find(|p| p.id == id) {
-            pane.rect[2..].copy_from_slice(&[w / doc.camera.zoom, h / doc.camera.zoom]);
+            [pane.rect.w, pane.rect.h] = doc.camera.size_to_world([w, h]);
             if let Some(pinned) = &mut pane.pinned { pinned[2..].copy_from_slice(&[w, h]); }
         }
     }
@@ -608,16 +608,16 @@ impl AppWindow {
 
     /// A sim pane's whole body as the canvas card and the panel draw it: the device, Annotate, and
     /// the bottom bar of device actions.
-    pub(super) fn sim_card_body(&self, card: &canvas::Pane, camera: canvas::Camera, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn sim_card_body(&self, card: &canvas::Pane, camera: canophy::Camera, cx: &mut Context<Self>) -> AnyElement {
         let body = self.sim_body(card, cx);
         #[cfg(not(target_os = "macos"))]
         let _ = camera;
         #[cfg(target_os = "macos")]
         if self.has_device_row(card, cx) {
             let body = div().absolute().top_0().left_0().right_0().bottom(px(DEVICE_BAR_ROW)).child(body);
-            let body = self.annotate_body(card, body.into_any_element(), annotate::card_body(card, camera.zoom), cx);
+            let body = self.annotate_body(card, body.into_any_element(), annotate::card_body(card, camera.zoom()), cx);
             return div().relative().size_full().child(body)
-                .when_some(self.sim_bottom_bar(card, camera.zoom, cx), |d, bar| d.child(
+                .when_some(self.sim_bottom_bar(card, camera.zoom(), cx), |d, bar| d.child(
                     div().id("sim-device-controls").absolute().bottom(px(12.)).left_0().right_0()
                         .flex().items_center().overflow_x_scroll()
                         .child(bar.flex_none().map(|mut bar| {

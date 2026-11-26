@@ -10,6 +10,7 @@ mod core_bin;
 mod files;
 mod hc;
 mod keys;
+mod canophy;
 mod canvas;
 mod layout;
 mod layout_sync;
