@@ -374,8 +374,8 @@ automatically. Terminal ids keep core addresses, sub-agent ids are `sub:<parent>
 and file ids are `p<N>`, never reused;
 `canvas_color` in settings.json overrides the theme background (null resets).
 Layouts without a theme use `canopy-dark` or `canopy-light` by appearance. Saved `graphite`/`paper` themes alias `herdr-dark`/`herdr-light`.
-Canvas zoom scales pane content like a picture (terminal grids, PDF pages, web pages and file previews keep their layout); headers and mod panes keep their screen size. Terminal text zoom and PDF page zoom are separate. Hand-edited settings reload live: `canvas_gap` (24, 0..1024 world pixels),
-`tile_gap` (0, tile view cell gap), `tile_focus_grows` (false: equal tiles), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `canvas_resize_terminals` (true: the grid refits to the cell; false keeps it and scales), `space_fill` (0.04, 0..1),
+Canvas zoom scales every pane like a picture, header included: terminal grids, PDF pages, web pages and file previews keep their layout, and zoom never changes a terminal's columns and rows (resizing a pane reflows them once, on release). A mod pane's box and header scale; the mod's own content keeps its screen size. Pinned panes keep their screen size. Terminal text zoom and PDF page zoom are separate. Hand-edited settings reload live: `canvas_gap` (24, 0..1024 world pixels),
+`tile_gap` (0, tile view cell gap), `tile_focus_grows` (false: equal tiles), `canvas_push` ("live", "drop" waiting until release, or "off" so cells overlap), `space_fill` (0.04, 0..1),
 and `terminal_size` ([100, 30], columns 20..500 and rows 5..200 for new expansions).
 They do not appear in Settings. `canopy config` prints all defaults and explanations.
 Browser settings are `browser_keep_cookies` ("until_quit" clears site data at quit and on the next start, or "forever" keeps it on macOS 14 or later) and `browser_open_links` ("built_in" opens clicked HTTP and HTTPS terminal links in a browser tab. "default" uses the system browser).

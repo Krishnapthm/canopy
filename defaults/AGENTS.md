@@ -692,7 +692,6 @@ when there is one); the rest of the file still applies. The corresponding `.erro
 - `run_in_background`: on by default on macOS. Quit hides Canopy; use Quit Canopy from the Canopy menu bar icon to exit. Set it to false in Settings > Look > App to quit normally.
 - `browser_keep_cookies`: "until_quit" (default) clears browser pane cookies and site data at quit and on the next start; "forever" keeps them on macOS 14 or later.
 - `browser_open_links`: "built_in" (initial setting) opens clicked HTTP and HTTPS terminal links in a browser tab. "default" uses the system browser.
-- `canvas_resize_terminals`: true (default) refits a canvas terminal's grid to the cell as it resizes; false keeps the grid and scales it to fit. Settings.json only.
 - `space_fill`: space background opacity (default 0.04, 0..1).
 - `terminal_size`: new expanded cell [columns, rows] (default [100, 30], ranges 20..500 and 5..200).
   These four are hand-edited only, never in Settings.
