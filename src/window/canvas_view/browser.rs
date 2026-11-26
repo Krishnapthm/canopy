@@ -2251,17 +2251,19 @@ impl AppWindow {
 
     /// Give an unpinned browser room to work at 100%, or fit it with a margin.
     pub(super) fn snap_usable(&mut self, id: &str, cx: &mut Context<Self>) {
-        if self.canvas_state.doc.docked(id) { return; }
-        let Some(bounds) = self.bounds.borrow().get("canopy-canvas").copied() else { return };
-        let [w, h] = [f32::from(bounds.size.width), f32::from(bounds.size.height)];
-        if w <= 0. || h <= 0. { return; }
-        let doc = &mut self.canvas_state.doc;
-        let Some(pane) = doc.panes.iter_mut().find(|p| p.id == id && p.pinned.is_none()) else { return };
-        let [x, y, pw, ph] = pane.rect.array();
-        let (pw, ph) = (pw.max(SIZE[0]), ph.max(SIZE[1]));
-        pane.rect = canophy::WorldRect::new(x, y, pw, ph);
-        let zoom = if pw <= w && ph <= h { 1. } else { ((w - canophy::FIT_PAD).max(1.) / pw).min((h - canophy::FIT_PAD).max(1.) / ph) };
-        doc.camera = canophy::Camera::centered([x + pw / 2., y + ph / 2.], [w, h], zoom);
+        let state = &mut self.canvas_state;
+        if state.doc.docked(id) { return; }
+        let view = state.viewport.size;
+        if view[0] <= 0. || view[1] <= 0. { return; }
+        let Some(pane) = state.doc.panes.iter().find(|p| p.id == id && p.pinned.is_none()) else { return };
+        let r = pane.rect;
+        let rect = canophy::WorldRect { w: r.w.max(SIZE[0]), h: r.h.max(SIZE[1]), ..r };
+        state.step(canophy::Intent::Place(vec![(id.to_owned(), rect)]));
+        // The fit, but never past 100%.
+        let mut camera = state.doc.camera;
+        camera.fit(&[rect.array()], view);
+        if camera.zoom() > 1. { camera = canophy::Camera::centered(rect.center().into(), view, 1.); }
+        state.step(canophy::Intent::Camera(camera));
         self.canvas_changed(cx);
         cx.notify();
     }
@@ -2293,22 +2295,21 @@ impl AppWindow {
         self.snap_usable(id, cx);
         let to = self.canvas_state.doc.camera;
         if from == to { return self.open_browser_inspector(id, window, cx); }
-        let bounds = self.bounds.borrow().get("canopy-canvas").copied().ok_or("the canvas is not shown")?;
-        let anchor = [f32::from(bounds.size.width) / 2., f32::from(bounds.size.height) / 2.];
-        self.canvas_state.doc.camera = from;
-        let motion = (from, to, std::time::Instant::now(), anchor);
-        self.canvas_state.motion.target = Some(motion);
+        let anchor = self.canvas_state.viewport.center();
+        self.canvas_state.step(canophy::Intent::Camera(from));
+        let started = std::time::Instant::now();
+        self.canvas_state.motion.camera = canophy::Motion::ease(from, to, anchor, started);
         self.animate_camera(window, cx);
-        self.inspect_after_camera(id.to_owned(), motion.2, to, window, cx);
+        self.inspect_after_camera(id.to_owned(), started, to, window, cx);
         Ok(())
     }
 
     fn inspect_after_camera(&self, id: String, started: std::time::Instant, target: canophy::Camera, window: &Window, cx: &Context<Self>) {
         let entity = cx.entity().downgrade();
         window.on_next_frame(move |window, cx| {
-            let _ = entity.update(cx, |this, cx| match this.canvas_state.motion.target {
-                Some((_, _, time, _)) if time == started => this.inspect_after_camera(id, started, target, window, cx),
-                None if this.canvas_state.doc.camera == target => {
+            let _ = entity.update(cx, |this, cx| match this.canvas_state.motion.camera {
+                canophy::Motion::Easing { start, .. } if start == started => this.inspect_after_camera(id, started, target, window, cx),
+                canophy::Motion::Rested | canophy::Motion::Gesture { .. } if this.canvas_state.doc.camera == target => {
                     if let Err(e) = this.open_browser_inspector(&id, window, cx) {
                         this.command_error("canvas.browser_inspect", &e, window, cx);
                     }
@@ -2322,7 +2323,7 @@ impl AppWindow {
         let camera = self.canvas_state.doc.camera;
         let pinned = self.canvas_state.doc.panes.iter().any(|p| p.id == id && p.pinned.is_some());
         let wake = self.wake_browser_result(id, window, cx);
-        if pinned { self.canvas_state.doc.camera = camera; }
+        if pinned { self.canvas_state.step(canophy::Intent::Camera(camera)); }
         wake?;
         let raw = self.raw_browser(id).ok_or("the browser view went away")?;
         raw.raw().open_devtools();

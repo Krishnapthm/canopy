@@ -9,7 +9,7 @@ impl AppWindow {
             "canvas.pane_pin" => {
                 let id = a["pane"].as_str().map(str::to_owned).or_else(|| self.canvas_state.selected.last().cloned());
                 match id {
-                    Some(id) => self.pin_pane(&id, a["pinned"].as_bool(), false, window, cx).map(|pinned| json!({"pane":id,"pinned":pinned})),
+                    Some(id) => self.pin_pane(&id, a["pinned"].as_bool(), false, cx).map(|pinned| json!({"pane":id,"pinned":pinned})),
                     None => Err("canvas.pane_pin needs pane".into()),
                 }
             }
@@ -95,9 +95,9 @@ impl AppWindow {
         } else {
             (self.add_mod_pane(kind.to_owned(), point, space, cx), None, kind.to_owned())
         };
-        if let Some(before) = before { before.restore(&mut self.canvas_state.doc); }
+        if let Some(before) = before { self.canvas_state.step(canophy::Intent::Restore(before)); }
         match home {
-            Home::Pinned => { self.pin_pane(&id, Some(true), true, window, cx)?; }
+            Home::Pinned => { self.pin_pane(&id, Some(true), true, cx)?; }
             Home::Panel => self.dock_pane(&id, window, cx),
             Home::Canvas if browser_or_sim => self.solve_layout(Some(&id), None, cx),
             Home::Canvas => {}
@@ -131,30 +131,29 @@ impl AppWindow {
     /// Pins a pane (`pin` None toggles) where it shows on screen, or with `corner` at the canvas's
     /// top right, stepped in from panes already pinned there. Unpinning leaves it on the canvas
     /// where it was showing, and the panes around it make room. Returns whether it is pinned.
-    pub(super) fn pin_pane(&mut self, id: &str, pin: Option<bool>, corner: bool, window: &Window, cx: &mut Context<Self>) -> Result<bool, String> {
+    pub(super) fn pin_pane(&mut self, id: &str, pin: Option<bool>, corner: bool, cx: &mut Context<Self>) -> Result<bool, String> {
         const MARGIN: f32 = 16.;
-        let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
-        let size = [f32::from(size.width), f32::from(size.height)];
+        let size = self.canvas_state.viewport.size;
         if self.canvas_state.doc.docked(id) {
             return if pin == Some(false) { Ok(false) } else { Err("Move the pane to the canvas before pinning it".into()) };
         }
-        let doc = &mut self.canvas_state.doc;
+        let doc = &self.canvas_state.doc;
         let camera = doc.camera;
         let stacked = doc.panes.iter().filter(|p| p.pinned.is_some() && p.id != id && doc.shows(p.space.as_ref())).count() as f32 * 24.;
-        let pane = doc.panes.iter_mut().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
+        let pane = doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
         let pin = pin.unwrap_or(pane.pinned.is_none());
         if !pin {
-            pane.pinned = None;
+            self.canvas_state.step(canophy::Intent::Pin { id: id.to_owned(), screen: None });
         } else if pane.pinned.is_none() {
             let [x, y, w, h] = camera.rect_to_screen(pane.rect);
             // It keeps its shape, at most the window's height and (in the corner) 60% of its width.
             let room = if corner { size[0] * 0.6 } else { size[0] - 2. * MARGIN };
             let k = (room / w).min((size[1] - 2. * MARGIN) / h).min(1.);
             let [w, h] = [(w * k).max(240.), (h * k).max(120.)];
-            pane.pinned = Some(if corner { [size[0] - w - MARGIN - stacked, MARGIN + stacked, w, h] } else { [x, y, w, h] });
+            let screen = if corner { [size[0] - w - MARGIN - stacked, MARGIN + stacked, w, h] } else { [x, y, w, h] };
+            self.canvas_state.step(canophy::Intent::Pin { id: id.to_owned(), screen: Some(screen) });
         }
         self.raise_pane(id, cx);
-        self.pin_panes();
         if !pin { self.solve_layout(Some(id), None, cx); }
         self.canvas_changed(cx);
         cx.notify();
@@ -364,10 +363,10 @@ mod tests {
             assert_eq!((s[0] + s[2], s[1]), (f32::from(view.width) - 16., 16.), "flush with the top right margin");
             // Toggling moves it onto the canvas right where it showed, then pins it again there.
             let shown = this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap().rect;
-            assert_eq!(this.pin_pane(&id, None, false, window, cx), Ok(false));
+            assert_eq!(this.pin_pane(&id, None, false, cx), Ok(false));
             let pane = this.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap();
             assert_eq!((pane.pinned, &pane.rect.array()[..2]), (None, &shown.array()[..2]));
-            assert_eq!(this.pin_pane(&id, None, false, window, cx), Ok(true));
+            assert_eq!(this.pin_pane(&id, None, false, cx), Ok(true));
             this.canvas_state.doc.panes.retain(|p| p.id != id);
             // Docked is the default: a panel tab that moves nothing on the canvas, until it moves back.
             let before = rects(this);
@@ -377,7 +376,7 @@ mod tests {
             assert!(this.canvas_state.doc.docked(&did));
             assert_eq!(this.canvas_state.file, Some(canvas::PanelTab::Pane(did.clone())));
             assert_eq!(rects(this).into_iter().filter(|(i, _)| *i != did).collect::<Vec<_>>(), before);
-            assert!(this.pin_pane(&did, Some(true), false, window, cx).is_err());
+            assert!(this.pin_pane(&did, Some(true), false, cx).is_err());
             assert_eq!(this.run_as("canvas.pane_dock", json!({"pane":did,"docked":"false"}), false, window, cx)["error"], "canvas.pane_dock: docked must be a boolean");
             assert!(this.canvas_state.doc.docked(&did));
             // The layout solve leaves a docked pane's saved rect alone, even under another pane.

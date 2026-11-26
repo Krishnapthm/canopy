@@ -1,6 +1,8 @@
 //! The invariants (I-numbers from the plan's Enforcement list) that the pure functions here
 //! promise today. Tests run them after every step; phase 2 runs them in debug builds after
 //! every change. Each returns the first violation it finds.
+// Debug builds call only `document`; the rest serve the tests.
+#![cfg_attr(not(test), allow(dead_code))]
 use super::camera::{Camera, ZOOMS};
 use super::units::{Point, Rect};
 use crate::canvas::Document;
@@ -32,10 +34,11 @@ pub enum Violation {
 fn close(a: f32, b: f32) -> bool { (a - b).abs() <= 1e-3 * a.abs().max(b.abs()).max(1.) }
 fn close2(a: Point, b: Point) -> bool { close(a[0], b[0]) && close(a[1], b[1]) }
 
-/// I1 and I4 over a saved document: every pane rect is finite with an area, and the camera
-/// is finite with its zoom in `ZOOMS` (what `Document::parse` guarantees on load).
+/// I1 and I4 over a document: every pane on the canvas has a finite rect with an area, and the
+/// camera is finite with its zoom in `ZOOMS` (what `Document::parse` guarantees on load). A
+/// docked pane may keep an empty rect until it first comes back to the canvas.
 pub fn document(doc: &Document) -> Result<(), Violation> {
-    for p in &doc.panes {
+    for p in doc.panes.iter().filter(|p| !doc.docked(&p.id)) {
         let r = p.rect.array();
         if !(r.iter().all(|n| n.is_finite()) && r[2] > 0. && r[3] > 0.) {
             return Err(Violation::BadRect { id: p.id.clone(), rect: r });

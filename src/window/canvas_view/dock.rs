@@ -95,7 +95,7 @@ impl AppWindow {
         let center = self.view_center(window);
         let state = &mut self.canvas_state;
         let was_active = state.active_panel_pane() == Some(id);
-        state.doc.undock(id, center);
+        state.step(canophy::Intent::Undock { id: id.to_owned(), center });
         state.panel_expanded = false;
         if was_active { state.file = state.doc.panel.tabs.last().cloned(); }
         self.raise_pane(id, cx);

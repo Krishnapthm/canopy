@@ -5,7 +5,7 @@
 //! terminal is a mod. Commands (commands.rs) are the one way to change
 //! anything: keys, mods, menus and agents all run them.
 
-use crate::{canvas, hc::Core};
+use crate::{canophy, canvas, hc::Core};
 mod floats;
 mod canvas_view;
 pub(crate) use canvas_view::browser::forget_browser_data_if_until_quit;
@@ -2163,7 +2163,7 @@ impl AppWindow {
         if listed { self.refresh_sub_hooks(); }
         self.sync_canvas(window,cx);
         if listed {
-            if self.canvas_state.doc.sync_subs(&self.canvas_state.subs) { self.canvas_changed(cx); }
+            if self.canvas_state.step(canophy::Intent::SyncSubs(canvas::sub_ids(&self.canvas_state.subs))).panes { self.canvas_changed(cx); }
             self.watch_subs(cx);
             cx.notify();
         }
@@ -5124,7 +5124,7 @@ impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_browser_inputs(window, cx);
         self.release_pdf_drops(window, cx);
-        self.pin_panes();
+        self.sync_viewport(window);
         crate::bench::count(&crate::bench::WINDOW);
         let _timed = crate::bench::timed(&crate::bench::WINDOW_US);
         crate::bench::frame_start();

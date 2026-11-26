@@ -54,7 +54,6 @@ pub fn nearest(rects: &[Rect], from: Rect, direction: Point) -> Option<usize> {
 }
 
 pub fn zoom_factor(delta: f32) -> f32 { delta.clamp(-10., 10.).exp() }
-pub fn ease_out(t: f32) -> f32 { 1. - (1. - t.clamp(0., 1.)).powi(3) }
 pub fn friction(dt: f32) -> f32 { 0.92_f32.powf(dt / 0.016) }
 pub fn remember_folder(recent: &mut Vec<String>, folder: &str) {
     if folder.is_empty() { return; }
@@ -68,7 +67,7 @@ pub fn space_at(spaces: &[Space], p: Point) -> Option<&Space> {
     spaces.iter().rev().find(|s| p[0] >= s.rect[0] && p[1] >= s.rect[1] && p[0] <= s.rect[0] + s.rect[2] && p[1] <= s.rect[1] + s.rect[3])
 }
 /// One layout snapshot; restoring ignores deleted objects and leaves new objects alone.
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Rest {
     panes: Vec<(String, Rect)>,
     spaces: Vec<(String, Rect)>,
@@ -886,26 +885,24 @@ impl Document {
         }
     }
     /// Adds labelled children once and drops cells whose labels were cleared.
-    pub fn sync_subs(&mut self, subs: &std::collections::HashMap<String, Vec<crate::subs::Sub>>) -> bool {
+    /// `subs`: each parent terminal with its sub-agent ids (see `sub_ids`).
+    pub fn sync_subs(&mut self, subs: &[(String, Vec<String>)]) -> bool {
         let before = self.panes.len();
+        let has = |parent: &str, sub: &str| subs.iter().any(|(p, ids)| p == parent && ids.iter().any(|id| id == sub));
         self.panes.retain(|c| match &c.kind {
-            Kind::Sub { parent, sub } => subs.get(parent).is_some_and(|children| children.iter().any(|s| &s.id == sub)),
+            Kind::Sub { parent, sub } => has(parent, sub),
             _ => true,
         });
         let mut changed = before != self.panes.len();
-        let mut parents: Vec<_> = subs.keys().collect();
-        parents.sort();
-        for parent in parents {
+        for (parent, children) in subs {
             let Some((rect, space)) = self.panes.iter().find(|c| c.terminal() == Some(parent.as_str())).map(|c| (c.rect.array(), c.space.clone())) else { continue };
-            let mut children: Vec<_> = subs[parent].iter().collect();
-            children.sort_by_key(|s| &s.id);
             for sub in children {
-                if self.panes.iter().any(|c| matches!(&c.kind, Kind::Sub { parent: p, sub: id } if p == parent && id == &sub.id)) { continue; }
+                if self.panes.iter().any(|c| matches!(&c.kind, Kind::Sub { parent: p, sub: id } if p == parent && id == sub)) { continue; }
                 let siblings: Vec<_> = self.panes.iter().filter(|c| matches!(&c.kind, Kind::Sub { parent: p, .. } if p == parent)).map(|c| c.rect.array()).collect();
                 let z = self.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
                 let child = child_position(rect, &siblings, [PILL_WIDTH, 36.]);
                 // The cell belongs to its parent's space.
-                self.panes.push(Pane { id: format!("sub:{parent}:{}", sub.id), kind: Kind::Sub { parent: parent.clone(), sub: sub.id.clone() }, rect: child.into(), z, space: space.clone(), color: None, pinned: None });
+                self.panes.push(Pane { id: format!("sub:{parent}:{sub}"), kind: Kind::Sub { parent: parent.clone(), sub: sub.clone() }, rect: child.into(), z, space: space.clone(), color: None, pinned: None });
                 changed = true;
             }
         }
@@ -1004,6 +1001,17 @@ pub fn unused_color(spaces: &[Space], seed: usize) -> Hue {
     }
 }
 
+
+/// Each parent terminal with its sub-agent ids, both sorted, as `Document::sync_subs` takes them.
+pub fn sub_ids(subs: &std::collections::HashMap<String, Vec<crate::subs::Sub>>) -> Vec<(String, Vec<String>)> {
+    let mut out: Vec<_> = subs.iter().map(|(p, s)| {
+        let mut ids: Vec<_> = s.iter().map(|s| s.id.clone()).collect();
+        ids.sort();
+        (p.clone(), ids)
+    }).collect();
+    out.sort();
+    out
+}
 
 pub fn view_allows(view: &View, agent: bool) -> bool {
     match view {
@@ -1645,7 +1653,7 @@ mod motion_tests {
     #[test]
     fn motion_math() {
         assert!((zoom_factor(2_f32.ln()) - 2.).abs() < 0.0001);
-        assert_eq!(ease_out(0.), 0.); assert_eq!(ease_out(1.), 1.);
+        assert_eq!(crate::canophy::motion::ease_out(0.), 0.); assert_eq!(crate::canophy::motion::ease_out(1.), 1.);
         assert!((friction(0.032) - friction(0.016).powi(2)).abs() < 0.0001);
         let mut c = Camera::default(); let anchor = [142., 91.];
         let world = c.to_world(anchor); c.zoom_at(1.037, anchor);
@@ -1676,13 +1684,13 @@ mod cell_tests {
         assert_eq!(doc.panes[0].id, "t1");
         let mut subs = HashMap::from([("t1".into(), vec![crate::subs::Sub { id:"a".into(), name:"task".into(), program:serde_json::Value::Null, transcript:None, done:false }])]);
         doc.spaces.push(Space { space: "s".into(), rect: [-24., -24., 368., 84.], color: Hue::Gray, frame: true });
-        assert!(doc.sync_subs(&subs));
+        assert!(doc.sync_subs(&sub_ids(&subs)));
         assert_eq!(doc.panes.len(), 2);
         assert_eq!(doc.panes[1].space, doc.panes[0].space, "a sub cell lives in its parent's space");
         let key = doc.panes[1].id.clone();
         doc.place(&key, [600., 200.], [320., 36.]);
         subs.get_mut("t1").unwrap()[0].done = true;
-        assert!(!doc.sync_subs(&subs));
+        assert!(!doc.sync_subs(&sub_ids(&subs)));
         assert_eq!(&doc.panes[1].rect.array()[..2], &[600., 200.]);
         let saved = serde_json::to_value(&doc).unwrap();
         assert_eq!(saved["panes"][1]["props"]["sub"], "a");
@@ -1691,7 +1699,7 @@ mod cell_tests {
         let mut loaded: Document = serde_json::from_value(saved).unwrap();
         assert_eq!(loaded.panes[1].id.clone(), key);
         subs.clear();
-        assert!(loaded.sync_subs(&subs));
+        assert!(loaded.sync_subs(&sub_ids(&subs)));
         assert_eq!(loaded.panes.len(), 1);
     }
     #[test]

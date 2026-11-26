@@ -464,11 +464,12 @@ impl AppWindow {
 
     #[cfg(target_os = "macos")]
     fn set_sim_size(&mut self, id: &str, [w, h]: [f32; 2]) {
-        let doc = &mut self.canvas_state.doc;
-        if let Some(pane) = doc.panes.iter_mut().find(|p| p.id == id) {
-            [pane.rect.w, pane.rect.h] = doc.camera.size_to_world([w, h]);
-            if let Some(pinned) = &mut pane.pinned { pinned[2..].copy_from_slice(&[w, h]); }
-        }
+        let state = &mut self.canvas_state;
+        let Some(pane) = state.doc.panes.iter().find(|p| p.id == id) else { return };
+        let [ww, wh] = state.doc.camera.size_to_world([w, h]);
+        let (rect, pinned) = (canophy::WorldRect { w: ww, h: wh, ..pane.rect }, pane.pinned);
+        state.step(canophy::Intent::Place(vec![(id.to_owned(), rect)]));
+        if let Some([x, y, ..]) = pinned { state.step(canophy::Intent::Pin { id: id.to_owned(), screen: Some([x, y, w, h]) }); }
     }
 
     /// Pops a sim pane's device out into its own window, or brings it back.

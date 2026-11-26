@@ -15,9 +15,10 @@
 //!    the person opens is revealed (`camera`).
 //! 5. **check**: in debug builds the invariants in `check` hold.
 //!
-//! Phase 1 (this module today) holds the types, the camera, the per-kind traits, the pure
-//! placement rules and the invariants. The single `step` entry point that runs the laws in
-//! order comes in phase 2; until then callers in the window still call the rules directly.
+//! Every camera and pane-geometry change goes through `step(doc, Intent, &Viewport)`, which runs
+//! steps 1, 2, 4 and 5 in that order. Push (step 3) needs each pill's measured size, so the
+//! window runs it right after `step` (`solve_layout`), before anything reads the result.
+//! Camera motion over time (eases, gestures) is one `Motion` value; time is passed in.
 //!
 //! # Spaces
 //!
@@ -25,16 +26,19 @@
 //! converts between them, and its fields are private so no caller does zoom math by hand.
 
 pub mod camera;
-// shortcut: tests are its only caller, until phase 2 runs it after every step in debug builds.
-#[cfg(test)]
+#[cfg(any(test, debug_assertions))]
 pub mod check;
+pub mod motion;
 pub mod rules;
+pub mod step;
 pub mod traits;
 pub mod units;
 #[cfg(test)]
 mod tests;
 
-pub use camera::{Camera, FIT_PAD, focus_fit, reveal, visible, widen, zoom_range};
-pub use rules::{arrange, cascade, child_position, free_spot, resize_from, solve, tile};
+pub use camera::{Camera, focus_fit, reveal, visible, widen, zoom_range};
+pub use rules::{arrange, cascade, child_position, free_spot, solve, tile};
+pub use motion::Motion;
+pub use step::{Effects, Intent, Viewport, derive_pinned, step};
 pub use traits::traits;
 pub use units::{Point, Rect, WorldRect, WorldSize, intersects, union};
