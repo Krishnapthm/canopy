@@ -3,7 +3,9 @@
 use super::camera::{Camera, ZOOMS, focus_fit, reveal, visible, widen, zoom_range};
 use super::rules::*;
 use super::check::{self, Violation};
+use super::step::{Intent, Viewport, step};
 use super::units::{Point, Rect};
+use crate::canvas::{Document, Kind, Pane};
 use proptest::prelude::*;
 
 /// The gap the layout tests leave between panes.
@@ -292,7 +294,7 @@ fn a_saved_canvas_round_trips_byte_for_byte() {
     assert_eq!(serde_json::to_string_pretty(&doc).unwrap(), SAVED.trim_end());
 }
 
-/// One action on the canvas, as the window would run it through the rules.
+/// One action on the canvas, as the window would run it through `step`.
 #[derive(Clone, Debug)]
 enum Op {
     Pan(Point),
@@ -304,86 +306,122 @@ enum Op {
     Resize(usize, (i8, i8), Point),
     Arrange(&'static str),
     Tile(usize, Option<usize>),
+    Pin(usize, Option<Rect>),
+    Resized(Point),
 }
 
-/// The canvas the operations act on: panes (world rects) and a camera over a fixed window.
-#[derive(Clone, Debug, PartialEq)]
-struct World {
-    rects: Vec<Rect>,
-    camera: Camera,
-}
-
-const VIEWPORT: Point = [1200., 800.];
 const MIN: Point = [240., 120.];
 
-/// Applies `op` the way the window does, then checks every invariant that applies to it.
-fn apply(world: &mut World, op: &Op) -> Result<(), Violation> {
-    let before = world.clone();
-    let n = world.rects.len();
-    let range = widen(zoom_range(&world.rects, VIEWPORT), world.camera.zoom());
+/// A canvas of file panes (one per rect; the first `pinned` of them pinned) in a viewport.
+fn world(rects: &[Rect], view: Point) -> (Document, Viewport) {
+    let mut doc = Document::default();
+    for (i, r) in rects.iter().enumerate() {
+        doc.panes.push(Pane { id: format!("p{i}"), kind: Kind::File { path: format!("/{i}.md") }, rect: (*r).into(), z: i as u64, space: None, color: None, pinned: None });
+    }
+    (doc, Viewport::whole(view))
+}
+
+/// The canvas rects (pinned panes left out: they float over it).
+fn rects(doc: &Document) -> Vec<Rect> { doc.panes.iter().filter(|p| p.pinned.is_none()).map(|p| p.rect.array()).collect() }
+fn screens(doc: &Document) -> Vec<Option<Rect>> { doc.panes.iter().map(|p| p.pinned).collect() }
+fn ids(doc: &Document) -> Vec<String> { doc.panes.iter().map(|p| p.id.clone()).collect() }
+
+/// After a push the window places what `solve` returned, pinning the pane `i` moved.
+fn push(doc: &mut Document, view: &Viewport, i: usize) -> Result<(), Violation> {
+    let free: Vec<usize> = (0..doc.panes.len()).filter(|j| doc.panes[*j].pinned.is_none()).collect();
+    let Some(at) = free.iter().position(|j| *j == i) else { return Ok(()) };
+    let rs = rects(doc);
+    let solved = solve(&rs, at, rs[at], GAP, |_| false);
+    check::apart(&solved, GAP)?;
+    let places = free.iter().zip(&solved).map(|(j, r)| (doc.panes[*j].id.clone(), (*r).into())).collect();
+    step(doc, Intent::Place(places), view);
+    Ok(())
+}
+
+/// Applies `op` through `step` the way the window does, then checks every invariant that applies.
+fn apply(doc: &mut Document, view: &mut Viewport, op: &Op) -> Result<(), Violation> {
+    let (before, pinned_before) = (doc.camera, screens(doc));
+    let (n, free) = (doc.panes.len(), rects(doc));
+    let range = widen(zoom_range(&free, view.size), doc.camera.zoom());
+    let rects_before = rects(doc);
     match *op {
-        Op::Pan(d) => world.camera.pan(d),
-        Op::ZoomAt(z, anchor) => {
-            world.camera.zoom_at(z.clamp(range[0], range[1]), anchor);
-            check::anchored(before.camera, world.camera, anchor)?;
+        Op::Pan(d) => { step(doc, Intent::Pan(d), view); }
+        Op::ZoomAt(zoom, anchor) => {
+            step(doc, Intent::ZoomAt { zoom, anchor, range }, view);
+            check::anchored(before, doc.camera, anchor)?;
         }
         Op::Step(up, anchor) => {
-            world.camera.step(if up { 1 } else { -1 }, anchor, range);
-            check::zoom(world.camera, range)?;
-            check::anchored(before.camera, world.camera, anchor)?;
+            // The window eases to this target; the last frame is an exact `Camera` intent.
+            let mut to = doc.camera;
+            to.step(if up { 1 } else { -1 }, anchor, range);
+            step(doc, Intent::Camera(to), view);
+            check::zoom(doc.camera, range)?;
+            check::anchored(before, doc.camera, anchor)?;
         }
         Op::Fit => {
-            world.camera.fit(&world.rects, VIEWPORT);
-            check::revealed(world.camera, super::units::union(&world.rects).unwrap(), VIEWPORT)?;
+            let mut to = doc.camera;
+            to.fit(&free, view.size);
+            step(doc, Intent::Camera(to), view);
+            if let Some(all) = super::units::union(&free) { check::revealed(doc.camera, all, view.size)?; }
         }
         Op::Reveal(i) => {
-            let rect = world.rects[i % n];
-            if let Some(to) = reveal(world.camera, rect, VIEWPORT) { world.camera = to; }
-            check::revealed(world.camera, rect, VIEWPORT)?;
+            if let Some(rect) = free.get(i % free.len().max(1)).copied() {
+                if let Some(to) = reveal(doc.camera, rect, view.size) { step(doc, Intent::Camera(to), view); }
+                check::revealed(doc.camera, rect, view.size)?;
+            }
         }
         Op::Move(i, d) => {
             let i = i % n;
-            let r = world.rects[i];
-            world.rects = solve(&world.rects, i, [r[0] + d[0], r[1] + d[1], r[2], r[3]], GAP, |_| false);
-            check::apart(&world.rects, GAP)?;
+            step(doc, Intent::Move { ids: vec![doc.panes[i].id.clone()], world: d, screen: d }, view);
+            push(doc, view, i)?;
         }
         Op::Resize(i, zone, d) => {
             let i = i % n;
-            let r = world.rects[i];
-            let (o, s) = resize_from([r[0], r[1]], [r[2], r[3]], zone, d, MIN);
-            check::at_least(s, MIN)?;
-            world.rects = solve(&world.rects, i, [o[0], o[1], s[0], s[1]], GAP, |_| false);
-            check::apart(&world.rects, GAP)?;
+            step(doc, Intent::Resize { id: doc.panes[i].id.clone(), zone, world: d, screen: d }, view);
+            let p = &doc.panes[i];
+            check::at_least(p.pinned.map_or([p.rect.w, p.rect.h], |s| [s[2], s[3]]), MIN)?;
+            push(doc, view, i)?;
         }
         Op::Arrange(layout) => {
-            world.rects = arrange(&world.rects, &vec![None; n], &[], layout);
-            check::apart(&world.rects, crate::settings::get().canvas_gap)?;
+            let free_ids: Vec<_> = doc.panes.iter().filter(|p| p.pinned.is_none()).map(|p| p.id.clone()).collect();
+            let out = arrange(&free, &vec![None; free.len()], &[], layout);
+            check::apart(&out, crate::settings::get().canvas_gap)?;
+            step(doc, Intent::Place(free_ids.into_iter().zip(out.into_iter().map(Into::into)).collect()), view);
         }
         Op::Tile(tiles, active) => {
-            // Tile view lays out a picture of the panes; the document keeps its rects.
-            let area = [0., 0., VIEWPORT[0], VIEWPORT[1]];
-            let (out, _) = tile(area, tiles, active.filter(|a| *a < tiles), &[], GAP);
+            // Tile view lays out a picture of the panes; the check is on the picture.
+            let (out, _) = tile(view.open, tiles, active.filter(|a| *a < tiles), &[], GAP);
             check::apart(&out, GAP)?;
         }
-    }
-    // I12: camera-only actions never touch panes.
-    if matches!(op, Op::Pan(_) | Op::ZoomAt(..) | Op::Step(..) | Op::Fit | Op::Reveal(_) | Op::Tile(..)) {
-        check::untouched(&before.rects, &world.rects)?;
-    }
-    for r in &world.rects {
-        if !(r.iter().all(|v| v.is_finite()) && r[2] > 0. && r[3] > 0.) {
-            return Err(Violation::BadRect { id: String::new(), rect: *r });
+        Op::Pin(i, screen) => { step(doc, Intent::Pin { id: doc.panes[i % n].id.clone(), screen }, view); }
+        Op::Resized(size) => {
+            *view = Viewport::whole(size);
+            step(doc, Intent::ViewportChanged, view);
         }
     }
-    check::zoom(world.camera, [ZOOMS[0], ZOOMS[11]])?;
-    let r = world.rects[0];
-    check::round_trip(world.camera, [r[0] + r[2] / 2., r[1] + r[3] / 2.])
+    // I12: camera-only actions never touch panes on the canvas.
+    if matches!(op, Op::Pan(_) | Op::ZoomAt(..) | Op::Step(..) | Op::Fit | Op::Reveal(_) | Op::Tile(..) | Op::Resized(_)) {
+        check::untouched(&rects_before, &rects(doc))?;
+        // I10: pinned panes keep their screen rect while the camera moves.
+        if screens(doc) != pinned_before { return Err(Violation::PanesMoved); }
+        // Each is drawn at its saved spot, pulled inside the viewport.
+        for p in doc.panes.iter().filter(|p| p.pinned.is_some()) {
+            let [x, y, w, h] = p.pinned.unwrap();
+            let want = [x.min(view.size[0] - w).max(0.), y.min(view.size[1] - h).max(0.)];
+            let drawn = doc.camera.rect_to_screen(p.rect);
+            if (drawn[0] - want[0]).abs() > 0.5 || (drawn[1] - want[1]).abs() > 0.5 { return Err(Violation::PanesMoved); }
+        }
+    }
+    check::document(doc)?;
+    let r = doc.panes[0].rect;
+    check::round_trip(doc.camera, [r.x + r.w / 2., r.y + r.h / 2.])
 }
 
 fn op() -> impl Strategy<Value = Op> {
     let point = || (-1500f32..1500., -1500f32..1500.).prop_map(|(x, y)| [x, y]);
-    let screen = || (0f32..VIEWPORT[0], 0f32..VIEWPORT[1]).prop_map(|(x, y)| [x, y]);
+    let screen = || (0f32..1200., 0f32..800.).prop_map(|(x, y)| [x, y]);
     let zone = prop_oneof![Just((-1, -1)), Just((0, -1)), Just((1, -1)), Just((-1, 0)), Just((1, 0)), Just((-1, 1)), Just((0, 1)), Just((1, 1))];
+    let pin = proptest::option::of((0f32..900., 0f32..600., MIN[0]..600., MIN[1]..500.).prop_map(|(x, y, w, h)| [x, y, w, h]));
     prop_oneof![
         point().prop_map(Op::Pan),
         (ZOOMS[0]..=ZOOMS[11], screen()).prop_map(|(z, a)| Op::ZoomAt(z, a)),
@@ -394,6 +432,8 @@ fn op() -> impl Strategy<Value = Op> {
         (0usize..16, zone, point()).prop_map(|(i, z, d)| Op::Resize(i, z, d)),
         prop_oneof![Just("tidy"), Just("row"), Just("column")].prop_map(Op::Arrange),
         (0usize..10, proptest::option::of(0usize..10)).prop_map(|(n, a)| Op::Tile(n, a)),
+        (0usize..16, pin).prop_map(|(i, s)| Op::Pin(i, s)),
+        (400f32..2400., 300f32..1400.).prop_map(|(w, h)| Op::Resized([w, h])),
     ]
 }
 
@@ -401,22 +441,45 @@ fn rect() -> impl Strategy<Value = Rect> {
     (-2000f32..2000., -2000f32..2000., MIN[0]..1200., MIN[1]..900.).prop_map(|(x, y, w, h)| [x, y, w, h])
 }
 
-/// Runs `ops` from `rects`, stopping at the first broken invariant.
-fn run(rects: &[Rect], ops: &[Op]) -> Result<World, (usize, Violation)> {
-    let mut world = World { rects: rects.to_vec(), camera: Camera::default() };
-    for (step, op) in ops.iter().enumerate() {
-        apply(&mut world, op).map_err(|v| (step, v))?;
+/// Runs `ops` from `rects`, stopping at the first broken invariant. Returns what a replay
+/// must reproduce: the pane ids, rects, pinned screen rects and camera.
+fn run(rects: &[Rect], ops: &[Op]) -> Result<(Vec<String>, Vec<Rect>, Vec<Option<Rect>>, Camera), (usize, Violation)> {
+    let (mut doc, mut view) = world(rects, [1200., 800.]);
+    for (i, op) in ops.iter().enumerate() {
+        apply(&mut doc, &mut view, op).map_err(|v| (i, v))?;
     }
-    Ok(world)
+    Ok((ids(&doc), doc.panes.iter().map(|p| p.rect.array()).collect(), screens(&doc), doc.camera))
 }
 
 proptest! {
-    /// Random action sequences keep every invariant after every step (I1, I3, I4, I7, I8, I9,
-    /// I12) and replay to the same canvas (I13). `PROPTEST_CASES=5000` runs a deeper search.
+    /// Random action sequences through `step` keep every invariant after every step (I1, I3,
+    /// I4, I7, I8, I9, I10, I12) and replay to the same canvas (I13). `PROPTEST_CASES=5000`
+    /// runs a deeper search.
     #[test]
     fn invariants_hold_after_any_sequence(rects in proptest::collection::vec(rect(), 1..8), ops in proptest::collection::vec(op(), 0..200)) {
         let first = run(&rects, &ops);
         prop_assert!(first.is_ok(), "{:?}", first.as_ref().err());
         prop_assert_eq!(first, run(&rects, &ops));
     }
+}
+
+#[test]
+fn a_viewport_change_keeps_a_pinned_pane_inside_the_window() {
+    let (mut doc, view) = world(&[[0., 0., 300., 200.]], [1200., 800.]);
+    step(&mut doc, Intent::Pin { id: "p0".into(), screen: Some([1000., 16., 180., 300.]) }, &view);
+    let drawn = |doc: &Document| doc.camera.rect_to_screen(doc.panes[0].rect);
+    assert_eq!(drawn(&doc)[0], 1000.);
+    step(&mut doc, Intent::Pan([300., 40.]), &view);
+    assert_eq!(drawn(&doc)[..2], [1000., 16.], "pan leaves it where it sits on screen");
+    let narrow = Viewport::whole([900., 800.]);
+    step(&mut doc, Intent::ViewportChanged, &narrow);
+    assert_eq!(drawn(&doc)[0], 720., "a narrower window keeps it whole on screen");
+    assert_eq!(doc.panes[0].pinned, Some([1000., 16., 180., 300.]), "its saved spot is kept");
+}
+
+#[test]
+fn resize_never_shrinks_a_pane_below_its_kind() {
+    let (mut doc, view) = world(&[[0., 0., 300., 200.]], [1200., 800.]);
+    step(&mut doc, Intent::Resize { id: "p0".into(), zone: (1, 1), world: [-1000., -1000.], screen: [0., 0.] }, &view);
+    assert_eq!([doc.panes[0].rect.w, doc.panes[0].rect.h], MIN);
 }
