@@ -1,7 +1,10 @@
-//! Tests for canophy: the unit laws of each rule.
+//! Tests for canophy: the unit laws of each rule, then the invariants checked after random
+//! operation sequences.
 use super::camera::{Camera, ZOOMS, focus_fit, reveal, visible, widen, zoom_range};
 use super::rules::*;
-use super::units::Rect;
+use super::check::{self, Violation};
+use super::units::{Point, Rect};
+use proptest::prelude::*;
 
 /// The gap the layout tests leave between panes.
 const GAP: f32 = 24.;
@@ -258,4 +261,162 @@ fn every_edge_and_corner_moves_only_its_own_sides() {
     }
     // Shrinking past the minimum stops there, and the right/bottom edge stays put.
     assert_eq!(resize_from(o, s, (-1, -1), [1000., 1000.], min), ([450., 350.], [50., 50.]));
+}
+
+#[test]
+fn traits_keep_the_sizes_the_app_used() {
+    use super::traits::{Content, traits};
+    use crate::canvas::{Kind, header_height};
+    let browser = Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None };
+    let note = Kind::Mod { kind: "mod:note".into(), props: Default::default() };
+    let file = Kind::File { path: "/a.md".into() };
+    let terminal = Kind::Terminal { size: None };
+    assert_eq!(<[f32; 2]>::from(traits(&terminal).min), [330., 108.]);
+    assert_eq!(<[f32; 2]>::from(traits(&file).min), [240., 120.]);
+    assert_eq!(<[f32; 2]>::from(traits(&browser).default), [960., 680.]);
+    assert_eq!(<[f32; 2]>::from(traits(&Kind::Sim { udid: String::new() }).default), [340., 700.]);
+    assert_eq!(<[f32; 2]>::from(traits(&Kind::Pdf { path: String::new(), highlights: vec![] }).default), [560., 720.]);
+    assert_eq!(<[f32; 2]>::from(traits(&note).default), [320., 240.]);
+    assert_eq!((header_height(&browser), header_height(&note), header_height(&file)), (66., 0., 36.));
+    assert_eq!((traits(&terminal).content, traits(&browser).dockable, traits(&file).dockable), (Content::Grid, true, false));
+}
+
+/// A saved canvas with every pane kind, in the exact bytes `Document::save` writes.
+const SAVED: &str = include_str!("canvas.fixture.json");
+
+#[test]
+fn a_saved_canvas_round_trips_byte_for_byte() {
+    let doc = crate::canvas::Document::parse(SAVED.as_bytes()).unwrap().unwrap();
+    assert_eq!(doc.panes.len(), 8, "every kind is in the fixture");
+    check::document(&doc).unwrap();
+    assert_eq!(serde_json::to_string_pretty(&doc).unwrap(), SAVED.trim_end());
+}
+
+/// One action on the canvas, as the window would run it through the rules.
+#[derive(Clone, Debug)]
+enum Op {
+    Pan(Point),
+    ZoomAt(f32, Point),
+    Step(bool, Point),
+    Fit,
+    Reveal(usize),
+    Move(usize, Point),
+    Resize(usize, (i8, i8), Point),
+    Arrange(&'static str),
+    Tile(usize, Option<usize>),
+}
+
+/// The canvas the operations act on: panes (world rects) and a camera over a fixed window.
+#[derive(Clone, Debug, PartialEq)]
+struct World {
+    rects: Vec<Rect>,
+    camera: Camera,
+}
+
+const VIEWPORT: Point = [1200., 800.];
+const MIN: Point = [240., 120.];
+
+/// Applies `op` the way the window does, then checks every invariant that applies to it.
+fn apply(world: &mut World, op: &Op) -> Result<(), Violation> {
+    let before = world.clone();
+    let n = world.rects.len();
+    let range = widen(zoom_range(&world.rects, VIEWPORT), world.camera.zoom());
+    match *op {
+        Op::Pan(d) => world.camera.pan(d),
+        Op::ZoomAt(z, anchor) => {
+            world.camera.zoom_at(z.clamp(range[0], range[1]), anchor);
+            check::anchored(before.camera, world.camera, anchor)?;
+        }
+        Op::Step(up, anchor) => {
+            world.camera.step(if up { 1 } else { -1 }, anchor, range);
+            check::zoom(world.camera, range)?;
+            check::anchored(before.camera, world.camera, anchor)?;
+        }
+        Op::Fit => {
+            world.camera.fit(&world.rects, VIEWPORT);
+            check::revealed(world.camera, super::units::union(&world.rects).unwrap(), VIEWPORT)?;
+        }
+        Op::Reveal(i) => {
+            let rect = world.rects[i % n];
+            if let Some(to) = reveal(world.camera, rect, VIEWPORT) { world.camera = to; }
+            check::revealed(world.camera, rect, VIEWPORT)?;
+        }
+        Op::Move(i, d) => {
+            let i = i % n;
+            let r = world.rects[i];
+            world.rects = solve(&world.rects, i, [r[0] + d[0], r[1] + d[1], r[2], r[3]], GAP, |_| false);
+            check::apart(&world.rects, GAP)?;
+        }
+        Op::Resize(i, zone, d) => {
+            let i = i % n;
+            let r = world.rects[i];
+            let (o, s) = resize_from([r[0], r[1]], [r[2], r[3]], zone, d, MIN);
+            check::at_least(s, MIN)?;
+            world.rects = solve(&world.rects, i, [o[0], o[1], s[0], s[1]], GAP, |_| false);
+            check::apart(&world.rects, GAP)?;
+        }
+        Op::Arrange(layout) => {
+            world.rects = arrange(&world.rects, &vec![None; n], &[], layout);
+            check::apart(&world.rects, crate::settings::get().canvas_gap)?;
+        }
+        Op::Tile(tiles, active) => {
+            // Tile view lays out a picture of the panes; the document keeps its rects.
+            let area = [0., 0., VIEWPORT[0], VIEWPORT[1]];
+            let (out, _) = tile(area, tiles, active.filter(|a| *a < tiles), &[], GAP);
+            check::apart(&out, GAP)?;
+        }
+    }
+    // I12: camera-only actions never touch panes.
+    if matches!(op, Op::Pan(_) | Op::ZoomAt(..) | Op::Step(..) | Op::Fit | Op::Reveal(_) | Op::Tile(..)) {
+        check::untouched(&before.rects, &world.rects)?;
+    }
+    for r in &world.rects {
+        if !(r.iter().all(|v| v.is_finite()) && r[2] > 0. && r[3] > 0.) {
+            return Err(Violation::BadRect { id: String::new(), rect: *r });
+        }
+    }
+    check::zoom(world.camera, [ZOOMS[0], ZOOMS[11]])?;
+    let r = world.rects[0];
+    check::round_trip(world.camera, [r[0] + r[2] / 2., r[1] + r[3] / 2.])
+}
+
+fn op() -> impl Strategy<Value = Op> {
+    let point = || (-1500f32..1500., -1500f32..1500.).prop_map(|(x, y)| [x, y]);
+    let screen = || (0f32..VIEWPORT[0], 0f32..VIEWPORT[1]).prop_map(|(x, y)| [x, y]);
+    let zone = prop_oneof![Just((-1, -1)), Just((0, -1)), Just((1, -1)), Just((-1, 0)), Just((1, 0)), Just((-1, 1)), Just((0, 1)), Just((1, 1))];
+    prop_oneof![
+        point().prop_map(Op::Pan),
+        (ZOOMS[0]..=ZOOMS[11], screen()).prop_map(|(z, a)| Op::ZoomAt(z, a)),
+        (any::<bool>(), screen()).prop_map(|(up, a)| Op::Step(up, a)),
+        Just(Op::Fit),
+        (0usize..16).prop_map(Op::Reveal),
+        (0usize..16, point()).prop_map(|(i, d)| Op::Move(i, d)),
+        (0usize..16, zone, point()).prop_map(|(i, z, d)| Op::Resize(i, z, d)),
+        prop_oneof![Just("tidy"), Just("row"), Just("column")].prop_map(Op::Arrange),
+        (0usize..10, proptest::option::of(0usize..10)).prop_map(|(n, a)| Op::Tile(n, a)),
+    ]
+}
+
+fn rect() -> impl Strategy<Value = Rect> {
+    (-2000f32..2000., -2000f32..2000., MIN[0]..1200., MIN[1]..900.).prop_map(|(x, y, w, h)| [x, y, w, h])
+}
+
+/// Runs `ops` from `rects`, stopping at the first broken invariant.
+fn run(rects: &[Rect], ops: &[Op]) -> Result<World, (usize, Violation)> {
+    let mut world = World { rects: rects.to_vec(), camera: Camera::default() };
+    for (step, op) in ops.iter().enumerate() {
+        apply(&mut world, op).map_err(|v| (step, v))?;
+    }
+    Ok(world)
+}
+
+proptest! {
+    /// Random action sequences keep every invariant after every step (I1, I3, I4, I7, I8, I9,
+    /// I12) and replay to the same canvas (I13). `PROPTEST_CASES=5000` runs a deeper search.
+    #[test]
+    fn invariants_hold_after_any_sequence(rects in proptest::collection::vec(rect(), 1..8), ops in proptest::collection::vec(op(), 0..200)) {
+        let first = run(&rects, &ops);
+        prop_assert!(first.is_ok(), "{:?}", first.as_ref().err());
+        prop_assert_eq!(first, run(&rects, &ops));
+    }
 }
