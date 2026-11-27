@@ -1,4 +1,4 @@
-//! The Annotate tool shared by browser and simulator panes: a still, marks and numbered comments.
+//! Browser and simulator annotations retain their still, marks and pinned comments when closed.
 use super::*;
 use std::fmt::Write as _;
 
@@ -55,6 +55,13 @@ pub(super) enum Action {
     Edit { original: usize, comment: Option<Comment> },
 }
 
+enum Mode { Annotating, Kept }
+
+enum Phase { Live, Refreshing, Still, Composing(Draft), Sending(Outgoing) }
+
+#[derive(Debug, PartialEq, Eq)]
+enum SendState { Hidden, Disabled(&'static str), Ready(String) }
+
 pub(super) struct Annotate {
     pub pane: String,
     pub host: Host,
@@ -66,22 +73,20 @@ pub(super) struct Annotate {
     pub tool: Tool,
     pub color: Color,
     pub width: f32,
-    pub live: bool,
+    mode: Mode,
+    phase: Phase,
     drag: Option<Gesture>,
-    pub editing: Option<usize>,
-    draft: Option<Draft>,
     measured: HashMap<String, Option<Rect>>,
     focus: FocusHandle,
     session: Rc<()>,
     was_live: bool,
-    refreshing: bool,
     hint: bool,
     /// The agent the person picked next to the Annotate button; unused while exactly one is wired.
     target: Option<String>,
     /// The element under the pointer while Select is active: its page box and short name.
     hover: Option<(Rect, String)>,
     probe: Probe,
-    confirming: Option<String>,
+    /// Prepared screenshot retained for a retry after delivery fails.
     outgoing: Option<Outgoing>,
     #[cfg(target_os = "macos")]
     held: Option<Held>,
@@ -127,6 +132,7 @@ enum DraftKind {
 /// The open composer holds the draft text and the anchor for its inline actions.
 struct Draft {
     at: Pos,
+    editing: Option<usize>,
     kind: DraftKind,
     input: Entity<gpui_base::input::TextareaState>,
     _enter: Subscription,
@@ -136,7 +142,6 @@ struct Draft {
 pub(super) struct Outgoing {
     pub text: String,
     pub images: Vec<String>,
-    pub sending: bool,
 }
 
 enum Item<'a> {
@@ -145,6 +150,12 @@ enum Item<'a> {
 }
 
 impl Annotate {
+    pub(super) fn annotating(&self) -> bool { matches!(self.mode, Mode::Annotating) }
+
+    pub(super) fn shows_still(&self) -> bool {
+        self.annotating() && !matches!(self.phase, Phase::Live)
+    }
+
     fn items(&self) -> Vec<Item<'_>> {
         let mut items = Vec::new();
         for (id, action) in self.done.iter().enumerate() {
@@ -182,10 +193,27 @@ impl Annotate {
         }
     }
 
+    fn send_state(&self, recipient: impl FnOnce() -> Option<String>) -> SendState {
+        if self.items().is_empty() { return SendState::Hidden; }
+        match &self.phase {
+            Phase::Live | Phase::Refreshing => SendState::Disabled("Waiting for the page"),
+            Phase::Composing(_) => SendState::Disabled("Finish the comment"),
+            Phase::Sending(_) => SendState::Disabled("Sending"),
+            Phase::Still => match recipient() {
+                Some(addr) => SendState::Ready(addr),
+                None => SendState::Disabled("Wire or pick an agent"),
+            },
+        }
+    }
+
+    fn pin_position(&self, [x, y, ..]: Rect) -> Pos {
+        [x.clamp(0., self.page_size[0]), y.clamp(0., self.page_size[1])]
+    }
+
     fn anchor_rects(&self, anchor: &Anchor) -> Vec<Rect> {
         match anchor {
             Anchor::Element(el) => self.measured.get(el["selector"].as_str().unwrap_or_default())
-                .copied().unwrap_or_else(|| numbers(&el["rect"])).into_iter().collect(),
+                .copied().flatten().or_else(|| numbers(&el["rect"])).into_iter().collect(),
             Anchor::Area(rect) => vec![*rect],
             Anchor::Text { rects, .. } => rects.clone(),
             Anchor::Point([x, y]) => vec![[*x, *y, 0., 0.]],
@@ -464,8 +492,28 @@ type Capture = (image::RgbaImage, Pos);
 #[cfg(target_os = "macos")]
 impl AppWindow {
     fn annotate_toggle(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
-        if self.canvas_state.annotations.contains_key(id) {
-            return self.annotation_close(id, window, cx);
+        if let Some(a) = self.canvas_state.annotations.get(id) {
+            if a.annotating() { return self.annotation_close(id, window, cx); }
+            if matches!(a.phase, Phase::Sending(_)) { return Err("The annotation is being sent".into()); }
+            let popped = self.browser_popped(id);
+            if !popped && !self.annotation_pane_visible(id) { return Err("Bring the pane into view to annotate it".into()); }
+            let was_live = match a.host {
+                Host::Browser { .. } => !popped && self.hide_browser_for_annotation(id, cx),
+                Host::Sim { .. } => {
+                    if self.canvas_state.sims.get(id).is_some_and(|view| view.popped.is_some()) {
+                        return Err("Bring the simulator back to annotate it".into());
+                    }
+                    false
+                }
+            };
+            let a = self.canvas_state.annotations.get_mut(id).unwrap();
+            a.mode = Mode::Annotating;
+            a.was_live = was_live;
+            a.focus.focus(window, cx);
+            self.canvas_state.selected = vec![id.to_owned()];
+            self.canvas_state.space_down = false;
+            cx.notify();
+            return Ok(());
         }
         if self.canvas_state.annotation_starts.contains_key(id) { return Ok(()); }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).cloned().ok_or("The pane closed")?;
@@ -592,9 +640,9 @@ impl AppWindow {
         let a = Annotate {
             pane: pane.clone(), host, image: render_image(still.clone()), still, page_size,
             done: vec![], undone: vec![], tool: Tool::Select, color: COLORS[0].1, width: STROKES[1].1,
-            live: false, drag: None, editing: None, draft: None, measured: HashMap::new(),
-            focus, session: Rc::new(()), was_live, refreshing: false, hint: !annotation_hint_file().exists(),
-            target: None, hover: None, probe: Probe::Idle, confirming: None, outgoing: None, held: None,
+            mode: Mode::Annotating, phase: Phase::Still, drag: None, measured: HashMap::new(),
+            focus, session: Rc::new(()), was_live, hint: !annotation_hint_file().exists(),
+            target: None, hover: None, probe: Probe::Idle, outgoing: None, held: None,
         };
         self.canvas_state.annotations.insert(pane, a);
         cx.notify();
@@ -604,36 +652,44 @@ impl AppWindow {
         self.toast(Toast { title: title.into(), body: None, level: Level::Error, action: None }, window, cx);
     }
 
+    /// Leaves the still and its history available when the pane returns to normal use.
     fn annotation_close(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
-        let Some(a) = self.canvas_state.annotations.get_mut(id) else { return Ok(()) };
-        if a.outgoing.as_ref().is_some_and(|o| o.sending) { return Err("The annotation is being sent".into()); }
-        if a.items().is_empty() { return self.end_annotation(id, false, window, cx); }
-        if a.confirming.as_ref().is_some_and(|id| self.overlays.iter().any(|o| o.id == *id)) { return Ok(()); }
-        // shortcut: the dialog opens in the main window even for a popped-out page, draw it in the pop-out if that confuses.
-        let overlay = mods::new_overlay_id();
-        a.confirming = Some(overlay.clone());
-        self.open_overlay(overlay, json!({
-            "mod":"confirm", "kind":"dialog", "width":340, "props":{
-                "title":"Discard your annotations?", "accept":"Discard", "cancel":"Keep editing", "destructive":true,
-                "command":{"name":"canvas.annotate_action","args":{"pane":id,"action":"discard"}}
-            }
-        }), window, cx);
-        Ok(())
+        let Some(a) = self.canvas_state.annotations.get(id).filter(|a| a.annotating()) else { return Ok(()) };
+        if matches!(a.phase, Phase::Sending(_)) { return Err("The annotation is being sent".into()); }
+        self.end_annotation(id, false, window, cx)
     }
 
-    pub(super) fn end_annotation(&mut self, id: &str, sent: bool, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
-        let Some(a) = self.canvas_state.annotations.remove(id) else { return Ok(()) };
+    fn end_annotation(&mut self, id: &str, sent: bool, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let Some(a) = self.canvas_state.annotations.get_mut(id) else { return Ok(()) };
+        let annotating = a.annotating();
+        let browser = matches!(a.host, Host::Browser { .. });
+        let wake = sent || a.was_live;
+        let live = matches!(a.phase, Phase::Live);
+        if sent || a.items().is_empty() {
+            let a = self.canvas_state.annotations.remove(id).unwrap();
+            cx.defer(move |cx| cx.drop_image(a.image, None));
+        } else {
+            a.mode = Mode::Kept;
+            a.phase = Phase::Still;
+            a.held.take();
+            a.drag = None;
+            a.hover = None;
+            a.probe = Probe::Idle;
+            // A selection or refresh started before close cannot change the kept still.
+            a.session = Rc::new(());
+        }
         self.clear_annotation_bounds(id);
-        let (browser, wake, live) = (matches!(a.host, Host::Browser { .. }), sent || a.was_live, a.live);
-        let image = a.image.clone();
-        drop(a);
-        cx.defer(move |cx| cx.drop_image(image, None));
-        self.focus.focus(window, cx);
         cx.notify();
-        // A popped page shows again when its window redraws (`popped_body`).
+        if !annotating { return Ok(()); }
+        self.focus.focus(window, cx);
+        // A popped page shows again when its window redraws.
         if browser && !self.browser_popped(id) {
             if wake && self.annotation_pane_visible(id) { self.wake_for_annotation(id, window, cx)?; }
             else if live { self.rest_browser(id, cx); }
+        } else if !browser && live
+            && let Some(screen) = self.canvas_state.sims.get(id).and_then(|view| view.live.as_ref())
+        {
+            screen.update(cx, |screen, _| screen.touch_up(window.mouse_position()));
         }
         Ok(())
     }
@@ -646,7 +702,7 @@ impl AppWindow {
     fn annotation_hold(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         use objc2_app_kit::{NSEvent, NSEventMask};
         let Some(a) = self.canvas_state.annotations.get(id) else { return Ok(()) };
-        if a.live || a.refreshing || a.draft.is_some() || a.outgoing.as_ref().is_some_and(|o| o.sending) { return Ok(()); }
+        if !a.annotating() || !matches!(a.phase, Phase::Still) { return Ok(()); }
         let browser = matches!(a.host, Host::Browser { .. });
         let session = a.session.clone();
         let (release, pressed) = async_channel::bounded(1);
@@ -673,7 +729,7 @@ impl AppWindow {
         a.drag = None;
         a.probe.leave();
         a.hover = None;
-        a.live = true;
+        a.phase = Phase::Live;
         a.held = Some(held);
         let id = id.to_owned();
         cx.spawn_in(window, async move |this, cx| {
@@ -690,8 +746,7 @@ impl AppWindow {
     fn annotation_release(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(a) = self.canvas_state.annotations.get_mut(id).filter(|a| a.held.is_some()) else { return };
         a.held.take();
-        a.live = false;
-        a.refreshing = true;
+        a.phase = Phase::Refreshing;
         a.focus.focus(window, cx);
         let sim = matches!(a.host, Host::Sim { .. });
         cx.notify();
@@ -709,7 +764,7 @@ impl AppWindow {
     /// Takes a fresh browser still and re-measures the commented elements, which may have moved.
     fn annotation_refreeze(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return };
-        a.refreshing = true;
+        a.phase = Phase::Refreshing;
         let session = a.session.clone();
         cx.notify();
         let id = id.to_owned();
@@ -722,21 +777,21 @@ impl AppWindow {
             let mut selectors: Vec<_> = a.done.iter().chain(&a.undone).filter_map(|action| match action {
                 Action::Comment(c) | Action::Edit { comment: Some(c), .. } => match &c.anchor {
                     Anchor::Element(el) => el["selector"].as_str().map(str::to_owned),
-                    _ => None,
+                    Anchor::Area(_) | Anchor::Text { .. } | Anchor::Point(_) => None,
                 },
-                _ => None,
+                Action::Mark(_) | Action::Edit { comment: None, .. } => None,
             }).collect();
             selectors.sort_unstable();
             selectors.dedup();
             if selectors.is_empty() { return; }
-            a.refreshing = true;
+            a.phase = Phase::Refreshing;
             this.annotation_query(&id.clone(), format!("return window.__canopy.rects({})", json!(selectors)), window, cx,
                 move |this, value, _, cx| {
                     let a = this.canvas_state.annotations.get_mut(&id).unwrap();
                     if let Some(values) = value.and_then(|v| v.as_array().cloned()) {
                         for (selector, value) in selectors.into_iter().zip(values) { a.measured.insert(selector, numbers(&value)); }
                     }
-                    a.refreshing = false;
+                    a.phase = Phase::Still;
                     cx.notify();
                 });
         });
@@ -753,7 +808,7 @@ impl AppWindow {
 
     fn replace_annotation_still(&mut self, id: &str, result: Result<Capture, String>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return };
-        a.refreshing = false;
+        a.phase = Phase::Still;
         match result {
             Ok((still, size)) => {
                 let old = std::mem::replace(&mut a.image, render_image(still.clone()));
@@ -767,7 +822,7 @@ impl AppWindow {
                     moved = matches!(&a.host, Host::Browser { url: old, .. } if *old != url);
                     a.host = Host::Browser { url, viewport: *viewport };
                 }
-                if !a.outgoing.as_ref().is_some_and(|o| o.sending) { a.outgoing = None; }
+                a.outgoing = None;
                 if moved {
                     self.annotation_error("The page changed while it was live: comments keep their places on the old page", window, cx);
                 }
@@ -877,7 +932,7 @@ impl AppWindow {
     /// `[w, h]` is the body's screen size: a card's (`canophy::Layout::body`) or the pop-out window's.
     pub(super) fn annotate_body(&self, pane: &canvas::Pane, native: AnyElement, [w, h]: Pos, cx: &mut Context<Self>) -> AnyElement {
         let id = &pane.id;
-        let Some(a) = self.canvas_state.annotations.get(id) else { return native };
+        let Some(a) = self.canvas_state.annotations.get(id).filter(|a| a.annotating()) else { return native };
         // The simulator still uses the same screen rectangle and bezel as the live phone.
         let sim_frame = if matches!(a.host, Host::Sim { .. }) {
             self.canvas_state.sims.get(id).and_then(|view| view.live.as_ref()).and_then(|screen| {
@@ -904,7 +959,7 @@ impl AppWindow {
             }, |_, _, _, _| {}).absolute().top_0().left_0().size_full())
             .capture_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
                 let mods = e.keystroke.modifiers;
-                let drafting = this.canvas_state.annotations.get(&target).is_some_and(|a| a.draft.is_some());
+                let drafting = this.canvas_state.annotations.get(&target).is_some_and(|a| matches!(a.phase, Phase::Composing(_)));
                 // The composer's own input handles undo, Cmd+Enter and Space while it is open.
                 let result = if mods.platform && !mods.alt && !mods.control {
                     match e.keystroke.key.as_str() {
@@ -943,7 +998,7 @@ impl AppWindow {
                 });
             }).absolute().top_0().left_0().size_full());
         }
-        if a.live {
+        if matches!(a.phase, Phase::Live) {
             root = root.child(native);
         } else {
             let (target, hovering, leaving) = (id.clone(), id.clone(), id.clone());
@@ -969,7 +1024,7 @@ impl AppWindow {
                 .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     let body = this.bounds.borrow().get(&format!("annotate-body:{target}")).copied();
                     if let Some(a) = this.canvas_state.annotations.get_mut(&target)
-                        && !a.refreshing && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending)
+                        && a.annotating() && matches!(a.phase, Phase::Still)
                         && let Some((start, _)) = annotation_point(body, a.page_size, e.position, false)
                     {
                         a.focus.focus(window, cx);
@@ -985,6 +1040,7 @@ impl AppWindow {
             };
             let mut marks = Vec::new();
             let mut pins = 0;
+            let mut cards = Vec::new();
             for item in a.items() {
                 match item {
                     Item::Mark(Mark::Text { at, text, color }) => {
@@ -999,14 +1055,43 @@ impl AppWindow {
                         if matches!(comment.anchor, Anchor::Text { .. } | Anchor::Area(_)) {
                             for &r in &rects { root = root.child(box_at(r).bg(gpui::rgba(0x2563eb38))); }
                         }
-                        let Some(&[x, y, ..]) = rects.first() else { continue };
-                        if !(0. ..=a.page_size[0]).contains(&x) || !(0. ..=a.page_size[1]).contains(&y) { continue; }
-                        let [x, y] = screen([x, y]);
-                        let target = id.clone();
-                        root = root.child(pin(x, y, (20. * scale).max(16.), pins)
+                        let Some(&rect) = rects.first() else { continue };
+                        let [x, y] = screen(a.pin_position(rect));
+                        let size = (20. * scale).max(16.);
+                        let edit = id.clone();
+                        let delete = id.clone();
+                        let on_left = x > w / 2.;
+                        let edge_to_pin = if on_left { w - x } else { x };
+                        let inset = edge_to_pin + size / 2. + 4.;
+                        let card = div().id(("annotation-card", index)).flex().items_center().min_w_0().max_w(wpx(240.))
+                            .pl(wpx(6.)).gap(wpx(2.)).rounded(wpx(ui::RADIUS_SM)).bg(c("popover"))
+                            .border_1().border_color(c("border")).text_size(wpx(12.)).text_color(c("foreground"))
+                            .occlude().cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener({
+                                let edit = edit.clone();
+                                move |this, _, window, cx| this.annotation_edit(&edit, index, window, cx)
+                            }))
+                            .child(div().min_w_0().truncate().child(comment.text.replace('\n', " ")))
+                            .child(annotation_button("delete", "icons/x.svg", "Delete comment", false)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    let Some(a) = this.canvas_state.annotations.get_mut(&delete) else { return };
+                                    if a.annotating() && matches!(a.phase, Phase::Still) {
+                                        a.push(Action::Edit { original: index, comment: None });
+                                        cx.notify();
+                                    }
+                                })));
+                        cards.push(pin(x, y, size, pins)
                             .id(("annotation-pin", index)).role(gpui::Role::Button).aria_label(format!("Comment {pins}")).cursor_pointer()
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(cx.listener(move |this, _, window, cx| this.annotation_edit(&target, index, window, cx))));
+                            .on_click(cx.listener(move |this, _, window, cx| this.annotation_edit(&edit, index, window, cx)))
+                            .into_any_element());
+                        cards.push(div().absolute().top(px((y - 12.).clamp(0., (h - 26.).max(0.))))
+                            .w(px((w - inset).max(0.))).flex()
+                            .when(on_left, |d| d.right(px(inset)).justify_end())
+                            .when(!on_left, |d| d.left(px(inset)))
+                            .child(card).into_any_element());
                     }
                 }
             }
@@ -1021,7 +1106,7 @@ impl AppWindow {
                     if area[2] > 0. && area[3] > 0. {
                         root = root.child(box_at(area).border_1().border_color(swatch(PIN)).bg(gpui::rgba(0x2563eb26)));
                     }
-                } else if a.draft.is_none() && let Some((rect, label)) = &a.hover {
+                } else if matches!(a.phase, Phase::Still) && let Some((rect, label)) = &a.hover {
                     // The element the next click picks, with its short name above the box.
                     let [x, y] = screen([rect[0], rect[1]]);
                     root = root.child(box_at(*rect).border_1().border_color(swatch(PIN)).bg(gpui::rgba(0x2563eb1f)))
@@ -1030,10 +1115,8 @@ impl AppWindow {
                             .text_size(px(10.)).child(label.clone()));
                 }
             }
-            if matches!(a.host, Host::Browser { .. }) {
-                root = root.children(self.browser_annotation_queue(id, a, [w, h], cx));
-            }
-            if let Some(draft) = &a.draft {
+            root = root.children(cards);
+            if let Phase::Composing(draft) = &a.phase {
                 let mut at = screen(draft.at);
                 if let DraftKind::Comment { anchor } = &draft.kind {
                     let rects = a.anchor_rects(anchor);
@@ -1041,14 +1124,17 @@ impl AppWindow {
                         root = root.child(box_at(rect).border_1().border_color(swatch(PIN)).bg(gpui::rgba(0x2563eb38)));
                     }
                     // A new comment drops its numbered pin as soon as the element is picked.
-                    if a.editing.is_none() && let Some(&[x, y, ..]) = rects.first() {
-                        at = screen([x, y]);
+                    if draft.editing.is_none() && let Some(&rect) = rects.first() {
+                        at = screen(a.pin_position(rect));
                         root = root.child(pin(at[0], at[1], (20. * scale).max(16.), pins + 1));
                     }
                 }
                 let reference = match (&a.host, &draft.kind) {
                     (Host::Browser { url, .. }, DraftKind::Comment { anchor: Anchor::Element(el) }) => Some(element_reference(el, url)),
-                    _ => None,
+                    (Host::Sim { .. }, DraftKind::Label { .. } | DraftKind::Comment { .. })
+                    | (Host::Browser { .. }, DraftKind::Label { .. } | DraftKind::Comment {
+                        anchor: Anchor::Area(_) | Anchor::Text { .. } | Anchor::Point(_),
+                    }) => None,
                 };
                 root = root.child(self.annotation_composer(id, draft, reference, at, [w, h], cx));
             }
@@ -1086,8 +1172,8 @@ impl AppWindow {
     fn annotation_hover(&mut self, id: &str, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let body = self.bounds.borrow().get(&format!("annotate-body:{id}")).copied();
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return };
-        if !matches!(a.host, Host::Browser { .. }) || a.tool != Tool::Select || a.draft.is_some() || a.drag.is_some()
-            || a.refreshing || a.live || a.outgoing.as_ref().is_some_and(|o| o.sending) { return; }
+        if !a.annotating() || !matches!(a.phase, Phase::Still) || !matches!(a.host, Host::Browser { .. })
+            || a.tool != Tool::Select || a.drag.is_some() { return; }
         let Some((point, _)) = annotation_point(body, a.page_size, at, false) else {
             a.probe.leave();
             if a.hover.take().is_some() { cx.notify(); }
@@ -1155,7 +1241,7 @@ impl AppWindow {
                 if let Some(mark) = drag.mark(a.tool, a.color, a.width) { a.push(Action::Mark(mark)); }
             }
             Tool::Select if browser => {
-                a.refreshing = true;
+                a.phase = Phase::Refreshing;
                 a.probe.leave();
                 a.hover = None;
                 let [x, y] = drag.start;
@@ -1167,7 +1253,7 @@ impl AppWindow {
                 };
                 let id = id.to_owned();
                 self.annotation_query(&id.clone(), query, window, cx, move |this, value, window, cx| {
-                    this.canvas_state.annotations.get_mut(&id).unwrap().refreshing = false;
+                    this.canvas_state.annotations.get_mut(&id).unwrap().phase = Phase::Still;
                     let Some(value) = value else { return cx.notify() };
                     let anchor = if dragged { Some(tidy_text(&value).unwrap_or(Anchor::Area(area))) } else { tidy_element(&value).map(|a| this.resolve_component_file(&id, a)) };
                     if let Some(anchor) = anchor {
@@ -1187,13 +1273,15 @@ impl AppWindow {
 
     fn annotation_edit(&mut self, id: &str, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(a) = self.canvas_state.annotations.get(id) else { return };
-        if a.refreshing || a.outgoing.as_ref().is_some_and(|o| o.sending) { return; }
+        if !a.annotating() || !matches!(a.phase, Phase::Still) { return; }
         let Some(comment) = a.items().into_iter().find_map(|item| match item {
-            Item::Comment(i, comment) if i == index => Some(comment.clone()), _ => None,
+            Item::Comment(i, comment) if i == index => Some(comment.clone()),
+            Item::Comment(..) | Item::Mark(_) => None,
         }) else { return };
-        let Some(&[x, y, ..]) = a.anchor_rects(&comment.anchor).first() else { return };
+        let Some(&rect) = a.anchor_rects(&comment.anchor).first() else { return };
+        let at = a.pin_position(rect);
         let Comment { anchor, text } = comment;
-        self.annotation_draft(id, [x, y], DraftKind::Comment { anchor }, Some(index), &text, window, cx);
+        self.annotation_draft(id, at, DraftKind::Comment { anchor }, Some(index), &text, window, cx);
     }
 
     fn annotation_draft(&mut self, id: &str, at: Pos, kind: DraftKind, editing: Option<usize>, value: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -1212,17 +1300,16 @@ impl AppWindow {
                 this.annotation_commit(&target, *secondary, window, cx);
             }
         });
-        a.editing = editing;
         a.hover = None;
-        a.draft = Some(Draft { at, kind, input, _enter: enter });
+        a.phase = Phase::Composing(Draft { at, editing, kind, input, _enter: enter });
         cx.notify();
     }
 
     /// Esc in the composer drops the draft and keeps the annotation. Returns whether there was one.
     fn annotation_cancel_draft(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return false };
-        if a.draft.take().is_none() { return false; }
-        a.editing = None;
+        if !matches!(a.phase, Phase::Composing(_)) { return false; }
+        a.phase = Phase::Still;
         a.focus.focus(window, cx);
         cx.notify();
         true
@@ -1232,17 +1319,17 @@ impl AppWindow {
     /// Saving an existing comment with no text deletes it; Send with no text just sends what is queued.
     fn annotation_commit(&mut self, id: &str, send: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return };
-        let Some(draft) = a.draft.as_ref() else { return };
+        let Phase::Composing(draft) = &a.phase else { return };
         let text: String = draft.input.read(cx).value().trim().chars().filter(|c| *c == '\n' || !c.is_control()).collect();
-        if text.is_empty() && a.editing.is_none() {
+        if text.is_empty() && draft.editing.is_none() {
             if !(send && !a.items().is_empty()) {
                 return self.annotation_error("Enter some text first", window, cx);
             }
-            a.draft = None;
+            a.phase = Phase::Still;
         } else {
-            let draft = a.draft.take().unwrap();
-            let action = match (draft.kind, a.editing.take()) {
-                (DraftKind::Label { color }, _) => Action::Mark(Mark::Text { at: draft.at, text, color }),
+            let Phase::Composing(draft) = std::mem::replace(&mut a.phase, Phase::Still) else { unreachable!() };
+            let action = match (draft.kind, draft.editing) {
+                (DraftKind::Label { color }, None | Some(_)) => Action::Mark(Mark::Text { at: draft.at, text, color }),
                 (DraftKind::Comment { anchor }, Some(original)) => Action::Edit { original, comment: (!text.is_empty()).then_some(Comment { anchor, text }) },
                 (DraftKind::Comment { anchor }, None) => Action::Comment(Comment { anchor, text }),
             };
@@ -1257,8 +1344,7 @@ impl AppWindow {
     fn annotation_composer(&self, id: &str, draft: &Draft, reference: Option<String>, [x, y]: Pos, [w, h]: Pos, cx: &mut Context<Self>) -> Stateful<Div> {
         let width = w.min(274.);
         let top = (y + 14.).clamp(0., (h - 118.).max(0.));
-        let (add, send, copy) = (id.to_owned(), id.to_owned(), id.to_owned());
-        let send_colors = self.annotation_send_colors(id);
+        let (add, copy) = (id.to_owned(), id.to_owned());
         div().id("annotation-composer").absolute()
             .left(px((x + 12.).clamp(0., (w - width).max(0.)))).top(px(top)).w(px(width))
             .flex().flex_col().gap(px(4.)).p(px(4.)).occlude()
@@ -1267,25 +1353,25 @@ impl AppWindow {
             .child(div().px(px(6.)).py(px(2.)).text_size(px(13.)).text_color(c("foreground"))
                 .child(gpui_base::Textarea::new(&draft.input)))
             .child(div().flex().flex_wrap().justify_end().gap(px(2.))
-                .children(reference.map(|reference| annotation_text_button("Copy reference", None)
+                .children(reference.map(|reference| annotation_text_button("Copy reference", None).cursor_pointer()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(reference.clone()));
                         this.toast(Toast { title: "Element reference copied".into(), body: None, level: Level::Success,
                             action: Some(("pane.focus".into(), json!({"pane": copy}))) }, window, cx);
                     }))))
-                .child(annotation_text_button("Add", None).tooltip(strip_tooltip("Add (Enter)".into(), None))
+                .child(annotation_text_button("Add", None).cursor_pointer().tooltip(strip_tooltip("Add (Enter)".into(), None))
                     .on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&add, false, window, cx))))
-                .child(annotation_text_button("Send", Some(send_colors)).tooltip(strip_tooltip("Send (Cmd+Enter)".into(), None))
-                    .on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&send, true, window, cx)))))
+                .children(self.annotation_send_button(id, "Send", cx)))
     }
 }
 
 #[cfg(target_os = "macos")]
 /// `primary` is the (background, label) of a Send button; None draws a plain text button.
-fn annotation_text_button(label: &'static str, primary: Option<(Hsla, Hsla)>) -> Stateful<Div> {
-    div().id(label).role(gpui::Role::Button).aria_label(label)
-        .flex().items_center().flex_none().h(px(24.)).px(px(6.)).rounded(px(ui::RADIUS_SM))
-        .text_size(px(12.)).cursor_pointer().child(label)
+fn annotation_text_button(label: impl Into<SharedString>, primary: Option<(Hsla, Hsla)>) -> Stateful<Div> {
+    let label = label.into();
+    div().id(label.clone()).role(gpui::Role::Button).aria_label(label.clone())
+        .flex().items_center().flex_none().h(wpx(24.)).px(wpx(6.)).rounded(wpx(ui::RADIUS_SM))
+        .text_size(wpx(12.)).child(label)
         .map(|button| match primary {
             Some((bg, text)) => button.bg(bg).text_color(text).hover(|d| d.opacity(0.85)),
             None => button.text_color(c("foreground")).hover(|d| d.bg(c("hover"))),
@@ -1307,7 +1393,7 @@ fn annotation_point(body: Option<Bounds<Pixels>>, page: Pos, at: Point<Pixels>, 
 impl AppWindow {
     fn annotation_action(&mut self, id: &str, action: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         let Some(a) = self.canvas_state.annotations.get_mut(id) else { return Ok(()) };
-        if a.outgoing.as_ref().is_some_and(|o| o.sending) { return Err("The annotation is being sent".into()); }
+        if matches!(a.phase, Phase::Sending(_)) && action != "send" { return Err("The annotation is being sent".into()); }
         if let Some(addr) = action.strip_prefix("agent:") {
             if !self.annotation_agents(id).iter().any(|agent| agent.0 == addr) {
                 return Err("That agent is no longer running".into());
@@ -1315,16 +1401,17 @@ impl AppWindow {
             self.canvas_state.selected = vec![id.to_owned()];
             let a = self.canvas_state.annotations.get_mut(id).unwrap();
             a.target = Some(addr.to_owned());
-            if let Some(draft) = &a.draft {
-                draft.input.read(cx).focus_handle(cx).focus(window, cx);
-            } else if !a.live {
-                a.focus.focus(window, cx);
+            if a.annotating() {
+                if let Phase::Composing(draft) = &a.phase {
+                    draft.input.read(cx).focus_handle(cx).focus(window, cx);
+                } else if a.shows_still() {
+                    a.focus.focus(window, cx);
+                }
             }
             cx.notify();
             return Ok(());
         }
         match action {
-            "discard" if a.confirming.is_some() => return self.end_annotation(id, false, window, cx),
             "close" => return self.annotation_close(id, window, cx),
             "send" => return self.send_annotation(id, window, cx),
             "hint" => {
@@ -1335,7 +1422,7 @@ impl AppWindow {
                 cx.notify();
                 return Ok(());
             }
-            _ if a.refreshing || a.live || a.draft.is_some() => return Ok(()),
+            _ if !a.annotating() || !matches!(a.phase, Phase::Still) => return Ok(()),
             "undo" => a.undo(),
             "redo" => a.redo(),
             action => {
@@ -1352,16 +1439,19 @@ impl AppWindow {
                 }
             }
         }
-        if !a.live && a.draft.is_none() { a.focus.focus(window, cx); }
+        a.focus.focus(window, cx);
         cx.notify();
         Ok(())
     }
 
     /// `canvas.browser_pick`: start annotating, or switch the running annotation to Select.
     pub(super) fn annotation_pick(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
-        match self.canvas_state.annotations.get_mut(id) {
-            Some(a) => { a.tool = Tool::Select; cx.notify(); Ok(()) }
-            None => self.annotate_toggle(id, window, cx),
+        if let Some(a) = self.canvas_state.annotations.get_mut(id).filter(|a| a.annotating()) {
+            a.tool = Tool::Select;
+            cx.notify();
+            Ok(())
+        } else {
+            self.annotate_toggle(id, window, cx)
         }
     }
 
@@ -1373,37 +1463,25 @@ impl AppWindow {
         })
     }
 
-    /// The browser shows the batch in the same order as the undo history, with comment pin numbers.
-    fn browser_annotation_queue(&self, id: &str, a: &Annotate, [w, h]: Pos, cx: &mut Context<Self>) -> Option<Div> {
-        let items = a.items();
-        if items.is_empty() { return None; }
-        let mut pin = 0;
-        let rows = items.into_iter().map(|item| {
-            let label = match item {
-                Item::Mark(Mark::Pen { .. }) => "Pen stroke".into(),
-                Item::Mark(Mark::Box { .. }) => "Box".into(),
-                Item::Mark(Mark::Text { text, .. }) => format!("Text: {text}"),
-                Item::Comment(_, comment) => {
-                    pin += 1;
-                    format!("{pin}. {}", comment.text)
-                }
-            };
-            div().flex_none().px(px(6.)).truncate().child(label)
-        });
-        Some(div().absolute().top(px(6.)).left_0().w_full().flex().justify_center()
-            .child(super::helper_bar::bar_shell(1.).id("browser-annotation-queue").occlude()
-                .w(px((w - 12.).clamp(1., 400.))).flex_col().items_end()
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(div().id("browser-annotation-items").w_full().flex().flex_col()
-                    .max_h(px((h * 0.2).clamp(18., 90.))).overflow_y_scroll()
-                    .text_size(px(12.)).text_color(c("foreground")).children(rows))
-                .child(self.annotation_send_button(id, a, cx))))
+    fn send_state(&self, id: &str, _cx: &App) -> SendState {
+        let Some(a) = self.canvas_state.annotations.get(id) else { return SendState::Hidden };
+        a.send_state(|| self.annotation_target(id).ok())
     }
 
-    fn annotation_send_button(&self, id: &str, a: &Annotate, cx: &mut Context<Self>) -> Stateful<Div> {
-        let enabled = !a.live && !a.refreshing && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending);
-        annotation_text_button("Send", Some(self.annotation_send_colors(id))).opacity(if enabled { 1. } else { 0.45 })
-            .when(enabled, |button| button.on_click(self.annotation_click(id, "send", cx)))
+    fn annotation_send_button(&self, id: &str, label: impl Into<SharedString>, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let button = match self.send_state(id, cx) {
+            SendState::Hidden => return None,
+            SendState::Disabled(reason) => annotation_text_button(label, None).opacity(0.45)
+                .aria_description(reason).tooltip(strip_tooltip(reason.into(), None)),
+            SendState::Ready(addr) => annotation_text_button(label, Some(self.annotation_send_colors(&addr))).cursor_pointer()
+                .on_click(self.annotation_click(id, "send", cx)),
+        };
+        Some(button.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()))
+    }
+
+    pub(super) fn kept_annotation_send(&self, id: &str, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let a = self.canvas_state.annotations.get(id).filter(|a| matches!(a.mode, Mode::Kept))?;
+        self.annotation_send_button(id, format!("Send annotations ({})", a.items().len()), cx)
     }
 
     fn annotation_bar(&self, id: &str, a: &Annotate, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -1438,11 +1516,9 @@ impl AppWindow {
             }
         }
         bar = bar.child(gap());
-        if matches!(a.host, Host::Sim { .. }) && !a.items().is_empty() {
-            bar = bar.child(self.annotation_send_button(id, a, cx));
-        }
+        bar = bar.children(self.annotation_send_button(id, "Send", cx));
         bar = bar.child(annotation_button("close", "icons/x.svg", "Stop annotating", false).on_click(self.annotation_click(id, "close", cx)));
-        if a.live && matches!(a.host, Host::Browser { .. }) {
+        if matches!(a.phase, Phase::Live) && matches!(a.host, Host::Browser { .. }) {
             let bounds = self.bounds.clone();
             let cover = format!("cover:annotate:{id}");
             bar = bar.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full());
@@ -1465,7 +1541,7 @@ impl AppWindow {
                 .child("Got it").on_click(cx.listener(move |this, _, window, cx| {
                     if let Err(error) = this.annotation_action(&target, "hint", window, cx) { this.annotation_error(error, window, cx); }
                 })))
-            .when(a.live && matches!(a.host, Host::Browser { .. }), |d| {
+            .when(matches!(a.phase, Phase::Live) && matches!(a.host, Host::Browser { .. }), |d| {
                 d.child(canvas(move |b, _, _| { bounds.borrow_mut().insert(cover, b); }, |_, _, _, _| {}).absolute().top_0().left_0().size_full())
             })
     }
@@ -1473,7 +1549,7 @@ impl AppWindow {
     pub(in crate::window) fn annotation_escape(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if key.key != "escape" || key.modifiers.modified() || self.overlays.iter().any(|o| o.kind.modal_keys()) { return false; }
         let Some(id) = self.canvas_state.annotations.iter()
-            .find(|(_, a)| a.focus.contains_focused(window, cx)).map(|(id, _)| id.clone()) else { return false };
+            .find(|(_, a)| a.annotating() && a.focus.contains_focused(window, cx)).map(|(id, _)| id.clone()) else { return false };
         if self.annotation_cancel_draft(&id, window, cx) { return true; }
         if let Err(error) = self.annotation_close(&id, window, cx) { self.annotation_error(error, window, cx); }
         true
@@ -1484,8 +1560,12 @@ impl AppWindow {
         let a = self.canvas_state.annotations.get(id)?;
         // A popped page's annotation takes the keyboard in its own window.
         if self.browser_popped(id) { return None; }
-        if a.live || a.outgoing.as_ref().is_some_and(|o| o.sending) || !self.annotation_pane_visible(id) { return None; }
-        Some(a.draft.as_ref().map_or_else(|| a.focus.clone(), |d| d.input.read(cx).focus_handle(cx)))
+        if !a.annotating() || !self.annotation_pane_visible(id) { return None; }
+        match &a.phase {
+            Phase::Live | Phase::Sending(_) => None,
+            Phase::Refreshing | Phase::Still => Some(a.focus.clone()),
+            Phase::Composing(draft) => Some(draft.input.read(cx).focus_handle(cx)),
+        }
     }
 
     /// Whether the main window can give the annotation focus or show its live page again.
@@ -1508,10 +1588,9 @@ impl AppWindow {
         Some(a.target.as_ref().filter(|t| agents.iter().any(|x| &x.0 == *t)).map_or_else(|| "Choose agent".to_owned(), |t| self.pill_name(t)))
     }
 
-    /// Send's (background, label): the target agent's color with a label that reads on it, or the
-    /// theme's plain foreground-on-background when Send has no target yet.
-    fn annotation_send_colors(&self, id: &str) -> (Hsla, Hsla) {
-        let hue = self.annotation_target(id).ok().and_then(|addr| self.canvas_state.doc.effective_color(&addr));
+    /// Send uses the target agent's color when available.
+    fn annotation_send_colors(&self, addr: &str) -> (Hsla, Hsla) {
+        let hue = self.canvas_state.doc.effective_color(addr);
         let Some(hue) = hue else { return (c("foreground"), c("background")) };
         let bg = c(&hue.tint_token());
         let rgba: Rgba = bg.into();
@@ -1556,24 +1635,21 @@ impl AppWindow {
 #[cfg(target_os = "macos")]
 impl AppWindow {
     fn send_annotation(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
-        let a = self.canvas_state.annotations.get(id).ok_or("There is no annotation to send")?;
-        if a.live || a.refreshing || a.draft.is_some() { return Err("Finish the current annotation edit before sending".into()); }
-        // Fail before the screenshot is saved when there is nowhere to send it.
-        let addr = self.annotation_target(id)?;
+        let addr = match self.send_state(id, cx) {
+            SendState::Hidden => return Err("Add a mark or comment before sending".into()),
+            SendState::Disabled(reason) => return Err(reason.into()),
+            SendState::Ready(addr) => addr,
+        };
         let a = self.canvas_state.annotations.get_mut(id).unwrap();
-        if let Some(outgoing) = &a.outgoing {
-            if outgoing.sending { return Err("The annotation is being sent".into()); }
-            return self.offer_annotation(id, addr, window, cx);
-        }
+        if a.outgoing.is_some() { return self.offer_annotation(id, addr, window, cx); }
         let items = a.items();
-        if items.is_empty() { return Err("Add a mark or comment before sending".into()); }
         let mut marks = Vec::new();
         let mut pins = Vec::new();
         for item in items {
             match item {
                 Item::Mark(mark) => marks.push(mark.clone()),
                 Item::Comment(_, comment) => {
-                    if let Some(&[x, y, ..]) = a.anchor_rects(&comment.anchor).first() { pins.push([x, y]); }
+                    if let Some(&rect) = a.anchor_rects(&comment.anchor).first() { pins.push(a.pin_position(rect)); }
                 }
             }
         }
@@ -1585,7 +1661,7 @@ impl AppWindow {
         let images = vec![path.to_string_lossy().into_owned()];
         let text = message(a);
         let (still, page_size, session) = (a.still.clone(), a.page_size, a.session.clone());
-        a.refreshing = true;
+        a.phase = Phase::Sending(Outgoing { text, images });
         a.drag = None;
         let id = id.to_owned();
         cx.spawn_in(window, async move |this, cx| {
@@ -1603,10 +1679,10 @@ impl AppWindow {
             let _ = this.update_in(cx, |this, window, cx| {
                 if !this.annotation_is(&id, &session) { return; }
                 let a = this.canvas_state.annotations.get_mut(&id).unwrap();
-                a.refreshing = false;
+                let Phase::Sending(outgoing) = std::mem::replace(&mut a.phase, Phase::Still) else { unreachable!() };
                 match saved {
                     Ok(()) => {
-                        a.outgoing = Some(Outgoing { text, images, sending: false });
+                        a.outgoing = Some(outgoing);
                         if let Err(error) = this.offer_annotation(&id, addr, window, cx) {
                             this.annotation_error(error, window, cx);
                         }
@@ -1634,12 +1710,12 @@ impl AppWindow {
     pub(super) fn route_annotation(&mut self, addr: String, quote: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         let id = quote["pane"].as_str().ok_or("The annotation pane is missing")?;
         let a = self.canvas_state.annotations.get_mut(id).ok_or("The annotation is closed")?;
-        let outgoing = a.outgoing.as_mut().filter(|o| quote["path"].as_str() == o.images.first().map(String::as_str))
+        if !matches!(a.phase, Phase::Still) { return Err("The annotation is busy. Choose Send again".into()); }
+        let prepared = a.outgoing.as_ref().filter(|o| quote["path"].as_str() == o.images.first().map(String::as_str))
             .ok_or("The annotation changed. Choose Send again")?;
-        if outgoing.sending { return Err("The annotation is being sent".into()); }
         if !self.canvas_state.annotation_targets.insert(addr.clone()) { return Err("This agent is already receiving an annotation".into()); }
-        outgoing.sending = true;
-        let mut outgoing = outgoing.clone();
+        let mut outgoing = prepared.clone();
+        a.phase = Phase::Sending(a.outgoing.take().unwrap());
         if let Some(message) = quote["message"].as_str().map(str::trim).filter(|m| !m.is_empty()) {
             outgoing.text.push_str("\n\n");
             outgoing.text.extend(message.chars().filter(|&c| c == '\n' || c == '\t' || !c.is_control()));
@@ -1652,7 +1728,7 @@ impl AppWindow {
 
     pub(super) fn annotation_sending(&self, id: &str, session: &Rc<()>) -> bool {
         self.annotation_is(id, session)
-            && self.canvas_state.annotations[id].outgoing.as_ref().is_some_and(|o| o.sending)
+            && matches!(self.canvas_state.annotations[id].phase, Phase::Sending(_))
     }
 
     pub(super) fn annotation_delivered(&mut self, addr: &str, id: &str, session: &Rc<()>, result: Result<(), String>, window: &mut Window, cx: &mut Context<Self>) {
@@ -1671,8 +1747,11 @@ impl AppWindow {
             // Pasted but not submitted: ending here keeps a second Send from pasting it again.
             if error.ends_with(NOT_SUBMITTED) {
                 if let Err(e) = self.end_annotation(id, true, window, cx) { self.annotation_error(e, window, cx); }
-            } else if let Some(outgoing) = self.canvas_state.annotations.get_mut(id).and_then(|a| a.outgoing.as_mut()) {
-                outgoing.sending = false;
+            } else {
+                let a = self.canvas_state.annotations.get_mut(id).unwrap();
+                if let Phase::Sending(outgoing) = std::mem::replace(&mut a.phase, Phase::Still) {
+                    a.outgoing = Some(outgoing);
+                }
             }
             self.annotation_error(error, window, cx);
         }
@@ -1682,7 +1761,7 @@ impl AppWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, Anchor, Annotate, COLORS, Comment, Host, Item, Mark, Probe, STROKES, Tool, annotation_recipient, burn, fit, message, tidy_element};
+    use super::{Action, Anchor, Annotate, COLORS, Comment, Host, Item, Mark, Mode, Phase, Probe, SendState, STROKES, Tool, annotation_recipient, burn, fit, message, tidy_element};
     use gpui::{RenderImage, TestAppContext};
     use serde_json::json;
 
@@ -1702,9 +1781,9 @@ mod tests {
         Annotate {
             pane: "p1".into(), host, still, image, page_size: [1280., 800.],
             done: vec![], undone: vec![], tool: Tool::Select, color: COLORS[0].1, width: STROKES[1].1,
-            live: false, drag: None, editing: None, draft: None, measured: HashMap::new(),
-            focus: cx.update(|cx| cx.focus_handle()), session: Rc::new(()), was_live: false, refreshing: false,
-            hint: false, target: None, hover: None, probe: Probe::Idle, confirming: None, outgoing: None,
+            mode: Mode::Annotating, phase: Phase::Still, drag: None, measured: HashMap::new(),
+            focus: cx.update(|cx| cx.focus_handle()), session: Rc::new(()), was_live: false,
+            hint: false, target: None, hover: None, probe: Probe::Idle, outgoing: None,
             #[cfg(target_os = "macos")]
             held: None,
         }
@@ -1751,6 +1830,22 @@ mod tests {
             "Image 1 is the annotated screenshot; numbered blue dots mark the comments.\n\n",
             "1. Increase the tap target\n   Point: x 120, y 300",
         ));
+    }
+
+    #[gpui::test]
+    fn send_state_follows_items_phase_and_recipient(cx: &mut TestAppContext) {
+        let mut a = example(Host::Sim { device: "phone".into(), runtime: "iOS".into() }, cx);
+        assert_eq!(a.send_state(|| panic!("no items")), SendState::Hidden);
+        a.push(comment("Move this", Anchor::Point([-4., 900.])));
+        assert_eq!(a.pin_position([-4., 900., 2., 2.]), [0., 800.]);
+        assert_eq!(a.send_state(|| None), SendState::Disabled("Wire or pick an agent"));
+        a.mode = Mode::Kept;
+        assert_eq!(a.send_state(|| Some("t1".into())), SendState::Ready("t1".into()));
+        a.mode = Mode::Annotating;
+        a.phase = Phase::Refreshing;
+        assert_eq!(a.send_state(|| panic!("refreshing")), SendState::Disabled("Waiting for the page"));
+        a.phase = Phase::Sending(super::Outgoing { text: String::new(), images: vec![] });
+        assert_eq!(a.send_state(|| panic!("sending")), SendState::Disabled("Sending"));
     }
 
     #[test]
