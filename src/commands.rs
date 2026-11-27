@@ -197,6 +197,13 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.pdf_highlight", &[], "Toggle text highlight mode in the last selected PDF pane."),
     cmd("canvas.pdf_prev", &[], "Go to the previous page in the last selected PDF pane."),
     cmd("canvas.pdf_next", &[], "Go to the next page in the last selected PDF pane."),
+    cmd("file.rename", &[req("from"), req("to")], "Rename a local file or folder."),
+    cmd("file.copy", &[req("from"), opt("to"), opt("into")], "Copy a local file or folder to a path, or into a folder with an available name."),
+    cmd("file.move", &[req("from"), opt("to"), opt("into")], "Move a local file or folder to a path, or into a folder with an available name."),
+    cmd("file.mkdir", &[req("path")], "Create a local folder."),
+    cmd("file.new", &[req("path")], "Create an empty local file."),
+    cmd("file.trash", &[req("path")], "Move a local file or folder to the system trash."),
+    cmd("file.reveal", &[req("path")], "Show a local file or folder in the system file browser."),
     cmd("preview.external", &[req("path")], "Open a local image or PDF in macOS Preview."),
     cmd("canvas.pdf_zoom_out", &[], "Zoom out in the last selected PDF pane."),
     cmd("canvas.pdf_zoom_reset", &[], "Reset zoom in the last selected PDF pane: the page fits the pane's width again."),
@@ -231,7 +238,8 @@ pub fn validate_args(c: &Command, args: &Value) -> Result<(), String> {
                 return Err(format!("{}: unknown argument(s): {}; valid arguments: {valid}", c.name, unknown.join(", ")));
             }
             for (key, value) in args {
-                if matches!(key.as_str(), "id" | "pane" | "space" | "terminal" | "target") && !value.is_string() && !value.is_null() {
+                if (matches!(key.as_str(), "id" | "pane" | "space" | "terminal" | "target")
+                    || (c.name.starts_with("file.") && matches!(key.as_str(), "from" | "to" | "into" | "path"))) && !value.is_string() && !value.is_null() {
                     return Err(format!("{}: argument {key} must be a string (or null to omit it)", c.name));
                 }
             }
@@ -311,6 +319,16 @@ mod tests {
                 assert!(validate_args(c, &json!({arg: value})).is_ok());
             }
         }
+    }
+
+    #[test]
+    fn file_commands_validate_path_arguments() {
+        let copy = find("file.copy").unwrap();
+        assert!(validate_args(copy, &json!({"from": "/a", "into": "/folder"})).is_ok());
+        assert!(validate_args(copy, &json!({"from": "/a", "into": true})).is_err());
+        assert!(validate_args(copy, &json!({"from": "/a", "destination": "/b"})).is_err());
+        let rename = find("file.rename").unwrap();
+        assert_eq!(missing(rename, &json!({"from": "/a"})), Some("to"));
     }
 
     #[test]

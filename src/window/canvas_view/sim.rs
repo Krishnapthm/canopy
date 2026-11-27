@@ -354,8 +354,8 @@ impl AppWindow {
                 return self.answer(r.map(|_| json!({})));
             }
             "canvas.sim_reveal" => {
-                let Some(path) = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()) else { return self.fail("canvas.sim_reveal needs an absolute path") };
-                let r = std::process::Command::new("open").arg("-R").arg(path).status().map_err(|e| format!("Can't show {path}: {e}"));
+                let Some(path) = a["path"].as_str() else { return self.fail("path must be absolute") };
+                let r = crate::file_ops::reveal(std::path::Path::new(path));
                 return self.answer(r.map(|_| json!({})));
             }
             "canvas.sim_input" => return self.sim_input(a, window, cx),

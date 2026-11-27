@@ -7,6 +7,7 @@ mod app_menu;
 mod commands;
 mod control;
 mod core_bin;
+mod file_ops;
 mod files;
 mod hc;
 mod keys;

@@ -72,7 +72,7 @@ wry = { package = "lb-wry", version = "0.53.3" }
 block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSImage", "NSOpenPanel", "NSSavePanel", "NSView", "NSWorkspace", "objc2-quartz-core", "NSButton", "NSControl", "NSMenu", "NSMenuItem", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSBundle", "NSData", "NSError", "NSProcessInfo", "NSString", "NSURL", "NSUUID"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSBundle", "NSData", "NSError", "NSFileManager", "NSProcessInfo", "NSString", "NSURL", "NSUUID"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKContentRuleList", "WKContentRuleListStore", "WKContentWorld", "WKFrameInfo", "WKNavigation", "WKWebView", "WKWebViewConfiguration", "WKSnapshotConfiguration", "WKUserContentController"] }
 # Native agent alerts. Already locked through gpui.
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNError", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationTrigger", "UNUserNotificationCenter"] }
