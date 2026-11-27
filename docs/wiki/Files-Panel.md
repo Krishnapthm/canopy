@@ -8,12 +8,12 @@ The files panel is a side panel with your space's file tree and file previews. U
 On macOS, right-click a local image or PDF in the file tree and choose **Open in Preview**. The preview tab also has an **Open in Preview** button.
 ## Open the panel
 
-1. Click the folder button, **Files**, in the [top strip](Spaces#the-top-strip).
-2. Drag the panel's left edge to resize it.
+1. click the folder button, **Files**, in the [top strip](Spaces#the-top-strip). it restores the file tab that was active when you closed the panel if that tab is still open. otherwise it opens the file tree.
+2. drag the panel's left edge to resize it.
 
-- Click **Expand panel** to fill the window. Click **Restore panel** to return to the canvas.
-- Resizing also ends expanded mode.
-- Click **Close panel** to hide it. The folder button brings back the tab you had open. Docked panes stay docked while it is hidden.
+- click **Files** while a tab is active to return to the tree. click it again from the tree to close the panel.
+- click **Expand panel** to fill the window. click **Restore panel** or resize the panel to return to the canvas.
+- click **Close panel** to hide it. docked panes stay docked while it is hidden. to return to a docked browser or simulator, open the panel and select the pane's tab.
 
 ## Browse and preview files
 
@@ -50,7 +50,7 @@ A docked pane is not on the canvas: layout, tiling and wire lines skip it. Canop
 3. Edit the text.
 4. Click **Save** to save it, or **Done** to save and return to the preview.
 
-An unsaved dot replaces the tab's X until you hover over it. Closing that tab (its X, or `Cmd+W` while the panel has your last click) asks "Discard unsaved changes?" first, and only the answer you saw closes it: if you edit the file again after the dialog opened, the old answer does nothing. Agents cannot close a file tab.
+an unsaved dot replaces the tab's X until you hover over it. switching to another tab, returning to the tree with **Files**, or closing the dirty tab asks **Discard unsaved changes?**. cancel to keep editing. if you edit the file again after the dialog opened, the old answer does nothing. agents cannot close a file tab.
 Editing accepts text files up to 1 MiB.
 If the file changes outside Canopy, saving fails and keeps your draft.
 
