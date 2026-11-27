@@ -3157,6 +3157,10 @@ const BASE: &str = r#"  /** A row. */
 
   // HERDR: built-in source editing and read-only code viewing.
   export interface EditorState {
+    /** Replaces gutter change marks. Lines are one-based. */
+    set_line_marks(marks: { line: number; kind: "added" | "modified" | "removed" }[]): void;
+    /** A gutter drag yields inclusive one-based lines and the release point in window pixels. */
+    on(event: "gutter_quote", handler: (event: { start: number; end: number; x: number; y: number }, cx: Context) => void): boolean;
     // HERDR: null when empty; source lines are 1-based and inclusive.
     selection(): { text: string; start: number; end: number } | null;
     value(): string;
@@ -3181,6 +3185,10 @@ const BASE: &str = r#"  /** A row. */
       readonly?: boolean;
       /** Defaults to false. */
       soft_wrap?: boolean;
+      /** Highlights the cursor's line. Defaults to false. */
+      active_line?: boolean;
+      /** Hex colors for the three kinds of gutter change marks. */
+      mark_colors?: { added: string; modified: string; removed: string };
       /** Semantic colors: keyword, string, comment, function, type, number,
        * constant, variable, operator, punctuation, boolean, string.escape.
        * Values are concrete hex colors; unspecified UI colors follow the theme. */
