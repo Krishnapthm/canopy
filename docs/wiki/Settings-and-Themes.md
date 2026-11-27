@@ -28,15 +28,19 @@ canopy config
 
 See [Canvas](Canvas) and [Terminals](Terminals) for their settings.
 
-## Keep Canopy running on macOS
+## Quit and Keep Terminals Running
 
-**Run in Background** keeps Canopy available while its windows are hidden, so you can leave your agents working and return to them later. It is on by default.
+terminals and agents run in [herdr-core](herdr-core), a separate process. quitting Canopy closes its windows and leaves that work running. open Canopy again to return to those terminals.
 
-Press `Cmd+Q` or choose **Quit Canopy** to hide the app. Click the Canopy icon in the macOS menu bar and choose **Show Canopy** to bring the window forward, or **Quit Canopy** to exit. **Quit** in the Dock also exits the app.
+on macOS, **Run in Background** is on by default. after you quit with live terminals, the Dock tile shows how many are running. click the tile or choose **Open Canopy** from its menu to reopen your windows. the tile goes away when the last terminal stops or the core exits.
 
-The menu also lists the agent programs in your open spaces. For the local Codex CLI account, it shows used percentages and time until reset when the CLI provides them. Open the menu again after **Refresh Usage** to see the latest result. Canopy rechecks a cached result when it is over a minute old and you open the menu. Other programs show **Unavailable** when Canopy cannot read their usage.
+to stop the core and every terminal and agent in it, open the background tile's menu, choose **Quit Completely**, and confirm. the Dock's regular **Quit** removes the tile and leaves the core running. you can also quit Canopy and run `hc server stop` from another terminal app using the same core session.
 
-Open **Settings** > **Look** > **App** to turn off **Run in Background**, or set `run_in_background` to `false` in `settings.json`. **Quit Canopy** then exits the app, and Canopy removes its menu bar icon.
+while Canopy is open, **Run in Background** shows its menu bar icon. choose **Show Canopy** to bring the window forward or **Quit Canopy** to exit the app.
+
+the menu also lists the agent programs in your open spaces. for the local Codex CLI account, it shows used percentages and time until reset when the CLI provides them. open the menu again after **Refresh Usage** to see the latest result. cached results are rechecked when they are over a minute old and you open the menu. other programs show **Unavailable** when Canopy cannot read their usage.
+
+turn off **Run in Background** in **Settings** > **Look** > **App**, or set `run_in_background` to `false` in `settings.json`, to remove the menu bar icon and skip the Dock tile after Quit.
 
 ## Alerts
 

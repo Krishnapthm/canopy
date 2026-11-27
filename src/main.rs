@@ -31,6 +31,8 @@ mod usage;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
+mod background;
+#[cfg(target_os = "macos")]
 mod macos_check;
 mod mods;
 mod mod_files;
@@ -97,6 +99,14 @@ fn attach_console() {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    #[cfg(target_os = "macos")]
+    if args.get(1).is_some_and(|s| s == "--background") {
+        if let Err(err) = background::run() {
+            eprintln!("canopy background: {err}");
+            std::process::exit(1);
+        }
+        return;
+    }
     // A live sim pane's helper, started by Canopy itself under sandbox-exec: nothing else runs.
     #[cfg(target_os = "macos")]
     if args.get(1).is_some_and(|s| s == "--sim-helper") {
@@ -151,7 +161,10 @@ fn main() {
     }
 
     #[cfg(target_os = "macos")]
-    core_bin::fill_path();
+    {
+        background::retire();
+        core_bin::fill_path();
+    }
     #[cfg(unix)]
     core_bin::put_cli_on_path();
     tracing_subscriber::fmt()
@@ -199,12 +212,22 @@ fn main() {
             settings::load_home_fonts(cx);
             mods::init(cx);
             cx.on_app_quit(|cx| {
+                #[cfg(target_os = "macos")]
+                let mut start_tile = macos::background_enabled(cx);
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
                 // Where the window was, for the next start (a quit never asks the window).
                 for w in cx.windows() {
                     if let Some(w) = w.downcast::<window::AppWindow>() {
                         let _ = w.update(cx, |this, window, cx| {
                             this.drain_documents(window, cx);
+                            #[cfg(target_os = "macos")]
+                            if start_tile && this.has_live_terminals() {
+                                start_tile = false;
+                                // The window is closing, so a toast would never be seen.
+                                if let Err(err) = background::spawn() {
+                                    tracing::warn!("cannot start the background Dock tile: {err}");
+                                }
+                            }
                             this.close_mods_now(deadline, window, cx);
                             place::save(window, cx);
                         });

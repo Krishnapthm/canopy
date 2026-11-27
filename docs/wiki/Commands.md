@@ -1288,7 +1288,7 @@ Open the shared primary command menu, optionally a named group.
 
 ## `app.quit`
 
-Quit Canopy, or hide it if Run in Background is on (macOS).
+Quit Canopy. Terminals keep running in the core.
 
 No arguments.
 

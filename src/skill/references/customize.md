@@ -25,6 +25,9 @@ Make only the change asked for. Touch nothing else.
   `canopy do layout.clone --name main` or `canopy do mod.clone --name toolbar`,
   then edit the copy.
 - `app.settings {section: "shortcuts"}` opens searchable keys for the person.
+- `app.quit` exits Canopy while the core keeps terminals and agents running. On macOS,
+  `run_in_background` adds a menu bar icon and keeps a Dock tile after Quit while terminals
+  run; its menu has **Open Canopy** and **Quit Completely** (stops the core, asks first).
 - If a layout or keys edit locks the person out, `ctrl-alt-shift-escape` always
   restores the default layout and sets the broken files aside.
 

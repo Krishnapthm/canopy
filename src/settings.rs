@@ -384,7 +384,7 @@ person_settings! {
     terminal_size: [u16; 2] = [100, 30] => "New expanded terminal columns and rows (20..500, 5..200).";
     zoom: f32 = 1.0 => "Whole app scale (0.5..3).";
     #[serde(skip_serializing_if = "is_true")]
-    run_in_background: bool = true => "On macOS, hide Canopy on Quit and keep it running in the menu bar.";
+    run_in_background: bool = true => "On macOS, show Canopy in the menu bar, and keep a Canopy Dock tile after Quit while terminals run.";
     desktop_notifications: bool = true => "Show macOS notifications for agent alerts when Canopy is in the background.";
     sounds: Sounds = Sounds::default() => "Attention sounds: enabled, done and blocked file overrides.";
     #[serde(skip_serializing_if = "Option::is_none")]

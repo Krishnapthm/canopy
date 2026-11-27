@@ -659,7 +659,8 @@ The main ones:
   explicitly forget the old identity and pair again with the same name and target.
   Other unreachable machines don't offer this.
 - Window: `window.minimize`, `window.maximize` (or back), `window.close`.
-- macOS: `app.quit`, `app.hide`, `app.hide_others`, `app.show_all`.
+- `app.quit` exits Canopy while the core keeps terminals and agents running.
+- macOS also has `app.hide`, `app.hide_others`, and `app.show_all`.
 
 When the user runs a command without a required name (a key, a click), Canopy
 asks them. **You never get a dialog**: pass every required argument, or the
@@ -693,7 +694,7 @@ when there is one); the rest of the file still applies. The corresponding `.erro
 - `tile_gap`: gap between cells in tile view in world pixels (default 0, 0..1024).
 - `tile_focus_grows`: false (default) keeps every tile the same size; true lets the selected tile take more room.
 - `canvas_push`: "live" (default) pushes neighbours while dragging; "drop" waits for release; "off" never pushes, so cells may overlap (Home still keeps spaces apart).
-- `run_in_background`: on by default on macOS. Quit hides Canopy; use Quit Canopy from the Canopy menu bar icon to exit. Set it to false in Settings > Look > App to quit normally.
+- `run_in_background` is on by default on macOS. it shows Canopy in the menu bar while the app runs and keeps a Dock tile after Quit while terminals run. choose **Open Canopy** to reopen the app or **Quit Completely** to stop the core and its terminals after confirmation.
 - `browser_keep_cookies`: "until_quit" (default) clears browser pane cookies and site data at quit and on the next start; "forever" keeps them on macOS 14 or later.
 - `browser_open_links`: "built_in" (initial setting) opens clicked HTTP and HTTPS terminal links in a browser tab. "default" uses the system browser.
 - `space_fill`: space background opacity (default 0.04, 0..1).

@@ -16,7 +16,7 @@ actions!(herdr, [Quit, Hide, HideOthers, ShowAll, Settings, Minimize, Zoom, Togg
 pub fn init(cx: &mut App, run_in_background: bool) {
     let status_item = create_status_item(cx, run_in_background);
     cx.set_global(BackgroundMode { enabled: run_in_background, status_item });
-    cx.on_action(|_: &Quit, cx| quit_or_hide(cx));
+    cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
@@ -35,6 +35,10 @@ struct BackgroundMode {
 }
 impl Global for BackgroundMode {}
 
+pub(crate) fn background_enabled(cx: &App) -> bool {
+    cx.try_global::<BackgroundMode>().is_some_and(|mode| mode.enabled)
+}
+
 /// Update the status item when a valid settings.json change is applied.
 pub(crate) fn set_background_enabled(enabled: bool, cx: &mut App) {
     let Some(mode) = cx.try_global::<BackgroundMode>() else { return };
@@ -43,15 +47,6 @@ pub(crate) fn set_background_enabled(enabled: bool, cx: &mut App) {
     mode.enabled = enabled;
     if let Some((item, _)) = &mode.status_item {
         item.setVisible(enabled);
-    }
-}
-
-/// Handle Canopy's Quit command and native application menu action.
-pub(crate) fn quit_or_hide(cx: &mut App) {
-    if cx.try_global::<BackgroundMode>().is_some_and(|mode| mode.enabled) {
-        cx.hide();
-    } else {
-        cx.quit();
     }
 }
 
@@ -97,7 +92,7 @@ define_class!(
                     ns_string!("Show Canopy"), Some(sel!(showCanopy:)), ns_string!(""),
                 ).setTarget(Some(self));
                 menu.addItemWithTitle_action_keyEquivalent(
-                    ns_string!("Quit Canopy"), Some(sel!(quitCompletely:)), ns_string!(""),
+                    ns_string!("Quit Canopy"), Some(sel!(quitCanopy:)), ns_string!(""),
                 ).setTarget(Some(self));
             }
             menu.popUpMenuPositioningItem_atLocation_inView(None, NSPoint::new(0.0, 0.0), Some(button));
@@ -117,8 +112,8 @@ define_class!(
             self.show_canopy();
         }
 
-        #[unsafe(method(quitCompletely:))]
-        fn quit_completely(&self, _: &NSObject) {
+        #[unsafe(method(quitCanopy:))]
+        fn quit_canopy(&self, _: &NSObject) {
             self.ivars().update(|cx| cx.quit());
         }
     }

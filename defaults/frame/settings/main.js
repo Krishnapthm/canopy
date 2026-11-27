@@ -624,7 +624,7 @@ export default class Settings extends View {
       .child(this.row(t, "Open links", "Open web links clicked in terminals in a new browser tab or in the system browser.", this.settingPicker(t, "browser_open_links", [["built_in", "Built-in browser"], ["default", "Default browser"]])))
       .when(window()?.platform === "macos", (el) => el
         .child(this.heading(t, "App"))
-        .child(this.row(t, "Run in Background", "Keep Canopy running in the menu bar when you quit.",
+        .child(this.row(t, "Run in Background", "Show Canopy in the menu bar and keep its Dock tile after Quit while terminals run.",
           this.toggle(t, "st-run-in-background", this.person.run_in_background !== false, (_e, cx) => this.change((p) => {
             if (p.run_in_background === false) delete p.run_in_background;
             else p.run_in_background = false;
