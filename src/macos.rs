@@ -35,6 +35,10 @@ struct BackgroundMode {
 }
 impl Global for BackgroundMode {}
 
+pub(crate) fn background_enabled(cx: &App) -> bool {
+    cx.try_global::<BackgroundMode>().is_some_and(|mode| mode.enabled)
+}
+
 /// Update the status item when a valid settings.json change is applied.
 pub(crate) fn set_background_enabled(enabled: bool, cx: &mut App) {
     let Some(mode) = cx.try_global::<BackgroundMode>() else { return };
@@ -88,7 +92,7 @@ define_class!(
                     ns_string!("Show Canopy"), Some(sel!(showCanopy:)), ns_string!(""),
                 ).setTarget(Some(self));
                 menu.addItemWithTitle_action_keyEquivalent(
-                    ns_string!("Quit Canopy"), Some(sel!(quitCompletely:)), ns_string!(""),
+                    ns_string!("Quit Canopy"), Some(sel!(quitCanopy:)), ns_string!(""),
                 ).setTarget(Some(self));
             }
             menu.popUpMenuPositioningItem_atLocation_inView(None, NSPoint::new(0.0, 0.0), Some(button));
@@ -108,8 +112,8 @@ define_class!(
             self.show_canopy();
         }
 
-        #[unsafe(method(quitCompletely:))]
-        fn quit_completely(&self, _: &NSObject) {
+        #[unsafe(method(quitCanopy:))]
+        fn quit_canopy(&self, _: &NSObject) {
             self.ivars().update(|cx| cx.quit());
         }
     }

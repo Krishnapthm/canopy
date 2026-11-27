@@ -2125,6 +2125,12 @@ impl AppWindow {
         view.update(cx, |v, _| v.cwd = cwd);
     }
 
+    /// Includes running terminals without a pane, such as parked terminals.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn has_live_terminals(&self) -> bool {
+        self.live.values().any(|t| t["state"] == "live")
+    }
+
     fn terminals_listed(&mut self, v: Value, window: &mut Window, cx: &mut Context<Self>) {
         let mut list = v.get("terminals").cloned().unwrap_or(Value::Array(vec![]));
         let mut live = HashMap::new();
