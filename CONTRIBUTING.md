@@ -21,3 +21,16 @@ See [requirements](README.md#requirements) and [build and run locally](README.md
 Keep OS-specific code only where the OS really differs. Keep small quirks near their use; put larger differences behind one small module per concern. Test macOS changes on macOS.
 
 When dependencies or bundled assets change, update their licenses and run `just notices`. See [licenses](licenses/README.md).
+
+## Landing page
+
+The GitHub Pages landing page lives in `site/`. Run
+`python3 -m http.server 8000 --directory site` from the repository root
+and open `http://localhost:8000/#features` to preview it.
+
+The GitHub Pages workflow publishes `site/` when changes merge to `main`.
+The repository's Pages source must be set to GitHub Actions.
+
+Changes confined to `site/` and the Pages workflow skip app CI. To release
+from a site-only commit, run the `ci` workflow manually on that commit before
+tagging it. The release checks for a successful full run on the tagged commit.
