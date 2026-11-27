@@ -1209,8 +1209,8 @@ impl AppWindow {
         if has_url {
             if live && !self.browser_popped(id) && !self.active_page(id).is_some_and(|page| page.live.is_some()) {
                 self.wake_browser_result(id, window, cx)?;
-            } else {
-                self.ensure_view(id, window, cx)?;
+            } else if let Err(e) = self.ensure_view(id, window, cx) {
+                self.command_error("Open tab", &e, window, cx);
             }
         }
         Ok(tab)
@@ -1541,7 +1541,10 @@ impl AppWindow {
             return Ok(json!({"pane":id,"url":url,"tab":tab}));
         }
         if !tab.is_null() { return Err("tab must be new".into()); }
-        self.load_browser(id, &url, true, window, cx)?;
+        if let Err(e) = self.load_browser(id, &url, true, window, cx) {
+            self.command_error("Page not opened", &e, window, cx);
+            if self.held_reply.is_some() { return Err(e); }
+        }
         Ok(json!({"pane":id,"url":url}))
     }
 
