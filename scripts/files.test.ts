@@ -139,21 +139,21 @@ test("Files filter preserves folders for lazy expansion and matches names withou
   expect(matches({ dir: false, name: "other.rs" }, "")).toBe(true);
 });
 
-test("Files saves the snapshot, keeps conflicts and newer edits, and Done exits only a saved draft", async () => {
+test("Files saves the snapshot and preserves conflicts and newer edits", async () => {
   let disk = "original", draft = "draft", pending: Promise<void> | undefined;
-  const calls: unknown[] = [];
-  const Files = new Function("View", "writeTextFile", "run", "props", source.slice(source.indexOf("export default class")).replace("export default ", "") + "; return Files;")(
+  const calls: unknown[] = [], toasts: any[] = [];
+  const Files = new Function("View", "writeTextFile", "run", "props", "fileMarks", "notify", source.slice(source.indexOf("export default class")).replace("export default ", "") + "; return Files;")(
     class {},
     async (path: string, text: string, expected: string) => {
       expect(path).toBe("/fixture/hello.md");
       if (disk !== expected) throw new Error("File changed outside Canopy");
       disk = text;
     },
-    (...args: unknown[]) => calls.push(args), () => ({}),
+    (...args: unknown[]) => calls.push(args), () => ({ editing: true }), async () => [], (toast: unknown) => toasts.push(toast),
   );
   const files = new Files();
   files.root = "/fixture"; files.file = "hello.md"; files.original = disk;
-  files.code = { value: () => draft };
+  files.code = { value: () => draft, set_line_marks() {} };
   const cx = { notify() {}, spawn(f: Function) { pending = f(cx); } };
   files.save(false, cx); await pending;
   expect(disk).toBe("draft"); expect(files.original).toBe("draft"); expect(calls).toEqual([]);
@@ -162,12 +162,14 @@ test("Files saves the snapshot, keeps conflicts and newer edits, and Done exits 
   expect(files.saveError).toContain("changed outside");
   expect(files.code.value()).toBe("my changes"); expect(files.original).toBe("draft");
   expect(disk).toBe("external"); expect(calls).toEqual([]);
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatchObject({ title: "Could not save hello.md", level: "error" });
   disk = "draft";
   files.save(true, cx); draft = "newer changes"; await pending;
   expect(files.original).toBe("my changes"); expect(calls).toEqual([]);
   files.save(true, cx); await pending;
   expect(disk).toBe("newer changes");
-  expect(calls).toEqual([["panel.editor", { done: true, path: "/fixture/hello.md" }]]);
+  expect(calls).toEqual([]);
 });
 
 test("Files edits full markdown source instead of the bounded read-only preview", async () => {
@@ -175,7 +177,7 @@ test("Files edits full markdown source instead of the bounded read-only preview"
   const options: any[] = [];
   let editing = true, pending: Promise<void> | undefined;
   const Files = new Function("View", "readTextFile", "theme", "settings", "EditorState", "props",
-    source.replace(/^import .*;\n/gm, "").replace("export default class", "class") + "; return Files;")(
+    source.replace(/^import .*;\n/gm, "").replace("export default class", "class").replace("export function lineMarks", "function lineMarks") + "; return Files;")(
     class {}, async () => text, () => ({}), () => ({}),
     { new(o: any) { options.push(o); return { on() {}, release() {} }; } }, () => ({ editing }),
   );
@@ -193,13 +195,13 @@ test("Files edits full markdown source instead of the bounded read-only preview"
 test("Files reports only dirty transitions to the native tab, including edits during save", async () => {
   let draft = "saved", pending: Promise<void> | undefined;
   const calls: unknown[] = [];
-  const Files = new Function("View", "props", "run", "writeTextFile",
+  const Files = new Function("View", "props", "run", "writeTextFile", "fileMarks",
     source.slice(source.indexOf("export default class")).replace("export default ", "") + "; return Files;")(
     class {}, () => ({ canvas: "viewer", editing: true }),
-    (...args: unknown[]) => calls.push(args), async () => {},
+    (...args: unknown[]) => calls.push(args), async () => {}, async () => [],
   );
   const files = new Files();
-  Object.assign(files, { root: "/fixture", file: "hello.md", original: "saved", code: { value: () => draft } });
+  Object.assign(files, { root: "/fixture", file: "hello.md", original: "saved", code: { value: () => draft, set_line_marks() {} } });
   const cx = { notify() {}, spawn(f: Function) { pending = f(cx); } };
   files.reportDirty();
   draft = "edit"; files.reportDirty();
@@ -212,4 +214,64 @@ test("Files reports only dirty transitions to the native tab, including edits du
   ]);
   files.save(false, cx); await pending;
   expect(calls.at(-1)).toEqual(["panel.editor", { path: "/fixture/hello.md", dirty: false }]);
+});
+
+const markSource = source.slice(source.indexOf("export function lineMarks("), source.indexOf("\nasync function fileMarks("));
+const lineMarks = new Function(`${markSource.replace("export ", "")}; return lineMarks;`)();
+
+test("Files turns zero-context Git hunks into source gutter marks", () => {
+  expect(lineMarks("@@ -1,0 +2,2 @@\n+a\n+b")).toEqual([
+    { line: 2, kind: "added" }, { line: 3, kind: "added" },
+  ]);
+  expect(lineMarks("@@ -2 +2 @@\n-old\n+new")).toEqual([{ line: 2, kind: "modified" }]);
+  expect(lineMarks("@@ -1 +0,0 @@")).toEqual([{ line: 1, kind: "removed" }]);
+  expect(lineMarks("@@ -4,2 +3,0 @@")).toEqual([{ line: 4, kind: "removed" }]);
+  expect(lineMarks("@@ -1 +1 @@ title\n@@ -3,0 +4 @@\n@@ -8 +8,0 @@")).toEqual([
+    { line: 1, kind: "modified" }, { line: 4, kind: "added" }, { line: 9, kind: "removed" },
+  ]);
+  expect(lineMarks("")).toEqual([]);
+});
+
+test("Files replaces the pending auto-save timer and cancels it when edits are reverted", async () => {
+  const viewerSource = source.slice(source.indexOf("  show(path, cx)"), source.indexOf("\n  // Only transitions"));
+  const save = () => { saves++; };
+  let saves = 0, value = "original", change: Function;
+  const code = { value: () => value, on: (event: string, handler: Function) => { if (event === "change") change = handler; }, set_line_marks() {} };
+  const args = {
+    readTextFile: async () => value,
+    theme: () => ({}), settings: () => ({}), props: () => ({ canvas: "viewer", editing: true }),
+    LANG: {}, EditorState: { new: () => code }, autoSave: () => true, fileMarks: async () => [],
+  };
+  const viewer = new Function(...Object.keys(args), `return ({ ${viewerSource} });`)(...Object.values(args));
+  Object.assign(viewer, { current: () => true, reportDirty() {}, save });
+  let loaded: Promise<void>;
+  const pending = new Set<Function>();
+  const cx = {
+    notify() {}, spawn(fn: Function) { loaded = fn(cx); },
+    timer: {
+      after(ms: number, cb: Function) {
+        expect(ms).toBe(1000);
+        pending.add(cb);
+        return { cancel: () => pending.delete(cb) };
+      },
+    },
+  };
+  viewer.show("test.txt", cx);
+  await loaded!;
+  value = "first";
+  change!(null, cx);
+  const first = [...pending][0];
+  value = "second";
+  change!(null, cx);
+  expect(pending.size).toBe(1);
+  expect(pending.has(first)).toBe(false);
+  value = "original";
+  change!(null, cx);
+  expect(pending.size).toBe(0);
+  value = "third";
+  change!(null, cx);
+  const last = [...pending][0];
+  pending.delete(last);
+  last(cx);
+  expect(saves).toBe(1);
 });

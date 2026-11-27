@@ -43,16 +43,15 @@ A browser or simulator opens as a tab in this panel, so it sits beside your work
 
 A docked pane is not on the canvas: layout, tiling and wire lines skip it. Canopy remembers docked panes between runs. On the canvas, use **Open in panel** from the browser’s **⋯** menu or its equivalent on the simulator’s helper bar. The pages themselves work as described in [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices).
 
-## Edit a file
+## Editing
 
-1. Open the arrow menu beside the editor button.
-2. Select **Open here** to edit in the panel.
-3. Edit the text.
-4. Click **Save** to save it, or **Done** to save and return to the preview.
+Use **Source** to make a quick edit or quote an exact line without leaving the panel. For files with a rendered view, use **Preview** to switch back. You can also choose **Open here** from the menu beside the editor button.
 
-an unsaved dot replaces the tab's X until you hover over it. switching to another tab, returning to the tree with **Files**, or closing the dirty tab asks **Discard unsaved changes?**. cancel to keep editing. if you edit the file again after the dialog opened, the old answer does nothing. agents cannot close a file tab.
-Editing accepts text files up to 1 MiB.
-If the file changes outside Canopy, saving fails and keeps your draft.
+- Edits save automatically one second after you stop typing. To turn this off, open **More** and uncheck **Auto save**. The toolbar then shows **Save**. On macOS, **Cmd+S** saves in either setting.
+- Hover a line number and click **+** to open the quote menu for that line. Drag from **+** to another line to quote the whole range. This also works in read-only source views.
+- The bar beside a line number shows a Git change. Green marks additions, blue marks edits, and a short red bar shows where lines were deleted. The bars refresh when you open or save the file.
+
+The editor wraps long lines and highlights the line with the cursor. It accepts text files up to 1 MiB. If another program changes the file before you save, Canopy shows an error and keeps your draft. An unsaved dot appears on the tab, and leaving a dirty tab asks whether to discard your changes.
 
 ## Changes
 

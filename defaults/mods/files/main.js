@@ -2,7 +2,38 @@
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, nextCommand } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, nextCommand, shared, setShared, notify, ui } from "herdr";
+
+const autoSave = () => shared("files.auto_save") !== false;
+
+// Zero-context hunk headers describe changes in the working copy's line numbers.
+export function lineMarks(diff) {
+  const marks = [];
+  for (const [, oldCount = "1", start, newCount = "1"] of diff.matchAll(/^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
+    const line = Number(start), count = Number(newCount);
+    if (count === 0) marks.push({ line: line + 1, kind: "removed" });
+    else for (let i = 0; i < count; i++) marks.push({ line: line + i, kind: oldCount === "0" ? "added" : "modified" });
+  }
+  return marks;
+}
+
+async function fileMarks(file, text, options) {
+  try {
+    const git = (...args) => exec("git", args, options);
+    if ((await git("rev-parse", "--is-inside-work-tree")).stdout.trim() !== "true") return [];
+    const lines = text.split("\n").length;
+    const path = `:(literal)${file}`;
+    if ((await git("ls-files", "--error-unmatch", "--", path)).code === 1) {
+      return Array.from({ length: lines }, (_, i) => ({ line: i + 1, kind: "added" }));
+    }
+    const diff = await git("diff", "-U0", "--no-color", "--no-ext-diff", "--no-textconv", "--", path);
+    return diff.code === 0 ? lineMarks(diff.stdout).map(mark =>
+      mark.kind === "removed" ? { ...mark, line: Math.min(mark.line, lines) } : mark) : [];
+  } catch {
+    // Git is optional for the viewer.
+    return [];
+  }
+}
 
 function location() {
   if (props()?.canvas) return { cwd: props().root, on: null };
@@ -155,24 +186,50 @@ export default class Files extends View {
   }
 
   show(path, cx) {
+    this.saveTimer?.cancel(); this.saveTimer = null;
+    this.saveError = null;
+    const load = this.fileLoad = {};
     this.code?.release(); this.code = null; this.file = path; this.fileError = null; this.reportedDirty = undefined;
     if (!path || !cx) return;
     const context = this.context, root = this.root, on = this.on;
     cx.spawn(async cx => {
       try {
         const text = await readTextFile(`${root}/${path}`, { on });
-        if (this.file !== path || !this.current(context)) return;
+        if (this.fileLoad !== load || !this.current(context)) return;
         if (text === null) { this.fileError = "File deleted"; return; }
         if (text.includes("\0")) { this.fileError = "Can't preview"; return; }
         const t = theme(), ext = path.includes(".") ? path.split(".").pop() : "txt";
         this.original = text;
-        this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: !props()?.editing,
+        const viewer = props()?.canvas === "viewer";
+        const code = this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: !props()?.editing,
           value: !props()?.editing && text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text,
           font_family: settings().font_family, font_size: 12,
+          ...(viewer ? { soft_wrap: true, active_line: true, mark_colors: { added: t.ansi2, modified: t.ansi4, removed: t.ansi1 } } : {}),
           syntax: { keyword: t.ansi5, string: t.ansi2, comment: t.dim, function: t.ansi4, type: t.ansi3, number: t.ansi1, constant: t.ansi6 } });
-        this.code.on("change", (_e, cx) => { this.reportDirty(); cx.notify(); });
+        code.on("change", (_e, cx) => {
+          this.reportDirty();
+          this.saveTimer?.cancel();
+          this.saveTimer = null;
+          this.queuedSave = null;
+          if (viewer && props()?.editing && autoSave() && (this.saving || code.value() !== this.original)) {
+            this.saveTimer = cx.timer.after(1000, cx => {
+              this.saveTimer = null;
+              if (this.code === code && props()?.editing && autoSave()) this.save(false, cx);
+            });
+          }
+          cx.notify();
+        });
         this.reportDirty();
-      } catch { if (this.file === path && this.current(context)) this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; }
+        if (viewer) {
+          code.on("gutter_quote", e => run("quote.menu", {
+            text: code.value().split("\n").slice(e.start - 1, e.end).join("\n"),
+            start: e.start, end: e.end, path: `${root}/${path}`, point: { x: e.x, y: e.y },
+          }));
+          cx.notify();
+          const marks = await fileMarks(path, text, { cwd: root, on });
+          if (this.code === code && this.original === text) code.set_line_marks(marks);
+        }
+      } catch { if (this.fileLoad === load && this.current(context)) this.fileError = "Cannot preview this file (binary, too large, or unreadable)"; }
       finally { cx.notify(); }
     });
   }
@@ -186,11 +243,19 @@ export default class Files extends View {
     run("panel.editor", { path: `${this.root}/${this.file}`, dirty });
   }
 
-  save(done, cx) {
-    if (this.saving) return;
-    if (!this.code) { if (done) run("panel.editor", { done: true, path: `${this.root}/${this.file}` }); return; }
-    const code = this.code, text = code.value(), path = `${this.root}/${this.file}`;
-    if (done && text === this.original) { run("panel.editor", { done: true, path }); return; }
+  save(manual, cx) {
+    const code = this.code;
+    if (!code || !props()?.editing) return;
+    this.saveTimer?.cancel();
+    this.saveTimer = null;
+    if (this.saving) {
+      this.queuedSave = { code, manual };
+      return;
+    }
+    const text = code.value();
+    if (text === this.original) return;
+    const { root, file, on } = this;
+    const path = `${root}/${file}`;
     this.saving = true; this.saveError = null; cx.notify();
     cx.spawn(async cx => {
       try {
@@ -198,9 +263,21 @@ export default class Files extends View {
         if (this.code !== code) return;
         this.original = text;
         this.reportDirty();
-        if (done && code.value() === text) run("panel.editor", { done: true, path });
-      } catch (e) { if (this.code === code) this.saveError = String(e); }
-      finally { this.saving = false; cx.notify(); }
+        cx.spawn(async () => {
+          const marks = await fileMarks(file, text, { cwd: root, on });
+          if (this.code === code && this.original === text) code.set_line_marks(marks);
+        });
+      } catch (e) {
+        if (this.code === code) this.saveError = String(e);
+        notify({ title: `Could not save ${file.split("/").pop()}`, body: String(e), level: "error",
+          action: { name: "preview.open", args: { path } } });
+      } finally {
+        this.saving = false;
+        const queued = this.queuedSave;
+        this.queuedSave = null;
+        if (queued && queued.code === this.code && (queued.manual || autoSave())) this.save(queued.manual, cx);
+        cx.notify();
+      }
     });
   }
 
@@ -254,22 +331,35 @@ export default class Files extends View {
   render(cx) {
     if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
-    if (props()?.canvas === "viewer") return v_flex().size_full().min_h(0).bg(t.canvas).text_color(t.foreground)
-      .on_key_down((e, cx) => {
-        if (props()?.editing && e.keystroke === "cmd-s") { this.save(false, cx); cx.stop_propagation(); }
-      })
-      .when(Boolean(props()?.editing), el => el.child(h_flex().h(32).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border).text_size(12)
-        .child(div().flex_1().text_color(t.dim).child(this.saving ? "Saving" : this.code && this.code.value() !== this.original ? "Unsaved" : "Saved"))
-        .children(["Save", "Done"].map(label => div().id(`file-${label}`).px(8).py(3).rounded(7).border_1().border_color(t.border)
-          .cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => this.save(label === "Done", cx)).child(label)))))
-      .when(Boolean(this.saveError), el => el.child(div().px(12).py(6).text_size(12).text_color(t.foreground).child(this.saveError)))
-      // A finished selection opens the quote popover where the mouse came up.
-      .on_mouse_up("left", (e) => {
-        if (props()?.editing) return;
-        const quote = this.code?.selection();
-        if (quote?.text.trim()) run("quote.menu", { ...quote, path: `${this.root}/${this.file}`, point: e.position });
-      })
-      .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(16).text_color(t.dim).child(this.fileError || "Loading file"));
+    if (props()?.canvas === "viewer") {
+      const dismissTip = (_e, cx) => { setShared("files.auto_save_tip", "seen"); cx.notify(); };
+      return v_flex().relative().size_full().min_h(0).bg(t.canvas).text_color(t.foreground)
+        .on_key_down((e, cx) => {
+          if (props()?.editing && e.keystroke === "cmd-s") { this.save(true, cx); cx.stop_propagation(); }
+        })
+        .when(Boolean(props()?.editing), el => el.child(h_flex().h(32).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border).text_size(12)
+          .child(div().flex_1().text_color(t.dim).child(this.saving ? "Saving" : this.code && this.code.value() !== this.original ? "Unsaved" : "Saved"))
+          .when(!autoSave(), bar => bar.child(div().id("file-Save").px(8).py(3).rounded(ui.size.radiusSm).border_1().border_color(t.border)
+            .cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => this.save(true, cx)).child("Save")))))
+        .when(Boolean(this.saveError), el => el.child(div().px(12).py(6).text_size(12).text_color(t.foreground).child(this.saveError)))
+        // A finished selection opens the quote popover where the mouse came up.
+        .on_mouse_up("left", (e) => {
+          if (props()?.editing) return;
+          const quote = this.code?.selection();
+          if (quote?.text.trim()) run("quote.menu", { ...quote, path: `${this.root}/${this.file}`, point: e.position });
+        })
+        .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(16).text_color(t.dim).child(this.fileError || "Loading file"))
+        .when(Boolean(props()?.editing) && autoSave() && shared("files.auto_save_tip") !== "seen", el =>
+          el.child(h_flex().absolute().top(40).right(8).left(72).justify_end()
+            .child(v_flex().max_w(320).min_w(0).p(12).gap(8).rounded(ui.size.radiusSm).border_1().border_color(t.border)
+              .bg(t.popover).text_color(t.foreground).text_size(12)
+              .child(h_flex().items_center().gap(8)
+                .child(div().flex_1().font_semibold().child("Auto save is on"))
+                .child(div().id("auto-save-tip-close").px(6).cursor_pointer().hover(s => s.bg(t.hover)).on_click(dismissTip).child("×")))
+              .child(div().child("Changes you make to a file now save on their own. To turn this off, open the More menu and uncheck Auto save."))
+              .child(h_flex().justify_end().child(div().id("auto-save-tip-ok").px(8).py(4).rounded(ui.size.radiusSm)
+                .bg(t.hover).cursor_pointer().on_click(dismissTip).child("Got it"))))));
+    }
     const list = props()?.canvas === "tree" ? this.rows("", 0, [], t) : null;
     if (props()?.canvas === "tree") return v_flex().size_full().min_h(0).text_size(13).text_color(t.muted)
       .child(div().p(8).flex_none().child(Input.new(this.input).w_full().h(30).px(10).gap(8).rounded(8).border_1().border_color(t.border).text_size(12)
