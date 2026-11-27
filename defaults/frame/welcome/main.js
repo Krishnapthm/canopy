@@ -1,7 +1,7 @@
 // Modified for Canopy.
 // First-run welcome over the live app; records finished/skipped in frame.welcomed.
 
-import { View, div, svg, image } from "gpui-kit";
+import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar } from "gpui-base";
 import { spaces, run, theme, props, closeOverlay, setShared, shared, hc, appHome, readTextFile, writeTextFile, settings, layout, keys } from "herdr";
 
@@ -9,7 +9,6 @@ const I = (name) => `frame/welcome/${name}.svg`;
 const W = (name) => `mods/workspace-chrome/${name}.svg`;
 const PAGES = 4;
 const ASK = "Read ~/.config/canopy/AGENTS.md, then tell me what you can change in Canopy.";
-const MIGRATE = "Read `canopy --skill`, then migrate my keybinds and settings from ~/.config/herdr/config.toml";
 const APPEARANCES = [
   [null, "System"],
   ["light", "Light"],
@@ -259,27 +258,6 @@ export default class Welcome extends View {
       );
   }
 
-  comingFromCanopy(t) {
-    return v_flex()
-      .gap(12)
-      .p(16)
-      .rounded(12)
-      .border_1()
-      .border_color(t.border)
-      .bg(t.raised)
-      .child(
-        h_flex()
-          .gap(10)
-          .items_center()
-          .child(svg(I("terminal")).size(16).text_color(t.muted))
-          .child(div().text_size(13.5).font_semibold().text_color(t.foreground).child("Coming from herdr?")),
-      )
-      .child(this.para(t, "This is a new app on a new core. Your herdr workspaces stay where they are; nothing moves over."))
-      .child(this.para(t, "Same idea as before: spaces, tabs and terminals."))
-      .child(this.para(t, "Want your keybinds and settings carried over? Give your agent this line:"))
-      .child(this.copyLine(t, MIGRATE, "w-migrate-copy"));
-  }
-
   // Pages ---------------------------------------------------------------
 
   pageOne(t) {
@@ -291,8 +269,7 @@ export default class Welcome extends View {
       .child(this.feature(t, "layers", "Your other machines, in the same window", "A server or a Mac mini runs its own herdr-core, so its agents keep going even while this laptop sleeps."))
       .child(div().h(1).bg(t.border))
       .child(h_flex().gap(10).items_center().child(div().w(84).text_size(13).text_color(t.muted).child("Appearance")).child(this.segment(t, APPEARANCES, this.appearance, (v, cx) => this.setAppearance(v, cx))))
-      .child(h_flex().gap(10).items_center().child(div().w(84).text_size(13).text_color(t.muted).child("Size")).child(this.sizeControl(t)))
-      .child(this.comingFromCanopy(t));
+      .child(h_flex().gap(10).items_center().child(div().w(84).text_size(13).text_color(t.muted).child("Size")).child(this.sizeControl(t)));
   }
 
   machineRow(t, icon, name, note, ok) {
@@ -449,17 +426,7 @@ export default class Welcome extends View {
           .bg(t.raised)
           .child(div().text_size(13.5).font_semibold().text_color(t.foreground).child("Your terminals, outside this window too"))
           .child(this.para(t, "hc is herdr-core's command line. In any terminal, hc ls lists everything running and hc attach t3 jumps into one. Your agents can use it to start and watch other agents for you. Tell them to read hc's help, or make it a skill.")),
-      )
-      .child(
-        v_flex()
-          .gap(10)
-          .p(12)
-          .rounded(10)
-          .bg(t.raised)
-          .child(div().text_size(13.5).font_semibold().text_color(t.foreground).child("More examples in Settings"))
-          .child(this.para(t, "Settings \u203a Look has more layouts to try or start from, Canopy 98 among them. Your agent can copy any of them and change anything.")),
-      )
-      ;
+      );
   }
 
   render() {
