@@ -16,7 +16,7 @@ pub(super) struct BarAction {
 pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>, docked: bool, mode: Option<FileMode>) -> Vec<BarAction> {
     let mut actions = kind_actions(pane, hint);
     match &pane.kind {
-        canvas::Kind::File { path } if previewable(Path::new(path)).is_some() => {
+        canvas::Kind::File { path } if file_view::can_preview(Path::new(path)) => {
             actions.insert(0, file_view::mode_action(path, file_view::file_host_mode(path, mode.unwrap_or_else(|| FileMode::default_for(Path::new(path)))), Some(&pane.id)));
         }
         canvas::Kind::Browser { source: Some(path), .. } => {

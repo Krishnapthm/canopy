@@ -160,6 +160,7 @@ test("Files saves the snapshot and preserves conflicts and newer edits", async (
   disk = "external"; draft = "my changes";
   files.save(true, cx); await pending;
   expect(files.saveError).toContain("changed outside");
+  expect(files.conflict).toBe(true);
   expect(files.code.value()).toBe("my changes"); expect(files.original).toBe("draft");
   expect(disk).toBe("external"); expect(calls).toEqual([]);
   expect(toasts).toHaveLength(1);
@@ -206,7 +207,9 @@ test("Files reports only dirty transitions to the native tab, including edits du
   files.reportDirty();
   draft = "edit"; files.reportDirty();
   draft = "more edits"; files.reportDirty();
-  files.save(false, cx); draft = "newer edit"; await pending;
+  files.save(false, cx);
+  draft = "saved"; files.reportDirty(); // Undo while writing must not make the draft closable.
+  await pending;
   files.reportDirty();
   expect(calls).toEqual([
     ["panel.editor", { path: "/fixture/hello.md", dirty: false }],
@@ -274,6 +277,12 @@ test("Files replaces the pending auto-save timer and cancels it when edits are r
   pending.delete(last);
   last(cx);
   expect(saves).toBe(1);
+  value = "fourth";
+  change!(null, cx);
+  const afterConflict = [...pending][0];
+  viewer.conflict = true;
+  afterConflict(cx);
+  expect(saves).toBe(1);
 });
 
 const { parseFilter, menuItems } = new Function(
@@ -301,6 +310,7 @@ test("Files scopes menu actions to the row, clipboard, and machine", () => {
   expect(actions).toContain("browser");
   expect(actions).not.toContain("new-file");
   expect(actions).not.toContain("new-folder");
+  expect(ids(menuItems(file, clip, "linux"))).not.toContain("browser");
   expect(menuItems(file, clip, "linux")).toContainEqual({ id: "reveal", label: "Show in folder" });
   expect(ids(menuItems({ ...file, on: "remote" }, clip, "macos"))).toEqual(["copy-path", "copy-relative"]);
 });

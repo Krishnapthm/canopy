@@ -1286,6 +1286,7 @@ impl AppWindow {
     /// tab (zoomed or not shown), and the overlays.
     fn owned_mods(&self) -> HashMap<String, Instance> {
         let mut out: HashMap<String, Instance> = self.panel_mods().into_iter().collect();
+        out.extend(self.draft_mods());
         let inst = |name: &String, props: &Value| Instance { name: name.clone(), props: props.clone() };
         for n in self.chrome.walk() {
             if let Some(Content::Mod { name, props }) = n.content() {
@@ -3188,6 +3189,7 @@ impl AppWindow {
                 Some(on) => mods::set_shared("files.auto_save".into(), json!(on)),
                 None => self.fail("files.auto_save requires a boolean on"),
             },
+            "panel.editor" if !person && a["dirty"].is_boolean() => return self.fail("only the editor can report unsaved changes"),
             "panel.editor" => self.panel_editor(a, window, cx),
             "file.rename" => self.file_operation(crate::file_ops::Operation::Rename, a, window, cx),
             "file.copy" => self.file_operation(crate::file_ops::Operation::Copy, a, window, cx),
@@ -3241,6 +3243,8 @@ impl AppWindow {
             }
             "space.close" => {
                 let Some(id) = Self::owned(a, "id").or_else(|| self.model.active.clone()) else { return self.fail("no space to close") };
+                let boxed: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.boxed() && p.space.as_deref() == Some(id.as_str())).map(|p| p.id.clone()).collect();
+                if self.refuse_to_close_drafts(&boxed) { return; }
                 let Some(p) = self.model.space(&id) else { return self.fail(format!("no space {id:?}")) };
                 if a.get("confirmed").and_then(Value::as_bool) != Some(true) {
                     if !person {
@@ -3254,7 +3258,6 @@ impl AppWindow {
                 let addrs = self.model.remove_space(&id);
                 self.kill(&addrs, cx);
                 // Terminals went with the space; its file, browser and other boxed panes stay on the canvas document, so close them too (this tears down browser pages).
-                let boxed: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.boxed() && p.space.as_deref() == Some(id.as_str())).map(|p| p.id.clone()).collect();
                 if !boxed.is_empty() { self.close_boxed_panes(&boxed, cx); }
             }
             "space.rename" => {

@@ -1163,8 +1163,10 @@ with a draft asks first. Saves use `writeTextFile(path, text, expected)`; a conf
 inline, keeps the draft and pauses Auto save until a manual save or reload.
 Markdown, JSONL, HTML and SVG have **Source** and **Preview** in the panel header and the file
 pane's helper bar: `file.mode {path, mode: "source" | "preview", pane?}` (absolute path; pane
-for a canvas file pane, none for a panel tab). JSONL source is read-only. On macOS, HTML Preview
-uses a local browser pane. Markdown previews follow folder changes and show File deleted when
+for a canvas file pane, none for a panel tab). JSONL source is read-only. HTML opens in a
+local browser pane on macOS and in Source on Linux and Windows. A canvas draft stays with its
+editor when switching spaces. Save or undo edits before closing a file pane or its space.
+Agents cannot close a pane with an unsaved draft. Markdown previews follow folder changes and show File deleted when
 missing. The More menu's `files.auto_save {on}` persists the shared Auto save setting.
 
 Preview quotes: finishing a selection in a file pane shows the quote icon, which opens the popover, also opened by `quote.menu {path, start?, end?, text, point?, pane?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv, pane?}` expands an agent's cell and pastes the quote, then a blank line and the trimmed message when given, without Enter. The popover lists agents wired to the quoted pane first, then running agents, then installed agents ("New agent with this"). New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.

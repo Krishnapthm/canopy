@@ -21,6 +21,11 @@ pub(super) fn previewable(path: &Path) -> Option<Previewable> {
     }
 }
 
+/// Whether the file's rendered view is available on this platform.
+pub(super) fn can_preview(path: &Path) -> bool {
+    previewable(path).is_some_and(|kind| kind != Previewable::Html || browser::LOCAL_FILES_SUPPORTED)
+}
+
 /// How an open file is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -30,9 +35,9 @@ pub(super) enum FileMode {
 }
 
 impl FileMode {
-    /// Previewable files open as Preview, everything else as Source.
+    /// Files with a preview on this platform open as Preview, everything else as Source.
     pub(super) fn default_for(path: &Path) -> Self {
-        if previewable(path).is_some() {
+        if can_preview(path) {
             Self::Preview
         } else {
             Self::Source
@@ -144,7 +149,7 @@ impl AppWindow {
             return Err("File path must be absolute".into());
         }
         let kind = previewable(Path::new(path));
-        if mode == FileMode::Preview && kind.is_none() {
+        if mode == FileMode::Preview && !can_preview(Path::new(path)) {
             return Err(format!("No preview available for {path}"));
         }
         let file_tab = canvas::PanelTab::File(path.into());
@@ -443,7 +448,7 @@ fn headings(text: &str) -> Vec<(u8, String, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileMode, Path, Previewable, headings, previewable};
+    use super::{FileMode, Path, Previewable, browser, headings, previewable};
 
     #[test]
     fn extensions_and_default_modes() {
@@ -452,8 +457,6 @@ mod tests {
             ("markdown", Previewable::Markdown),
             ("mdx", Previewable::Markdown),
             ("jsonl", Previewable::Jsonl),
-            ("html", Previewable::Html),
-            ("htm", Previewable::Html),
             ("svg", Previewable::Svg),
         ] {
             for ext in [ext.to_owned(), ext.to_ascii_uppercase()] {
@@ -461,6 +464,11 @@ mod tests {
                 assert_eq!(previewable(&path), Some(expected));
                 assert_eq!(FileMode::default_for(&path), FileMode::Preview);
             }
+        }
+        for ext in ["html", "HTML", "htm", "HTM"] {
+            let path = Path::new("doc").with_extension(ext);
+            assert_eq!(previewable(&path), Some(Previewable::Html));
+            assert_eq!(FileMode::default_for(&path), if browser::LOCAL_FILES_SUPPORTED { FileMode::Preview } else { FileMode::Source });
         }
         for path in [Path::new("doc"), Path::new("doc.txt")] {
             assert_eq!(previewable(path), None);

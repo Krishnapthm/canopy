@@ -304,7 +304,10 @@ mod tests {
     #[gpui::test]
     fn pane_commands_headless(cx: &mut TestAppContext) {
         if !running_alone(TEST) { return; }
-        let (view, cx) = open_window(cx, "pane-commands", "", json!({"id":"root","type":"canvas"}));
+        let (view, cx) = open_window(cx, "files", r#"
+import { View, div } from "gpui-kit";
+export default class extends View { render() { return div(); } }
+"#, json!({"id":"root","type":"canvas"}));
         view.update_in(cx, |this, window, cx| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
@@ -438,6 +441,7 @@ mod tests {
             assert_eq!(this.pane_read(&json!({"pane":"missing"}), cx).unwrap_err(), "no pane missing");
             assert_eq!(this.pane_read(&json!({"pane":"t1"}), cx).unwrap_err(), "pane t1 is a terminal: read it with hc read t1");
             assert_eq!(this.pane_open(&json!({"pane":id,"target":"x"}), window, cx).unwrap_err(), format!("pane {id} (file) has no verb open"));
+            this.model.add_space("other", "Fixture", path.parent().unwrap().to_str().unwrap(), crate::model::Tab::new("tb1", "", "fixture", "t99"));
             this.canvas_state.doc.room = Some("other".into());
             assert_eq!(this.pane_shot(&json!({"pane":id}), window).unwrap_err(), format!("pane {id} is in another space: go there first"));
             let moved = this.pane_new(&json!({"kind":"file","path":path,"point":[10000,10000]}), false, window, cx).unwrap();
@@ -451,27 +455,66 @@ mod tests {
             assert_eq!(this.run_as("file.mode", json!({"path":source,"pane":id,"mode":"source"}), false, window, cx)["ok"], true);
             this.panel_editor(&json!({"path":source,"pane":id,"dirty":true}), window, cx);
             assert!(this.run_as("file.mode", preview, false, window, cx)["error"].is_string());
+            let slot = FileHost::Card { pane: id.into() }.slot();
+            let editor = this.copies[&slot].id;
+            assert!(this.copies[&slot].root.is_some());
+            this.go_room(None, window, cx);
+            assert!(!this.panel_mods().iter().any(|(key, _)| key == &slot));
+            assert_eq!(this.copies.get(&slot).map(|copy| copy.id), Some(editor), "a hidden draft keeps its editor");
+            assert!(this.run_as("canvas.close", json!({"pane":id}), false, window, cx)["error"].is_string());
+            assert!(this.run_as("canvas.close", json!({"panes":[id]}), false, window, cx)["error"].is_string());
+            assert!(this.run_as("panel.editor", json!({"path":source,"pane":id,"dirty":false}), false, window, cx)["error"].is_string());
+            this.dispatch("space.close", &json!({"id":"other","confirmed":true}), false, window, cx);
+            assert!(this.model.space("other").is_some(), "deleting a space must keep its draft");
+            this.go_room(Some("other".into()), window, cx);
+            this.canvas_state.selected = vec![id.into()];
+            assert!(this.run_as("canvas.close_focused", json!({}), true, window, cx)["error"].is_string());
+            assert_eq!(this.copies[&slot].id, editor);
+            this.panel_editor(&json!({"path":source,"pane":id,"done":true}), window, cx);
+            assert_eq!(this.canvas_state.file_mode(&FileHost::Card { pane: id.into() }, source), FileMode::Source);
+            this.panel_editor(&json!({"path":source,"pane":id,"dirty":false}), window, cx);
             this.panel_editor(&json!({"path":source,"pane":id,"done":true}), window, cx);
             assert_eq!(this.canvas_state.file_mode(&FileHost::Card { pane: id.into() }, source), FileMode::Preview);
             this.close_canvas_cell(&json!({"pane":id}), window, cx);
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == id));
             assert!(this.canvas_state.doc.wires.is_empty());
-            // HTML Preview is a browser pane with the file as its source; Source turns the same pane
-            // back into a file pane, and reopening the file keeps that one pane.
+            // macOS swaps the same pane between Preview and Source. Linux and Windows keep Source.
             let html = std::env::temp_dir().join(format!("canopy-mode-{}.html", std::process::id()));
             std::fs::write(&html, "<p>hi</p>").unwrap();
             let opened = this.pane_new(&json!({"kind":"file","path":html}), false, window, cx).unwrap();
             let (id, html) = (opened["pane"].as_str().unwrap().to_owned(), opened["path"].as_str().unwrap().to_owned());
             let panes = this.canvas_state.doc.panes.len();
             let kind = |this: &crate::window::AppWindow| this.canvas_state.doc.panes.iter().find(|p| p.id == id).map(|p| p.kind.clone());
-            assert!(matches!(kind(this), Some(canvas::Kind::Browser { source: Some(s), .. }) if s == html), "HTML opens as its Preview");
-            assert_eq!(this.run_as("file.mode", json!({"path":html,"pane":id,"mode":"source"}), false, window, cx)["ok"], true);
-            assert!(matches!(kind(this), Some(canvas::Kind::File { path }) if path == html));
-            assert_eq!(this.run_as("file.mode", json!({"path":html,"pane":id,"mode":"preview"}), false, window, cx)["ok"], true);
-            assert!(matches!(kind(this), Some(canvas::Kind::Browser { source: Some(s), .. }) if s == html));
+            let preview = json!({"path":html,"pane":id,"mode":"preview"});
+            let has_mode_action = |this: &crate::window::AppWindow| {
+                let pane = this.canvas_state.doc.panes.iter().find(|pane| pane.id == id).unwrap();
+                super::super::helper_bar::pane_actions(pane, None, false, None)
+                    .iter().any(|action| action.command == "file.mode")
+            };
+            if cfg!(target_os = "macos") {
+                assert!(matches!(kind(this), Some(canvas::Kind::Browser { source: Some(s), .. }) if s == html));
+                assert_eq!(this.run_as("file.mode", json!({"path":html,"pane":id,"mode":"source"}), false, window, cx)["ok"], true);
+                assert!(matches!(kind(this), Some(canvas::Kind::File { path }) if path == html));
+                assert!(has_mode_action(this));
+                assert_eq!(this.run_as("file.mode", preview, false, window, cx)["ok"], true);
+                assert!(matches!(kind(this), Some(canvas::Kind::Browser { source: Some(s), .. }) if s == html));
+            } else {
+                assert!(matches!(kind(this), Some(canvas::Kind::File { path }) if path == html));
+                assert!(!has_mode_action(this));
+                assert!(this.run_as("file.mode", preview, false, window, cx)["error"].is_string());
+                assert!(matches!(kind(this), Some(canvas::Kind::File { path }) if path == html));
+            }
             assert_eq!(this.pane_new(&json!({"kind":"file","path":html}), false, window, cx).unwrap()["pane"], id.as_str());
             assert_eq!(this.canvas_state.doc.panes.len(), panes, "no pane added or left behind");
             this.close_canvas_cell(&json!({"pane":id}), window, cx);
+            this.open_preview(json!({"path":html}), false, window, cx);
+            if cfg!(target_os = "macos") {
+                assert_eq!(this.canvas_state.file, this.html_panel_tab(&html));
+                assert!(this.canvas_state.active_panel_pane().is_some());
+            } else {
+                assert_eq!(this.canvas_state.file_path(), Some(&html));
+                assert_eq!(this.canvas_state.shown_mode(&FileHost::Panel, &html), FileMode::Source);
+            }
             let _ = std::fs::remove_file(&html);
         });
     }

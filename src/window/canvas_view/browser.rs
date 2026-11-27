@@ -119,6 +119,9 @@ fn file_url(path: &std::path::Path) -> Result<String, String> {
         .ok_or_else(|| format!("Invalid browser file path: {}", path.display()))
 }
 
+/// Whether a browser pane can render a local file.
+pub(super) const LOCAL_FILES_SUPPORTED: bool = cfg!(target_os = "macos");
+
 /// Classifies an explicit address. Web pages never call this entry point.
 pub(super) fn browser_target_url(input: &str) -> Result<String, String> {
     let input = input.trim();

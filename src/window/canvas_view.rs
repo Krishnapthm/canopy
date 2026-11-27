@@ -1142,6 +1142,7 @@ impl AppWindow {
 
     /// Removes file and mod panes, their selection and previews no longer in use.
     pub(super) fn close_boxed_panes(&mut self, ids: &[String], cx: &mut Context<Self>) {
+        if self.refuse_to_close_drafts(ids) { return; }
         self.forget_annotations(ids, cx);
         let state = &mut self.canvas_state;
         let paths: Vec<_> = state.doc.panes.iter().filter(|p| ids.contains(&p.id)).filter_map(|p| match &p.kind {
@@ -1157,7 +1158,6 @@ impl AppWindow {
         self.forget_sims(ids, cx);
         let state = &mut self.canvas_state;
         state.modes.retain(|(host, _), _| !matches!(host, FileHost::Card { pane } if ids.contains(pane)));
-        state.card_drafts.retain(|pane| !ids.contains(pane));
         for path in paths {
             if state.file_path() != Some(&path) && !state.doc.panes.iter().any(|p| p.file() == Some(path.as_str())) {
                 state.previews.remove(&path);
@@ -1168,6 +1168,13 @@ impl AppWindow {
         self.prune_pdf_views();
         self.canvas_changed(cx);
         cx.notify();
+    }
+
+    /// Closing a pane or deleting its space must leave its unsaved editor alive.
+    pub(super) fn refuse_to_close_drafts(&mut self, ids: &[String]) -> bool {
+        let Some(id) = ids.iter().find(|id| self.canvas_state.card_drafts.contains(*id)) else { return false };
+        self.fail(format!("Save or undo the changes in file pane {id} before closing it"));
+        true
     }
 
     /// Cmd+W: close the active Files tab when the panel has the focus, else the one selected pane.
@@ -1222,6 +1229,7 @@ impl AppWindow {
                 let (written, files): (Vec<_>, Vec<_>) = state.doc.panes.iter().filter(|p| state.selected.contains(&p.id) && state.doc.shown(p) && p.boxed()).partition(|p| p.text().is_some());
                 let written: Vec<_> = written.into_iter().map(|p| p.id.clone()).collect();
                 let files: Vec<_> = files.into_iter().map(|p| p.id.clone()).collect();
+                if self.refuse_to_close_drafts(&files) { return; }
                 if !files.is_empty() {
                     self.close_boxed_panes(&files, cx);
                 }
@@ -1434,11 +1442,7 @@ impl AppWindow {
             return;
         }
         if done {
-            match &pane {
-                Some(pane) => { self.canvas_state.card_drafts.remove(pane); }
-                None => self.canvas_state.dirty = None,
-            }
-            if previewable(Path::new(&path)).is_some() {
+            if file_view::can_preview(Path::new(&path)) {
                 if let Err(error) = self.set_file_mode(&path, FileMode::Preview, pane.as_deref(), window, cx) {
                     self.command_error("panel.editor", &error, window, cx);
                 }
@@ -1580,6 +1584,16 @@ impl AppWindow {
     fn connect_hint(&self) -> bool {
         self.canvas_state.wire.sticky || self.canvas_state.connecting.is_some()
     }
+
+    /// Own active drafts even while the canvas draws another room. Only visible slots start a copy.
+    pub(super) fn draft_mods(&self) -> impl Iterator<Item = (String, Instance)> + '_ {
+        let state = &self.canvas_state;
+        state.doc.panes.iter().filter_map(|pane| {
+            let path = pane.file().filter(|_| state.card_drafts.contains(&pane.id))?;
+            Some(file_view::viewer_slot(path, FileHost::Card { pane: pane.id.clone() }))
+        })
+    }
+
     pub(super) fn panel_mods(&self) -> Vec<(String, Instance)> {
         if !self.has_canvas() { return vec![]; }
         let mut slots = vec![];
@@ -4278,7 +4292,7 @@ impl AppWindow {
                             .tooltip(strip_tooltip("Open in Preview".into(), Some("preview.external")))
                             .on_click(cx.listener(move |this, _, window, cx| this.run("preview.external", json!({"path":path}), window, cx))))
                     })
-                    .when_some(state.file_path().filter(|path| previewable(Path::new(path)).is_some()), |d, path| {
+                    .when_some(state.file_path().filter(|path| file_view::can_preview(Path::new(path))), |d, path| {
                         let action = file_view::mode_action(path, state.shown_mode(&FileHost::Panel, path), None);
                         d.child(panel_button("panel-file-mode", action.icon, c("muted-foreground"), c("hover"))
                             .aria_label(action.label.clone())

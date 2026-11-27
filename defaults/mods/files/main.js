@@ -79,7 +79,7 @@ export function menuItems(target, clip, platform) {
   return TREE_ACTIONS.flatMap(action => {
     if (!action) return target.on ? [] : [null];
     const { id, label, when } = action;
-    if ((target.on && id !== "copy-path" && id !== "copy-relative") || (id === "preview" && platform !== "macos") || !when(target, clip)) return [];
+    if ((target.on && id !== "copy-path" && id !== "copy-relative") || ((id === "preview" || id === "browser") && platform !== "macos") || !when(target, clip)) return [];
     return [{ id, label: id === "reveal" && platform !== "macos" ? "Show in folder" : label }];
   });
 }
@@ -277,7 +277,7 @@ export default class Files extends View {
           if (viewer && props()?.editing && autoSave() && !this.conflict && (this.saving || code.value() !== this.original)) {
             this.saveTimer = cx.timer.after(1000, cx => {
               this.saveTimer = null;
-              if (this.code === code && props()?.editing && autoSave()) this.save(false, cx);
+              if (this.code === code && props()?.editing && autoSave() && !this.conflict) this.save(false, cx);
             });
           }
           cx.notify();
@@ -300,7 +300,7 @@ export default class Files extends View {
   // Only transitions reach the native strip, never a timer or the file contents.
   reportDirty() {
     if (props()?.canvas !== "viewer" || !props()?.editing || !this.code) return;
-    const dirty = this.code.value() !== this.original;
+    const dirty = Boolean(this.saving) || this.code.value() !== this.original;
     if (dirty === this.reportedDirty) return;
     this.reportedDirty = dirty;
     run("panel.editor", { path: `${this.root}/${this.file}`, pane: props()?.pane ?? undefined, dirty });
@@ -318,6 +318,7 @@ export default class Files extends View {
     const text = code.value();
     if (text === this.original) return;
     const { root, file, on } = this;
+    const pane = props()?.pane;
     const path = `${root}/${file}`;
     this.saving = true; this.saveError = null; cx.notify();
     cx.spawn(async cx => {
@@ -326,19 +327,21 @@ export default class Files extends View {
         if (this.code !== code) return;
         this.original = text;
         this.conflict = false;
-        this.reportDirty();
         cx.spawn(async () => {
           const marks = await fileMarks(file, text, { cwd: root, on });
           if (this.code === code && this.original === text) code.set_line_marks(marks);
         });
       } catch (e) {
-        if (this.code === code) this.saveError = String(e);
         // One toast per failure: auto save waits for a manual save or a reload, or every pause would toast again.
-        if (!manual && this.code === code) this.conflict = true;
+        if (this.code === code) {
+          this.saveError = String(e);
+          this.conflict = true;
+        }
         notify({ title: `Could not save ${file.split("/").pop()}`, body: String(e), level: "error",
-          action: { name: "preview.open", args: { path } } });
+          action: pane ? { name: "pane.focus", args: { pane } } : { name: "preview.open", args: { path } } });
       } finally {
         this.saving = false;
+        this.reportDirty();
         const queued = this.queuedSave;
         this.queuedSave = null;
         if (queued && queued.code === this.code && (queued.manual || (autoSave() && !this.conflict))) this.save(queued.manual, cx);
@@ -488,11 +491,12 @@ export default class Files extends View {
       const dismissTip = (_e, cx) => { setShared("files.auto_save_tip", "seen"); cx.notify(); };
       return v_flex().relative().size_full().min_h(0).bg(t.canvas).text_color(t.foreground)
         .on_key_down((e, cx) => {
-          if (props()?.editing && e.keystroke === "cmd-s") { this.save(true, cx); cx.stop_propagation(); }
+          const saveKey = window()?.platform === "macos" ? "cmd-s" : "ctrl-s";
+          if (props()?.editing && e.keystroke === saveKey) { this.save(true, cx); cx.stop_propagation(); }
         })
         .when(Boolean(props()?.editing), el => el.child(h_flex().h(32).flex_none().px(12).gap(8).items_center().border_b(1).border_color(t.border).text_size(12)
           .child(div().flex_1().text_color(t.dim).child(this.saving ? "Saving" : this.code && this.code.value() !== this.original ? "Unsaved" : "Saved"))
-          .when(!autoSave(), bar => bar.child(div().id("file-Save").px(8).py(3).rounded(ui.size.radiusSm).border_1().border_color(t.border)
+          .when(!autoSave() || Boolean(this.conflict), bar => bar.child(div().id("file-Save").px(8).py(3).rounded(ui.size.radiusSm).border_1().border_color(t.border)
             .cursor_pointer().hover(s => s.bg(t.hover)).on_click((_e, cx) => this.save(true, cx)).child("Save")))))
         .when(Boolean(this.saveError), el => el.child(div().px(12).py(6).text_size(12).text_color(t.foreground).child(this.saveError)))
         // A finished selection opens the quote popover where the mouse came up.
