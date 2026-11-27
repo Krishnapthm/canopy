@@ -59,26 +59,6 @@ pub fn tile(area: Rect, tiles: usize, active: Option<usize>, pills: &[Rect], gap
     (out, placed)
 }
 
-/// The largest rect inside `cell` whose content (the rect minus `chrome`, `[w, h]` world px of
-/// header, margins and bars) has width over height `aspect`, centered in the cell. Keep the cell
-/// if the aspect is invalid or the chrome alone leaves no room.
-pub fn contain(cell: Rect, aspect: f32, chrome: [f32; 2]) -> Rect {
-    if !aspect.is_finite() || aspect <= 0. {
-        return cell;
-    }
-    let [x, y, w, h] = cell;
-    let [cw, ch] = chrome;
-    let room_w = (w - cw).max(1.);
-    let room_h = (h - ch).max(1.);
-    let content_h = room_h.min(room_w / aspect);
-    let width = (content_h * aspect).min(room_w) + cw;
-    let height = content_h + ch;
-    if width > w || height > h {
-        return cell;
-    }
-    [x + (w - width) / 2., y + (h - height) / 2., width, height]
-}
-
 /// Resolve from rest positions, holding the dragged group fixed and placing its neighbours.
 pub fn solve(rest: &[Rect], pinned: usize, rect: Rect, gap: f32, carried: impl Fn(usize) -> bool) -> Vec<Rect> {
     if pinned >= rest.len() {

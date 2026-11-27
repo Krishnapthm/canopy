@@ -53,7 +53,7 @@ No arguments.
 
 ## `canvas.tile`
 
-Tile view: fit every expanded cell of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed cells line up below. Repeat to put everything back.
+Tile view: fit every expanded terminal and agent of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed ones line up below. Other panes stay where they are. Repeat to put everything back.
 
 No arguments.
 

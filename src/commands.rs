@@ -34,7 +34,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.zoom_reset", &[], "Reset canvas zoom."),
     cmd("canvas.arrange", &[opt("layout"), opt("picker"), opt("space")], "Arrange selected cells or the current space: tidy, row, column or wires. Omit layout to repeat the last; picker opens the layout menu."),
     cmd("canvas.undo", &[], "Restore geometry before the last canvas move, resize or arrange."),
-    cmd("canvas.tile", &[], "Tile view: fit every expanded cell of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed cells line up below. Repeat to put everything back."),
+    cmd("canvas.tile", &[], "Tile view: fit every expanded terminal and agent of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed ones line up below. Other panes stay where they are. Repeat to put everything back."),
     cmd("canvas.fit", &[], "Fit the selection, else everything in the current space or Home; repeat to restore the previous camera."),
     cmd("canvas.mode", &[], "Enter canvas mode: its keys take priority and unbound keys are swallowed until Enter or Escape."),
     cmd("canvas.leave", &[], "Cancel a keyboard connection, or leave canvas mode with selection unchanged."),

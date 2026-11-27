@@ -1000,11 +1000,12 @@ impl AppWindow {
         let camera = self.canvas_state.motion.camera.target().unwrap_or(doc.camera);
         let area = self.canvas_state.tile.as_ref().map_or(camera, |t| t.camera);
         let area = area.origin();
-        // What the place shows: expanded cells and previews tile; pills (and space cards on Home) line up.
-        let shown = |c: &canvas::Pane| doc.shown(c) && c.pinned.is_none()
-            && (c.boxed() || matches!(c.kind, canvas::Kind::Sub { .. }) || canvas::view_allows(&doc.view, self.live.get(&c.id).is_some_and(canvas_agent)));
+        // Only terminals, agents and sub-agent cells join tile view: expanded ones tile; pills (and
+        // space cards on Home) line up. Every other pane stays where it is, under the tiles.
+        let shown = |c: &canvas::Pane| doc.shown(c) && c.pinned.is_none() && !c.boxed()
+            && (matches!(c.kind, canvas::Kind::Sub { .. }) || canvas::view_allows(&doc.view, self.live.get(&c.id).is_some_and(canvas_agent)));
         let cards: Vec<usize> = (0..doc.panes.len()).filter(|i| shown(&doc.panes[*i])).collect();
-        let (tiled, pilled): (Vec<usize>, Vec<usize>) = cards.into_iter().partition(|i| doc.panes[*i].boxed() || doc.panes[*i].size().is_some());
+        let (tiled, pilled): (Vec<usize>, Vec<usize>) = cards.into_iter().partition(|i| doc.panes[*i].size().is_some());
         let spaces: Vec<usize> = (0..doc.spaces.len()).filter(|i| doc.room.is_none()
             && !self.model.spaces.iter().any(|s| s.id == doc.spaces[*i].space && root_space(s))).collect();
         let count = doc.panes.len();
@@ -1039,15 +1040,7 @@ impl AppWindow {
         // Every tile the same size unless `tile_focus_grows` lets the selected one take more.
         let active = self.person.tile_focus_grows.then(|| self.canvas_state.selected.iter().rev().find_map(|k| tiles.iter().position(|t| &t.0 == k))).flatten();
         // The canvas starts under the bar, so tiles fill its whole area.
-        let (mut placed, lined) = canophy::tile([area[0], area[1], visible[0], visible[1]], tiles.len(), active, &pills, self.person.tile_gap);
-        for ((_, _, i), rect) in tiles.iter().zip(&mut placed) {
-            let pane = &doc.panes[*i];
-            if canophy::traits(&pane.kind).shape == canophy::traits::Shape::Content
-                && let Some((aspect, chrome)) = self.content_shape(pane, cx)
-            {
-                *rect = canophy::contain(*rect, aspect, chrome);
-            }
-        }
+        let (placed, lined) = canophy::tile([area[0], area[1], visible[0], visible[1]], tiles.len(), active, &pills, self.person.tile_gap);
         let state = &mut self.canvas_state;
         let unchanged = rects == placed && lined_up.iter().zip(&lined).all(|(a, b)| a.1[0] == b[0] && a.1[1] == b[1]);
         if !toggle && unchanged { return; }
@@ -1057,10 +1050,8 @@ impl AppWindow {
                 .chain(doc.spaces.iter().map(|s| (s.space.clone(), s.rect, None)))
                 .filter(|(k, ..)| order.contains(k)).collect();
             // Members draw above the cells that stay put.
-            if !all {
-                let top = doc.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
-                for c in &mut doc.panes { if let Some(r) = rank(&c.id) { c.z = top + r as u64; } }
-            }
+            let top = doc.panes.iter().map(|c| c.z).max().unwrap_or(0).saturating_add(1);
+            for c in &mut doc.panes { if let Some(r) = rank(&c.id) { c.z = top + r as u64; } }
             state.tile = Some(Tile { camera, before, order, all });
         } else if let Some(t) = &mut state.tile { t.order = order; }
         if state.shown.is_none() { state.shown = Some(state.doc.clone()); }
@@ -1084,19 +1075,6 @@ impl AppWindow {
         }
         self.animate_layout(window, cx);
         cx.notify();
-    }
-
-    fn content_shape(&self, pane: &canvas::Pane, cx: &App) -> Option<(f32, [f32; 2])> {
-        match &pane.kind {
-            canvas::Kind::Sim { .. } => self.sim_shape(&pane.id, cx),
-            canvas::Kind::Terminal { .. }
-            | canvas::Kind::Sub { .. }
-            | canvas::Kind::File { .. }
-            | canvas::Kind::Image { .. }
-            | canvas::Kind::Pdf { .. }
-            | canvas::Kind::Mod { .. }
-            | canvas::Kind::Browser { .. } => None,
-        }
     }
 
     pub(super) fn refresh_sub_hooks(&mut self) {
@@ -5350,7 +5328,8 @@ mod tile_tests {
                 {"id":"t1","kind":"terminal","props":{"size":[600,400]},"rect":[0,0,600,400],"z":0},
                 {"id":"t2","kind":"terminal","props":{"size":[600,400]},"rect":[700,0,600,400],"z":1},
                 {"id":"t3","kind":"terminal","props":{"size":[600,400]},"rect":[0,500,600,400],"z":2},
-                {"id":"t4","kind":"terminal","props":{},"rect":[2000,2000,220,36],"z":3}
+                {"id":"t4","kind":"terminal","props":{},"rect":[2000,2000,220,36],"z":3},
+                {"id":"f1","kind":"file","props":{"path":"/tmp/a.md"},"rect":[900,900,300,200],"z":4}
             ])).unwrap();
             for t in ["t1", "t2", "t3", "t4"] { this.live.insert(t.into(), json!({})); }
             let before: Vec<_> = this.canvas_state.doc.panes.iter().map(|c| (c.rect, c.size())).collect();
@@ -5365,6 +5344,7 @@ mod tile_tests {
             assert!(area(1) > area(0) && area(1) > area(2), "the selected tile is the largest: {:?}", cards.iter().map(|c| c.rect).collect::<Vec<_>>());
             assert!(cards.iter().take(3).all(|c| c.size() == Some([c.rect.w, c.rect.h])), "tiles stay expanded at their tile size");
             assert!(cards.iter().take(3).all(|c| c.rect.y + c.rect.h <= cards[3].rect.y), "the pill lines up below the tiles");
+            assert_eq!(cards[4].rect, before[4].0, "only terminals and agents tile: a file pane stays put");
             // Selecting another tile makes it the large one.
             this.canvas_state.selected = vec!["t1".into()];
             this.tile_canvas(false, window, cx);

@@ -20,8 +20,7 @@
 //! earlier step read:
 //!
 //! 1. **apply**: the change itself (a move, a resize, a pan, an opened pane).
-//! 2. **size laws**: a pane never shrinks below its kind's `min` on resize. In tile view a
-//!    `Shape::Content` pane keeps its content's shape. A simulator's drag resize snaps to its
+//! 2. **size laws**: a pane never shrinks below its kind's `min` on resize. A simulator's drag resize snaps to its
 //!    device (`snap_sim_size`).
 //! 3. **push**: pushable neighbours make room (`rules::solve`, the canvas push setting).
 //! 4. **camera laws**: the zoom stays inside `ZOOMS` and the place's `zoom_range`, and a
@@ -62,7 +61,7 @@ pub use camera::{Camera, focus_fit, reveal, visible, widen, zoom_range};
 pub use input::{Placement, Owner, pinch_owner, wheel_owner};
 pub use layout::{Layout, layout, rest_scale};
 pub use open::{Natural, open_size};
-pub use rules::{arrange, cascade, child_position, contain, free_spot, solve, tile};
+pub use rules::{arrange, cascade, child_position, free_spot, solve, tile};
 pub use motion::Motion;
 pub use step::{Effects, Intent, Viewport, derive_pinned, step};
 pub use traits::traits;

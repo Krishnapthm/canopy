@@ -456,21 +456,6 @@ impl AppWindow {
         Ok(result)
     }
 
-    /// The known device's aspect, bezel included, and its pane chrome in world px at tile zoom 1.
-    pub(super) fn sim_shape(&self, id: &str, cx: &App) -> Option<(f32, [f32; 2])> {
-        #[cfg(target_os = "macos")]
-        {
-            let screen = self.canvas_state.sims.get(id)?.live.as_ref()?.read(cx);
-            let outer = screen.outer_points(screen.points()?);
-            Some((outer[0] / outer[1], sim_pane_size(outer, 0., 1.)))
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            let _ = (id, cx);
-            None
-        }
-    }
-
     /// Snaps a finished resize to the same fit as the device inside the dragged bounds.
     #[cfg(target_os = "macos")]
     pub(super) fn snap_sim_size(&mut self, id: &str, cx: &mut Context<Self>) {
