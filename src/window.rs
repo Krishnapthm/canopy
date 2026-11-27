@@ -159,14 +159,12 @@ const LAYOUTS: &[(&str, &str)] = &[
     ("main", include_str!("../defaults/layouts/main.json")),
     ("classic", include_str!("../defaults/layouts/classic.json")),
     ("terminals", include_str!("../defaults/layouts/terminals.json")),
-    ("win98", include_str!("../defaults/layouts/win98.json")),
 ];
 
 /// Pictures shipped layouts name as their `preview`, written beside them.
 const LAYOUT_PREVIEWS: &[(&str, &str)] = &[
     ("main.svg", include_str!("../defaults/layouts/main.svg")),
     ("main-light.svg", include_str!("../defaults/layouts/main-light.svg")),
-    ("win98.svg", include_str!("../defaults/layouts/win98.svg")),
 ];
 
 pub fn shipped_layouts() -> Vec<&'static str> {
@@ -259,6 +257,14 @@ fn install_layouts() {
     if let Err(e) = mods::sync_layouts(&mods::app_dir(), LAYOUTS) {
         tracing::warn!("cannot install layouts: {e}");
     }
+    let dir = file("layouts");
+    crate::mods::remove_retired_asset(
+        &dir,
+        "win98.svg",
+        &[
+            "e678058d704b89dc809d85c9ecfd4b1b011d01a3589ff85d2e056091561b1c45",
+        ],
+    );
     for (name, text) in LAYOUT_PREVIEWS {
         let _ = std::fs::write(file(&format!("layouts/{name}")), text);
     }
@@ -376,8 +382,7 @@ struct Overlay {
     /// A window: where its top left is (None: centered) and its name (`key`).
     place: Option<Point<Pixels>>,
     key: Option<String>,
-    /// The app's own screen (a `frame-` mod: What's new, the welcome): only
-    /// its own close ends it, never a layout switch.
+    /// An app-owned overlay that stays open across layout switches.
     frame: bool,
 }
 
@@ -7031,6 +7036,7 @@ export default class SystemToast extends View {
     #[test]
     fn shipped_layouts_parse_and_show_what_they_promise() {
         let main = super::default_layout("main");
+        assert_eq!(super::default_layout("missing-layout"), main);
         assert!(main.walk().iter().any(|n| matches!(n.kind, super::Kind::Canvas)));
         assert!(main.find("status").is_some());
         assert!(main.find("sidebar").is_none());

@@ -183,6 +183,20 @@ pub fn sync_layouts(home: &Path, layouts: &[(&str, &str)]) -> std::io::Result<()
     write_if_changed(&record, serde_json::to_string_pretty(&installed).unwrap() + "\n")
 }
 
+/// Removes `dir/name`, a default Canopy no longer ships, only while its bytes still match one
+/// of the shipped originals (`originals` are SHA-256 hex digests). An edited copy stays.
+pub(crate) fn remove_retired_asset(dir: &Path, name: &str, originals: &[&str]) {
+    use sha2::{Digest, Sha256};
+
+    let path = dir.join(name);
+    if !path.is_file() { return; }
+    if std::fs::read(&path).is_ok_and(|bytes| originals.contains(&format!("{:x}", Sha256::digest(bytes)).as_str())) {
+        if let Err(error) = std::fs::remove_file(&path) {
+            tracing::warn!("cannot remove retired default {}: {error}", path.display());
+        }
+    }
+}
+
 fn layout_fingerprint(text: &str) -> String {
     let canonical = serde_json::from_str::<Value>(text.trim_start_matches('\u{feff}')).ok().map(|mut v| {
         crate::layout_sync::normalize(&mut v);
@@ -1659,6 +1673,28 @@ mod tests {
         assert!(std::fs::read_to_string(aside).unwrap().contains("old"));
         assert!(!dir.join("main-edited.json").exists());
         assert!(take_sync_notes().is_empty(), "no toast for a file nobody can say was edited");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retired_asset_removal_requires_original_name_and_bytes() {
+        use sha2::{Digest, Sha256};
+
+        let root = std::env::temp_dir().join(format!("canopy-retired-asset-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let name = "old.json";
+        let path = root.join(name);
+        let copy = root.join("personal.json");
+        let original = b"shipped";
+        let hash = format!("{:x}", Sha256::digest(original));
+        std::fs::write(&path, b"edited").unwrap();
+        std::fs::write(&copy, original).unwrap();
+        remove_retired_asset(&root, name, &[&hash]);
+        assert_eq!(std::fs::read(&path).unwrap(), b"edited");
+        std::fs::write(&path, original).unwrap();
+        remove_retired_asset(&root, name, &[&hash]);
+        assert!(!path.exists());
+        assert_eq!(std::fs::read(&copy).unwrap(), original);
         std::fs::remove_dir_all(root).unwrap();
     }
 

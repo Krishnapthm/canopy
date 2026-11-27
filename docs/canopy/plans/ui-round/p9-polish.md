@@ -20,7 +20,7 @@ Items 3 and 9 were reproduced in an isolated dev window (scratch home and core) 
 | 8 | Home shows only shortcuts | `empty_hints` lists keys only. The model already keeps `recent` (name and folder of closed spaces) but nothing on Home shows it. | `empty_hints` |
 | 9 | Files panel shows nothing | The tree root comes from `doc.panel.space`, which only a click on a space tab or card sets. After a restart inside a space, and always on Home, it is empty, so the Files mod shows "Click a space to see its files". | `panel_root` |
 | 3 | Browser goes blank after a click | Only local `file://` pages. `439c455` loads them with an incognito store and a deferred `loadFileURL`. WebKit renders them (snapshots are correct), but the live view never appears: a click wakes the page and the pane turns white. An `http://` page with the same HTML renders live. | `ensure_view`, `load_local_file` |
-| icon | Old tree glyph | `defaults/icons/canopy.svg` is the old Lucide tree. Welcome, first-run setup and the win98 mod draw it. The new mark is `assets/icons/canopy-status.svg`. | `defaults/icons/canopy.svg` |
+| icon | Old tree glyph | `defaults/icons/canopy.svg` is the old Lucide tree. Welcome and first-run setup draw it. The new mark is `assets/icons/canopy-status.svg`. | `defaults/icons/canopy.svg` |
 
 ## Fixes and commits
 

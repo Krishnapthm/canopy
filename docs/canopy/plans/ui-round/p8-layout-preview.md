@@ -55,8 +55,7 @@ For the whole round (other plans, merge order, names) read `00-orchestrator.md` 
 - **SVG**: a preview picture for the Canopy layout card in Settings > Layouts.
 
 ## The task
-- New `defaults/layouts/main.svg`, viewBox 320×200, crisp and minimal, in the same spirit as
-  `win98.svg`:
+- New `defaults/layouts/main.svg`, viewBox 320×200, crisp and minimal:
   - a dark canvas with a faint dot grid and a slim top strip and status strip;
   - three panes with headers: an agent pane with a small spark glyph and text lines, a
     terminal pane with prompt lines, and a phone-shaped simulator pane;

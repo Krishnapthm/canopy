@@ -75,7 +75,7 @@ first frame or during GPU recovery it reports an error instead of a PNG.
 
 | File | What it decides | Applied |
 |---|---|---|
-| `layouts/<name>.json` | the window and its whole look: blocks, theme, fonts, backgrounds, pane frames; one file per layout (`main`, `terminals`, `win98`, any you add) | live |
+| `layouts/<name>.json` | the window and its whole look: blocks, theme, fonts, backgrounds, pane frames; one file per layout (`main`, `terminals`, any you add) | live |
 | `keys.json` | what every key does | live |
 | `settings.json` | the person: zoom, sounds, fonts for every layout | live |
 | `mods/<name>/` | panels: small JavaScript programs | live (hot reload) |
@@ -178,8 +178,7 @@ with a header; Files and Changes panels on the right, `files` and
 `changes`, opened from the tab bar and remembered per space (which ones:
 shared `"workspace.panels"`, set by the welcome); a status strip,
 `workspace-status`: the branch, a chip per agent that jumps to it), and as examples `terminals` ("Terminals": tabs in
-the title bar, panes as cards, a space picker) and `win98`
-("Canopy 98": a whole desktop in one mod, `win98`). Add a layout by
+the title bar, panes as cards, a space picker). Add a layout by
 writing a new file. The Files panel supports Windows folder paths with spaces,
 parentheses and apostrophes, and preserves Unicode file and folder names
 (including Chinese). Directory links expand as folders; their contents load
@@ -188,7 +187,7 @@ only when expanded.
 **Canopy's own layouts and mods are read-only.** They are replaced whole
 on every start. Use settings.json for look (fonts, sizes, theme, colors,
 sounds), where the layout leaves them unset. Canopy (main) has no look of
-its own, so your settings decide it; Canopy 98 and Terminals bring their own
+its own, so your settings decide it; Terminals brings its own
 look. The theme picker overrides any layout. To change a shipped layout's
 look beyond that, or its structure/code, clone it and edit the clone:
 
@@ -336,9 +335,9 @@ layout's look and a block can differ:
 - `themes/<name>.json`: `{ "background", "foreground", "selection",
   "cursor"?, "ansi": [16 colors], "colors"?: {...} }`, all `#rrggbb`; panel
   colors are derived from these, `colors` overrides them. Canopy ships
-  `atom-one-dark`. The original unedited Atom One Dark and Win98 theme files
-  are upgraded to readable terminal colors; edited theme files are kept.
-  A theme named like a layout (`themes/win98.json`) is
+  `atom-one-dark`. The original unedited Atom One Dark theme file
+  is upgraded to readable terminal colors; edited theme files are kept.
+  A theme named like a layout is
   that layout's own: Settings offers it only there.
 - `terminal_line_height`: row height multiplier (default 1, clamped to 0.8..2).
   Text stays centred; joining characters, cursors and images follow the rows.
@@ -347,14 +346,12 @@ layout's look and a block can differ:
 - `font` / `font_size`: the terminals' (px at zoom 1); `ui_font`: the mods'
   (their text sizes are their own, in px, and follow zoom). Optional: without
   them a layout uses settings.json's, else Canopy's (JetBrains Mono 14, Geist).
-  Canopy (main) leaves these unset; Terminals sets text size 15, and Canopy 98
-  brings its own fonts.
+  Canopy (main) leaves these unset; Terminals sets text size 15.
   JetBrains Mono, Geist Mono and Geist ship with Canopy; any installed font
   works (a terminal font the machine lacks falls back to JetBrains Mono).
   A layout brings its own fonts: `.ttf`/`.otf` files in a mod's `fonts/`
   folder (or the home's `fonts/`) load at start and on the next look change,
-  so a layout and its mod folder travel together (Canopy 98's do: its pixel
-  fonts are in `mods/win98/fonts/`).
+  so a layout and its mod folder travel together.
 - `pane_scrollbars` in settings.json (default `true`): show terminal scrollback
   with a slim thumb and track. Drag the thumb or click the track to jump there.
   With little or no terminal padding, the hit lane overlays the last 8px;
