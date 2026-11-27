@@ -295,6 +295,83 @@ fn traits_keep_the_sizes_the_app_used() {
     assert_eq!((traits(&terminal).content, traits(&browser).dockable, traits(&file).dockable), (Content::Grid, true, false));
 }
 
+#[test]
+fn pdf_open_size_fits_the_first_page() {
+    use super::{Natural, WorldSize, open::OPEN_MARGIN, open_size, traits};
+
+    let t = traits(&Kind::Pdf { path: String::new(), highlights: vec![] });
+    let (chrome_w, chrome_h) = gpui_pdf::FIT_CHROME;
+    let frame = 2. * super::layout::BORDER;
+    for [vw, vh] in [[1440., 900.], [800., 600.]] {
+        let view = Viewport { size: [vw + 200., vh], open: [200., 0., vw, vh] };
+        for (w, h) in [(612., 792.), (595.28, 841.89)] {
+            let size = open_size(&t, Some(Natural {
+                content: WorldSize::new(gpui_pdf::PAGE_WIDTH, gpui_pdf::PAGE_WIDTH * h / w),
+                chrome: WorldSize::new(chrome_w, chrome_h),
+            }), &view);
+            let page_w = size.w - chrome_w - frame;
+            let page_h = size.h - chrome_h - frame - t.header.unwrap();
+            assert!((page_h - page_w * h / w).abs() < 0.5);
+            assert!(size.w <= vw - 2. * OPEN_MARGIN + 0.01);
+            assert!((size.h - (vh - 2. * OPEN_MARGIN)).abs() < 0.01);
+        }
+        assert_eq!(open_size(&t, None, &view), t.default);
+    }
+}
+
+#[test]
+fn image_open_size_shrinks_by_width_and_leaves_small_images_at_their_size() {
+    use super::{Natural, WorldSize, open::OPEN_MARGIN, open_size, traits};
+
+    let t = traits(&Kind::Image { path: String::new() });
+    let view = Viewport::whole([1440., 900.]);
+    let image = |w, h| Some(Natural { content: WorldSize::new(w, h), chrome: WorldSize::default() });
+    let size = open_size(&t, image(4000., 1000.), &view);
+    let frame = 2. * super::layout::BORDER;
+    let header = t.header.unwrap();
+    assert!((size.w - (view.open[2] - 2. * OPEN_MARGIN)).abs() < 0.01);
+    assert!((size.h - frame - header - (size.w - frame) / 4.).abs() < 0.01);
+    let size = open_size(&t, image(100., 80.), &view);
+    // The image uses its own pixels inside the pane's minimum frame.
+    assert_eq!(size, WorldSize::new(t.min.w, (80. + frame + header).max(t.min.h)));
+    assert_eq!(open_size(&t, image(4000., 1000.), &Viewport::whole([100., 80.])), t.min);
+}
+
+#[test]
+fn column_open_size_uses_the_canvas_height_and_fixed_size_uses_the_default() {
+    use super::{WorldSize, open::OPEN_MARGIN, open_size, traits};
+    use super::traits::TEXT_COLUMN;
+
+    let file = traits(&Kind::File { path: String::new() });
+    let terminal = traits(&Kind::Terminal { size: None });
+    for size in [[1440., 900.], [800., 600.], [500., 600.], [100., 80.]] {
+        let view = Viewport::whole(size);
+        let w = TEXT_COLUMN.min(size[0] - 2. * OPEN_MARGIN).max(file.min.w);
+        let h = (size[1] - 2. * OPEN_MARGIN).max(file.min.h);
+        assert_eq!(open_size(&file, None, &view), WorldSize::new(w, h));
+        assert_eq!(open_size(&terminal, None, &view), terminal.default);
+    }
+}
+
+#[test]
+fn rest_scale_uses_the_destination_or_waits_for_a_gesture() {
+    use super::{Motion, motion::GESTURE_REST, rest_scale};
+    use std::time::Instant;
+
+    let mut pane = Pane { id: "p1".into(), kind: Kind::Pdf { path: String::new(), highlights: vec![] },
+        rect: [0., 0., 560., 720.].into(), z: 1, space: None, color: None, pinned: None };
+    let now = Instant::now();
+    let camera = Camera::new(0., 0., 0.5);
+    let ease = Motion::ease(camera, Camera::new(0., 0., 1.25), [0., 0.], now);
+    let gesture = Motion::Gesture { since: now };
+    assert_eq!(rest_scale(&Motion::Rested, camera, &pane, now), Some(0.5));
+    assert_eq!(rest_scale(&ease, camera, &pane, now), Some(1.25));
+    assert_eq!(rest_scale(&gesture, camera, &pane, now), None);
+    assert_eq!(rest_scale(&gesture, camera, &pane, now + GESTURE_REST), Some(0.5));
+    pane.pinned = Some([0., 0., 560., 720.]);
+    assert_eq!(rest_scale(&ease, camera, &pane, now), Some(1.));
+}
+
 /// A saved canvas with every pane kind, in the exact bytes `Document::save` writes.
 const SAVED: &str = include_str!("canvas.fixture.json");
 

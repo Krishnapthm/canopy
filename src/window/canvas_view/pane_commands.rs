@@ -331,13 +331,7 @@ mod tests {
             assert_eq!(this.run_as(close, json!({"pane":"p1","tab":"t1"}), false, window, cx), json!({"ok":true}));
             assert_eq!(active(this, "p1").id, "t2");
             assert_eq!(this.run_as(close, json!({"pane":"p1"}), false, window, cx), json!({"ok":true}));
-            assert_eq!(active(this, "p1").url, "");
-            let pane = this.canvas_state.doc.panes.iter().find(|p| p.id == "p1").unwrap();
-            assert!(matches!(&pane.kind, canvas::Kind::Browser { tabs, active: 0, .. } if tabs.len() == 1));
-            let (tx, rx) = std::sync::mpsc::channel();
-            this.held_reply = Some(tx);
-            this.browser_reply("p1", None, window, cx).unwrap();
-            assert_eq!(rx.try_recv().unwrap()["text"], canvas::envelope("p1", "browser", &[("url", "")], "New tab"));
+            assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == "p1"));
             assert_eq!(this.run_as("canvas.pane_new", json!({"kind":"browser","url":null,"place":"canvas"}), false, window, cx)["url"], "");
             assert!(this.pane_new(&json!({"kind":"browser","url":"file:///etc"}), false, window, cx).is_err());
             // Dispatch above resyncs the canvas, which drops this test's stand-in terminal.
@@ -415,7 +409,8 @@ mod tests {
             assert_eq!(this.canvas_state.editing.as_ref(), Some(&draft_path));
             assert_eq!(this.canvas_state.dirty.as_ref(), Some(&draft_path));
             assert!(this.pane_dock("t1", None, window, cx).is_err(), "a terminal does not dock");
-            this.close_boxed_panes(&[did], cx);
+            assert_eq!(this.run_as(close, json!({"pane":did}), false, window, cx), json!({"ok":true}));
+            assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == did));
             assert_eq!(this.canvas_state.doc.panel.tabs, [draft.clone()]);
             this.close_panel_tab(&draft, window, cx);
             assert!(this.canvas_state.doc.panel.tabs.contains(&draft), "a dirty tab asks before it closes");

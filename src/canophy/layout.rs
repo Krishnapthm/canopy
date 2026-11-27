@@ -5,9 +5,11 @@
 //! which is the camera zoom on the canvas and 1 for a pinned pane (it keeps its screen size).
 //! Only the 1 px frame is screen-fixed, like the rest of the overlay chrome.
 use super::camera::Camera;
+use super::motion::Motion;
 use super::traits::traits;
 use super::units::{Point, Rect};
 use crate::canvas::Pane;
+use std::time::Instant;
 
 /// The pane frame, in screen px at every zoom.
 pub const BORDER: f32 = 1.;
@@ -51,6 +53,16 @@ pub fn layout(camera: Camera, pane: &Pane) -> Layout {
     let [sw, sh, header] = [w * scale, h * scale, header * scale];
     let body = [x + BORDER, y + header + BORDER, (sw - 2. * BORDER).max(0.), (sh - header - 2. * BORDER).max(0.)];
     Layout { screen: [x, y, sw, sh], header, body, scale, body_world }
+}
+
+/// The scale a pane will rest at (law 7). Rasterized content can use the
+/// destination of an ease for its first bitmap. A moving gesture keeps the current bitmaps.
+pub fn rest_scale(motion: &Motion, camera: Camera, pane: &Pane, now: Instant) -> Option<f32> {
+    match motion {
+        Motion::Easing { to, .. } => Some(layout(*to, pane).scale),
+        Motion::Rested => Some(layout(camera, pane).scale),
+        Motion::Gesture { .. } => motion.settled(now).then(|| layout(camera, pane).scale),
+    }
 }
 
 /// Where world rect `rect` of `pane` (its own, or as drawn: a pill's measured size) lands on

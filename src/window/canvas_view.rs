@@ -100,7 +100,7 @@ pub(super) struct State {
     /// A finished selection waiting behind a small quote icon: the quote (with its
     /// window `point`) and the TextView it came from, None for the Files code viewer.
     quote_chip: Option<(Value, Option<Entity<gpui_base::TextViewState>>)>,
-    /// The panel's active tab when it was closed, for the folder button to bring back.
+    /// The tab active when the panel closed. Files restores it only if it is a file.
     closed: Option<canvas::PanelTab>,
     /// Per expanded cell: the layout before it grew, and what growing moved. Collapse puts those back.
     moves: HashMap<String, (canvas::Rest, canvas::Rest)>,
@@ -179,6 +179,19 @@ struct WheelZoom {
     anchor: canophy::Point,
     timeout: Option<Task<()>>,
 }
+/// Files cycles from a tab to the tree to closed, and restores only a file tab.
+fn files_button(
+    open: bool,
+    file: Option<&canvas::PanelTab>,
+    closed: Option<&canvas::PanelTab>,
+    tabs: &[canvas::PanelTab],
+) -> (bool, Option<canvas::PanelTab>) {
+    if open {
+        return (file.is_some(), None);
+    }
+    (true, closed.filter(|tab| tab.file().is_some() && tabs.contains(tab)).cloned())
+}
+
 impl State {
     /// The file open in the panel, when its active tab is a file.
     pub(super) fn file_path(&self) -> Option<&String> {
@@ -597,6 +610,32 @@ impl AppWindow {
 
     fn canvas_input_covered(&self, position: Point<Pixels>) -> bool {
         self.canvas_overlay_at(position) || self.canvas_chrome_at(position)
+    }
+
+    /// The current host of a pane. Browser pop-outs keep their own window handles.
+    fn placement(&self, id: &str) -> canophy::Placement {
+        let state = &self.canvas_state;
+        if state.popped.contains_key(id) || self.browser_popped(id) {
+            canophy::Placement::Popped
+        } else if state.doc.docked(id) {
+            canophy::Placement::Docked
+        } else {
+            canophy::Placement::Canvas { entered: state.entered() == Some(id) }
+        }
+    }
+
+    fn content_owns_pinch(&self, position: Point<Pixels>) -> bool {
+        let state = &self.canvas_state;
+        if state.entered().is_none() { return false; }
+        let doc = state.shown.as_ref().unwrap_or(&state.doc);
+        let [x, y] = self.wire_local(position);
+        doc.panes.iter().filter(|p| doc.shown(p)).filter(|p| {
+            let [left, top, width, height] = canophy::layout(state.doc.camera, p).screen;
+            x >= left && x < left + width && y >= top && y < top + height
+        }).max_by_key(|p| paint_order(p)).is_some_and(|p| {
+            !self.browser_popped(&p.id)
+                && canophy::pinch_owner(&canophy::traits(&p.kind), self.placement(&p.id)) == canophy::Owner::Content
+        })
     }
 
     /// Resize the held edge in world pixels, or in screen pixels for a pinned pane.
@@ -1130,6 +1169,9 @@ impl AppWindow {
             if !pane.boxed() { return self.fail(format!("pane {id} is a {}: close it with canvas.close {{terminal}}", pane.kind_name())); }
             // Its text lives only in canvas.json: an agent must not delete what the person wrote.
             if pane.text().is_some() { return self.fail(format!("pane {id} holds text the person wrote: only they can close it")); }
+            if self.browser_popped(id) && let Err(error) = self.pop_browser(id, window, cx) {
+                return self.fail(error);
+            }
             return self.close_boxed_panes(&[id.to_owned()], cx);
         }
         // The confirmed dialog hands back the panes whose text closing deletes.
@@ -1294,6 +1336,43 @@ impl AppWindow {
         if self.canvas_state.doc.panel.space.as_deref().and_then(|id| self.model.space(id)).is_some_and(|s| s.machine.is_some()) {
             vec![]
         } else { self.canvas_state.editors.clone() }
+    }
+
+    /// Switches the panel view after confirming any unsaved edits in its active file.
+    fn select_panel_tab(&mut self, tab: Option<canvas::PanelTab>, window: &mut Window, cx: &mut Context<Self>) {
+        let state = &self.canvas_state;
+        if state.file == tab || tab.as_ref().is_some_and(|tab| !state.doc.panel.tabs.contains(tab)) { return; }
+        if let Some(path) = state.file_path().filter(|path| state.dirty.as_ref() == Some(*path)).cloned() {
+            let generation = state.dirty_generation;
+            let answer = window.prompt(
+                gpui::PromptLevel::Warning,
+                "Discard unsaved changes?",
+                Some("Your changes to this file will be lost."),
+                &[gpui::PromptButton::cancel("Cancel"), gpui::PromptButton::new("Discard changes")],
+                cx,
+            );
+            cx.spawn_in(window, async move |this, cx| {
+                if !matches!(answer.await, Ok(1)) { return; }
+                let _ = this.update_in(cx, |this, window, cx| {
+                    let state = &mut this.canvas_state;
+                    if state.file_path() != Some(&path) || state.dirty_generation != generation
+                        || tab.as_ref().is_some_and(|tab| !state.doc.panel.tabs.contains(tab)) { return; }
+                    state.dirty = None;
+                    state.editing = None;
+                    this.select_panel_tab(tab, window, cx);
+                });
+            }).detach();
+            return;
+        }
+        let state = &mut self.canvas_state;
+        if tab.is_none() {
+            state.files = true;
+            state.doc.panel.tree_hidden = false;
+        }
+        state.file = tab;
+        self.focus.focus(window, cx);
+        self.sync(window, cx);
+        cx.notify();
     }
 
     pub(super) fn panel_editor(&mut self, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
@@ -1566,15 +1645,14 @@ impl AppWindow {
         canophy::widen(self.zoom_range(window, cx), self.canvas_state.doc.camera.zoom())
     }
 
-    /// Measures the canvas from the last frame (the window before the first one) and, when its
-    /// size or uncovered part changed, tells canophy, which re-derives pinned panes. Runs before
-    /// each render; it writes nothing while the window stays the same size.
     /// Pushes each pane's layout into the views that draw it: a terminal's scale and world body
     /// (its grid reflows only once nothing moves the camera or the pane), and a PDF's page
-    /// scale. Runs before each render, after `sync_viewport`, so render only reads.
+    /// display and destination raster scales. Runs after `sync_viewport`, so render only reads.
     pub(in crate::window) fn sync_panes(&mut self, cx: &mut Context<Self>) {
-        let rested = self.camera_rested();
         let state = &self.canvas_state;
+        let now = std::time::Instant::now();
+        let motion = &state.motion.camera;
+        let rested = motion.settled(now);
         let camera = state.doc.camera;
         let doc = state.shown.as_ref().unwrap_or(&state.doc);
         for card in doc.panes.iter().filter(|p| doc.shown(p)) {
@@ -1594,14 +1672,21 @@ impl AppWindow {
                 }
                 canvas::Kind::Pdf { .. } => {
                     let Some(view) = state.pdfs.get(&card.id) else { continue };
-                    view.update(cx, |view, cx| view.set_display_scale(layout.scale, rested, cx));
+                    let raster = canophy::rest_scale(motion, camera, card, now);
+                    view.update(cx, |view, cx| {
+                        view.set_fit_size(layout.body_world, cx);
+                        view.set_display_scale(layout.scale, raster, cx);
+                    });
                 }
                 canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } | canvas::Kind::File { .. } | canvas::Kind::Image { .. }
                 | canvas::Kind::Mod { .. } | canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. } => {}
             }
         }
+        #[cfg(target_os = "macos")]
+        if rested { self.sync_resting_browser_stills(cx); }
     }
 
+    /// Measures the uncovered canvas and re-derives pinned panes when it changes.
     pub(in crate::window) fn sync_viewport(&mut self, window: &Window) {
         let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
         let view = canophy::Viewport { size: [f32::from(size.width), f32::from(size.height)], open: self.open_canvas_in(window.viewport_size()) };
@@ -1634,18 +1719,18 @@ impl AppWindow {
             "image" => format!("Can't open {name}: not a readable image"),
             _ => format!("Can't open {}: {e}", path.display()),
         })?.to_string_lossy().into_owned();
-        let at_default = |kind: canvas::Kind| (canophy::traits(&kind).default.into(), kind);
-        let (size, kind): (canophy::Point, _) = match kind {
+        let (kind, natural) = match kind {
             "image" => {
-                let size = self.open_image(path, &canonical).map_err(|_| format!("Can't open {name}: not a readable image"))?;
-                (size, canvas::Kind::Image { path: canonical.clone() })
+                let (w, h) = self.open_image(path, &canonical).map_err(|_| format!("Can't open {name}: not a readable image"))?;
+                let natural = canophy::Natural { content: canophy::WorldSize::new(w as f32, h as f32), chrome: canophy::WorldSize::default() };
+                (canvas::Kind::Image { path: canonical.clone() }, Some(natural))
             }
-            "pdf" => at_default(canvas::Kind::Pdf { path: canonical.clone(), highlights: vec![] }),
-            _ => at_default(canvas::Kind::File { path: canonical.clone() }),
+            "pdf" => (canvas::Kind::Pdf { path: canonical.clone(), highlights: vec![] }, None),
+            _ => (canvas::Kind::File { path: canonical.clone() }, None),
         };
         let path = canonical;
         let doc = &mut self.canvas_state.doc;
-        let (id, kind_name) = if let Some(pane) = doc.panes.iter_mut().find(|p| p.path() == Some(path.as_str())) {
+        let (id, kind_name, parsed) = if let Some(pane) = doc.panes.iter_mut().find(|p| p.path() == Some(path.as_str())) {
             // A reopened file pane moves to where it was opened.
             let (id, rect) = (pane.id.clone(), canophy::WorldRect { x: point[0], y: point[1], ..pane.rect });
             let kind_name = pane.kind_name().to_owned();
@@ -1655,16 +1740,23 @@ impl AppWindow {
                 doc.wires.retain(|w| w.a != id && w.b != id);
             }
             self.canvas_state.step(canophy::Intent::Place(vec![(id.clone(), rect)]));
-            (id, kind_name)
+            (id, kind_name, None)
         } else {
+            let parsed = if let canvas::Kind::Pdf { path, .. } = &kind {
+                pdf::parse_pdf(path).ok()
+            } else {
+                None
+            };
+            let natural = parsed.as_ref().and_then(|(_, doc)| pdf::natural_size(doc)).or(natural);
+            let size = canophy::open_size(&canophy::traits(&kind), natural, &self.canvas_state.viewport);
             let id = doc.next_file_id();
             let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-            let pane = canvas::Pane { id: id.clone(), kind, rect: canophy::WorldRect::at(point.into(), size.into()), z, space, color: None, pinned: None };
+            let pane = canvas::Pane { id: id.clone(), kind, rect: canophy::WorldRect::at(point.into(), size), z, space, color: None, pinned: None };
             let kind_name = pane.kind_name().to_owned();
             doc.panes.push(pane);
-            (id, kind_name)
+            (id, kind_name, parsed)
         };
-        self.load_previews(window, cx);
+        self.load_previews(parsed.map(|pdf| (id.as_str(), pdf)), window, cx);
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
@@ -1684,9 +1776,9 @@ impl AppWindow {
         id
     }
 
-    fn load_previews(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn load_previews(&mut self, parsed: Option<(&str, pdf::ParsedPdf)>, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_browsers(cx);
-        self.sync_pdf_views(window, cx);
+        self.sync_pdf_views(parsed, window, cx);
         self.sync_image_sizes(window, cx);
         let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
         if let Some(path) = self.canvas_state.file_path() {
@@ -1889,10 +1981,10 @@ impl AppWindow {
         self.set_expanded(&addr, expand, window, cx);
     }
 
-    /// Delay terminal grid resizing and crisp PDF pages until a canvas zoom gesture settles.
+    /// Delay terminal grid resizing and sharp page redraws until a canvas zoom gesture settles.
     fn zoom_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
-        if !state.doc.panes.iter().any(|c| c.size().is_some() || matches!(c.kind, canvas::Kind::Pdf { .. })) { return; }
+        if !state.doc.panes.iter().any(|c| c.size().is_some() || matches!(c.kind, canvas::Kind::Pdf { .. } | canvas::Kind::Browser { .. })) { return; }
         let since = std::time::Instant::now();
         state.motion.camera = canophy::Motion::Gesture { since };
         state.zoom_task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -1904,7 +1996,7 @@ impl AppWindow {
         }));
     }
 
-    /// Whether expanded cells can refit their terminal grids and PDF pages re-render.
+    /// Whether nothing moves the camera, so stills and grids may refit to the zoom.
     pub(super) fn camera_rested(&self) -> bool {
         self.canvas_state.motion.camera.settled(std::time::Instant::now())
     }
@@ -2334,7 +2426,7 @@ impl AppWindow {
         if !self.has_canvas() || !self.listed_once || !core_layout_answered(self.documents.get("")) {
             return;
         }
-        self.load_previews(window, cx);
+        self.load_previews(None, window, cx);
         self.load_sims(window, cx);
         let missing: Vec<_> = self
             .live
@@ -2840,7 +2932,7 @@ impl AppWindow {
             }
             "panel.close" => {
                 state.dirty = None;
-                // The tabs stay (a docked pane lives in them); the folder button reopens on this one.
+                // The tabs stay, including any docked panes.
                 if let Some(tab) = state.file.take() { state.closed = Some(tab); }
                 state.files = false;
                 state.panel_expanded = false;
@@ -2870,7 +2962,7 @@ impl AppWindow {
         let quote_path = file.to_owned();
         let quote_view = view.clone();
         // The text scales with the pane like a picture (`ScaledPane` in `pane_card`).
-        let body = div().flex_1().min_h_0().overflow_hidden().px(wpx(16.)).py(wpx(12.))
+        let body = div().flex_1().min_h_0().overflow_hidden().px(wpx(canophy::traits::FILE_PAD_X)).py(wpx(12.))
             .child(gpui_base::TextView::new(view).scrollable(true)
                     .image_source(|_| {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
@@ -2929,6 +3021,8 @@ impl AppWindow {
         let raise = drag.clone();
         let shutdown = card.sim().is_some_and(|udid| !udid.is_empty() && !self.canvas_state.shutting_down_sims.contains(udid));
         let browser = card.url().is_some();
+        // A browser enters through its own path (`select_browser_pane`).
+        let scrolls = !browser && canophy::traits(&card.kind).scrolls;
         let pane_menu = card.id.clone();
         #[cfg(target_os = "macos")]
         let rest = card.id.clone();
@@ -2940,6 +3034,10 @@ impl AppWindow {
                 .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     if e.button != MouseButton::Left { return; }
                     this.canvas_state.close_panel_focus = false;
+                    // A click leaves the entered pane; a double-click enters a pane that scrolls (law 9).
+                    if this.canvas_state.entered() != Some(raise.as_str()) {
+                        this.canvas_state.mode = !(scrolls && e.click_count == 2);
+                    }
                     this.raise_pane(&raise, cx);
                     this.focus.focus(window, cx);
                     this.canvas_state.selected = vec![raise.clone()];
@@ -3227,6 +3325,7 @@ impl AppWindow {
                         window.on_mouse_event(move |e: &PinchEvent, phase, window, cx| {
                             if phase == DispatchPhase::Capture && b.contains(&e.position)
                                 && !pinch.read(cx).canvas_input_covered(e.position)
+                                && !pinch.read(cx).content_owns_pinch(e.position)
                             {
                                 pinch.update(cx, |this, cx| this.canvas_pinch(e, window, cx));
                             }
@@ -3898,21 +3997,23 @@ impl AppWindow {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(|this, _, window, cx| this.run_key("space.new", json!({}), window, cx))));
         let mut tabs = control();
-        // Like Claude's titlebar: the folder opens or closes the files pane (tree and preview).
-        let open = state.file.is_some() || state.files;
+        // The folder returns to the tree from any active tab.
         tabs = tabs.child(
             panel_button("canvas-files", "mods/files/folder.svg", c("muted-foreground"), c("hover"))
                 .aria_label("Files").tooltip(strip_tooltip("Files".into(), None))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    if open {
+                .on_click(cx.listener(|this, _, window, cx| {
+                    let state = &mut this.canvas_state;
+                    let open = state.file.is_some() || state.files;
+                    let (show, tab) = files_button(open, state.file.as_ref(), state.closed.as_ref(), &state.doc.panel.tabs);
+                    if !show {
                         this.canvas_command("panel.close", window, cx);
+                    } else if open {
+                        this.select_panel_tab(tab, window, cx);
                     } else {
-                        this.canvas_state.files = true;
-                        this.canvas_state.doc.panel.tree_hidden = false;
-                        let tabs = &this.canvas_state.doc.panel.tabs;
-                        this.canvas_state.file = this.canvas_state.closed.take()
-                            .filter(|tab| tabs.contains(tab))
-                            .or_else(|| tabs.last().cloned());
+                        state.files = true;
+                        state.doc.panel.tree_hidden = false;
+                        state.file = tab;
+                        state.closed = None;
                         this.sync(window, cx);
                         cx.notify();
                     }
@@ -4030,12 +4131,7 @@ impl AppWindow {
                     .tooltip(strip_tooltip(tip, None))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        if this.canvas_state.file.as_ref() == Some(&activate) { return; }
-                        this.canvas_state.dirty = None;
-                        this.canvas_state.file = Some(activate.clone());
-                        this.focus.focus(window, cx);
-                        this.sync(window, cx);
-                        cx.notify();
+                        this.select_panel_tab(Some(activate.clone()), window, cx);
                     }))
                     .child(svg().path(icon).flex_none().size(px(14.)).text_color(c(if active { "foreground" } else { "muted-foreground" })).group_hover(group.clone(), |s| s.text_color(c("foreground"))))
                     .child(div().flex_1().min_w_0().truncate().child(label))
@@ -4338,7 +4434,11 @@ impl AppWindow {
     fn claims_wheel(&self, e: &ScrollWheelEvent) -> bool {
         wheel_claimed(wheel_zooms(e.modifiers), self.canvas_state.wheel_pan_at, std::time::Instant::now())
             || (gesture_ended(e.touch_phase) && self.canvas_state.wheel_zoom.is_some())
-            || self.wire_cell_at(e.position, 0.).is_some_and(|pane| self.canvas_state.entered() != Some(&pane))
+            || self.wire_cell_at(e.position, 0.).is_some_and(|id| {
+                self.canvas_state.doc.panes.iter().find(|p| p.id == id).is_none_or(|p| {
+                    canophy::wheel_owner(&canophy::traits(&p.kind), self.placement(&p.id)) == canophy::Owner::Canvas
+                })
+            })
     }
 }
 
@@ -4552,6 +4652,26 @@ fn numbered_code(text: &str) -> String {
 }
 
 #[cfg(test)]
+mod files_button_tests {
+    #[test]
+    fn files_button_restores_file_tabs_and_cycles_through_the_tree() {
+        use super::files_button;
+        use crate::canvas::PanelTab::{File, Pane};
+
+        let file = File("/tmp/example.txt".into());
+        let browser = Pane("browser".into());
+        let tabs = [file.clone(), browser.clone()];
+        assert_eq!(files_button(false, None, None, &tabs), (true, None));
+        assert_eq!(files_button(false, None, Some(&browser), &tabs), (true, None));
+        assert_eq!(files_button(false, None, Some(&file), &tabs), (true, Some(file.clone())));
+        assert_eq!(files_button(false, None, Some(&file), &[]), (true, None));
+        assert_eq!(files_button(true, Some(&browser), None, &tabs), (true, None));
+        assert_eq!(files_button(true, Some(&file), None, &tabs), (true, None));
+        assert_eq!(files_button(true, None, None, &tabs), (false, None));
+    }
+}
+
+#[cfg(test)]
 mod preview_tests {
     #[test]
     fn transcripts_wait_for_the_file_and_keep_agent_markup_literal() {
@@ -4713,6 +4833,7 @@ mod input_tests {
         ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, point, px, size};
     use serde_json::json;
     use std::time::Instant;
+    use crate::{canophy, canvas};
 
     #[test]
     fn a_pan_in_progress_keeps_the_wheel_until_it_goes_quiet() {
@@ -4823,7 +4944,7 @@ mod input_tests {
 
         let before = camera(cx);
         cx.simulate_event(PinchEvent { position, delta: -0.1, modifiers: none, phase: TouchPhase::Moved });
-        assert!(camera(cx).zoom() < before.zoom(), "pinch reaches the canvas through an occluding pane");
+        assert!(camera(cx).zoom() < before.zoom(), "pinch reaches the canvas over an entered terminal");
 
         let notch = ScrollWheelEvent { position, delta: ScrollDelta::Lines(point(0., 50.)), modifiers: zoom, touch_phase: TouchPhase::Moved };
         cx.simulate_event(notch.clone());
@@ -4835,6 +4956,59 @@ mod input_tests {
         cx.executor().advance_clock(WHEEL_GESTURE / 2);
         cx.run_until_parked();
         assert!(view.read_with(cx, |this, _| this.canvas_state.wheel_zoom.is_none()), "wheel input without an end ends after a quiet period");
+
+        view.update(cx, |this, cx| {
+            let browser: canvas::Pane = serde_json::from_value(json!({
+                "id":"b1","kind":"browser","props":{"home":""},"rect":[100,120,300,200],"z":2
+            })).unwrap();
+            this.canvas_state.doc.panes.push(browser);
+            this.canvas_state.step(canophy::Intent::Camera(canophy::Camera::default()));
+            this.canvas_state.selected = vec!["b1".into()];
+            this.canvas_state.mode = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        // At zoom 1 this small canvas cannot zoom out further, so pinch in.
+        let pinch = PinchEvent { position, delta: 0.1, modifiers: none, phase: TouchPhase::Moved };
+        let before = camera(cx);
+        cx.simulate_event(pinch.clone());
+        assert!(camera(cx).zoom() > before.zoom(), "pinch reaches the canvas through an unentered browser pane");
+
+        view.update(cx, |this, cx| {
+            this.canvas_state.mode = false;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let before = camera(cx);
+        cx.simulate_event(pinch);
+        assert_eq!(camera(cx), before, "an entered browser owns the pinch");
+
+        // Law 9: a file pane pans the canvas until it is entered, then scrolls its text.
+        let path = std::env::temp_dir().join(format!("canopy-wheel-{}.md", std::process::id()));
+        std::fs::write(&path, "# Notes\n").unwrap();
+        view.update_in(cx, |this, window, cx| {
+            let file: canvas::Pane = serde_json::from_value(json!({
+                "id":"f1","kind":"file","props":{"path":path},"rect":[100,120,300,200],"z":3
+            })).unwrap();
+            this.canvas_state.doc.panes.push(file);
+            this.load_previews(None, window, cx);
+            this.canvas_state.selected = vec!["f1".into()];
+            this.canvas_state.mode = true;
+            this.canvas_state.wheel_pan_at = None;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let plain = ScrollWheelEvent { position, delta: ScrollDelta::Pixels(point(px(0.), px(20.))), modifiers: none, touch_phase: TouchPhase::Moved };
+        assert!(view.read_with(cx, |this, _| this.claims_wheel(&plain)), "a selected file pane pans the canvas");
+        cx.simulate_event(MouseDownEvent { position, modifiers: none, button: MouseButton::Left, click_count: 1, first_mouse: false });
+        cx.simulate_mouse_up(position, MouseButton::Left, none);
+        assert!(view.read_with(cx, |this, _| this.canvas_state.entered().is_none()), "a click selects without entering");
+        cx.simulate_event(MouseDownEvent { position, modifiers: none, button: MouseButton::Left, click_count: 2, first_mouse: false });
+        cx.simulate_mouse_up(position, MouseButton::Left, none);
+        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.entered().map(str::to_owned)), Some("f1".into()), "a double-click enters");
+        assert!(!view.read_with(cx, |this, _| this.claims_wheel(&plain)), "an entered file pane scrolls its own text");
+        assert!(view.read_with(cx, |this, _| this.claims_wheel(&ScrollWheelEvent { modifiers: zoom, ..plain.clone() })), "Cmd+wheel still zooms the canvas");
+        let _ = std::fs::remove_file(path);
     }
 
     #[gpui::test]

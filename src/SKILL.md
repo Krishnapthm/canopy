@@ -139,7 +139,7 @@ A browser pane holds tabs. `canopy pane read`, `shot`, and `open` act on its
 active tab. Use `canvas.browser_tab_new {pane?, url?}` to open a tab and get
 its id, `canvas.browser_tab_select {pane?, tab}` to switch by id, or
 `canvas.browser_tab_close {pane?, tab?}` to close a tab (the active tab by
-default). Closing the last tab leaves an empty one. Clicked HTTP and HTTPS
+default). Closing the last tab closes the browser pane. Clicked HTTP and HTTPS
 terminal links open in a built-in browser tab when `browser_open_links` is
 `built_in`.
 
@@ -395,11 +395,11 @@ empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. 
 shows keys on the toolbar and helper bars, even while a terminal has focus. Expanded cells are
 100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
 neighbours back. Drag the bottom-right corner to resize; the terminal is resized on release. Several
-can be open. The wheel scrolls a focused expanded terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
+can be open. The wheel scrolls an entered pane that scrolls (a terminal, PDF, file or browser; double-click enters) and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
 the named or last selected cell; `panel.open {terminal}` only expands. Below 0.5 zoom an expanded cell draws as its
 pill. The side panel shows files and sub-agent transcripts only.
 
-Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor.
+Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor (on macOS, pinching an entered, docked or popped-out browser page magnifies the page).
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
 `canvas.arrange {layout?: "tidy" | "row" | "column" | "wires", space?, picker?}`
 arranges selected cells or the current space; no layout repeats the last choice.

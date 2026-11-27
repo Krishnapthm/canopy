@@ -34,3 +34,15 @@
 
 Not covered: `<hc from>` tagging and `hc wait --children any` need both ends
 to report status (OSC 7501), so they need a live agent.
+
+## Agent status words, 2026-11-27 (hc 0.1.22, Claude Code 2.1.332, Codex 0.172.0)
+
+Checked in the dev window against its scratch core, with `hc ls --json`:
+
+- Claude Code reports a status word in all three ways it can start: as the terminal's
+  program (`terminal.open` with `argv: ["claude"]`), typed into a shell, and through
+  `canopy spawn claude`, which adds its own `--settings` hooks. The trust prompt on a new
+  folder shows as `blocked`, and the empty prompt after it as `idle`.
+- Codex shows `working` while it starts and `idle` at its prompt.
+- After an agent exits, its terminal's `agent` field goes back to the shell (`zsh`) and
+  `status` disappears, so the bottom strip drops it.

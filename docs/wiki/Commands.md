@@ -166,7 +166,7 @@ Open the quote popover at point or the pointer: agents wired to the quoted pane 
 
 ## `canvas.close_focused`
 
-Close the focused Files panel tab, or the one selected canvas pane. A browser closes its active tab; with several or no panes selected, nothing closes. Only the person can run it.
+Close the focused Files panel tab, or the one selected canvas pane. A browser closes its active tab, and its last tab closes the pane; with several or no panes selected, nothing closes. Only the person can run it.
 
 No arguments.
 
@@ -279,7 +279,7 @@ Open a new tab in a browser pane. Pass an HTTP(S) address, an absolute local pat
 
 ## `canvas.browser_tab_close`
 
-Close a tab in a browser pane. Without tab, closes the active tab. Closing the last tab leaves an empty tab. With no pane and no single browser pane selected, runs tab.close if bound.
+Close a tab in a browser pane. Without tab, closes the active tab. Closing the last tab closes the pane. With no pane and no single browser pane selected, runs tab.close if bound.
 
 | Argument | Required |
 |---|---|
@@ -1349,7 +1349,7 @@ No arguments.
 
 ## `canvas.pdf_zoom_reset`
 
-Reset zoom in the last selected PDF pane.
+Reset zoom in the last selected PDF pane: the page fits the pane's width again.
 
 No arguments.
 

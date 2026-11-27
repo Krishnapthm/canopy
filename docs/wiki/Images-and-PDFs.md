@@ -8,7 +8,7 @@ On macOS, choose **Open in Preview** in the helper bar to open the original file
 
 ## Images
 
-Image panes show PNG, JPEG, GIF and WebP files, scaled to fit the pane.
+image panes show PNG, JPEG, GIF and WebP files. a new pane keeps the image's proportions and shrinks large images to fit the visible canvas at 100% canvas zoom. small images keep their original pixel size at 100%, with extra space when the pane reaches its minimum size. reopening an existing pane keeps its size.
 
 ### Quote part of an image
 
@@ -26,7 +26,9 @@ The image helper bar also has **Connect** and **Close**.
 
 ![A PDF pane with highlighted text](images/images-and-pdfs-1.png)
 
-PDF panes let you read, search, highlight and quote a document. They open at 100% zoom. Zooming the canvas scales the page with the pane, like a picture, so you see the same part of the PDF at any zoom. Its own zoom percentage stays as you set it.
+PDF panes let you read, search, highlight and quote a document. a new pane uses the first page's proportions to fit the visible canvas at 100% canvas zoom. the PDF starts in fit-width mode, which adjusts the page when you resize the pane. reopening an existing pane keeps its size.
+
+zooming the canvas scales the page with the pane, like a picture, so you see the same part of the PDF at any canvas zoom. when the canvas eases to a new zoom, the first page bitmap is drawn for the zoom where the canvas will come to rest.
 
 ### Find text
 
@@ -44,7 +46,8 @@ Highlights stay on the pane, so you can mark up a spec as you read it and quote 
 
 ### Move around
 
-- Click **Zoom out**, **Reset zoom**, or **Zoom in** to change the PDF zoom. Reset returns it to 100%.
+- Double-click the PDF to enter it, then scroll with the wheel or two fingers. Click empty canvas or another pane to leave it. Until you enter it, scrolling over the PDF pans the canvas.
+- Click **Zoom out**, **Reset zoom**, or **Zoom in** to change the PDF zoom. Reset returns the page to fit the pane's width.
 - Click **Previous page** or **Next page**, or press `[` and `]` with the pane selected.
 - Click **Clear highlights**, or press `Shift+M`, to remove every highlight. The button shows only when there are some.
 

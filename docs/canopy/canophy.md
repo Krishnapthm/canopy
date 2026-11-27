@@ -13,18 +13,38 @@ history is in [plans/canophy/plan.md](plans/canophy/plan.md). canophy replaces t
 with three things: each kind declares how it behaves once, every change goes through one
 function, and everything draws from one layout.
 
-## The four laws
+## The laws
 
 These are product decisions. Code that breaks one is a bug, whatever the test suite says.
 
-1. **Zoom is a picture.** Everything inside a pane, header included, scales with the canvas.
-   Only overlay chrome keeps its screen size: the helper bar, resize grips, the selection
-   outline, wires and the marquee.
-2. **A pane the person opens eases the camera to 100%.** Panes an agent creates never move
-   the camera; when one lands out of view, a toast with a jump action says so.
-3. **The Files panel shrinks the canvas.** The canvas keeps its left edge, and the entered
-   pane is revealed when the panel covers it.
-4. **Zoom never changes a terminal's grid; resizing reflows it,** once, on release.
+**1. Zoom is a picture.** Everything inside a pane, header included, scales with the canvas.
+Only overlay chrome keeps its screen size: the helper bar, resize grips, the selection
+outline, wires and the marquee.
+
+**2. A pane the person opens eases the camera to 100%.** Panes an agent creates never move
+the camera. When one lands out of view, a toast with a jump action says so.
+
+**3. The Files panel shrinks the canvas.** The canvas keeps its left edge and reveals the
+entered pane when the panel covers it.
+
+**4. Zoom never changes a terminal's grid.** Resizing reflows it once, on release.
+
+**5. A new file-backed pane fits its content to the visible canvas at 100%.** Images and
+first PDF pages keep their proportions, and a text preview opens as a reading column. The
+pane's minimum size takes priority when space runs out.
+
+**6. Content you're working in gets the pinch.** A pane that handles pinch gets it when
+entered on the canvas, docked or popped out. Otherwise, the pinch zooms the canvas.
+
+**7. Rasterized content draws for its resting scale.** A PDF rasterizes for the ease's
+destination from its first bitmap and keeps its current raster during a gesture.
+
+**8. Closing the last browser tab closes its pane.** This applies on the canvas, in the
+Files panel and in a pop-out.
+
+**9. Plain scroll moves the content you're working in.** A pane that scrolls gets the wheel
+when entered on the canvas (double-click), docked or popped out. Over any other pane, plain
+scroll pans the canvas, and Cmd/Ctrl+wheel always zooms it.
 
 ## The pieces
 
@@ -32,8 +52,11 @@ These are product decisions. Code that breaks one is a bug, whatever the test su
 |---|---|---|
 | World and screen px | `units.rs`, `camera.rs` | World px are canvas px at 100% zoom. Screen px are GPUI's. Only `Camera` converts between them, and its fields are private. |
 | `Traits` | `traits.rs` | What a pane kind is: default size, min, aspect, header height, whether it pushes neighbours or docks, and what its body draws. |
+| `open_size`, `Fit` | `open.rs`, `traits.rs` | Size a new pane at 100% from its fit mode and the uncovered viewport. Natural content shrinks uniformly, with room for chrome and a 32 px gap at each canvas edge. |
+| `pinch_owner`, `wheel_owner` | `input.rs` | Choose whether the canvas or pane content handles a pinch or a plain wheel, from the pane kind's traits (`zooms`, `scrolls`) and its current placement. |
 | `step(doc, Intent, &Viewport)` | `step.rs` | The only way to change pane geometry or the camera. Applies the intent, then the size law, the camera law and (debug builds) the invariants, in that order. |
 | `Layout` | `layout.rs` | `layout(camera, pane)` gives the pane's screen rect, header height, body rect, scale, and body size in world px. Render reads this and nothing else. |
+| `rest_scale` | `layout.rs` | Pick the raster scale from the current camera or the ease's destination. Return no scale while a zoom gesture is moving. |
 | `ScaledPane`, `wpx` | `src/window/canvas_view/scaled.rs` | Draws one pane subtree at its layout scale by changing the rem size, so chrome written in `wpx(n)` is `n` px at 100%. |
 | `Motion` | `motion.rs` | Camera eases and momentum. Time is passed in; each frame is an `Intent::Camera`. |
 | `check` | `check.rs` | The invariants (no bad rects, nothing below its min, zoom in range, the camera round trip, camera actions leaving panes where they are). |
@@ -42,7 +65,8 @@ A frame goes like this. Input becomes an `Intent`, `step` applies it, the window
 (`solve_layout`, which needs each pill's measured size), and render calls `layout` for each
 pane and wraps its subtree in `ScaledPane::new(layout.scale, ...)`. `sync_panes` then hands
 each live view what it needs from the layout: a terminal its scale and `body_world` (its
-grid comes from `body_world`, so zoom cannot change it), a PDF its display scale.
+grid comes from `body_world`, so zoom cannot change it), and a PDF its world body size,
+display scale and raster scale.
 
 Who asked matters for law 2. Commands carry `person`: true for clicks, keys and mods, false
 for the control socket (agents and scripts). Paths that open panes take it and call
@@ -55,8 +79,9 @@ for the control socket (agents and scripts). Paths that open panes take it and c
 2. Draw its body inside the pane frame the canvas already draws, from `Layout`. Size chrome
    with `wpx(n)`, never `px(n * zoom)`. Size content from `layout.body_world` when it must not
    change with zoom, and from `layout.body` when it fills the screen rect.
-3. Open it with an `Intent` (`Place` for a new rect), never by writing `pane.rect`. If the
-   person can open it, call `show_full_size` after it lands.
+3. Declare its `fit` in `Traits` and use `open_size` to choose its initial size. Open it
+   with an `Intent` (`Place` for a new rect). If the person can open it, call `show_full_size`
+   after it lands.
 4. Give it helper bar actions through the shared helper bar.
 5. Add its parts to the scale-equivalence test if it draws its own chrome.
 
