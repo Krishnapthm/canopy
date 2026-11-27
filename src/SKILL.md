@@ -139,7 +139,7 @@ A browser pane holds tabs. `canopy pane read`, `shot`, and `open` act on its
 active tab. Use `canvas.browser_tab_new {pane?, url?}` to open a tab and get
 its id, `canvas.browser_tab_select {pane?, tab}` to switch by id, or
 `canvas.browser_tab_close {pane?, tab?}` to close a tab (the active tab by
-default). Closing the last tab leaves an empty one. Clicked HTTP and HTTPS
+default). Closing the last tab closes the browser pane. Clicked HTTP and HTTPS
 terminal links open in a built-in browser tab when `browser_open_links` is
 `built_in`.
 
@@ -400,6 +400,7 @@ the named or last selected cell; `panel.open {terminal}` only expands. Below 0.5
 pill. The side panel shows files and sub-agent transcripts only.
 
 Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor.
+On macOS, pinching an entered, docked or popped-out browser page magnifies the page.
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
 `canvas.arrange {layout?: "tidy" | "row" | "column" | "wires", space?, picker?}`
 arranges selected cells or the current space; no layout repeats the last choice.

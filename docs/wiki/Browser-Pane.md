@@ -54,8 +54,8 @@ Click **New tab** (the plus button) in the browser pane's header to open an empt
 tab and focus its address field. Click a tab to switch to it, click its
 **Close tab** button (shown on the selected tab and when you hover another) or
 middle-click it to close it. Right-click a tab for **Open in** your browser and
-**Close tab**. In [canvas mode](Canvas), `Cmd+W` also closes
-the active tab of the selected browser pane, or of the one in the Files panel when you last clicked there.
+**Close tab**. `Cmd+W` also closes the active tab of the selected browser pane,
+the one in the Files panel when you last clicked there, or the browser in the focused pop-out.
 
 Browser tabs look like the Files panel tabs, in the panel, on the canvas and in a
 pop-out window. As in Chrome, tabs sit a little below the top of their strip with
@@ -66,7 +66,7 @@ globe and its title: Canopy never loads a page's own icon, because that would be
 request outside the page.
 
 Closing the active tab selects the tab to its left, or the next tab when the
-first tab closes. Closing the last tab leaves the pane open with an empty tab.
+first tab closes. Closing the last tab closes the browser pane wherever it is open.
 Each tab keeps its own address and page history while its view is open.
 
 ## Links from terminals
@@ -84,9 +84,10 @@ A browser pane is either resting or live:
 
 - **Resting**, it shows a snapshot of the page. This keeps the canvas fast when you have several browsers open.
 - **Click the page** to make it live. Scroll, click and type as in any browser. The page stays live while you pan, zoom or resize the pane. The canvas clips the page at its edges, and panes, helper bars and menus in front of the page remain visible and clickable.
+- **Pinch the page** to magnify it while you're working in it on the canvas, in the Files panel or in a pop-out. An unentered browser pane passes the pinch to the [canvas](Canvas).
 - **Click outside the pane** to rest the page and take a fresh snapshot.
 
-A page lays out at the size its pane is drawn: the Files panel body, or the pane at the current canvas zoom. So the first snapshot of a new page already fits its pane, with no reload. Zooming the canvas scales a page like a picture: its text grows and shrinks with the pane, and the page keeps its layout width, so it never reflows. Only the height it shows changes a little, because the header keeps its size. Choosing another **Viewport** refits a resting page and retakes its snapshot.
+A page lays out at the size its pane is drawn. Canopy waits for that size before taking the first snapshot. A resting page scales like a picture while you zoom the canvas. When the camera settles more than 5% above the snapshot's scale, Canopy takes a sharper snapshot. Choosing another **Viewport** also refits a resting page and retakes its snapshot.
 
 ## The header
 
@@ -104,7 +105,7 @@ A browser pane's header has two rows. The pop-out window draws the same header.
 - The **address field**. Type an address and press Enter to open it (`localhost:3000` gets `http://`); this also sets the pane's **Home**. Press Escape to put the current address back. While you are not typing, the field follows the page.
 - **Annotate** (`canvas.browser_annotate`), a button with its label that starts annotating the page.
 
-Drag the pane by the empty part of row 1. Browser actions are in the header. A docked browser shows its web tabs along the top of the Files panel, with the address field and **Annotate** below. Choose **Close browser pane** from **⋯** to close the whole browser, or **Expand panel** to fill the window.
+Drag the pane by the empty part of row 1. A docked browser shows its web tabs along the top of the Files panel, with the address field and **Annotate** below. Click **Close** in the header or choose **Close browser pane** from **⋯** to close the whole pane. Choose **Expand panel** to fill the window.
 
 ### The ⋯ menu
 
@@ -133,7 +134,7 @@ Drag the pane by the empty part of row 1. Browser actions are in the header. A d
 
 Tabs, Back, Forward, Reload, the address field, the ⋯ menu and the Web Inspector all work on the window's pages. The ⋯ menu opens over the page, which stays visible around it. Sign-ins carry over, because the pane and the window share one website data store. The window annotates the same way the pane does.
 
-**Bring back** (the pane's button, the window's **Close**, or its red traffic light) destroys the window's pages and puts the pane back as it was: the same tabs and active tab at the addresses they last had. Pages load again when you click them. Closing the pane closes its window.
+**Bring back** (the pane's button, the window's **Close**, or its red traffic light) destroys the window's pages and puts the pane back with the same tabs and addresses. Pages load again when you click them. Closing the last tab closes both the pane and its window.
 
 ## Cookies and site data
 

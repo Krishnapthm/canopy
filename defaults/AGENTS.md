@@ -1286,7 +1286,7 @@ A browser pane holds tabs. `canopy pane read`, `shot`, and `open` act on its
 active tab. Use `canvas.browser_tab_new {pane?, url?}` to open a tab and get
 its id, `canvas.browser_tab_select {pane?, tab}` to switch by id, or
 `canvas.browser_tab_close {pane?, tab?}` to close a tab (the active tab by
-default). Closing the last tab leaves an empty one. Clicked HTTP and HTTPS
+default). Closing the last tab closes the browser pane. Clicked HTTP and HTTPS
 terminal links open in a built-in browser tab when `browser_open_links` is
 `built_in`.
 
