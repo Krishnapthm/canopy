@@ -27,7 +27,7 @@ canopy pane open p3 http://127.0.0.1:8000/pricing         # open another page on
 
 These commands wait until the device is ready, then print its name, iOS version and state, or the reason it failed. Without `--url` they also print the path of a fresh screenshot. With one, the page is still drawing when the command returns, so `canopy pane read` gives a screenshot of it from the live screen. An already booted device answers in about a second. A shut down one adds Xcode's boot time, roughly ten seconds. Canopy runs Xcode's `xcrun simctl` itself, so this works from an agent's sandboxed shell where `simctl` cannot reach the simulator service.
 
-`--url` takes any `http://` or `https://` address or an app link such as `myapp://settings`. The simulator cannot read the Mac's files: serve a local folder over loopback first, for example `python3 -m http.server 8000 -b 127.0.0.1`. The reply means the device accepted the address. Simulators report no page-load event, so read the pane to see the page.
+`--url` takes any `http://` or `https://` address or an app link such as `myapp://settings`. The simulator cannot read the Mac's files: serve a local folder over loopback first, for example `python3 -m http.server 8000 -b 127.0.0.1`. The reply means the device accepted the address. Simulators report no page-load event, so read the pane to see the page. A newer open or device selection cancels an earlier open that is still waiting. An iOS command already in progress can finish on its original device before Canopy starts the next request.
 
 ## Use the device
 

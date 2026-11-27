@@ -70,12 +70,12 @@ pub(super) struct SimView {
     #[cfg(target_os = "macos")]
     pub popped: Option<WindowHandle<SimWindow>>,
     _task: Option<Task<()>>,
+    revision: u64,
     #[cfg(target_os = "macos")]
     _events: Option<Subscription>,
 }
 
-/// What the next refresh does beyond a screenshot. It stays on the view until a refresh
-/// finishes, so a newer refresh (Refresh, a live fallback) carries it rather than dropping it.
+/// The requested device and URL, together with the callers waiting for that refresh.
 #[derive(Default)]
 pub(super) struct Pending {
     /// A simulator named by an agent, not yet resolved to the pane's saved udid.
@@ -83,6 +83,28 @@ pub(super) struct Pending {
     /// An address to open once the device is booted.
     pub url: Option<sim::Url>,
     pub waiting: Vec<Waiter>,
+}
+
+impl Pending {
+    /// A newer open supersedes older open replies; a read still wants the pane's current screen.
+    fn replace(&mut self, target: Option<Target>, url: Option<sim::Url>) {
+        self.target = target;
+        self.url = url;
+        self.waiting.retain(|waiter| match waiter {
+            Waiter::Opened { tx, .. } => {
+                let _ = tx.send(json!({"error":"the simulator open was superseded"}));
+                false
+            }
+            Waiter::Read(_) => true,
+        });
+    }
+}
+
+impl SimView {
+    fn request(&mut self, target: Option<Target>, url: Option<sim::Url>) {
+        self.revision += 1;
+        self.pending.replace(target, url);
+    }
 }
 
 /// A held `canopy pane` reply that the running refresh answers.
@@ -191,14 +213,14 @@ impl AppWindow {
         let [w, h] = DEFAULT_SIZE;
         doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid: String::new() }, rect: canophy::WorldRect::new(point[0], point[1], w, h), z, space, color: None, pinned: None });
         self.canvas_changed(cx);
-        self.new_sim_view(&id).pending = Pending { target, url, waiting: vec![] };
+        self.new_sim_view(&id).request(target, url);
         self.refresh_sim(&id, true, window, cx);
         id
     }
 
     fn new_sim_view(&mut self, id: &str) -> &mut SimView {
         self.canvas_state.sims.entry(id.to_owned()).or_insert_with(|| SimView {
-            screen: Screen::Loading, device: None, devices: vec![], png: None, pending: Pending::default(), _task: None,
+            screen: Screen::Loading, device: None, devices: vec![], png: None, pending: Pending::default(), _task: None, revision: 0,
             #[cfg(target_os = "macos")] live: None,
             #[cfg(target_os = "macos")] popped: None,
             #[cfg(target_os = "macos")] _events: None,
@@ -264,11 +286,25 @@ impl AppWindow {
         } else if !matches!(view.screen, Screen::Shot(_)) {
             view.screen = Screen::Loading;
         }
+        // Keep simctl calls serialized: dropping a task cannot undo a URL already sent to simctl.
+        if view._task.is_some() {
+            cx.notify();
+            return;
+        }
         let pane = id.to_owned();
+        let revision = view.revision;
         view._task = Some(cx.spawn_in(window, async move |this, cx| {
             let look_pane = pane.clone();
             let found = cx.background_executor().spawn(async move { look(&look_pane, target, named, boot, url) }).await;
-            let _ = this.update_in(cx, |this, window, cx| this.sim_found(&pane, found, window, cx));
+            let _ = this.update_in(cx, |this, window, cx| {
+                let Some(view) = this.canvas_state.sims.get_mut(&pane) else { return };
+                view._task = None;
+                if view.revision == revision {
+                    this.sim_found(&pane, found, window, cx);
+                } else {
+                    this.refresh_sim(&pane, true, window, cx);
+                }
+            });
         }));
         cx.notify();
     }
@@ -276,7 +312,6 @@ impl AppWindow {
     /// Shows what a refresh found, saves a newly resolved device, and answers its waiters.
     fn sim_found(&mut self, pane: &str, found: Result<Found, String>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(view) = self.canvas_state.sims.get_mut(pane) else { return };
-        // This refresh used everything pending: every change to it starts a newer refresh.
         let pending = std::mem::take(&mut view.pending);
         let result = match found {
             Ok(Found::Pick(devices)) => { view.device = None; view.devices = devices.clone(); set_screen(view, Screen::Pick(devices), cx); Err("No simulator picked yet".to_owned()) }
@@ -403,7 +438,7 @@ impl AppWindow {
             *saved = udid;
             self.canvas_changed(cx);
         }
-        self.new_sim_view(id).pending.target = pending;
+        self.new_sim_view(id).request(pending, None);
         self.refresh_sim(id, true, window, cx);
         Ok(())
     }
@@ -416,7 +451,7 @@ impl AppWindow {
         if saved.is_empty() && view.pending.target.is_none() {
             return Err(format!("Pick a simulator first: canopy pane open {id} booted (or a udid from canopy pane devices)"));
         }
-        view.pending.url = Some(url);
+        view.request(view.pending.target.clone(), Some(url));
         self.refresh_sim(id, true, window, cx);
         Ok(())
     }
@@ -1035,6 +1070,35 @@ fn drop_shot(image: Arc<RenderImage>, cx: &mut App) {
 mod reply_tests {
     use super::{Device, opened_reply, sim};
     use serde_json::json;
+
+    #[test]
+    fn newer_open_cancels_the_old_reply_and_device_selection_clears_the_url() {
+        use super::{Pending, Target, Waiter};
+        use std::sync::mpsc;
+
+        let (first, first_reply) = mpsc::channel();
+        let (second, second_reply) = mpsc::channel();
+        let (read, read_reply) = mpsc::channel();
+        let first_url = sim::Url::parse("http://127.0.0.1:8000/first").unwrap();
+        let second_url = sim::Url::parse("http://127.0.0.1:8000/second").unwrap();
+        let mut pending = Pending {
+            target: Some(Target::Udid("first-device".into())),
+            url: Some(first_url),
+            waiting: vec![Waiter::Opened { tx: first, reply: json!({}) }, Waiter::Read(read)],
+        };
+
+        pending.replace(pending.target.clone(), Some(second_url));
+        assert_eq!(first_reply.try_recv().unwrap()["error"], "the simulator open was superseded");
+        assert_eq!(pending.url.as_ref().unwrap().as_str(), "http://127.0.0.1:8000/second");
+        pending.waiting.push(Waiter::Opened { tx: second, reply: json!({}) });
+
+        pending.replace(Some(Target::Udid("second-device".into())), None);
+        assert_eq!(second_reply.try_recv().unwrap()["error"], "the simulator open was superseded");
+        assert!(matches!(&pending.target, Some(Target::Udid(udid)) if udid == "second-device"));
+        assert!(pending.url.is_none());
+        assert_eq!(pending.waiting.len(), 1);
+        assert_eq!(read_reply.try_recv(), Err(mpsc::TryRecvError::Empty));
+    }
 
     #[test]
     fn opened_reply_reports_the_device_and_drops_a_stale_screenshot() {

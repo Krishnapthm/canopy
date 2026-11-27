@@ -36,7 +36,8 @@ canopy pane open p4 <udid>                                         # show anothe
 The reply waits for the device and prints its name, iOS version, state and
 UDID. Without `--url` it adds a screenshot path. With a URL, Safari is still
 drawing when the reply arrives, so run `canopy pane read p4` for a fresh
-screenshot. Simulators report no page-load event.
+screenshot. Simulators report no page-load event. If a newer open or device selection
+supersedes yours, Canopy reports cancellation.
 
 - `--url` and `open` take `http://`, `https://` or an app link. A file path or
   `file:` URL is refused: the device cannot read the Mac's disk. Serve the folder
