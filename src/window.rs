@@ -624,10 +624,9 @@ impl AppWindow {
         window.observe_button_layout_changed(|window, _| window.refresh()).detach();
         let closing = cx.weak_entity();
         window.on_window_should_close(cx, move |window, cx| {
-            // macOS: the red button hides the app instead, so alerts keep ringing;
-            // the Dock icon or a new launch brings it back.
+            // On macOS, the app quit hook saves the main window and GPUI drops the pop-outs.
             if cfg!(target_os = "macos") {
-                cx.hide();
+                cx.quit();
                 return false;
             }
             let _ = closing.update(cx, |this, cx| {
@@ -3705,12 +3704,7 @@ impl AppWindow {
                 });
                 self.write_person(|p| p.zoom = zoom, window, cx);
             }
-            "app.quit" => {
-                #[cfg(target_os = "macos")]
-                crate::macos::quit_or_hide(cx);
-                #[cfg(not(target_os = "macos"))]
-                cx.quit();
-            }
+            "app.quit" => cx.quit(),
             "window.close" | "window.minimize" | "window.maximize" => return self.window_command(name, window, cx),
             // Hiding apps is macOS's (bound natively there).
             "app.hide" | "app.hide_others" | "app.show_all" => return,

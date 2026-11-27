@@ -16,7 +16,7 @@ actions!(herdr, [Quit, Hide, HideOthers, ShowAll, Settings, Minimize, Zoom, Togg
 pub fn init(cx: &mut App, run_in_background: bool) {
     let status_item = create_status_item(cx, run_in_background);
     cx.set_global(BackgroundMode { enabled: run_in_background, status_item });
-    cx.on_action(|_: &Quit, cx| quit_or_hide(cx));
+    cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(|_: &Hide, cx| cx.hide());
     cx.on_action(|_: &HideOthers, cx| cx.hide_other_apps());
     cx.on_action(|_: &ShowAll, cx| cx.unhide_other_apps());
@@ -43,15 +43,6 @@ pub(crate) fn set_background_enabled(enabled: bool, cx: &mut App) {
     mode.enabled = enabled;
     if let Some((item, _)) = &mode.status_item {
         item.setVisible(enabled);
-    }
-}
-
-/// Handle Canopy's Quit command and native application menu action.
-pub(crate) fn quit_or_hide(cx: &mut App) {
-    if cx.try_global::<BackgroundMode>().is_some_and(|mode| mode.enabled) {
-        cx.hide();
-    } else {
-        cx.quit();
     }
 }
 
