@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="canopy is a desktop canvas for terminals and coding agents. Wire agents together, point them at a live web page or phone, and see which one needs you.">
+  <meta name="theme-color" content="#f6f5f1">
+  <title>canopy - a canvas for coding agents</title>
+  <script>
+    // macOS sets type in the system font; every other OS gets the self-hosted Inter.
+    const platform = navigator.userAgentData?.platform || navigator.platform;
+    if (/^mac/i.test(platform) && navigator.maxTouchPoints < 2) document.documentElement.classList.add("macos");
+  </script>
+  <link rel="icon" href="logos/cnpy-blu-1.svg" type="image/svg+xml">
+  <link rel="preload" href="claude/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="claude/JetBrainsMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="claude.css">
+  <script src="claude/animate.js" defer></script>
+  <script src="claude/scenes.js" defer></script>
+  <script src="claude/canvas.js" defer></script>
+  <script src="claude.js" defer></script>
+</head>
+<body id="top">
+  <svg width="0" height="0" class="defs" aria-hidden="true">
+    <defs>
+      <!-- The canopy icon: seven facets, drawn from logos/cnpy-1.svg. -->
+      <symbol id="mark" viewBox="32 51 411 416">
+        <path d="M32 202.728L106.889 304.707V466.061L36.413 382.211Z"/>
+        <path d="M246.5 51.9998L245.5 56.9998L106.74 300.175L33.5977 201.891Z"/>
+        <path d="M246.628 56.9999L254.651 57.4444L279.994 338.878L108.353 301.701Z"/>
+        <path d="M256.5 56.9998L258.999 50.9999L442.853 252.034L283.454 339.324Z"/>
+        <path d="M109.895 305.281L280.798 342.623L272.205 466.635H109.895Z"/>
+        <path d="M285.48 342.762L442.404 257.117L424.752 360.456L276.716 466.061Z"/>
+        <path d="M247.5 52.0002L258.041 51.3596L255 56.5002L246.5 56.0002Z"/>
+      </symbol>
+
+      <!-- Pane header icons, on the app's 24px grid with a 1.6 stroke. -->
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+      <symbol id="i-fwd" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+      <symbol id="i-reload" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+      <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20l1-4.5L15.5 5a2.1 2.1 0 0 1 3 3L8 18.5zM13.5 7l3 3"/></symbol>
+
+      <!-- Claude's mark, from LobeHub icons (claude-color). -->
+      <symbol id="i-claude" viewBox="0 0 24 24"><path fill="#d97757" d="M4.709 15.955l4.72-2.647.08-.23-.08-.128H9.2l-.79-.048-2.698-.073-2.339-.097-2.266-.122-.571-.121L0 11.784l.055-.352.48-.321.686.06 1.52.103 2.278.158 1.652.097 2.449.255h.389l.055-.157-.134-.098-.103-.097-2.358-1.596-2.552-1.688-1.336-.972-.724-.491-.364-.462-.158-1.008.656-.722.881.06.225.061.893.686 1.908 1.476 2.491 1.833.365.304.145-.103.019-.073-.164-.274-1.355-2.446-1.446-2.49-.644-1.032-.17-.619a2.97 2.97 0 01-.104-.729L6.283.134 6.696 0l.996.134.42.364.62 1.414 1.002 2.229 1.555 3.03.456.898.243.832.091.255h.158V9.01l.128-1.706.237-2.095.23-2.695.08-.76.376-.91.747-.492.584.28.48.685-.067.444-.286 1.851-.559 2.903-.364 1.942h.212l.243-.242.985-1.306 1.652-2.064.73-.82.85-.904.547-.431h1.033l.76 1.129-.34 1.166-1.064 1.347-.881 1.142-1.264 1.7-.79 1.36.073.11.188-.02 2.856-.606 1.543-.28 1.841-.315.833.388.091.395-.328.807-1.969.486-2.309.462-3.439.813-.042.03.049.061 1.549.146.662.036h1.622l3.02.225.79.522.474.638-.079.485-1.215.62-1.64-.389-3.829-.91-1.312-.329h-.182v.11l1.093 1.068 2.006 1.81 2.509 2.33.127.578-.322.455-.34-.049-2.205-1.657-.851-.747-1.926-1.62h-.128v.17l.444.649 2.345 3.521.122 1.08-.17.353-.608.213-.668-.122-1.374-1.925-1.415-2.167-1.143-1.943-.14.08-.674 7.254-.316.37-.729.28-.607-.461-.322-.747.322-1.476.389-1.924.315-1.53.286-1.9.17-.632-.012-.042-.14.018-1.434 1.967-2.18 2.945-1.726 1.845-.414.164-.717-.37.067-.662.401-.589 2.388-3.036 1.44-1.882.93-1.086-.006-.158h-.055L4.132 18.56l-1.13.146-.487-.456.061-.746.231-.243 1.908-1.312-.006.006z"/></symbol>
+      <!-- Codex's app icon: a white tile, a blue cloud and a prompt. -->
+      <symbol id="i-codex" viewBox="0 0 16 16">
+        <defs><linearGradient id="codex-cloud" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9ab4ff"/><stop offset="1" stop-color="#4d5cf5"/></linearGradient></defs>
+        <rect width="16" height="16" rx="3.6" fill="#fff"/>
+        <path fill="url(#codex-cloud)" d="M8.2 2.6c1.5 0 2.6.9 3 2.1 1.3.2 2.3 1.3 2.3 2.7 0 .8-.3 1.4-.8 1.9.1.3.1.5.1.8 0 1.5-1.2 2.7-2.7 2.7-.4 0-.8-.1-1.2-.3-.5.5-1.2.8-2 .8-1.3 0-2.4-.9-2.7-2.1C3 10.9 2.2 9.9 2.2 8.7c0-.8.3-1.4.8-1.9-.1-.3-.1-.5-.1-.8 0-1.5 1.2-2.7 2.7-2.7.2 0 .4 0 .6.1.5-.5 1.2-.8 2-.8z"/>
+        <path d="M5.6 6.4 7.4 8 5.6 9.6M8.6 10.1h2.4" fill="none" stroke="#fff" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+      </symbol>
+
+
+      <!-- iOS status bar glyphs, drawn at their point sizes. -->
+      <symbol id="ios-signal" viewBox="0 0 19 12"><rect x="0" y="7.5" width="3.2" height="4.5" rx="1"/><rect x="5" y="5" width="3.2" height="7" rx="1"/><rect x="10" y="2.5" width="3.2" height="9.5" rx="1"/><rect x="15" y="0" width="3.2" height="12" rx="1"/></symbol>
+      <symbol id="ios-wifi" viewBox="0 0 17 12"><path d="M8.5 2.3c2.4 0 4.6.9 6.3 2.5l1.2-1.2A10.6 10.6 0 0 0 8.5.6 10.6 10.6 0 0 0 1 3.6l1.2 1.2a9 9 0 0 1 6.3-2.5zm0 3.4c1.5 0 2.8.5 3.9 1.5l1.2-1.2a7.3 7.3 0 0 0-10.2 0L4.6 7.2a5.6 5.6 0 0 1 3.9-1.5zm0 3.4c.6 0 1.1.2 1.5.6L8.5 11.2 7 9.7c.4-.4.9-.6 1.5-.6z"/></symbol>
+      <symbol id="ios-battery" viewBox="0 0 28 13"><rect x=".5" y=".5" width="24" height="12" rx="3.8" fill="none" stroke="currentColor" stroke-opacity=".35"/><rect x="2" y="2" width="21" height="9" rx="2.5"/><path d="M26 4.5v4c.8-.3 1.4-1.1 1.4-2s-.6-1.7-1.4-2z" fill-opacity=".4"/></symbol>
+      <!-- Harbor, the sample coffee shop in the browser and the phone. -->
+      <symbol id="harbor-mark" viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><path d="M12 7v13M5 12H3a9 9 0 0 0 18 0h-2M8.5 10h7"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="header gutter">
+    <a class="brand" href="#top" aria-label="canopy home">
+      <svg width="20" height="20" aria-hidden="true"><use href="#mark"/></svg>canopy
+    </a>
+    <nav aria-label="Main">
+      <a href="#features">features</a>
+      <a href="https://github.com/Krishnapthm/canopy/wiki">docs</a>
+      <a href="https://github.com/Krishnapthm/canopy">github</a>
+      <a class="pill dark" href="#install">get canopy</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero gutter" aria-labelledby="hero-title">
+      <h1 id="hero-title" class="t-display">all your agents, on one canvas</h1>
+      <p class="t-display quiet">wire them together, show them your app, see who needs you</p>
+      <div class="actions">
+        <a class="pill dark" href="#install">get canopy</a>
+        <a class="pill" href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start">how it works</a>
+      </div>
+    </section>
+
+    <!-- The canvas: a canopy canvas as wide as the page column. scenes.js draws each pane from
+         its id; canvas.js fits them to the frame, wires them and lets you drag them by their headers. -->
+    <section class="stage-wrap gutter" aria-label="an interactive canopy canvas. Claude Code is wired to a browser and an iPhone, and Codex writes tests on its own below it. drag a pane by its header, or the phone itself, to move it.">
+      <div class="stage" data-stage>
+        <div class="app" data-app>
+          <div class="world" data-world>
+            <svg class="edges" data-edges aria-hidden="true"></svg>
+            <!-- data-narrow is the phone layout, "x y w h", picked once at load: one column, and no Codex.
+                 The sim is the bare device, 432:904, so its box is the phone. -->
+            <article class="pane" data-pane="t1" data-x="0" data-y="0" data-narrow="0 340 460 440" style="width:460px;height:420px"></article>
+            <article class="pane" data-pane="codex" data-x="0" data-y="460" data-narrow="hide" style="width:460px;height:340px"></article>
+            <article class="pane" data-pane="browser" data-x="700" data-y="0" data-narrow="0 0 460 280" style="width:600px;height:360px"></article>
+            <article class="pane" data-pane="sim" data-x="900" data-y="380" data-narrow="100 880 260 544" style="width:260px;height:544px"></article>
+          </div>
+        </div>
+      </div>
+      <p class="caption"><span>one canvas, every pane.</span> <span class="quiet">drag one by its header, or grab the phone.</span></p>
+    </section>
+
+    <script>
+      if (matchMedia("(max-width: 720px)").matches) for (const el of document.querySelectorAll("[data-narrow]")) {
+        if (el.dataset.narrow === "hide") { el.remove(); continue; }
+        const [x, y, w, h] = el.dataset.narrow.split(" ");
+        Object.assign(el.dataset, { x, y });
+        el.style.width = w + "px"; el.style.height = h + "px";
+      }
+    </script>
+
+    <div id="features">
+      <section class="feature" aria-label="connect agents">
+        <h2 class="t-display feature-text">connect agents. <span class="quiet">draw a line. agents message each other.</span></h2>
+        <figure class="shot" data-scene="wire"></figure>
+      </section>
+      <section class="feature" aria-label="iPhone simulator">
+        <h2 class="t-display feature-text">iPhone simulator. <span class="quiet">agents tap and scroll your app. mark up the screen. macOS only.</span></h2>
+        <figure class="shot" data-scene="sim"></figure>
+      </section>
+      <section class="feature" aria-label="files panel">
+        <h2 class="t-display feature-text">files panel. <span class="quiet">browse files. edit them. quote a line to an agent.</span></h2>
+        <figure class="shot" data-scene="files"></figure>
+      </section>
+    </div>
+
+    <section class="faq gutter" aria-labelledby="faq-title">
+      <h2 id="faq-title" class="t-display">questions</h2>
+      <div class="faq-list">
+        <details>
+          <summary>what is canopy?</summary>
+          <p>a desktop canvas for running several coding agents at once, beside the terminals, files, pages and phones they work on.</p>
+        </details>
+        <details>
+          <summary>where did the idea come from?</summary>
+          <p>a little bit of everything i love, from Claude Code, the Claude desktop app, Figma and herdr.</p>
+        </details>
+        <details>
+          <summary>which agents does it work with?</summary>
+          <p>any cli agent, unchanged, with your own logins: Claude Code, Codex, Cursor, Gemini, OpenCode, Amp and more.</p>
+        </details>
+        <details>
+          <summary>is it fast?</summary>
+          <p>yes. canopy is written in Rust and drawn on the GPU with GPUI, the framework behind Zed.</p>
+        </details>
+        <details>
+          <summary>what happens when i quit?</summary>
+          <p>your agents keep working. terminals live in herdr-core, a small background server, so quitting, updating or a crash leaves them where they were.</p>
+        </details>
+        <details>
+          <summary>how is it related to herdr?</summary>
+          <p>canopy is built on herdr-core, the terminal server from <a class="link" href="https://herdr.dev">herdr</a>. herdr-core keeps terminals alive; canopy draws them on a canvas.</p>
+        </details>
+        <details>
+          <summary>which systems does it run on?</summary>
+          <p>macOS on Apple Silicon and Linux. the iOS simulator pane is macOS only.</p>
+        </details>
+        <details>
+          <summary>does my code leave my machine?</summary>
+          <p>no. canopy is fully local.</p>
+        </details>
+        <details>
+          <summary>is it free?</summary>
+          <p>yes. open source under Apache 2.0.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="install gutter" id="install" aria-labelledby="install-title">
+      <div>
+        <h2 id="install-title" class="t-display">get canopy</h2>
+        <p class="t-display quiet">macOS and Linux</p>
+      </div>
+      <div class="install-body">
+        <div class="command">
+          <code id="install-command">curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/install.sh | sh</code>
+          <button class="pill dark copy-button" type="button" hidden>copy</button>
+        </div>
+        <p id="copy-status" class="sr-only" role="status"></p>
+        <p class="t-ui quiet">adds <a class="link" href="https://herdr.dev">herdr-core</a> if it is missing. then the <a class="link" href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start">quick start</a>.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer id="footer">
+    <svg class="footer-surface" aria-hidden="true">
+      <defs>
+        <radialGradient id="footer-cobalt" cx=".32" cy=".15" r=".94">
+          <stop stop-color="#5482e7"/><stop offset=".5" stop-color="#315bc5"/><stop offset="1" stop-color="#112b73"/>
+        </radialGradient>
+        <filter id="footer-emboss" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
+          <feGaussianBlur in="SourceAlpha" stdDeviation="6.5" result="bevel"/>
+          <feTurbulence type="fractalNoise" baseFrequency=".072" numOctaves="2" seed="22" stitchTiles="stitch"/>
+          <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  .006 0 0 0 0" result="grain"/>
+          <feComposite in="bevel" in2="grain" operator="arithmetic" k2=".96" k3="1" result="relief"/>
+          <!-- claude.js swings the light's azimuth toward the pointer. The elevation stays at 35, so the flat
+               sheet keeps its tone and only the bevels facing the pointer catch it. It rests at 225 (top left). -->
+          <feDiffuseLighting in="relief" surfaceScale="13" diffuseConstant=".872" result="diffuse">
+            <feDistantLight data-light azimuth="225" elevation="35"/>
+          </feDiffuseLighting>
+          <feSpecularLighting in="relief" surfaceScale="13" specularConstant=".58" specularExponent="24" result="gloss">
+            <feDistantLight data-light azimuth="225" elevation="35"/>
+          </feSpecularLighting>
+          <feComposite in="diffuse" in2="gloss" operator="arithmetic" k2="1" k3="1"/>
+        </filter>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#footer-cobalt)"/>
+    </svg>
+    <div class="footer-relief">
+      <div class="brand footer-brand">
+        <svg width="22" height="22" aria-hidden="true"><use href="#mark"/></svg><span>canopy</span>
+      </div>
+    </div>
+    <div class="links gutter">
+      <p>open canvas for coding agents</p>
+      <nav aria-label="Project">
+        <a href="https://github.com/Krishnapthm/canopy">github</a>
+        <a href="https://github.com/Krishnapthm/canopy/wiki">docs</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

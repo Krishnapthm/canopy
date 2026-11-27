@@ -1,0 +1,290 @@
+/* canopy marketing page (claude.html). Type follows ignsight.com: one weight (450), three sizes,
+   tracking that tightens as size grows. No rules or borders on the page: space carries the hierarchy.
+   The canopy canvas in the stage is the exception: it copies the app's own dark chrome. */
+@font-face {
+  font-family: Inter;
+  src: url("claude/inter-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+/* The app's own faces: Geist for pane chrome, JetBrains Mono for terminals (subset to what the panes print). */
+@font-face { font-family: Geist; src: url("claude/Geist.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("claude/JetBrainsMono-Variable.woff2") format("woff2"); font-weight: 100 800; font-display: swap; }
+
+:root {
+  color-scheme: light;
+  --paper: #f6f5f1;
+  --ink: #1b1a17;
+  --quiet: #1b1a1799;
+  --stage: #e9e7e1;
+  --font: Inter, system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --t-display: clamp(1.5rem, 1.08rem + 1.3vw, 2.25rem);
+  --t-body: clamp(1.0625rem, 0.98rem + 0.3vw, 1.25rem);
+  --t-ui: 1rem;
+  /* Ignsight's gutter: 80px at 1440, a 1680px column on very wide screens. canvas.js reads it for the frame. */
+  --gutter: max(1.25rem, 5.5vw, (100vw - 1680px) / 2);
+  --frame-gap: clamp(1.5rem, 4vw, 3.5rem); /* space above a frame that a link scrolls to */
+}
+.macos { --font: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+
+* { box-sizing: border-box; scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+html { overscroll-behavior-y: none; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 450 var(--t-ui)/1.5 var(--font);
+  letter-spacing: -0.006em;
+  font-feature-settings: "cv11", "ss03";
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p, figure { margin: 0; }
+h1, h2, h3 { font-weight: inherit; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; cursor: pointer; }
+svg { display: block; }
+[hidden] { display: none !important; }
+::selection { background: #c9d8ff; color: #0b2a7a; }
+:focus-visible { outline: 2px solid #2265d1; outline-offset: 4px; border-radius: 4px; }
+.defs { position: absolute; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.gutter { padding-inline: var(--gutter); }
+
+.t-display { font-size: var(--t-display); line-height: 1.22; letter-spacing: -0.024em; text-wrap: balance; }
+.t-body { font-size: var(--t-body); line-height: 1.5; letter-spacing: -0.012em; text-wrap: pretty; }
+.t-ui { font-size: var(--t-ui); line-height: 1.5; }
+.quiet { color: var(--quiet); }
+.link {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  transition: text-decoration-color 150ms ease;
+}
+@media (hover: hover) { .link:hover { text-decoration-color: currentColor; } }
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  height: 2.5rem;
+  padding: 0 1.1rem;
+  border: 0;
+  border-radius: 999px;
+  background: #1b1a170f;
+  white-space: nowrap;
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+.pill.dark { background: var(--ink); color: var(--paper); }
+@media (hover: hover) {
+  .pill:hover { background: #1b1a171a; }
+  .pill.dark:hover { background: #3a3833; }
+}
+.pill:active { transform: scale(0.97); }
+
+/* Header: quiet, and not fixed, so it has scrolled away by the time the canvas takes the screen. */
+.header { display: flex; align-items: center; justify-content: space-between; height: 4rem; font-size: 0.9375rem; }
+.brand { display: flex; align-items: center; gap: 0.5rem; font-size: 1.0625rem; letter-spacing: -0.02em; }
+.brand svg { fill: currentColor; }
+.header nav { display: flex; align-items: center; gap: 1.6rem; }
+.header nav a:not(.pill) { color: var(--quiet); transition: color 150ms ease; }
+@media (hover: hover) { .header nav a:not(.pill):hover { color: var(--ink); } }
+.header .pill { height: 2.125rem; padding: 0 0.95rem; }
+
+/* Hero */
+.hero { padding-top: clamp(3rem, 9vw, 7.5rem); padding-bottom: clamp(3rem, 6vw, 5rem); }
+.hero .t-display { max-width: 24em; }
+.actions { display: flex; gap: 0.6rem; margin-top: 2rem; }
+
+/* ---------------------------------------------------------------------------------------------------
+   Stage: the canopy canvas itself, as wide as the page column. canvas.js sets its aspect ratio from the
+   panes, and the height is capped at one screen: the panes scale down to fit, and are centred if the
+   canvas ends up wider than they are. */
+.stage { position: relative; overflow: hidden; border-radius: 12px; aspect-ratio: 4 / 3; width: 100%; max-height: calc(100svh - 2rem); }
+.caption { padding-top: 1.25rem; font-size: 1.0625rem; line-height: 1.5; }
+
+/* ---------------------------------------------------------------------------------------------------
+   The canopy canvas, in the app's dark theme (defaults/themes/canopy-dark.json): canvas #111, panes
+   #0c0c0c. Every pane, wire and shot is SVG from claude/scenes.js; these rules are its type and colour. */
+.app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #111;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: pan-y;
+}
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.edges { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.pane { position: absolute; left: 0; top: 0; will-change: transform; }
+.pane.lifted { z-index: 5; filter: drop-shadow(0 24px 30px #000000b3); }
+.pane-head { cursor: grab; touch-action: none; }
+.pane.lifted .pane-head { cursor: grabbing; }
+
+/* Wires are the app's neutral grey; a message dot rides the wire while two agents talk. */
+.wire { fill: none; stroke: #6b6b6b; stroke-width: 1.5; }
+.wire-end { fill: #8a8a8a; }
+.wire-msg { fill: #ececec; }
+.caret { animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+.sv { display: block; width: 100%; height: auto; }
+.sv text { white-space: pre; }
+.sv-ui { font: 400 12px Geist, system-ui, sans-serif; fill: #f2f2f2; }
+.sv-ui.bar { font-size: 13px; fill: #ececec; }
+.sv-ic { fill: none; stroke: #cfcfcf; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.sv-mono { font: 400 13px "JetBrains Mono", ui-monospace, Menlo, monospace; font-variant-ligatures: none; color: #ececec; fill: #ececec; }
+.sv-app { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, system-ui, sans-serif; letter-spacing: -0.01em; }
+.sv-app.tight { letter-spacing: -0.025em; }
+.sv-app.caps { letter-spacing: 0.01em; }
+.sv-app.italic { font-style: italic; }
+.gl { fill: currentColor; stroke: currentColor; stroke-width: 0; }
+.c-b { font-weight: 700; }
+.c-dim { color: #8d8d8d; fill: #8d8d8d; }
+.c-hi { color: #ececec; fill: #ececec; }
+.c-rule { fill: #4a4a4a; }
+.c-green { color: #4eba65; fill: #4eba65; }
+.c-red { fill: #e5534b; }
+.c-cyan { color: #8fc8d6; fill: #8fc8d6; }
+.c-violet { color: #b1b9f9; fill: #b1b9f9; }
+.c-clawd { color: #d77757; fill: #d77757; }
+.c-kw { fill: #be98b7; }
+.c-fn { fill: #8fa8c8; }
+.c-type { fill: #8fc8d6; }
+.c-amber { fill: #dca04a; }
+.c-shimmer { animation: pulse 2s ease-in-out infinite; }
+
+/* State dots: grey and pulsing while working, orange when waiting on you, green when done. */
+.dot { fill: #5f5f5f; }
+.dot.work { fill: #a3a3a3; animation: pulse 1.6s ease-in-out infinite; }
+.dot.wait { fill: #f59e2b; }
+.dot.done { fill: #4eba65; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+/* ---------------------------------------------------------------------------------------------------
+   Features: one rounded rectangle split in two with no seam, alternating sides. One half is a gradient holding the heading and its
+   paragraph (white, then quiet, as on Ignsight); the other is the canvas itself, with no frame. */
+.feature {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 5fr);
+  margin: clamp(1rem, 2vw, 1.5rem) var(--gutter) 0;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.feature:first-child { margin-top: clamp(4rem, 8vw, 7rem); }
+.feature:nth-child(even) { grid-template-columns: minmax(0, 5fr) minmax(0, 3fr); }
+.feature:nth-child(even) .feature-text { order: 2; }
+.feature-text {
+  --quiet: #ffffffb3;
+  padding: clamp(1.25rem, 3.5vw, 3rem);
+  color: #fff;
+  background: linear-gradient(#5e5e5e, #565656 45%, #1b1b1b);
+  text-wrap: pretty;
+}
+/* The shot keeps its 740:560 picture whole; the frame is never taller than the screen less the
+   scroll margin above it, so "features" lands on a whole frame. */
+.shot { display: grid; place-items: center; background: #111; }
+.shot .sv { width: 100%; max-height: calc(100svh - 2 * var(--frame-gap)); }
+#features { scroll-margin-top: var(--frame-gap); }
+
+/* Questions */
+.faq {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+  gap: 1.75rem 4rem;
+  padding-top: clamp(5rem, 10vw, 9rem);
+}
+.faq-list { display: grid; }
+.faq details { padding: 1.1rem 0; box-shadow: 0 1px 0 #1b1a1714; }
+.faq details:first-child { padding-top: 0.35rem; }
+.faq summary { display: flex; justify-content: space-between; gap: 1rem; font-size: var(--t-body); letter-spacing: -0.012em; list-style: none; cursor: pointer; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; color: var(--quiet); transition: transform 200ms ease; }
+.faq details[open] summary::after { transform: rotate(45deg); }
+.faq details p { max-width: 36em; padding-top: 0.6rem; color: var(--quiet); font-size: 1.0625rem; }
+
+/* Install: the heading and its quiet line share the display size, like the hero. */
+.install {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+  gap: 1.75rem 4rem;
+  align-items: center;
+  min-height: min(100svh, 46rem);
+  padding-block: 6rem;
+}
+.install-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+.command {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0.75rem 0.75rem 1.5rem;
+  border-radius: 14px;
+  background: var(--stage);
+}
+.command code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  font: 13px/1.6 var(--mono);
+  white-space: nowrap;
+}
+.copy-button { height: 2.25rem; }
+
+/* Footer: the embossed cobalt sheet, with one line on the left and two links on the right. */
+#footer {
+  --quiet: #e3ebff;
+  color: white;
+  min-height: max(34rem, 100dvh);
+  position: relative;
+  display: grid;
+  isolation: isolate;
+  background: #315bc5;
+}
+.footer-surface { position: absolute; inset: 0; width: 100%; height: 100%; }
+.footer-relief {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: grid;
+  place-items: center;
+  padding-bottom: min(22%, 24dvh);
+  filter: url(#footer-emboss);
+  mix-blend-mode: hard-light;
+}
+.footer-brand { gap: 0.49em; font-size: min(16vw, 27dvh); }
+.footer-brand span { font-size: 1.2em; }
+.footer-brand svg { width: 1.22em; height: 1.22em; flex: none; }
+.links {
+  position: relative;
+  align-self: end;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem 2rem;
+  padding-block: 2rem 2.5rem;
+  font-size: clamp(1rem, 1.15vw, 1.125rem);
+}
+.links nav { display: flex; gap: 1.75rem; }
+.links a { transition: opacity 150ms ease; }
+@media (hover: hover) { .links a:hover { opacity: 0.7; } }
+
+@media (max-width: 720px) {
+  .header nav { gap: 1.1rem; }
+  .header nav .pill, .header nav a[href="#features"] { display: none; }
+  .feature, .feature:nth-child(even), .faq, .install { grid-template-columns: minmax(0, 1fr); }
+  .feature:nth-child(even) .feature-text { order: 0; }
+  .install { gap: 1rem; }
+  .command code { white-space: normal; overflow-wrap: anywhere; }
+  #footer { min-height: max(37rem, 100dvh); }
+  .footer-relief { padding-bottom: 32%; }
+  .links { flex-direction: column; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill, .link, a { transition: none; }
+  html { scroll-behavior: auto; }
+  .dot, .c-shimmer, .caret { animation: none !important; }
+}
