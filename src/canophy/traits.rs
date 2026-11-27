@@ -22,11 +22,24 @@ pub enum Content {
     Mod,
 }
 
+/// How a new pane gets its size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fit {
+    /// Use the kind's default size.
+    Fixed,
+    /// Use the content's own size, passed by the caller.
+    Natural,
+    /// Fit a text column to the visible canvas.
+    Column,
+}
+
 /// A pane kind's declared behavior.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Traits {
-    /// The world size a new pane of this kind opens at (a terminal: its collapsed pill).
+    /// The default or fallback world size (a terminal starts as a collapsed pill).
     pub default: WorldSize,
+    /// How a new pane of this kind gets its size (see `open::open_size`).
+    pub fit: Fit,
     /// The smallest size a resize leaves it (a terminal: its expanded size).
     pub min: WorldSize,
     /// Width over height when the shape is locked; None when it is free.
@@ -42,8 +55,13 @@ pub struct Traits {
 
 /// The standard minimum resize size.
 pub(crate) const MIN: WorldSize = WorldSize::new(240., 120.);
-/// Where a file or image preview opens, and an image is fitted inside.
+/// The fallback preview size.
 pub const PREVIEW: WorldSize = WorldSize::new(560., 420.);
+/// The file preview's horizontal padding per side, in world px.
+pub(crate) const FILE_PAD_X: f32 = 16.;
+/// The width of 80 monospace columns including the preview's horizontal padding.
+// Glyphs advance about 0.6 × 13 px. Add the preview padding, code block padding and both frames.
+pub const TEXT_COLUMN: f32 = 80. * (0.6 * 13.) + 2. * (FILE_PAD_X + 13. + 1. + super::layout::BORDER);
 /// Where a browser pane opens, and the size Web Inspector grows it to.
 pub const BROWSER: WorldSize = WorldSize::new(960., 680.);
 /// A phone in its bezel (about 1:2) under the header.
@@ -51,14 +69,14 @@ pub const SIM: WorldSize = WorldSize::new(340., 700.);
 
 /// The declared behavior of a pane of `kind`.
 pub fn traits(kind: &Kind) -> Traits {
-    let base = Traits { default: PREVIEW, min: MIN, aspect: None, header: Some(HEADER), pushable: true, dockable: false, content: Content::Text };
+    let base = Traits { default: PREVIEW, fit: Fit::Fixed, min: MIN, aspect: None, header: Some(HEADER), pushable: true, dockable: false, content: Content::Text };
     match kind {
         // An expanded terminal keeps at least a 1.5-pill-wide, three-header-tall body.
         Kind::Terminal { .. } => Traits { default: WorldSize::new(PILL_WIDTH, HEADER), min: WorldSize::new(PILL_WIDTH * 1.5, HEADER * 3.), content: Content::Grid, ..base },
         Kind::Sub { .. } => Traits { default: WorldSize::new(PILL_WIDTH, HEADER), ..base },
-        Kind::File { .. } => base,
-        Kind::Image { .. } => Traits { content: Content::Picture, ..base },
-        Kind::Pdf { .. } => Traits { default: WorldSize::new(560., 720.), content: Content::Document, ..base },
+        Kind::File { .. } => Traits { fit: Fit::Column, ..base },
+        Kind::Image { .. } => Traits { fit: Fit::Natural, content: Content::Picture, ..base },
+        Kind::Pdf { .. } => Traits { default: WorldSize::new(560., 720.), fit: Fit::Natural, content: Content::Document, ..base },
         Kind::Mod { kind, .. } => {
             let shape = crate::mods::pane_shape(kind).unwrap_or_default();
             Traits { default: shape.size, min: shape.min, header: shape.header.then_some(HEADER), content: Content::Mod, ..base }

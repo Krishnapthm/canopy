@@ -2,7 +2,16 @@
 //! the canvas is looked at. Pure Rust: no GPUI, no clock, no settings beyond what callers pass.
 //! docs/canopy/canophy.md explains the laws and how to extend them.
 //!
-//! # The laws, in their fixed order
+//! # The laws
+//!
+//! - Law 1. Zoom scales pane content and its header together.
+//! - Law 2. Panes the person opens ease the camera to 100%. Panes agents open leave it in place.
+//! - Law 3. The Files panel shrinks the visible canvas.
+//! - Law 4. Terminal grids reflow on resize, once on release.
+//! - Law 5. New file-backed panes use `open_size` to fit their content to the visible canvas at 100%.
+//! - Law 7. Rasterized panes use `rest_scale` to draw for the scale at which they will rest.
+//!
+//! # Step order
 //!
 //! Every change to the canvas runs these steps in this order, and no step writes something an
 //! earlier step read:
@@ -36,6 +45,7 @@ pub mod camera;
 pub mod check;
 pub mod layout;
 pub mod motion;
+pub mod open;
 pub mod rules;
 pub mod step;
 pub mod traits;
@@ -44,7 +54,8 @@ pub mod units;
 mod tests;
 
 pub use camera::{Camera, focus_fit, reveal, visible, widen, zoom_range};
-pub use layout::{Layout, layout};
+pub use layout::{Layout, layout, rest_scale};
+pub use open::{Natural, open_size};
 pub use rules::{arrange, cascade, child_position, free_spot, solve, tile};
 pub use motion::Motion;
 pub use step::{Effects, Intent, Viewport, derive_pinned, step};
