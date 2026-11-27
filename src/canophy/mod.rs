@@ -25,6 +25,8 @@
 //! steps 1, 2, 4 and 5 in that order. Push (step 3) needs each pill's measured size, so the
 //! window runs it right after `step` (`solve_layout`), before anything reads the result.
 //! Camera motion over time (eases, gestures) is one `Motion` value; time is passed in.
+//! Law 6 routes pinch through `input::pinch_owner`: content with its own zoom gets the pinch
+//! when entered, docked or popped out. Law 8 closes a browser pane with its last tab.
 //!
 //! # Spaces
 //!
@@ -34,6 +36,7 @@
 pub mod camera;
 #[cfg(any(test, debug_assertions))]
 pub mod check;
+pub mod input;
 pub mod layout;
 pub mod motion;
 pub mod rules;
@@ -44,6 +47,7 @@ pub mod units;
 mod tests;
 
 pub use camera::{Camera, focus_fit, reveal, visible, widen, zoom_range};
+pub use input::{Placement, Owner, pinch_owner};
 pub use layout::{Layout, layout};
 pub use rules::{arrange, cascade, child_position, free_spot, solve, tile};
 pub use motion::Motion;

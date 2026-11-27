@@ -37,6 +37,8 @@ pub struct Traits {
     pub pushable: bool,
     /// Whether it opens in the Files panel by default (`canvas.pane_new` without a place).
     pub dockable: bool,
+    /// Whether the content handles pinch when the person is working in it.
+    pub zooms: bool,
     pub content: Content,
 }
 
@@ -51,7 +53,7 @@ pub const SIM: WorldSize = WorldSize::new(340., 700.);
 
 /// The declared behavior of a pane of `kind`.
 pub fn traits(kind: &Kind) -> Traits {
-    let base = Traits { default: PREVIEW, min: MIN, aspect: None, header: Some(HEADER), pushable: true, dockable: false, content: Content::Text };
+    let base = Traits { default: PREVIEW, min: MIN, aspect: None, header: Some(HEADER), pushable: true, dockable: false, zooms: false, content: Content::Text };
     match kind {
         // An expanded terminal keeps at least a 1.5-pill-wide, three-header-tall body.
         Kind::Terminal { .. } => Traits { default: WorldSize::new(PILL_WIDTH, HEADER), min: WorldSize::new(PILL_WIDTH * 1.5, HEADER * 3.), content: Content::Grid, ..base },
@@ -63,7 +65,7 @@ pub fn traits(kind: &Kind) -> Traits {
             let shape = crate::mods::pane_shape(kind).unwrap_or_default();
             Traits { default: shape.size, min: shape.min, header: shape.header.then_some(HEADER), content: Content::Mod, ..base }
         }
-        Kind::Browser { .. } => Traits { default: BROWSER, header: Some(BROWSER_HEADER), dockable: true, content: Content::Page, ..base },
+        Kind::Browser { .. } => Traits { default: BROWSER, header: Some(BROWSER_HEADER), dockable: true, zooms: true, content: Content::Page, ..base },
         Kind::Sim { .. } => Traits { default: SIM, dockable: true, content: Content::Device, ..base },
     }
 }
