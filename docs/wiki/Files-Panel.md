@@ -37,6 +37,17 @@ Content search starts 300 ms after you stop typing. In a Git working tree it sea
 - The tree loads at most 500 entries per folder and 5,000 entries in total.
 - For files on the canvas, see [File and Note Panes](File-and-Note-Panes).
 
+## Copy, move, and rename files
+
+Right-click a local file or folder to **Copy**, **Cut**, or **Rename** it.
+To copy or move it, right-click the destination folder and choose **Paste**.
+Paste picks an available name. If another operation claims that name first,
+Canopy reports a conflict and preserves the existing item.
+
+On macOS and Linux, copies start with access restricted to the owner. Canopy
+restores the source's permission bits as each file or folder finishes copying.
+Moves between file systems use the same copy rules.
+
 ## Switch between Source and Preview
 
 Markdown (`.md`, `.markdown`, `.mdx`), JSONL, HTML and SVG open in **Preview**.

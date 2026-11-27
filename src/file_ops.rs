@@ -90,13 +90,63 @@ pub fn destination(from: &Path, to: Option<&Path>, into: Option<&Path>) -> Resul
 pub fn rename(from: &Path, to: &Path) -> Result<(), String> {
     absolute(from)?;
     absolute(to)?;
-    // shortcut: the vacancy check and the rename are two steps, so a file created in between is
-    // replaced; use a native no-replace rename if agents start racing the tree.
-    vacant(to)?;
-    fs::rename(from, to).map_err(|e| io_error(to, e))
+    rename_noreplace(from, to).map_err(|e| io_error(to, e))
+}
+
+/// Claim the destination atomically, including when another process uses the same name.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let from = CString::new(from.as_os_str().as_bytes())?;
+    let to = CString::new(to.as_os_str().as_bytes())?;
+    // Both paths are NUL-terminated and stay alive through the call.
+    #[cfg(target_os = "linux")]
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    #[cfg(target_os = "macos")]
+    let result = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+
+    let wide = |path: &Path| -> io::Result<Vec<u16>> {
+        let mut path: Vec<_> = path.as_os_str().encode_wide().collect();
+        if path.contains(&0) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL"));
+        }
+        path.push(0);
+        Ok(path)
+    };
+    let (from, to) = (wide(from)?, wide(to)?);
+    // Zero flags disallow replacement and let move_entry handle cross-volume copies.
+    if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } != 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
 }
 
 fn copy_entry(from: &Path, to: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+
     let meta = from.symlink_metadata()?;
     if meta.is_symlink() {
         let link = fs::read_link(from)?;
@@ -113,13 +163,16 @@ fn copy_entry(from: &Path, to: &Path) -> io::Result<()> {
         }
     }
     if meta.is_dir() {
-        fs::create_dir(to)?;
+        let mut directory = fs::DirBuilder::new();
+        #[cfg(unix)]
+        directory.mode(0o700);
+        directory.create(to)?;
         let result = (|| {
             for entry in fs::read_dir(from)? {
                 let entry = entry?;
                 copy_entry(&entry.path(), &to.join(entry.file_name()))?;
             }
-            Ok(())
+            fs::set_permissions(to, meta.permissions())
         })();
         if result.is_err() {
             let _ = fs::remove_dir_all(to);
@@ -130,7 +183,11 @@ fn copy_entry(from: &Path, to: &Path) -> io::Result<()> {
         return Err(io::Error::other("unsupported file type"));
     }
     let mut input = File::open(from)?;
-    let mut output = File::create_new(to)?;
+    let mut options = File::options();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut output = options.open(to)?;
     let result =
         io::copy(&mut input, &mut output).and_then(|_| output.set_permissions(meta.permissions()));
     drop(output);
@@ -165,9 +222,7 @@ pub fn copy(from: &Path, to: &Path) -> Result<(), String> {
 pub fn move_entry(from: &Path, to: &Path) -> Result<(), String> {
     absolute(from)?;
     absolute(to)?;
-    // shortcut: the same check-then-rename gap as `rename`.
-    vacant(to)?;
-    match fs::rename(from, to) {
+    match rename_noreplace(from, to) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
             copy(from, to)?;
@@ -280,6 +335,13 @@ mod tests {
         let _temp = Temp(root.clone());
         let src = root.join("src");
         mkdir(&src).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&src, fs::Permissions::from_mode(0o700)).unwrap();
+            fs::create_dir(src.join("nested")).unwrap();
+            fs::set_permissions(src.join("nested"), fs::Permissions::from_mode(0o750)).unwrap();
+        }
         assert_eq!(mkdir(&src).unwrap_err(), "src already exists");
         let file = src.join("a.txt");
         new_file(&file).unwrap();
@@ -293,6 +355,12 @@ mod tests {
         assert_eq!(free_name(&src, "b"), src.join("b"));
         let duplicate = root.join("duplicate");
         copy(&src, &duplicate).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(duplicate.metadata().unwrap().permissions().mode() & 0o777, 0o700);
+            assert_eq!(duplicate.join("nested").metadata().unwrap().permissions().mode() & 0o777, 0o750);
+        }
         assert_eq!(
             fs::read_to_string(duplicate.join("a.txt")).unwrap(),
             "hello"
@@ -320,6 +388,33 @@ mod tests {
         move_entry(&renamed, &duplicate).unwrap();
         assert!(!renamed.exists());
         assert!(duplicate.join("a.txt").exists());
+        for (op, name) in [(rename as fn(&Path, &Path) -> _, "rename"), (move_entry, "move")] {
+            let to = root.join(name);
+            let barrier = std::sync::Barrier::new(2);
+            std::thread::scope(|scope| {
+                let contender = |name| {
+                    let from = root.join(name);
+                    fs::write(&from, name).unwrap();
+                    let (barrier, to) = (&barrier, &to);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        (name, from.clone(), op(&from, to))
+                    })
+                };
+                let a = contender("first");
+                let b = contender("second");
+                let results = [a.join().unwrap(), b.join().unwrap()];
+                for (name, from, result) in results {
+                    if result.is_ok() {
+                        assert!(!from.exists());
+                        assert_eq!(fs::read_to_string(&to).unwrap(), name);
+                    } else {
+                        assert_eq!(result.unwrap_err(), collision(&to));
+                        assert_eq!(fs::read_to_string(from).unwrap(), name);
+                    }
+                }
+            });
+        }
         assert_eq!(
             mkdir(Path::new("relative")).unwrap_err(),
             "path must be absolute"
