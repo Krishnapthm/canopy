@@ -1,6 +1,6 @@
 //! PDF pane rendering, highlights and page text. See docs/wiki/Images-and-PDFs.md.
 use super::*;
-use gpui_pdf::{Highlight, PdfEvent, PdfStyle, PdfView};
+use gpui_pdf::{FitMode, Highlight, PdfEvent, PdfStyle, PdfView};
 use std::{io::Read, path::Path, rc::Rc};
 
 /// Checks the signature without opening the PDF for writing.
@@ -124,7 +124,8 @@ impl AppWindow {
             let id = pane.id.clone();
             view.update(cx, |view, cx| {
                 view.set_show_header(false, cx);
-                view.fit_width(cx);
+                // Panes rest fit to width: the helper bar's reset zoom and Cmd+0 come back to it.
+                view.set_home_fit(FitMode::Width, cx);
                 view.set_highlights(view_marks(highlights), cx);
                 let (owner, pane) = (weak.clone(), id.clone());
                 view.set_on_create_highlight(Rc::new(

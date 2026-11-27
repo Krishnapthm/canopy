@@ -564,6 +564,8 @@ pub struct PdfView {
     /// Active zoom-to-fit mode: re-fits on every viewport resize until a
     /// manual zoom clears it.
     fit: Option<FitMode>,
+    /// The fit that reset zoom returns to; None resets to 100%.
+    home: Option<FitMode>,
     /// Viewport size the fit was last computed for (so a resize re-fits once).
     fit_viewport: (f32, f32),
     fit_size: Option<[f32; 2]>,
@@ -747,6 +749,7 @@ impl PdfView {
             scroll: ScrollHandle::new(),
             scrollbar_drag: None,
             fit: None,
+            home: None,
             fit_viewport: (0.0, 0.0),
             fit_size: None,
             zoom: 1.0,
@@ -1551,9 +1554,25 @@ impl PdfView {
         self.set_zoom(self.zoom / ZOOM_STEP, cx);
     }
 
-    /// Reset zoom to 100%.
+    /// Reset zoom to the home fit (see [`set_home_fit`](Self::set_home_fit)), or to 100%.
     pub fn reset_zoom(&mut self, cx: &mut Context<Self>) {
-        self.set_zoom(1.0, cx);
+        match self.home {
+            Some(mode) => self.fit_to(mode, cx),
+            None => self.set_zoom(1.0, cx),
+        }
+    }
+
+    /// Make `mode` the fit the viewer rests at: apply it now, and return to it on reset zoom.
+    pub fn set_home_fit(&mut self, mode: FitMode, cx: &mut Context<Self>) {
+        self.home = Some(mode);
+        self.fit_to(mode, cx);
+    }
+
+    /// Turn on a sticky fit mode, whatever was active.
+    fn fit_to(&mut self, mode: FitMode, cx: &mut Context<Self>) {
+        self.fit = Some(mode);
+        self.apply_fit(cx);
+        cx.notify();
     }
 
     /// Scroll so page `index` (0-based, clamped) is at the top of the viewport.
