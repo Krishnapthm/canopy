@@ -9,7 +9,7 @@ use crate::sim_live::{self, Event, Input, Phase};
 use core_video::pixel_buffer::CVPixelBuffer;
 use std::collections::VecDeque;
 
-/// Space around the bezel inside the pane, in pixels.
+/// Space around the bezel inside the pane, in world px.
 pub(super) const MARGIN: f32 = 12.;
 /// How long a hidden pane's helper keeps running before it stops.
 const LINGER: Duration = Duration::from_secs(5);
@@ -52,6 +52,14 @@ pub(super) struct Recording {
     _tick: Task<()>,
 }
 
+/// The parent's body room in screen px and its pane zoom for this frame.
+/// A popped-out window measures its own bounds.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct DeviceRoom {
+    pub room: [f32; 2],
+    pub zoom: f32,
+}
+
 pub(super) struct SimScreen {
     pub pane: String,
     pub device: Device,
@@ -66,6 +74,7 @@ pub(super) struct SimScreen {
     /// An agent's input keeps the helper running until then, shown or not.
     agent_until: Option<Instant>,
     bounds: Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    room: Option<DeviceRoom>,
     touching: bool,
     scrolling: Option<[f64; 2]>,
     focus: FocusHandle,
@@ -98,7 +107,7 @@ impl SimScreen {
         });
         Self {
             pane, device, info: None, shot: None, surface: None, helper: None, live: Live::Off, shown: false, agent_until: None,
-            bounds: Rc::default(), touching: false, scrolling: None, focus: cx.focus_handle(), log: VecDeque::new(), typed: None,
+            bounds: Rc::default(), room: None, touching: false, scrolling: None, focus: cx.focus_handle(), log: VecDeque::new(), typed: None,
             recording: None, popped: false, _pump: None, _agent: None, _agent_idle: None, _linger: None, _tasks: vec![info],
         }
     }
@@ -249,28 +258,45 @@ impl SimScreen {
         sim_live::outer_size(points, self.info.as_ref().and_then(|i| i.chrome.as_ref()))
     }
 
+    pub(super) fn set_room(&mut self, room: Option<DeviceRoom>) -> bool {
+        if self.room == room { return false; }
+        self.room = room;
+        true
+    }
+
+    pub(super) fn zoom(&self) -> f32 { self.room.map_or(1., |r| r.zoom) }
+
+    fn drawing_room(&self) -> Option<[f32; 2]> {
+        self.room.map(|r| r.room).or_else(|| {
+            self.bounds.get().map(|b| [f32::from(b.size.width), f32::from(b.size.height)])
+        })
+    }
+
     pub(super) fn fit(&self, room: [f32; 2]) -> Option<sim_live::Fit> {
+        self.fit_at(room, self.zoom())
+    }
+
+    pub(super) fn fit_at(&self, room: [f32; 2], zoom: f32) -> Option<sim_live::Fit> {
         let points = self.points()?;
-        Some(sim_live::fit(room, points, self.info.as_ref().and_then(|i| i.chrome.as_ref()), MARGIN))
+        Some(sim_live::fit(room, points, self.info.as_ref().and_then(|i| i.chrome.as_ref()), MARGIN * zoom))
     }
 
     /// The scale the device is drawn at now, in pixels per point.
     pub fn scale(&self) -> Option<f32> {
-        let b = self.bounds.get()?;
-        Some(self.fit([f32::from(b.size.width), f32::from(b.size.height)])?.scale)
+        Some(self.fit(self.drawing_room()?)?.scale)
     }
 
     /// A window position as 0..1 of the screen, or None outside it.
     fn to_screen(&self, at: Point<Pixels>) -> Option<[f64; 2]> {
         let b = self.bounds.get()?;
-        let fit = self.fit([f32::from(b.size.width), f32::from(b.size.height)])?;
+        let fit = self.fit(self.drawing_room()?)?;
         fit.normalized([f32::from(at.x - b.origin.x), f32::from(at.y - b.origin.y)])
     }
 
     /// Like `to_screen`, clamped to the screen's edge, for a drag that leaves it.
     fn to_screen_clamped(&self, at: Point<Pixels>) -> Option<[f64; 2]> {
         let b = self.bounds.get()?;
-        let fit = self.fit([f32::from(b.size.width), f32::from(b.size.height)])?;
+        let fit = self.fit(self.drawing_room()?)?;
         let [x, y, w, h] = fit.screen;
         let p = [f32::from(at.x - b.origin.x), f32::from(at.y - b.origin.y)];
         Some([((p[0] - x) / w).clamp(0., 1.) as f64, ((p[1] - y) / h).clamp(0., 1.) as f64])
@@ -318,7 +344,7 @@ impl SimScreen {
         if !self.input_ready() { return; }
         cx.stop_propagation();
         let ScrollDelta::Pixels(delta) = e.delta else { return };
-        let Some(fit) = self.bounds.get().and_then(|b| self.fit([f32::from(b.size.width), f32::from(b.size.height)])) else { return };
+        let Some(fit) = self.drawing_room().and_then(|room| self.fit(room)) else { return };
         let [_, _, w, h] = fit.screen;
         match (e.touch_phase, self.scrolling) {
             // Momentum after the fingers lift arrives as Moved with no start: not a touch.
@@ -603,10 +629,11 @@ impl Render for SimScreen {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let measured = self.bounds.clone();
         let entity = cx.entity();
+        let needs_measure = self.room.is_none();
         let measure = canvas(
             move |b, window, cx| {
                 // The first layout and every resize draw once more at the measured size.
-                if measured.replace(Some(b)).is_none_or(|old| old.size != b.size) {
+                if measured.replace(Some(b)).is_none_or(|old| old.size != b.size) && needs_measure {
                     entity.update(cx, |_, cx| cx.notify());
                     window.refresh();
                 }
@@ -616,10 +643,10 @@ impl Render for SimScreen {
         let mut root = div().id(SharedString::from(format!("sim-screen-{}", self.pane))).size_full().relative()
             .track_focus(&self.focus).on_key_down(cx.listener(Self::key_down))
             .child(measure);
-        let room = self.bounds.get().map(|b| [f32::from(b.size.width), f32::from(b.size.height)]);
+        let room = self.drawing_room();
         let Some(fit) = room.and_then(|room| self.fit(room)) else {
             // Before the size is known: the screenshot alone, contain-fitted.
-            return root.when_some(self.shot.clone(), |d, shot| d.child(img(shot).size_full().p(px(MARGIN)).object_fit(ObjectFit::Contain)));
+            return root.when_some(self.shot.clone(), |d, shot| d.child(img(shot).size_full().p(px(MARGIN * self.zoom())).object_fit(ObjectFit::Contain)));
         };
         root = root.child(self.device_frame(div().absolute().top_0().left_0().size_full(), fit, None, Some(cx)));
         // Touch lands on the screen only; a drag keeps going outside it.
