@@ -193,7 +193,7 @@ Open a sticky note on the canvas. The optional point is in world coordinates.
 
 ## `canvas.pane_new`
 
-Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
+Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick; with udid, url (http(s) or an app link) opens on it once booted, and the reply waits for the device: name, runtime, state, url and a screenshot path. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path or url when applicable; for a browser with a url it waits until the page has loaded and adds title. `canopy pane new` puts browsers and sims on the canvas unless place says otherwise.
 
 | Argument | Required |
 |---|---|
@@ -260,7 +260,7 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a browser or simulator pane at a target. A browser loads an HTTP(S) address, an absolute local path or a file URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
+Point a browser or simulator pane at a target. A browser loads an HTTP(S) address, an absolute local path or a file URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" (refreshing the screenshot when already showing that device) or a URL to open on its device, booting it first; the reply waits for the device and includes name, runtime, state, url and a screenshot path. A browser reply waits until the page has loaded and adds title.
 
 | Argument | Required |
 |---|---|
@@ -532,12 +532,18 @@ Resize a simulator pane: step actual (one device point per canvas unit, requires
 
 ## `canvas.sim_shutdown`
 
-Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast.
+Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast, and a script's reply waits for it: pane, udid and state shutdown.
 
 | Argument | Required |
 |---|---|
 | `pane` | no |
 | `close` | no |
+
+## `canvas.sim_devices`
+
+List the available simulators (udid, name, runtime, state booted or shutdown) for a script, without opening a pane. `canopy pane devices` prints them.
+
+No arguments.
 
 ## `canvas.sim_pop`
 

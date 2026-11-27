@@ -11,13 +11,15 @@ The browser opens docked in the files panel, as a tab. Choose **Move to canvas**
 
 A bare local address like `localhost:3000` gets `http://`, and other bare hosts get `https://`.
 
-Agents can open a browser pane too, usually wired to themselves:
+Agents can open a browser pane too, usually wired to themselves. A pane an agent opens lands on the canvas beside it:
 
 ```sh
 canopy pane new browser localhost:3000 --wire
-canopy pane new browser localhost:3000 --place canvas  # on the canvas, not in the panel
+canopy pane new browser localhost:3000 --place panel  # a tab in the files panel instead
 canopy pane open p2 http://localhost:3000/pricing  # point an existing pane at another page
 ```
+
+Both commands wait until the page has loaded and print its address and title, so the agent knows it worked without reading the pane. A page whose server is not running prints why it did not load.
 
 `canopy pane open` also makes the new address the pane's **Home**.
 

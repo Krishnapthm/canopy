@@ -1241,8 +1241,13 @@ canopy pane close p1                       # close a file pane
 Simulator panes (a Mac with Xcode) show an iOS Simulator live in Xcode's bezel while the pane
 is on screen or popped out: its frames, and the person's taps, swipes, typing and hardware
 buttons. A shut down or unreachable simulator shows a screenshot instead.
-`canopy pane new sim [<udid>|booted] [--wire]`, `canopy pane open pN <udid>` (shows it,
-booting it), `canopy pane read pN` (udid, name, state, live, screen size in points, a fresh
+`canopy pane devices` (every available simulator: udid, name, runtime, booted or shutdown),
+`canopy pane new sim [<udid>|booted] [--url <url>] [--wire]` (on the canvas unless `--place`
+says otherwise), `canopy pane open pN <udid>|booted` (shows it, booting it), `canopy pane open
+pN <url>` (opens an http(s) page in Safari, or an app link, on its device; the device cannot
+read the Mac's files, so serve them over loopback). `new` with a simulator and `open` reply once
+the device is ready: name, runtime, state, the url opened and a screenshot path, or the error.
+`canopy pane read pN` (udid, name, state, live, screen size in points, a fresh
 screenshot file, recent activity by the person and agents). Drive it in device points from the
 top left: `canopy pane tap pN <x> <y>`, `canopy pane swipe pN <x1> <y1> <x2> <y2> [ms]`,
 `canopy pane type pN <text>` (US keyboard), `canopy pane press pN <button>` (home, lock, power,
@@ -1254,7 +1259,8 @@ action, x?, y?, x1?, y1?, x2?, y2?, ms?, text?, button?}` (what those verbs send
 (the person draws on a still and sends it to an agent as a quote: you get `@<png path>` and a
 line saying what it shows), `canvas.sim_zoom {step?: "actual" | "default" | "in" | "out"}` ("actual" sizes the pane to one world px per device point, the device's real size at 100% zoom),
 `canvas.sim_shutdown {pane?, close?}` (turn off the device and show the picker, or close the
-pane with `close: true`. The result arrives in a toast),
+pane with `close: true`. The result arrives in a toast; a script's reply waits for it),
+`canvas.sim_devices` (what `canopy pane devices` prints),
 `canvas.sim_pop` (own window, or back), `canvas.sim_refresh` (new screenshot, retry live),
 `canvas.sim_device` (picker menu), `canvas.sim_hub` (Device Hub) and `canvas.sim_reveal {path}`
 (show a saved file in Finder). All but sim_hub, sim_reveal and sim_input take `pane?`, else the
@@ -1268,9 +1274,10 @@ Use the pane color swatch to choose a named color or enter a custom hex color. `
 
 Right-click empty canvas and choose **New Sticky Note**, or press Option+Cmd+N (Ctrl+Alt+N elsewhere). Drag a note by its helper bar grip. `canvas.note_new {point?}` opens the shipped note mod on the canvas.
 
-Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", path?, url?, udid?, wire?, point?, place?, pinned?}` (files need path, browsers open New tab if url is omitted; `place` is "panel", "canvas" or "pinned": browsers and sims default to "panel", a tab in the Files panel, and take `canopy pane new browser <url> --place canvas`; "pinned" (or `pinned: true`) is the screen's top right, where it stays while the canvas moves), `canvas.pane_pin {pane, pinned?}` (pin to the screen or unpin), `canvas.pane_dock {pane, docked?}` (dock a browser or sim in the Files panel, or move it back onto the canvas; a docked pane has no place on the canvas, and no edge is drawn for its wire), `canvas.pane_read {pane}`, A pane the person opens eases their camera to 100%; panes you open with these commands never move the camera, so the person keeps their view.
-`canvas.pane_shot {pane, path?}`, `canvas.pane_open {pane, target, tab?}` (browser panes load the URL in the active tab, or a new tab with `tab: "new"`; sim panes take a udid
-or `booted`), `canvas.close {pane}`. Mods read `canvasPanes()` and `paneKinds()`; `panes()` is
+Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", path?, url?, udid?, wire?, point?, place?, pinned?}` (files need path, browsers open New tab if url is omitted; `place` is "panel", "canvas" or "pinned": browsers and sims default to "panel", a tab in the Files panel, while `canopy pane new` puts them on the canvas unless `--place` says otherwise; "pinned" (or `pinned: true`) is the screen's top right, where it stays while the canvas moves), `canvas.pane_pin {pane, pinned?}` (pin to the screen or unpin), `canvas.pane_dock {pane, docked?}` (dock a browser or sim in the Files panel, or move it back onto the canvas; a docked pane has no place on the canvas, and no edge is drawn for its wire), `canvas.pane_read {pane}`, A pane the person opens eases their camera to 100%; panes you open with these commands never move the camera, so the person keeps their view.
+`canvas.pane_shot {pane, path?}`, `canvas.pane_open {pane, target, tab?}` (browser panes load the URL in the active tab, or a new tab with `tab: "new"`; sim panes take a udid,
+`booted` or a URL to open on the device; a script's reply waits for the page to load or the
+device to be ready), `canvas.close {pane}`. Mods read `canvasPanes()` and `paneKinds()`; `panes()` is
 the tab layouts' panes. `canvas.pane_set {pane, props}` shallow-merges an object
 into a mod pane's saved props (at most 1 MiB); a note's `props.text` is its read text.
 Use `canvas.pane_color {pane, color}` to set a canvas pane's hue. Pass `null` or omit

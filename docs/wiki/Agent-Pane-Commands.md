@@ -11,13 +11,13 @@ canopy pane new file ./README.md --wire  # open a file beside the calling agent
 canopy pane new mod:note --wire         # open a note beside the calling agent
 ```
 
-- `--place panel|canvas|pinned` chooses where a browser or simulator opens. The default is `panel`, a tab in the [files panel](Files-Panel). Other kinds default to the canvas.
+- `--place panel|canvas|pinned` chooses where a browser or simulator opens. From `canopy pane` the default is `canvas`, beside the agent's work. Browsers and simulators you open yourself from the toolbar start in the [files panel](Files-Panel).
 - `--wire` wires the pane to the calling terminal, using `HC_TERMINAL_ID`. It requires a Canopy terminal.
-- `new` prints the pane ID, its path, URL or kind, and a command to read it. Wired panes add `wired to you`.
+- `new` prints the pane ID, its path, URL or kind, and a command to read it. Wired panes add `wired to you`. For a web page it waits until the page loads and adds its title. For a named simulator it waits until the device is ready and adds its name, state and a screenshot path.
 - See [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices) for their opening commands.
 
 `canopy pane open <pane> <target>` changes a browser or simulator pane's target. File panes refuse `open`.
-A browser accepts a web address, a local `file:` URL or an absolute file path. The CLI also resolves paths starting with `./` or `../` against the directory you ran it from. It prints `<pane>: <url>` for a browser and `ok` for a simulator.
+A browser accepts a web address, a local `file:` URL or an absolute file path. The CLI also resolves paths starting with `./` or `../` against the directory you ran it from. A simulator accepts a UDID, `booted`, or a URL to open on its device. Like `new`, `open` waits for the page or device and prints how it turned out.
 
 See [Browser Pane](Browser-Pane) for browser targets and [Simulator Devices](Simulator-Devices) for `tap`, `swipe`, `type` and `press`.
 
