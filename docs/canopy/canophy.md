@@ -51,7 +51,7 @@ scroll pans the canvas, and Cmd/Ctrl+wheel always zooms it.
 | Piece | File | What it is |
 |---|---|---|
 | World and screen px | `units.rs`, `camera.rs` | World px are canvas px at 100% zoom. Screen px are GPUI's. Only `Camera` converts between them, and its fields are private. |
-| `Traits` | `traits.rs` | What a pane kind is: default size, min, aspect, header height, whether it pushes neighbours or docks, and what its body draws. |
+| `Traits` | `traits.rs` | What a pane kind is: default size, min, `Shape` (whether tiles keep the content’s shape), header height, whether it pushes neighbours or docks, and what its body draws. |
 | `open_size`, `Fit` | `open.rs`, `traits.rs` | Size a new pane at 100% from its fit mode and the uncovered viewport. Natural content shrinks uniformly, with room for chrome and a 32 px gap at each canvas edge. |
 | `pinch_owner`, `wheel_owner` | `input.rs` | Choose whether the canvas or pane content handles a pinch or a plain wheel, from the pane kind's traits (`zooms`, `scrolls`) and its current placement. |
 | `step(doc, Intent, &Viewport)` | `step.rs` | The only way to change pane geometry or the camera. Applies the intent, then the size law, the camera law and (debug builds) the invariants, in that order. |

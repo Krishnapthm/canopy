@@ -33,6 +33,16 @@ pub enum Fit {
     Column,
 }
 
+/// A pane's shape rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    /// Any width and height.
+    Free,
+    /// The body keeps its content's width over height. The caller supplies the ratio
+    /// because only the running content knows it (a simulator's device and bezel).
+    Content,
+}
+
 /// A pane kind's declared behavior.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Traits {
@@ -42,8 +52,8 @@ pub struct Traits {
     pub fit: Fit,
     /// The smallest size a resize leaves it (a terminal: its expanded size).
     pub min: WorldSize,
-    /// Width over height when the shape is locked; None when it is free.
-    pub aspect: Option<f32>,
+    /// Whether the pane keeps its content's shape when tiled or fitted.
+    pub shape: Shape,
     /// The header strip's height in world px. None when there is no header.
     pub header: Option<f32>,
     /// Whether it pushes and is pushed by neighbours (see `rules::solve`).
@@ -73,7 +83,7 @@ pub const SIM: WorldSize = WorldSize::new(340., 700.);
 
 /// The declared behavior of a pane of `kind`.
 pub fn traits(kind: &Kind) -> Traits {
-    let base = Traits { default: PREVIEW, fit: Fit::Fixed, min: MIN, aspect: None, header: Some(HEADER), pushable: true, dockable: false, zooms: false, scrolls: false, content: Content::Text };
+    let base = Traits { default: PREVIEW, fit: Fit::Fixed, min: MIN, shape: Shape::Free, header: Some(HEADER), pushable: true, dockable: false, zooms: false, scrolls: false, content: Content::Text };
     match kind {
         // An expanded terminal keeps at least a 1.5-pill-wide, three-header-tall body.
         Kind::Terminal { .. } => Traits { default: WorldSize::new(PILL_WIDTH, HEADER), min: WorldSize::new(PILL_WIDTH * 1.5, HEADER * 3.), scrolls: true, content: Content::Grid, ..base },
@@ -86,6 +96,6 @@ pub fn traits(kind: &Kind) -> Traits {
             Traits { default: shape.size, min: shape.min, header: shape.header.then_some(HEADER), content: Content::Mod, ..base }
         }
         Kind::Browser { .. } => Traits { default: BROWSER, header: Some(BROWSER_HEADER), dockable: true, zooms: true, scrolls: true, content: Content::Page, ..base },
-        Kind::Sim { .. } => Traits { default: SIM, dockable: true, content: Content::Device, ..base },
+        Kind::Sim { .. } => Traits { default: SIM, shape: Shape::Content, dockable: true, content: Content::Device, ..base },
     }
 }

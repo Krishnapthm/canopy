@@ -1014,7 +1014,15 @@ impl AppWindow {
         // Every tile the same size unless `tile_focus_grows` lets the selected one take more.
         let active = self.person.tile_focus_grows.then(|| self.canvas_state.selected.iter().rev().find_map(|k| tiles.iter().position(|t| &t.0 == k))).flatten();
         // The canvas starts under the bar, so tiles fill its whole area.
-        let (placed, lined) = canophy::tile([area[0], area[1], visible[0], visible[1]], tiles.len(), active, &pills, self.person.tile_gap);
+        let (mut placed, lined) = canophy::tile([area[0], area[1], visible[0], visible[1]], tiles.len(), active, &pills, self.person.tile_gap);
+        for ((_, _, i), rect) in tiles.iter().zip(&mut placed) {
+            let pane = &doc.panes[*i];
+            if canophy::traits(&pane.kind).shape == canophy::traits::Shape::Content
+                && let Some((aspect, chrome)) = self.content_shape(pane, cx)
+            {
+                *rect = canophy::contain(*rect, aspect, chrome);
+            }
+        }
         let state = &mut self.canvas_state;
         let unchanged = rects == placed && lined_up.iter().zip(&lined).all(|(a, b)| a.1[0] == b[0] && a.1[1] == b[1]);
         if !toggle && unchanged { return; }
@@ -1051,6 +1059,19 @@ impl AppWindow {
         }
         self.animate_layout(window, cx);
         cx.notify();
+    }
+
+    fn content_shape(&self, pane: &canvas::Pane, cx: &App) -> Option<(f32, [f32; 2])> {
+        match &pane.kind {
+            canvas::Kind::Sim { .. } => self.sim_shape(&pane.id, cx),
+            canvas::Kind::Terminal { .. }
+            | canvas::Kind::Sub { .. }
+            | canvas::Kind::File { .. }
+            | canvas::Kind::Image { .. }
+            | canvas::Kind::Pdf { .. }
+            | canvas::Kind::Mod { .. }
+            | canvas::Kind::Browser { .. } => None,
+        }
     }
 
     pub(super) fn refresh_sub_hooks(&mut self) {

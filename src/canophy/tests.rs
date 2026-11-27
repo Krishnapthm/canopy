@@ -585,3 +585,14 @@ fn resize_never_shrinks_a_pane_below_its_kind() {
     step(&mut doc, Intent::Resize { id: "p0".into(), zone: (1, 1), world: [-1000., -1000.], screen: [0., 0.] }, &view);
     assert_eq!([doc.panes[0].rect.w, doc.panes[0].rect.h], MIN);
 }
+
+#[test]
+fn contain_centers_content_with_chrome() {
+    assert_eq!(contain([0., 0., 1000., 400.], 0.5, [10., 40.]), [405., 0., 190., 400.]);
+    assert_eq!(contain([0., 0., 100., 500.], 0.5, [10., 40.]), [0., 140., 100., 220.]);
+    assert_eq!(contain([0., 0., 100., 30.], 0.5, [10., 40.]), [0., 0., 100., 30.]);
+    let cell = [3., 5., 100., 500.];
+    for aspect in [0., -1., f32::NAN, f32::INFINITY] {
+        assert_eq!(contain(cell, aspect, [10., 40.]), cell);
+    }
+}
