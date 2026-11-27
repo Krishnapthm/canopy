@@ -4,11 +4,20 @@ Build and test Canopy with an isolated app home and core for development.
 
 ## Requirements
 
-Follow the [README build instructions](https://github.com/Krishnapthm/canopy#build-from-source) for requirements and build commands.
-On macOS, add Homebrew's Zig 0.16 keg to your `PATH`:
+The [README](https://github.com/Krishnapthm/canopy#requirements) lists what every platform needs: Rust 1.95 or newer, Zig 0.16 and herdr-core. [just](https://github.com/casey/just) and [Bun](https://bun.sh) are optional and only run the full test suite.
+
+On macOS, install the Xcode command line tools (`xcode-select --install`). If you install Zig with Homebrew, its `zig@0.16` keg is not on your `PATH` by default, so add this line to your shell profile:
 
 ```sh
 export PATH="$(brew --prefix zig@0.16)/bin:$PATH"
+```
+
+On Debian or Ubuntu, install the build tools and the libraries the window and fonts need:
+
+```sh
+sudo apt-get install build-essential pkg-config clang libclang-dev \
+  libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+  libvulkan-dev mesa-vulkan-drivers libfontconfig-dev libfreetype-dev
 ```
 
 See [herdr-core](herdr-core) for core installation.
