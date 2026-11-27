@@ -8,6 +8,8 @@ use std::path::Path;
 mod wire_view;
 mod keyboard;
 mod helper_bar;
+mod file_view;
+use file_view::{FileHost, FileMode, Previewable, previewable};
 mod chrome;
 mod dock;
 mod pane_commands;
@@ -63,7 +65,9 @@ pub(super) struct State {
     preview_drag: Option<(String, Option<canophy::Point>, Point<Pixels>)>,
     /// The panel's active tab (its tabs are `doc.panel.tabs`).
     pub file: Option<canvas::PanelTab>,
-    pub(super) editing: Option<String>,
+    modes: HashMap<String, FileMode>,
+    card_drafts: HashSet<String>,
+    outline: bool,
     /// The Files editor reports transitions between saved and unsaved text.
     pub(super) dirty: Option<String>,
     /// Bumps each time the draft turns dirty, so a discard dialog for older text cannot confirm.
@@ -194,6 +198,10 @@ fn files_button(
 
 impl State {
     /// The file open in the panel, when its active tab is a file.
+    fn file_mode(&self, path: &str) -> FileMode {
+        self.modes.get(path).copied().unwrap_or_else(|| FileMode::default_for(Path::new(path)))
+    }
+
     pub(super) fn file_path(&self) -> Option<&String> {
         self.file.as_ref().and_then(canvas::PanelTab::file)
     }
@@ -253,7 +261,9 @@ impl State {
             chrome: Default::default(),
             preview_drag: None,
             file,
-            editing: None,
+            modes: HashMap::new(),
+            card_drafts: HashSet::new(),
+            outline: false,
             dirty: None,
             dirty_generation: 0,
             close_panel_focus: false,
@@ -608,8 +618,15 @@ impl AppWindow {
         })
     }
 
+    /// Whether something drawn over the canvas takes input at `position`: an overlay, canvas
+    /// chrome, or the open Files panel (its text scrolls and pinches as itself).
     fn canvas_input_covered(&self, position: Point<Pixels>) -> bool {
-        self.canvas_overlay_at(position) || self.canvas_chrome_at(position)
+        self.canvas_overlay_at(position) || self.canvas_chrome_at(position) || self.files_panel_at(position)
+    }
+
+    fn files_panel_at(&self, position: Point<Pixels>) -> bool {
+        (self.canvas_state.file.is_some() || self.canvas_state.files)
+            && self.bounds.borrow().get("canvas-panel").is_some_and(|b| b.contains(&position))
     }
 
     /// The current host of a pane. Browser pop-outs keep their own window handles.
@@ -1141,7 +1158,10 @@ impl AppWindow {
     pub(super) fn close_boxed_panes(&mut self, ids: &[String], cx: &mut Context<Self>) {
         self.forget_annotations(ids, cx);
         let state = &mut self.canvas_state;
-        let paths: Vec<_> = state.doc.panes.iter().filter(|p| ids.contains(&p.id)).filter_map(|p| p.file().map(str::to_owned)).collect();
+        let paths: Vec<_> = state.doc.panes.iter().filter(|p| ids.contains(&p.id)).filter_map(|p| match &p.kind {
+            canvas::Kind::Browser { source: Some(path), .. } => Some(path.clone()),
+            _ => p.file().map(str::to_owned),
+        }).collect();
         state.doc.panes.retain(|p| !ids.contains(&p.id));
         state.doc.panel.tabs.retain(|t| t.pane().is_none_or(|id| !ids.contains(id)));
         if state.file.as_ref().and_then(canvas::PanelTab::pane).is_some_and(|id| ids.contains(id)) {
@@ -1151,6 +1171,8 @@ impl AppWindow {
         self.forget_sims(ids, cx);
         let state = &mut self.canvas_state;
         for path in paths {
+            state.modes.remove(&path);
+            state.card_drafts.remove(&path);
             if state.file_path() != Some(&path) && !state.doc.panes.iter().any(|p| p.file() == Some(path.as_str())) {
                 state.previews.remove(&path);
             }
@@ -1379,7 +1401,7 @@ impl AppWindow {
                     if state.file_path() != Some(&path) || state.dirty_generation != generation
                         || tab.as_ref().is_some_and(|tab| !state.doc.panel.tabs.contains(tab)) { return; }
                     state.dirty = None;
-                    state.editing = None;
+                    state.modes.remove(&path);
                     this.select_panel_tab(tab, window, cx);
                 });
             }).detach();
@@ -1391,29 +1413,50 @@ impl AppWindow {
             state.doc.panel.tree_hidden = false;
         }
         state.file = tab;
+        self.load_previews(None, window, cx);
         self.focus.focus(window, cx);
         self.sync(window, cx);
         cx.notify();
     }
 
     pub(super) fn panel_editor(&mut self, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(path) = self.canvas_state.file_path().cloned() else { return };
-        if args["path"].as_str().is_some_and(|p| p != path) { return; }
-        if let Some(dirty) = args["dirty"].as_bool() {
-            if self.canvas_state.editing.as_ref() == Some(&path) {
-                if dirty && self.canvas_state.dirty.is_none() { self.canvas_state.dirty_generation += 1; }
-                self.canvas_state.dirty = dirty.then_some(path);
-                cx.notify();
+        let active = self.canvas_state.file_path();
+        let Some(path) = args["path"].as_str().or(active.map(String::as_str)).map(str::to_owned) else { return };
+        let dirty = args["dirty"].as_bool();
+        let done = args["done"].as_bool() == Some(true);
+        let pane = if active == Some(&path) {
+            None
+        } else {
+            if dirty.is_none() && !done { return; }
+            let Some(pane) = self.canvas_state.doc.panes.iter().find(|pane| pane.file() == Some(path.as_str())) else { return };
+            Some(pane.id.clone())
+        };
+        if let Some(dirty) = dirty {
+            if self.canvas_state.file_mode(&path) == FileMode::Source {
+                if pane.is_some() {
+                    if dirty { self.canvas_state.card_drafts.insert(path); }
+                    else { self.canvas_state.card_drafts.remove(&path); }
+                } else {
+                    if dirty && self.canvas_state.dirty.is_none() { self.canvas_state.dirty_generation += 1; }
+                    self.canvas_state.dirty = dirty.then_some(path);
+                    cx.notify();
+                }
             }
             return;
         }
-        if args["done"].as_bool() == Some(true) {
-            self.canvas_state.dirty = None;
-            self.canvas_state.editing = None;
+        if done {
+            if pane.is_some() { self.canvas_state.card_drafts.remove(&path); }
+            else { self.canvas_state.dirty = None; }
+            if previewable(Path::new(&path)).is_some() {
+                if let Err(error) = self.set_file_mode(&path, FileMode::Preview, pane.as_deref(), window, cx) {
+                    self.command_error("panel.editor", &error, window, cx);
+                }
+                return;
+            }
         } else {
             let choice = args["choice"].as_str().unwrap_or("here");
             if choice == "here" {
-                self.canvas_state.editing = Some(path.clone());
+                self.canvas_state.modes.insert(path.clone(), FileMode::Source);
                 self.canvas_state.dirty = None;
             } else {
                 let Some(editor) = self.panel_editors().into_iter().find(|e| e.key == choice) else { return };
@@ -1560,6 +1603,9 @@ impl AppWindow {
         }
         for pane in &self.canvas_state.doc.panes {
             if !self.canvas_state.doc.shown(pane) { continue; }
+            if let Some(path) = pane.file().filter(|path| file_view::file_host_mode(path, self.canvas_state.file_mode(path)) == FileMode::Source) {
+                slots.push(file_view::viewer_slot(path, FileHost::Card { pane: pane.id.clone() }));
+            }
             if let Some(name) = pane.mod_name().filter(|name| self.folders.get(*name).is_some_and(|f| f.hint.pane.is_some())) {
                 slots.push((format!("pane:{}", pane.id), Instance { name: name.into(), props: json!({"pane":pane.id}) }));
             }
@@ -1575,11 +1621,8 @@ impl AppWindow {
                 },
             ));
         }
-        if let Some(path) = self.canvas_state.file_path() {
-            if self.canvas_state.editing.as_ref() == Some(path) || !rendered(path)
-            {
-                slots.push(("canvas-file".into(), Instance { name: "files".into(), props: json!({"canvas":"viewer","editing":self.canvas_state.editing.as_ref() == Some(path),"root":std::path::Path::new(path).parent(),"file":std::path::Path::new(path).file_name().map(|p|p.to_string_lossy())}) }));
-            }
+        if let Some(path) = self.canvas_state.file_path().filter(|path| file_view::file_host_mode(path, self.canvas_state.file_mode(path)) == FileMode::Source) {
+            slots.push(file_view::viewer_slot(path, FileHost::Panel));
         }
         slots
     }
@@ -1628,10 +1671,26 @@ impl AppWindow {
                 .unwrap_or_else(|_| path.to_owned())
                 .to_string_lossy()
                 .into_owned();
-            let tab = canvas::PanelTab::File(path);
+            if let Some(tab) = self.html_panel_tab(&path) {
+                self.select_panel_tab(Some(tab), window, cx);
+                return;
+            }
+            let tab = canvas::PanelTab::File(path.clone());
             canvas::open_panel_tab(&mut self.canvas_state.doc.panel.tabs, &tab);
             if self.canvas_state.file.as_ref() != Some(&tab) { self.canvas_state.dirty = None; }
             self.canvas_state.file = Some(tab);
+            if previewable(Path::new(&path)) == Some(Previewable::Html)
+                && self.canvas_state.file_mode(&path) == FileMode::Preview
+            {
+                match self.set_file_mode(&path, FileMode::Preview, None, window, cx) {
+                    Ok(()) => return,
+                    Err(error) => {
+                        self.canvas_state.modes.insert(path, FileMode::Source);
+                        self.command_error("file.mode", &error, window, cx);
+                    }
+                }
+            }
+            self.load_previews(None, window, cx);
             self.focus.focus(window, cx);
             self.sync(window, cx);
             cx.notify();
@@ -1777,10 +1836,19 @@ impl AppWindow {
             doc.panes.push(pane);
             (id, kind_name, parsed)
         };
+        if kind_name == "file" && previewable(Path::new(&path)) == Some(Previewable::Html)
+            && self.canvas_state.file_mode(&path) == FileMode::Preview
+        {
+            if let Err(error) = self.set_file_mode(&path, FileMode::Preview, Some(&id), window, cx) {
+                self.canvas_state.modes.insert(path.clone(), FileMode::Source);
+                self.command_error("file.mode", &error, window, cx);
+            }
+        }
         self.load_previews(parsed.map(|pdf| (id.as_str(), pdf)), window, cx);
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
+        let kind_name = self.canvas_state.doc.panes.iter().find(|pane| pane.id == id).map_or(kind_name, |pane| pane.kind_name().into());
         Ok((id, path, kind_name))
     }
     /// Opens a mod pane at its own saved rect; its mod copy receives the pane id.
@@ -1803,8 +1871,9 @@ impl AppWindow {
         self.sync_image_sizes(window, cx);
         let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
         if let Some(path) = self.canvas_state.file_path() {
-            if rendered(path) { paths.push(path.clone()); }
+            paths.push(path.clone());
         }
+        paths.retain(|path| matches!(previewable(Path::new(path)), Some(Previewable::Markdown | Previewable::Jsonl)));
         self.canvas_state.previews.retain(|path, _| paths.contains(path));
         for path in paths {
             if self.canvas_state.previews.contains_key(&path) { continue; }
@@ -2853,7 +2922,7 @@ impl AppWindow {
     fn quote_selection(&mut self, path: &str, pane: Option<&str>, view: &Entity<gpui_base::TextViewState>, position: Point<Pixels>, _window: &mut Window, cx: &mut Context<Self>) {
         let text = view.read(cx).selected_text();
         if text.trim().is_empty() { return; }
-        let mut quote = if rendered(path) {
+        let mut quote = if matches!(previewable(Path::new(path)), Some(Previewable::Markdown | Previewable::Jsonl)) {
             markdown_quote(path, &preview_source(path), &text)
         } else { code_quote(path, &text) };
         if let Some(pane) = pane { quote["pane"] = json!(pane); }
@@ -2974,23 +3043,11 @@ impl AppWindow {
         &self,
         card: &canvas::Pane,
         file: &str,
-        view: &Entity<gpui_base::TextViewState>,
         camera: canophy::Camera,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let path = std::path::Path::new(file);
-        let quote_pane = card.id.clone();
-        let quote_path = file.to_owned();
-        let quote_view = view.clone();
-        // The text scales with the pane like a picture (`ScaledPane` in `pane_card`).
-        let body = div().flex_1().min_h_0().overflow_hidden().px(wpx(canophy::traits::FILE_PAD_X)).py(wpx(12.))
-            .child(gpui_base::TextView::new(view).scrollable(true)
-                    .image_source(|_| {
-                        static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
-                        gpui::ImageSource::Image(BLANK.clone())
-                    })
-                    .on_link_click(|_, _, _, _| {}))
-                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, Some(&quote_pane), &quote_view, e.position, window, cx))).into_any_element();
+        let path = Path::new(file);
+        let body = self.file_body(file, FileHost::Card { pane: card.id.clone() }, cx);
         self.pane_card(card, "mods/files/file.svg".into(), path.file_name().unwrap_or_default().to_string_lossy().into_owned(), path.parent().unwrap_or(path).to_string_lossy().into_owned(), None, body, camera, cx)
     }
 
@@ -3621,8 +3678,7 @@ impl AppWindow {
                 // Drawn by the terminal path below.
                 canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } => continue,
                 canvas::Kind::File { path } => {
-                    let Some((view, _)) = state.previews.get(path) else { continue };
-                    self.preview_card(card, path, view, camera, cx)
+                    self.preview_card(card, path, camera, cx)
                 }
                 canvas::Kind::Image { path } => self.image_card(card, path, camera, cx),
                 canvas::Kind::Pdf { path, .. } => {
@@ -4035,6 +4091,7 @@ impl AppWindow {
                         state.doc.panel.tree_hidden = false;
                         state.file = tab;
                         state.closed = None;
+                        this.load_previews(None, window, cx);
                         this.sync(window, cx);
                         cx.notify();
                     }
@@ -4086,7 +4143,9 @@ impl AppWindow {
                 .max(360.)
                 .min(full_width * 0.75);
             let width = if expanded { full_width } else { width };
+            let panel_bounds = self.bounds.clone();
             let mut panel = div()
+                .child(canvas(move |bounds, _, _| { panel_bounds.borrow_mut().insert("canvas-panel".into(), bounds); }, |_, _, _, _| {}).absolute().size_full())
                 .capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, _, _| {
                     if e.button == MouseButton::Left { this.canvas_state.close_panel_focus = true; }
                 }))
@@ -4197,6 +4256,9 @@ impl AppWindow {
                 Some(_) => "Sub-agent · read-only".to_owned(),
                 None => canvas::breadcrumb(path, root.as_deref().filter(|r| std::path::Path::new(path).starts_with(r)).or(Some(&home()))),
             };
+            let outline_available = state.file_path().is_some_and(|path| {
+                state.file_mode(path) == FileMode::Preview && previewable(Path::new(path)) == Some(Previewable::Markdown)
+            });
             panel = panel.child(
                 div()
                     .flex()
@@ -4221,8 +4283,34 @@ impl AppWindow {
                             .tooltip(strip_tooltip("Open in Preview".into(), Some("preview.external")))
                             .on_click(cx.listener(move |this, _, window, cx| this.run("preview.external", json!({"path":path}), window, cx))))
                     })
+                    .when_some(state.file_path().filter(|path| previewable(Path::new(path)).is_some()), |d, path| {
+                        let action = file_view::mode_action(path, file_view::file_host_mode(path, state.file_mode(path)), None);
+                        d.child(panel_button("panel-file-mode", action.icon, c("muted-foreground"), c("hover"))
+                            .aria_label(action.label.clone())
+                            .tooltip(strip_tooltip(action.label.to_string(), Some("file.mode")))
+                            .on_click(cx.listener(move |this, _, window, cx| this.run("file.mode", action.args.clone(), window, cx))))
+                    })
+                    .when(outline_available, |d| d.child(panel_button("panel-outline", "icons/list.svg", c("muted-foreground"), c("hover"))
+                        .aria_label("Outline")
+                        .tooltip(strip_tooltip("Outline".into(), None))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.canvas_state.outline = !this.canvas_state.outline;
+                            cx.notify();
+                        }))))
+                    .when(!state.doc.panel.tree_hidden, |d| d.child(panel_button("panel-collapse-folders", "icons/chevrons-down-up.svg", c("muted-foreground"), c("hover"))
+                        .aria_label("Collapse folders")
+                        .tooltip(strip_tooltip("Collapse folders".into(), None))
+                        .on_click(cx.listener(|this, _, window, cx| this.run("files.collapse_all", json!({}), window, cx)))))
+                    .child(panel_button("panel-more", "icons/ellipsis.svg", c("muted-foreground"), c("hover"))
+                        .aria_label("More")
+                        .tooltip(strip_tooltip("More".into(), None))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let on = mods::shared("files.auto_save").and_then(|v| v.as_bool()).unwrap_or(true);
+                            let label = if on { "✓ Auto save" } else { "Auto save" };
+                            this.open_menu("primary", json!({"items":[[label,"files.auto_save",{"on":!on}]]}), None, window, cx);
+                        })))
                     // An agent transcript is read, not edited.
-                    .when(state.file_path().is_some_and(|f| !f.ends_with(".jsonl")), |d| {
+                    .when(state.file_path().is_some_and(|f| previewable(Path::new(f)) != Some(Previewable::Jsonl)), |d| {
                         let editors = self.panel_editors();
                         let choice = state.doc.panel.editor.as_deref()
                             .filter(|key| *key == "here" || editors.iter().any(|e| e.key == *key))
@@ -4287,30 +4375,11 @@ impl AppWindow {
                     ),
             );
             let mut body = div().flex().flex_1().min_h_0();
-            if let Some((view, _)) = state
-                .file_path()
-                .filter(|p| {
-                    state.editing.as_ref() != Some(*p) && rendered(p)
-                })
-                .and_then(|p| state.previews.get(p))
-            {
-                let quote_path = state.file_path().cloned().unwrap();
-                let quote_view = view.clone();
-                // Padding sits on the TextView so its scrollbar overlay reaches the panel edge.
-                body = body.child(div().flex_1().min_w_0().h_full().child(gpui_base::TextView::new(view).scrollable(true).px(px(24.)).py(px(20.))
-                    .image_source(|_| {
-                        static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));
-                        gpui::ImageSource::Image(BLANK.clone())
-                    }).on_link_click(|_,_,_,_|{}))
-                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, window, cx| this.quote_selection(&quote_path, None, &quote_view, e.position, window, cx))));
-            } else if state.file_path().is_some() {
-                body = body.child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .child(self.render_slot("canvas-file", cx)),
-                );
+            if let Some(path) = state.file_path() {
+                if state.outline && outline_available {
+                    body = body.children(self.file_outline(path, cx));
+                }
+                body = body.child(self.file_body(path, FileHost::Panel, cx));
             } else {
                 body = body.child(
                     div().flex_1().flex().items_center().justify_center().text_size(px(12.))
@@ -4534,7 +4603,7 @@ fn strip_tab(group: impl Into<SharedString>, active: bool, fill: Hsla, strip: Hs
 }
 
 /// A 24 px plain icon button for canvas and panel controls.
-fn panel_button(id: &'static str, icon: &'static str, fg: Hsla, hover: Hsla) -> Stateful<Div> {
+fn panel_button(id: &'static str, icon: impl Into<SharedString>, fg: Hsla, hover: Hsla) -> Stateful<Div> {
     div()
         .id(id)
         .group(id)
@@ -4637,24 +4706,12 @@ fn root_space(s: &model::Space) -> bool {
     s.name == "Canvas" && s.folder == home() && s.machine.is_none()
 }
 
-/// Files the panel shows through the inert markdown renderer: markdown, and JSONL
-/// (an agent transcript reads as a conversation).
-fn rendered(path: &str) -> bool {
-    std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("jsonl"))
-}
-
 fn preview_source(path: &str) -> String {
     match canvas::read_preview(std::path::Path::new(path)) {
         Ok(text) if std::path::Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("jsonl")) => {
             numbered_code(&crate::subs::transcript_markdown(&text, path).unwrap_or(text))
         }
-        Ok(text)
-            if std::path::Path::new(path)
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("md")) =>
-        {
-            text
-        }
+        Ok(text) if previewable(Path::new(path)) == Some(Previewable::Markdown) => text,
         Ok(text) => numbered_code(&text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if std::path::Path::new(path).extension().is_some_and(|e| e == "jsonl") { "Waiting for transcript".into() }
@@ -5030,6 +5087,42 @@ mod input_tests {
         assert!(!view.read_with(cx, |this, _| this.claims_wheel(&plain)), "an entered file pane scrolls its own text");
         assert!(view.read_with(cx, |this, _| this.claims_wheel(&ScrollWheelEvent { modifiers: zoom, ..plain.clone() })), "Cmd+wheel still zooms the canvas");
         let _ = std::fs::remove_file(path);
+    }
+
+    const PANEL_WHEEL: &str = "window::canvas_view::input_tests::wheel_over_file_panel";
+
+    #[test]
+    fn file_panel_scrolls() { in_own_process(PANEL_WHEEL); }
+
+    #[gpui::test]
+    fn wheel_over_file_panel(cx: &mut TestAppContext) {
+        if !running_alone(PANEL_WHEEL) { return; }
+        let (view, cx) = panes(cx);
+        let path = std::env::temp_dir().join(format!("canopy-panel-wheel-{}.md", std::process::id()));
+        std::fs::write(&path, "A paragraph of text.\n\n".repeat(150)).unwrap();
+        let path = path.canonicalize().unwrap().to_string_lossy().into_owned();
+        view.update_in(cx, |this, window, cx| {
+            // File tabs can open before the core sends its first listing.
+            this.listed_once = false;
+            this.canvas_state.doc.panel.tree_hidden = true;
+            this.open_preview(json!({"path":path}), true, window, cx);
+        });
+        cx.run_until_parked();
+        let position = view.read_with(cx, |this, _| this.bounds.borrow()["canvas-panel"].center());
+        let offset = |cx: &mut VisualTestContext| {
+            view.read_with(cx, |this, cx| this.canvas_state.previews.get(&path)
+                .map(|(text, _)| text.read(cx).list_state().scroll_px_offset_for_scrollbar()))
+        };
+        let before = offset(cx);
+        cx.simulate_event(ScrollWheelEvent {
+            position, delta: ScrollDelta::Pixels(point(px(0.), px(-120.))),
+            modifiers: Modifiers::default(), touch_phase: TouchPhase::Moved,
+        });
+        cx.run_until_parked();
+        let after = offset(cx);
+        let _ = std::fs::remove_file(path);
+        assert!(before.zip(after).is_some_and(|(before, after)| before != after),
+            "a Markdown tab has a preview that scrolls on a plain wheel event");
     }
 
     #[gpui::test]

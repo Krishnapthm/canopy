@@ -103,7 +103,13 @@ impl AppWindow {
         }
         let state = &mut self.canvas_state;
         match tab {
-            PanelTab::File(_) => state.file = canvas::close_panel_tab(&mut state.doc.panel.tabs, state.file.as_ref(), tab),
+            PanelTab::File(path) => {
+                state.modes.remove(path);
+                if !state.doc.panes.iter().any(|pane| pane.file() == Some(path)) {
+                    state.previews.remove(path);
+                }
+                state.file = canvas::close_panel_tab(&mut state.doc.panel.tabs, state.file.as_ref(), tab);
+            }
             PanelTab::Pane(id) => self.close_boxed_panes(&[id.clone()], cx),
         }
         self.canvas_changed(cx);
@@ -147,7 +153,7 @@ impl AppWindow {
             _ => return None,
         };
         let wired = self.wired_agent(id);
-        let actions = helper_bar::pane_actions(pane, None, true);
+        let actions = helper_bar::pane_actions(pane, None, true, None);
         #[cfg(target_os = "macos")]
         let actions = self.sim_relabel(id, actions, cx);
         let label = wired.as_ref().map_or(title, |agent| format!("Wired to {}", self.pill_name(agent)));
