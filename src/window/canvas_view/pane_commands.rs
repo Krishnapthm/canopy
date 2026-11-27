@@ -115,6 +115,7 @@ impl AppWindow {
             let target = match &a["udid"] { Value::Null => None, Value::String(t) => Some(crate::sim::Target::parse(t)), _ => return Err("canvas.pane_new: udid must be a string".into()) };
             let sim_url = match &a["url"] { Value::Null => None, Value::String(u) => Some(crate::sim::Url::parse(u)?), _ => return Err("canvas.pane_new: url must be a string".into()) };
             if sim_url.is_some() && target.is_none() { return Err("canvas.pane_new: a sim url needs udid (a simulator or \"booted\")".into()); }
+            if let Some(crate::sim::Target::Udid(udid)) = &target && self.canvas_state.shutting_down_sims.contains(udid) { return Err("The simulator is shutting down".into()); }
             (target, sim_url)
         } else { (None, None) };
         use super::dock::Home;

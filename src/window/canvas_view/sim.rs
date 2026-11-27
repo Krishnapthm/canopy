@@ -112,6 +112,22 @@ struct ShutDown { pane: String, udid: String, state: sim::State }
 #[derive(serde::Serialize)]
 struct Devices { devices: Vec<sim::Listing> }
 
+/// A `new`/`open` reply once the refresh finished: `reply` plus the device, the URL it opened
+/// and, when no URL was opened, its screenshot; or the refresh's error.
+fn opened_reply(mut reply: Value, result: &Result<Option<std::path::PathBuf>, String>, device: Option<&Device>, url: Option<&sim::Url>) -> Value {
+    match (result, device) {
+        (Ok(png), Some(device)) => {
+            let url = url.filter(|_| device.booted).map(|u| u.as_str().to_owned());
+            // A screenshot taken as the URL opens still shows the previous screen; a read gives a live one.
+            let opened = Opened { device: device.into(), screenshot: png.clone().filter(|_| url.is_none()), url };
+            if let (Value::Object(r), Ok(Value::Object(o))) = (&mut reply, serde_json::to_value(opened)) { r.extend(o); }
+            reply
+        }
+        (Err(error), _) => json!({"error": error}),
+        (Ok(_), None) => json!({"error": "The simulator is not available"}),
+    }
+}
+
 /// What a background refresh found.
 enum Found {
     Pick(Vec<Device>),
@@ -264,7 +280,17 @@ impl AppWindow {
         let pending = std::mem::take(&mut view.pending);
         let result = match found {
             Ok(Found::Pick(devices)) => { view.device = None; view.devices = devices.clone(); set_screen(view, Screen::Pick(devices), cx); Err("No simulator picked yet".to_owned()) }
-            Ok(Found::Missing(why, devices)) => { view.device = None; view.devices = devices.clone(); set_screen(view, Screen::Pick(devices), cx); Err(format!("{why}. The pane {pane} shows the simulator picker")) }
+            Ok(Found::Missing(why, devices)) => {
+                view.device = None;
+                view.devices = devices.clone();
+                set_screen(view, Screen::Pick(devices), cx);
+                // The pane shows the picker, so it saves no device: a restart must not show "Gone".
+                if let Some(p) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == pane) && let canvas::Kind::Sim { udid } = &mut p.kind && !udid.is_empty() {
+                    udid.clear();
+                    self.canvas_changed(cx);
+                }
+                Err(format!("{why}. The pane {pane} shows the simulator picker"))
+            }
             Ok(Found::Gone(devices)) => { view.device = None; view.devices = devices; set_screen(view, Screen::Gone, cx); Err("This simulator no longer exists".to_owned()) }
             Ok(Found::Off(device, devices)) => { view.device = Some(device); view.devices = devices; set_screen(view, Screen::Off, cx); Ok(None) }
             Ok(Found::Shot(device, devices, image, png)) => {
@@ -295,20 +321,7 @@ impl AppWindow {
         self.attach_live(pane, window, cx);
         for waiter in pending.waiting {
             match waiter {
-                Waiter::Opened { tx, mut reply } => {
-                    let answer = match (&result, &device) {
-                        (Ok(png), Some(device)) => {
-                            let url = pending.url.as_ref().filter(|_| device.booted).map(|u| u.as_str().to_owned());
-                            // A screenshot taken as the URL opens still shows the previous screen; a read gives a live one.
-                            let opened = Opened { device: device.into(), screenshot: png.clone().filter(|_| url.is_none()), url };
-                            if let (Value::Object(r), Ok(Value::Object(o))) = (&mut reply, serde_json::to_value(opened)) { r.extend(o); }
-                            reply
-                        }
-                        (Err(error), _) => json!({"error": error}),
-                        (Ok(_), None) => json!({"error": "The simulator is not available"}),
-                    };
-                    let _ = tx.send(answer);
-                }
+                Waiter::Opened { tx, reply } => { let _ = tx.send(opened_reply(reply, &result, device.as_ref(), pending.url.as_ref())); }
                 Waiter::Read(tx) => {
                     let udid = device.as_ref().map(|d| d.udid.clone()).unwrap_or_default();
                     let _ = tx.send(json!({"text": self.sim_read(pane, &udid, cx)}));
@@ -381,7 +394,8 @@ impl AppWindow {
         let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return Err(format!("no pane {id}")) };
         let canvas::Kind::Sim { udid: saved } = &mut pane.kind else { return Err(format!("pane {id} is not a simulator pane")) };
         let (udid, pending) = match target {
-            Some(Target::Udid(udid)) => (udid, None),
+            // Named, so a UDID that is not a simulator is the caller's error and resets to the picker.
+            Some(Target::Udid(udid)) => (udid.clone(), Some(Target::Udid(udid))),
             Some(Target::Booted) => (saved.clone(), Some(Target::Booted)),
             None => (String::new(), None),
         };
@@ -1014,4 +1028,24 @@ fn set_screen(view: &mut SimView, screen: Screen, cx: &mut App) {
 /// Frees a replaced screenshot's texture once this window update ends.
 fn drop_shot(image: Arc<RenderImage>, cx: &mut App) {
     cx.defer(move |cx| cx.drop_image(image, None));
+}
+
+/// Runs on every OS: CI tests Linux, where the macOS-only tests above do not build.
+#[cfg(test)]
+mod reply_tests {
+    use super::{Device, opened_reply, sim};
+    use serde_json::json;
+
+    #[test]
+    fn opened_reply_reports_the_device_and_drops_a_stale_screenshot() {
+        let device = Device { udid: "U".into(), name: "iPhone 17".into(), runtime: "iOS 26.5".into(), booted: true, last_used: String::new(), device_type: String::new() };
+        let png = Ok(Some(std::path::PathBuf::from("/tmp/s.png")));
+        let url = sim::Url::parse("http://127.0.0.1:8000/").unwrap();
+        let base = json!({"pane":"p3","wired":true});
+        assert_eq!(opened_reply(base.clone(), &png, Some(&device), Some(&url)),
+            json!({"pane":"p3","wired":true,"udid":"U","name":"iPhone 17","runtime":"iOS 26.5","state":"booted","url":"http://127.0.0.1:8000/"}));
+        assert_eq!(opened_reply(base.clone(), &png, Some(&device), None)["screenshot"], "/tmp/s.png");
+        assert_eq!(opened_reply(base.clone(), &Err("No simulator is booted".into()), None, Some(&url)), json!({"error":"No simulator is booted"}));
+        assert_eq!(opened_reply(base, &Ok(None), None, None), json!({"error":"The simulator is not available"}));
+    }
 }
