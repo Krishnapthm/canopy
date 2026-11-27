@@ -20,7 +20,7 @@ If the file already has a pane, Canopy moves that pane to you instead of opening
 
 ### What you can do with it
 
-- **Read it.** Scroll through the file's text right on the canvas.
+- **Read it.** Double-click the pane to enter it, then scroll through the file's text right on the canvas. Until you enter it, scrolling over it pans the canvas.
 - **Quote from it.** Select lines and click the quote icon to send them to an agent with the path and line numbers. See [Point Agents at Things](Point-Agents-at-Things#lines-in-a-file).
 - **Edit it.** Click **Open as tab** in the helper bar to open the file in the [Files panel](Files-Panel), where you can edit and save it.
 - **Wire it.** Click **Connect** and then an agent. The agent then sees the file in `canopy wire` and can read it with `canopy pane read`. A file can be wired to terminals and agents, but not to another file.

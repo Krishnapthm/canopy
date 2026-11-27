@@ -52,6 +52,8 @@ pub struct Traits {
     pub dockable: bool,
     /// Whether the content handles pinch when the person is working in it.
     pub zooms: bool,
+    /// Whether the content scrolls with the wheel when the person is working in it.
+    pub scrolls: bool,
     pub content: Content,
 }
 
@@ -71,19 +73,19 @@ pub const SIM: WorldSize = WorldSize::new(340., 700.);
 
 /// The declared behavior of a pane of `kind`.
 pub fn traits(kind: &Kind) -> Traits {
-    let base = Traits { default: PREVIEW, fit: Fit::Fixed, min: MIN, aspect: None, header: Some(HEADER), pushable: true, dockable: false, zooms: false, content: Content::Text };
+    let base = Traits { default: PREVIEW, fit: Fit::Fixed, min: MIN, aspect: None, header: Some(HEADER), pushable: true, dockable: false, zooms: false, scrolls: false, content: Content::Text };
     match kind {
         // An expanded terminal keeps at least a 1.5-pill-wide, three-header-tall body.
-        Kind::Terminal { .. } => Traits { default: WorldSize::new(PILL_WIDTH, HEADER), min: WorldSize::new(PILL_WIDTH * 1.5, HEADER * 3.), content: Content::Grid, ..base },
+        Kind::Terminal { .. } => Traits { default: WorldSize::new(PILL_WIDTH, HEADER), min: WorldSize::new(PILL_WIDTH * 1.5, HEADER * 3.), scrolls: true, content: Content::Grid, ..base },
         Kind::Sub { .. } => Traits { default: WorldSize::new(PILL_WIDTH, HEADER), ..base },
-        Kind::File { .. } => Traits { fit: Fit::Column, ..base },
+        Kind::File { .. } => Traits { fit: Fit::Column, scrolls: true, ..base },
         Kind::Image { .. } => Traits { fit: Fit::Natural, content: Content::Picture, ..base },
-        Kind::Pdf { .. } => Traits { default: WorldSize::new(560., 720.), fit: Fit::Natural, content: Content::Document, ..base },
+        Kind::Pdf { .. } => Traits { default: WorldSize::new(560., 720.), fit: Fit::Natural, scrolls: true, content: Content::Document, ..base },
         Kind::Mod { kind, .. } => {
             let shape = crate::mods::pane_shape(kind).unwrap_or_default();
             Traits { default: shape.size, min: shape.min, header: shape.header.then_some(HEADER), content: Content::Mod, ..base }
         }
-        Kind::Browser { .. } => Traits { default: BROWSER, header: Some(BROWSER_HEADER), dockable: true, zooms: true, content: Content::Page, ..base },
+        Kind::Browser { .. } => Traits { default: BROWSER, header: Some(BROWSER_HEADER), dockable: true, zooms: true, scrolls: true, content: Content::Page, ..base },
         Kind::Sim { .. } => Traits { default: SIM, dockable: true, content: Content::Device, ..base },
     }
 }

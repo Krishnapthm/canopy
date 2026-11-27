@@ -3021,6 +3021,8 @@ impl AppWindow {
         let raise = drag.clone();
         let shutdown = card.sim().is_some_and(|udid| !udid.is_empty() && !self.canvas_state.shutting_down_sims.contains(udid));
         let browser = card.url().is_some();
+        // A browser enters through its own path (`select_browser_pane`).
+        let scrolls = !browser && canophy::traits(&card.kind).scrolls;
         let pane_menu = card.id.clone();
         #[cfg(target_os = "macos")]
         let rest = card.id.clone();
@@ -3032,8 +3034,9 @@ impl AppWindow {
                 .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     if e.button != MouseButton::Left { return; }
                     this.canvas_state.close_panel_focus = false;
-                    if browser && this.canvas_state.entered() != Some(raise.as_str()) {
-                        this.canvas_state.mode = true;
+                    // A click leaves the entered pane; a double-click enters a pane that scrolls (law 9).
+                    if this.canvas_state.entered() != Some(raise.as_str()) {
+                        this.canvas_state.mode = !(scrolls && e.click_count == 2);
                     }
                     this.raise_pane(&raise, cx);
                     this.focus.focus(window, cx);
@@ -4431,7 +4434,11 @@ impl AppWindow {
     fn claims_wheel(&self, e: &ScrollWheelEvent) -> bool {
         wheel_claimed(wheel_zooms(e.modifiers), self.canvas_state.wheel_pan_at, std::time::Instant::now())
             || (gesture_ended(e.touch_phase) && self.canvas_state.wheel_zoom.is_some())
-            || self.wire_cell_at(e.position, 0.).is_some_and(|pane| self.canvas_state.entered() != Some(&pane))
+            || self.wire_cell_at(e.position, 0.).is_some_and(|id| {
+                self.canvas_state.doc.panes.iter().find(|p| p.id == id).is_none_or(|p| {
+                    canophy::wheel_owner(&canophy::traits(&p.kind), self.placement(&p.id)) == canophy::Owner::Canvas
+                })
+            })
     }
 }
 
@@ -4975,6 +4982,33 @@ mod input_tests {
         let before = camera(cx);
         cx.simulate_event(pinch);
         assert_eq!(camera(cx), before, "an entered browser owns the pinch");
+
+        // Law 9: a file pane pans the canvas until it is entered, then scrolls its text.
+        let path = std::env::temp_dir().join(format!("canopy-wheel-{}.md", std::process::id()));
+        std::fs::write(&path, "# Notes\n").unwrap();
+        view.update_in(cx, |this, window, cx| {
+            let file: canvas::Pane = serde_json::from_value(json!({
+                "id":"f1","kind":"file","props":{"path":path},"rect":[100,120,300,200],"z":3
+            })).unwrap();
+            this.canvas_state.doc.panes.push(file);
+            this.load_previews(None, window, cx);
+            this.canvas_state.selected = vec!["f1".into()];
+            this.canvas_state.mode = true;
+            this.canvas_state.wheel_pan_at = None;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let plain = ScrollWheelEvent { position, delta: ScrollDelta::Pixels(point(px(0.), px(20.))), modifiers: none, touch_phase: TouchPhase::Moved };
+        assert!(view.read_with(cx, |this, _| this.claims_wheel(&plain)), "a selected file pane pans the canvas");
+        cx.simulate_event(MouseDownEvent { position, modifiers: none, button: MouseButton::Left, click_count: 1, first_mouse: false });
+        cx.simulate_mouse_up(position, MouseButton::Left, none);
+        assert!(view.read_with(cx, |this, _| this.canvas_state.entered().is_none()), "a click selects without entering");
+        cx.simulate_event(MouseDownEvent { position, modifiers: none, button: MouseButton::Left, click_count: 2, first_mouse: false });
+        cx.simulate_mouse_up(position, MouseButton::Left, none);
+        assert_eq!(view.read_with(cx, |this, _| this.canvas_state.entered().map(str::to_owned)), Some("f1".into()), "a double-click enters");
+        assert!(!view.read_with(cx, |this, _| this.claims_wheel(&plain)), "an entered file pane scrolls its own text");
+        assert!(view.read_with(cx, |this, _| this.claims_wheel(&ScrollWheelEvent { modifiers: zoom, ..plain.clone() })), "Cmd+wheel still zooms the canvas");
+        let _ = std::fs::remove_file(path);
     }
 
     #[gpui::test]

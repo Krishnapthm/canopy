@@ -12,6 +12,7 @@
 //! - Law 6. Content with its own zoom gets the pinch when entered, docked or popped out (`input::pinch_owner`).
 //! - Law 7. Rasterized panes use `rest_scale` to draw for the scale at which they will rest.
 //! - Law 8. Closing a browser pane's last tab closes the pane.
+//! - Law 9. A plain wheel scrolls content the person has entered, and pans the canvas elsewhere (`input::wheel_owner`).
 //!
 //! # Step order
 //!
@@ -57,7 +58,7 @@ pub mod units;
 mod tests;
 
 pub use camera::{Camera, focus_fit, reveal, visible, widen, zoom_range};
-pub use input::{Placement, Owner, pinch_owner};
+pub use input::{Placement, Owner, pinch_owner, wheel_owner};
 pub use layout::{Layout, layout, rest_scale};
 pub use open::{Natural, open_size};
 pub use rules::{arrange, cascade, child_position, free_spot, solve, tile};

@@ -395,7 +395,7 @@ empty canvas or another cell, or Cmd+Esc / Ctrl+Esc (`canvas.mode`), leaves it. 
 shows keys on the toolbar and helper bars, even while a terminal has focus. Expanded cells are
 100 x 30 cells by default, neighbours give way; `x` or `canvas.expand` collapses, which puts the
 neighbours back. Drag the bottom-right corner to resize; the terminal is resized on release. Several
-can be open. The wheel scrolls a focused expanded terminal and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
+can be open. The wheel scrolls an entered pane that scrolls (a terminal, PDF, file or browser; double-click enters) and pans the canvas anywhere else. `canvas.expand {terminal?}` toggles
 the named or last selected cell; `panel.open {terminal}` only expands. Below 0.5 zoom an expanded cell draws as its
 pill. The side panel shows files and sub-agent transcripts only.
 

@@ -46,7 +46,8 @@ Highlights stay on the pane, so you can mark up a spec as you read it and quote 
 
 ### Move around
 
-- Click **Zoom out**, **Reset zoom**, or **Zoom in** to change the PDF zoom. Reset returns it to 100%.
+- Double-click the PDF to enter it, then scroll with the wheel or two fingers. Click empty canvas or another pane to leave it. Until you enter it, scrolling over the PDF pans the canvas.
+- Click **Zoom out**, **Reset zoom**, or **Zoom in** to change the PDF zoom. Reset returns the page to fit the pane's width.
 - Click **Previous page** or **Next page**, or press `[` and `]` with the pane selected.
 - Click **Clear highlights**, or press `Shift+M`, to remove every highlight. The button shows only when there are some.
 
