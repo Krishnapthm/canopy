@@ -19,6 +19,9 @@ Zooming the canvas scales each pane like a picture (see [How panes behave when y
 
 Pan and zoom work over empty canvas and over any pane you have not entered. An entered terminal keeps plain scroll for its output. Pinch and `Cmd`+scroll (`Ctrl`+scroll on Linux and Windows) still zoom the canvas over a terminal.
 
+On macOS, pinch magnifies an entered, docked or popped-out browser page. Closing
+the last tab removes its pane. See [Browser Pane](Browser-Pane#use-the-page).
+
 Each space, and Home, remembers its own pan and zoom.
 
 ## Select and move panes

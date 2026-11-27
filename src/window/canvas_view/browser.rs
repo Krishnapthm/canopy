@@ -241,6 +241,10 @@ struct Page {
     told: bool,
     /// The last snapshot, BGRA for GPUI.
     shot: Option<Arc<RenderImage>>,
+    /// Layout scale of the last captured still, if known.
+    shot_scale: Option<f32>,
+    /// Sequence and scale of the latest request, including a failed one.
+    shot_request: Option<(u64, f32)>,
     title: String,
     /// While live: the last placement used to set WebKit zoom.
     live: Option<canophy::Layout>,
@@ -281,6 +285,7 @@ struct Native {
     view: Entity<gpui_wry::WebView>,
     raw: gpui_wry::WebViewHandle,
     clip: objc2::rc::Retained<objc2_app_kit::NSView>,
+    magnifies: bool,
     // The pending local load may run only while this view is still mounted.
     _local_load: Option<std::rc::Rc<()>>,
 }
@@ -307,8 +312,8 @@ pub(in crate::window) enum Event {
     Open(String),
     Blocked(String),
     LoadError(String),
-    /// The snapshot taken when the page rested (None: it failed).
-    Rested(Option<image::RgbaImage>),
+    /// The still request and its image (None when WebKit failed).
+    Rested((u64, f32), Option<image::RgbaImage>),
     /// A resting page out of sight has media playing.
     Playing,
 }
@@ -574,6 +579,17 @@ impl AppWindow {
             None => div().size_full().flex().items_center().justify_center().p(wpx(16.)).text_color(c("muted-foreground"))
                 .child(if page.is_some_and(|p| p.loading) { "Loading…".to_owned() } else { "Click to load the page".to_owned() }),
         };
+        #[cfg(target_os = "macos")]
+        let body = body.when(page.is_some_and(|p| p.needs_still(layout.scale)) && self.measured_host_frame(pane).is_none(), |body| {
+            let view = cx.entity().downgrade();
+            body.relative().child(canvas(move |_, window, cx| {
+                window.defer(cx, move |_, cx| {
+                    let _ = view.update(cx, |this, cx| {
+                        if this.camera_rested() { this.sync_resting_browser_stills(cx); }
+                    });
+                });
+            }, |_, _, _, _| {}).absolute().size_full())
+        });
         let body = body.id(SharedString::from(format!("browser-{id}"))).cursor_pointer()
             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| {
                 cx.stop_propagation();
@@ -677,7 +693,7 @@ impl AppWindow {
             // In the pop-out, Close already brings the page back.
             .when(host == Host::Pane, |d| d.child(self.browser_button(id, "browser-pop", "icons/picture-in-picture-2.svg", pop_label, "canvas.browser_pop", cx)))
             .when(host == Host::Pane && !docked, |d| d.child(self.browser_button(id, "browser-expand", "icons/maximize-2.svg", "Expand", "canvas.browser_expand", cx)))
-            .when(host == Host::Pane && !docked, |d| d.child(self.browser_button(id, "browser-close", "icons/x.svg", "Close", "canvas.close", cx)))
+            .when(host == Host::Pane, |d| d.child(self.browser_button(id, "browser-close", "icons/x.svg", "Close", "canvas.close", cx)))
             .when(host == Host::Window, |d| d.child(self.browser_button(id, "browser-close", "icons/x.svg", "Bring back", "canvas.browser_pop", cx)))
     }
 
@@ -771,6 +787,8 @@ impl AppWindow {
         if !urls.is_empty() { self.browser_events(window, cx); }
         for (id, shown) in urls {
             self.sync_url_input(&id, Host::Pane, window, cx);
+            #[cfg(target_os = "macos")]
+            self.sync_browser_magnification(&id);
             let ui = self.canvas_state.browsers.panes.entry(id).or_default();
             // A popped pane's new tab takes the keyboard in its window.
             if shown && ui.popped.is_none() && std::mem::take(&mut ui.focus_url) && let Some((input, _)) = &ui.url_input {
@@ -1011,8 +1029,10 @@ impl AppWindow {
                 self.toast(Toast { title: "Page not opened".into(), body: Some(error), level: Level::Error,
                     action: Some(("pane.focus".into(), json!({"pane": id}))) }, window, cx);
             }
-            Event::Rested(shot) => {
+            Event::Rested(request, shot) => {
+                if Some(request) != page.shot_request { return; }
                 if let Some(rgba) = shot {
+                    page.shot_scale = Some(request.1);
                     let file = shot_file(&key);
                     let saved = rgba.clone();
                     cx.background_executor().spawn(async move {
@@ -1066,9 +1086,8 @@ impl AppWindow {
         let resting = page.live.is_none();
         self.note_browser_url(key, cx);
         // The host may have been measured since the view was made: read and snapshot at its size.
-        if resting { self.fit_resting(key, cx); }
-        for ask in waiting { self.answer_browser(key, ask); }
         if resting { self.rest_page(key, cx); }
+        for ask in waiting { self.answer_browser(key, ask); }
         cx.notify();
     }
 
@@ -1180,7 +1199,8 @@ impl AppWindow {
             None => *active,
         };
         if tabs.len() == 1 {
-            tabs.push(canvas::Tab { id: canvas::next_tab_id(tabs), url: String::new(), title: String::new() });
+            self.close_canvas_cell(&json!({"pane": id}), window, cx);
+            return Ok(());
         }
         let selected = if index == *active {
             let next = if index == 0 { 1 } else { index - 1 };
@@ -1524,8 +1544,9 @@ impl AppWindow {
 
     /// The click on a resting page.
     fn wake_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if let Err(e) = self.wake_browser_result(id, window, cx) {
-            self.toast(Toast { title: "Page not opened".into(), body: Some(e), level: Level::Error, action: None }, window, cx);
+        match self.wake_browser_result(id, window, cx) {
+            Ok(()) => if !self.canvas_state.doc.docked(id) { self.canvas_state.mode = false; },
+            Err(e) => self.toast(Toast { title: "Page not opened".into(), body: Some(e), level: Level::Error, action: None }, window, cx),
         }
     }
 }
@@ -1718,14 +1739,21 @@ impl Render for BrowserWindow {
 /// when WebKit fails.
 #[cfg(target_os = "macos")]
 fn snapshot(view: &wry::WebView, done: impl FnOnce(Option<image::RgbaImage>) + 'static) {
-    use objc2_app_kit::NSImage;
+    use objc2_app_kit::{NSBitmapImageRep, NSImage};
     use objc2_foundation::NSError;
     use wry::WebViewExtMacOS as _;
     let done = std::cell::Cell::new(Some(done));
     let block = block2::RcBlock::new(move |image: *mut NSImage, _: *mut NSError| {
         let Some(done) = done.take() else { return };
         // SAFETY: WebKit passes a valid NSImage or null.
-        let tiff = unsafe { image.as_ref() }.and_then(|image| image.TIFFRepresentation());
+        // NSImage can hold multiple pixel densities. Encode the widest bitmap to retain backing pixels.
+        let tiff = unsafe { image.as_ref() }.and_then(|image| {
+            image.representations().to_vec().into_iter()
+                .filter_map(|rep| rep.downcast::<NSBitmapImageRep>().ok())
+                .max_by_key(|rep| rep.pixelsWide())
+                .and_then(|rep| rep.TIFFRepresentation())
+                .or_else(|| image.TIFFRepresentation())
+        });
         done(tiff.and_then(|data| image::load_from_memory_with_format(&data.to_vec(), image::ImageFormat::Tiff).ok()).map(|i| i.to_rgba8()));
     });
     // SAFETY: called on the main thread with a live WKWebView; WebKit copies the block.
@@ -1733,7 +1761,30 @@ fn snapshot(view: &wry::WebView, done: impl FnOnce(Option<image::RgbaImage>) + '
 }
 
 #[cfg(target_os = "macos")]
+fn set_magnification(view: &wry::WebView, enabled: bool) {
+    use objc2::{msg_send, runtime::Bool};
+    use wry::WebViewExtMacOS as _;
+    // shortcut: WebKitGTK pinch is unverified, upgrade after a Linux sandbox check.
+    // SAFETY: called on the main thread with a live WKWebView.
+    unsafe { let _: () = msg_send![&*view.webview(), setAllowsMagnification: Bool::new(enabled)]; }
+}
+
+#[cfg(target_os = "macos")]
 impl AppWindow {
+    fn sync_browser_magnification(&mut self, id: &str) {
+        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
+        let canvas::Kind::Browser { tabs, .. } = &pane.kind else { return };
+        let magnifies = canophy::pinch_owner(&canophy::traits(&pane.kind), self.placement(id)) == canophy::Owner::Content;
+        for tab in tabs {
+            if let Some(native) = self.canvas_state.browsers.pages.get_mut(&tab_key(id, &tab.id)).and_then(|p| p.native.as_mut())
+                && native.magnifies != magnifies
+            {
+                set_magnification(native.raw.raw(), magnifies);
+                native.magnifies = magnifies;
+            }
+        }
+    }
+
     /// Makes the tab's web view (hidden, loading the saved URL) unless it has one. A popped pane's
     /// views are built in its pop-out window, whichever window asked.
     // shortcut: hidden views stay allocated until their tab closes, drop views on rest if memory matters.
@@ -1743,6 +1794,7 @@ impl AppWindow {
         if self.canvas_state.browsers.pages.get(&key).is_some_and(Page::has_view) { return Ok(()); }
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.url().is_some()).ok_or_else(|| format!("no browser pane {id}"))?;
         let (url, frame) = (pane.url().unwrap().to_owned(), self.host_frame(pane));
+        let magnifies = canophy::pinch_owner(&canophy::traits(&pane.kind), self.placement(id)) == canophy::Owner::Content;
         let local = if url.starts_with("file:") {
             let path = checked_file(&file_path(&url)?)?;
             // Recheck after rest, pop-out, or restore. A stale folder grant cannot follow a
@@ -1806,6 +1858,7 @@ impl AppWindow {
                 })
                 .build_as_child(window)
                 .map_err(|e| format!("cannot make the web view: {e}"))?;
+            set_magnification(&webview, magnifies);
             let local_load = if let Some((_, path, folder)) = local {
                 let token = std::rc::Rc::new(());
                 load_local_file(&webview, &path, folder.as_deref(), std::rc::Rc::downgrade(&token), send(Event::LoadError))?;
@@ -1819,7 +1872,7 @@ impl AppWindow {
                 if popped.is_none() { fit_view(v, frame); }
                 v.handle()
             });
-            Ok(Native { view, raw, clip, _local_load: local_load })
+            Ok(Native { view, raw, clip, magnifies, _local_load: local_load })
         };
         // The window that asked may itself be the pop-out, which cannot be updated from inside.
         let native = match popped {
@@ -1857,6 +1910,7 @@ impl AppWindow {
         });
         self.canvas_state.browser_tab = Some(id.to_owned());
         self.select_browser_pane(id);
+        self.canvas_state.mode = false;
         cx.notify();
         Ok(())
     }
@@ -1865,6 +1919,7 @@ impl AppWindow {
     /// rested the usual way. Called by every way out: the command, Escape, any space tab, close.
     pub(super) fn collapse_browser(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.canvas_state.browser_tab.take() else { return };
+        self.canvas_state.mode = true;
         let frame = self.canvas_state.doc.panes.iter().find(|p| p.id == id).map(|p| self.host_frame(p));
         if let (Some(frame), Some(native)) = (frame, self.active_page(&id).and_then(|p| p.native.as_ref())) {
             native.view.update(cx, |v, _| fit_view(v, frame));
@@ -1879,7 +1934,7 @@ impl AppWindow {
     /// brings it back. Every tab's page then lives in the window; the pane's own views are
     /// destroyed first and the pane says so. Website data stays in the shared store, so sign-ins
     /// carry over both ways.
-    fn pop_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+    pub(super) fn pop_browser(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
         if self.browser_popped(id) {
             if let Some(popped) = self.unpop_browser(id, cx) {
                 // The window may be the one asking: it cannot be updated from inside.
@@ -2095,19 +2150,31 @@ impl AppWindow {
 
     fn rest_page(&mut self, key: &str, cx: &mut Context<Self>) {
         // A popped pane's pages live in its window: they never rest.
-        if key.split_once('/').is_some_and(|(id, _)| self.browser_popped(id)) { return; }
+        let Some((id, _)) = key.split_once('/') else { return };
+        if self.browser_popped(id) { return; }
+        let measured = self.canvas_state.doc.panes.iter().find(|p| p.id == id)
+            .and_then(|pane| self.measured_host_frame(pane));
         let Some(page) = self.canvas_state.browsers.pages.get_mut(key) else { return };
         let Some(view) = page.native.as_ref().map(|n| n.view.clone()) else { return };
         let view_id = page.view_id;
-        let was_live = page.live.take().is_some();
+        let live = page.live.take();
         self.canvas_state.browsers.last_masks.borrow_mut().remove(key);
         page.watch = true;
         let Some(tx) = self.canvas_state.browsers.events.clone() else { return };
-        let owned = key.to_owned();
-        view.update(cx, |v, _| {
-            if was_live { let _ = v.focus_parent(); }
-            snapshot(v.raw(), move |shot| { let _ = tx.try_send((owned, view_id, Event::Rested(shot))); });
-        });
+        if let Some((frame, scale)) = measured {
+            let request = page.request_still(live.map_or(scale, |layout| layout.scale));
+            let owned = key.to_owned();
+            view.update(cx, |v, _| {
+                if live.is_some() { let _ = v.focus_parent(); } else { fit_view(v, frame); }
+                snapshot(v.raw(), move |shot| { let _ = tx.try_send((owned, view_id, Event::Rested(request, shot))); });
+            });
+        } else if live.is_some() {
+            view.update(cx, |v, _| {
+                let _ = v.focus_parent();
+                v.hide();
+                super::browser_mask::clear_mask(v.raw());
+            });
+        }
         self.note_browser_url(key, cx);
         cx.notify();
     }
@@ -2182,7 +2249,8 @@ impl AppWindow {
         let Some(page) = self.canvas_state.browsers.pages.get_mut(&key) else { return done(self, None, cx) };
         let Some(view) = page.native.as_ref().map(|n| n.view.clone()) else { return done(self, None, cx) };
         let view_id = page.view_id;
-        page.live = None;
+        let scale = page.live.take().map_or(1., |layout| layout.scale);
+        let request = page.request_still(scale);
         page.watch = !popped;
         self.canvas_state.browsers.last_masks.borrow_mut().remove(&key);
         let events = self.canvas_state.browsers.events.clone();
@@ -2195,7 +2263,7 @@ impl AppWindow {
         self.note_browser_url(&key, cx);
         cx.spawn(async move |this, cx| {
             let shot = rx.recv().with_timeout(Duration::from_secs(2), cx.background_executor()).await.ok().and_then(Result::ok).flatten();
-            if let Some(events) = events { let _ = events.try_send((id, view_id, Event::Rested(shot.clone()))); }
+            if let Some(events) = events { let _ = events.try_send((id, view_id, Event::Rested(request, shot.clone()))); }
             let _ = this.update(cx, |this, cx| done(this, shot, cx));
         }).detach();
         cx.notify();
@@ -2419,7 +2487,7 @@ impl AppWindow {
     fn expand_browser(&mut self, _: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
         Err("browser panes run on macOS only for now".into())
     }
-    fn pop_browser(&mut self, _: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
+    pub(super) fn pop_browser(&mut self, _: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
         Err("browser panes run on macOS only for now".into())
     }
     fn clear_browsing_data(&mut self, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
@@ -2631,19 +2699,23 @@ impl AppWindow {
         Some(Bounds::new(origin + point(px(x), px(y)), size(px(w), px(h))))
     }
 
-    /// The size and zoom a page lays out at in its measured host (the Files panel body, or the
-    /// pane at the current camera, zoomed with it), so a resting snapshot matches the page when
-    /// it wakes. Before the host is measured, the pane's world body at zoom 1.
+    /// Gives a new view an initial size even before its first layout.
     fn host_frame(&self, pane: &canvas::Pane) -> ([f32; 2], f64) {
+        self.measured_host_frame(pane).map_or_else(|| {
+            (canophy::layout(self.canvas_state.doc.camera, pane).body_world.map(|v| v.max(1.)), 1.)
+        }, |(frame, _)| frame)
+    }
+
+    /// The measured view size and WebKit zoom, plus the host's layout scale for its still.
+    fn measured_host_frame(&self, pane: &canvas::Pane) -> Option<(([f32; 2], f64), f32)> {
         let docked = self.canvas_state.doc.docked(&pane.id);
-        let body_world = canophy::layout(self.canvas_state.doc.camera, pane).body_world;
-        match self.body_rect(pane).map(|b| [f32::from(b.size.width), f32::from(b.size.height)]) {
-            Some([w, h]) if w >= 1. && h >= 1. => {
-                let width = if docked { w } else { body_world[0] };
-                ([w, h], fixed_viewport(pane).map_or(f64::from(w / width), |[css_w, _]| f64::from(w / css_w)))
-            }
-            _ => (body_world.map(|v| v.max(1.)), 1.),
-        }
+        let layout = canophy::layout(self.canvas_state.doc.camera, pane);
+        let body = self.body_rect(pane)?;
+        let [w, h] = [f32::from(body.size.width), f32::from(body.size.height)];
+        if w < 1. || h < 1. { return None; }
+        let width = if docked { w } else { layout.body_world[0] };
+        let zoom = fixed_viewport(pane).map_or(f64::from(w / width), |[css_w, _]| f64::from(w / css_w));
+        Some((([w, h], zoom), if docked { 1. } else { layout.scale }))
     }
 
     pub(super) fn live_browser_views(&self) -> impl Iterator<Item = (&str, gpui_wry::WebViewHandle)> {
@@ -2657,30 +2729,54 @@ impl AppWindow {
 impl AppWindow {
     /// Retakes a resting browser's snapshot at its settled host size.
     pub(super) fn resize_resting_browser(&mut self, id: &str, cx: &mut Context<Self>) {
-        if let Some(key) = self.page_key(id) && self.fit_resting(&key, cx) { self.rest_browser(id, cx); }
+        if self.active_page(id).is_some_and(|page| page.live.is_none() && page.has_view()) {
+            self.rest_browser(id, cx);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl AppWindow {
+    /// Runs after a gesture or ease settles, and on the first measured frame of a resting page.
+    pub(super) fn sync_resting_browser_stills(&mut self, cx: &mut Context<Self>) {
+        let state = &self.canvas_state;
+        let mut refresh = Vec::new();
+        for pane in &state.doc.panes {
+            let canvas::Kind::Browser { tabs, .. } = &pane.kind else { continue };
+            if !state.shows_pane(pane) || self.browser_popped(&pane.id) || state.annotations.contains_key(&pane.id) { continue; }
+            let Some((_, scale)) = self.measured_host_frame(pane) else { continue };
+            for tab in tabs {
+                let key = tab_key(&pane.id, &tab.id);
+                if state.browsers.pages.get(&key).is_some_and(|page| page.needs_still(scale)) {
+                    refresh.push(key);
+                }
+            }
+        }
+        for key in refresh { self.rest_page(&key, cx); }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Page {
+    fn request_still(&mut self, scale: f32) -> (u64, f32) {
+        let request = (self.shot_request.map_or(1, |(n, _)| n + 1), scale);
+        self.shot_request = Some(request);
+        request
     }
 
-    /// Lays a resting page out at `host_frame`; false when it has no view to fit.
-    fn fit_resting(&self, key: &str, cx: &mut Context<Self>) -> bool {
-        #[cfg(target_os = "macos")]
-        // A popped page is sized by its own window.
-        if let Some((id, _)) = key.split_once('/')
-            && !self.browser_popped(id)
-            && let Some(native) = self.canvas_state.browsers.pages.get(key).filter(|p| p.live.is_none()).and_then(|p| p.native.as_ref())
-            && let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id)
-        {
-            let frame = self.host_frame(pane);
-            native.view.update(cx, |v, _| fit_view(v, frame));
-            return true;
-        }
-        #[cfg(not(target_os = "macos"))]
-        let _ = (key, cx);
-        false
+    fn needs_still(&self, scale: f32) -> bool {
+        self.has_view() && self.live.is_none() && !self.loading && self.still_needs_scale(scale)
+    }
+
+    fn still_needs_scale(&self, scale: f32) -> bool {
+        self.shot_scale.into_iter().chain(self.shot_request.map(|(_, scale)| scale))
+            .all(|previous| scale > previous * 1.05)
     }
 }
 
 #[cfg(all(test, target_os = "macos"))]
 mod host_tests {
+    use super::Page;
     use crate::canvas;
     use gpui::{Bounds, TestAppContext, point, px, size};
     use serde_json::json;
@@ -2690,6 +2786,18 @@ mod host_tests {
     #[test]
     fn resting_pages_fit_their_measured_host() { in_own_process(TEST); }
 
+    #[test]
+    fn stills_refresh_only_after_growing_more_than_five_percent() {
+        let mut page = Page::default();
+        assert!(page.still_needs_scale(1.));
+        page.shot_scale = Some(1.);
+        assert!(!page.still_needs_scale(0.9));
+        assert!(!page.still_needs_scale(1.05));
+        assert!(page.still_needs_scale(1.06));
+        page.request_still(1.1);
+        assert!(!page.still_needs_scale(1.1));
+    }
+
     #[gpui::test]
     fn resting_pages_fit_their_measured_host_headless(cx: &mut TestAppContext) {
         if !running_alone(TEST) { return; }
@@ -2697,18 +2805,23 @@ mod host_tests {
         view.update_in(cx, |this, _, _| {
             this.canvas_state.doc.panes = serde_json::from_value(json!([{"id":"b1","kind":"browser",
                 "props":{"tabs":[{"id":"t1","url":"https://example.com/"}],"active":0,"home":""},"rect":[0,0,964,740],"z":0}])).unwrap();
-            this.bounds.borrow_mut().insert("canopy-canvas".into(), Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(800.))));
             let pane = this.canvas_state.doc.panes[0].clone();
+            this.bounds.borrow_mut().remove("canopy-canvas");
+            assert!(this.measured_host_frame(&pane).is_none());
+            this.bounds.borrow_mut().insert("canopy-canvas".into(), Bounds::new(point(px(0.), px(0.)), size(px(1200.), px(800.))));
             // On the canvas: the camera scales the frame and the page zooms with it, so its
             // CSS width stays the body's width at zoom 1 (962 = 964 less the border).
             this.canvas_state.doc.camera.zoom_at(0.5, [0., 0.]);
             let ([w, _], zoom) = this.host_frame(&pane);
             assert_eq!((w, zoom), (480., f64::from(480_f32 / 962.)));
+            assert_eq!(this.measured_host_frame(&pane).unwrap().1, 0.5);
             // Docked: the measured panel body, not the pane's world size.
             this.canvas_state.doc.dock("b1");
             this.canvas_state.file = Some(canvas::PanelTab::Pane("b1".into()));
+            assert!(this.measured_host_frame(&pane).is_none());
             this.bounds.borrow_mut().insert("panel-body:b1".into(), Bounds::new(point(px(624.), px(40.)), size(px(576.), px(700.))));
             assert_eq!(this.host_frame(&pane), ([576., 700.], 1.));
+            assert_eq!(this.measured_host_frame(&pane).unwrap().1, 1.);
             // A fixed viewport scales to fit the body at its own aspect ratio.
             let canvas::Kind::Browser { viewport, .. } = &mut this.canvas_state.doc.panes[0].kind else { unreachable!() };
             *viewport = Some([288., 350.]);

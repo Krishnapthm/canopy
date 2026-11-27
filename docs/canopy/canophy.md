@@ -17,19 +17,30 @@ function, and everything draws from one layout.
 
 These are product decisions. Code that breaks one is a bug, whatever the test suite says.
 
-- **Law 1. Zoom is a picture.** everything inside a pane, header included, scales with the canvas.
-  only overlay chrome keeps its screen size: the helper bar, resize grips, the selection
-  outline, wires and the marquee.
-- **Law 2. A pane the person opens eases the camera to 100%.** panes an agent creates never move
-  the camera. when one lands out of view, a toast with a jump action says so.
-- **Law 3. The Files panel shrinks the canvas.** the canvas keeps its left edge, and the entered
-  pane is revealed when the panel covers it.
-- **Law 4. Zoom never changes a terminal's grid.** resizing reflows it once, on release.
-- **Law 5. A new file-backed pane fits its content to the visible canvas at 100%.** images and
-  first PDF pages keep their proportions, and a text preview opens as a reading column.
-  the pane's minimum size takes priority when space runs out.
-- **Law 7. Rasterized content draws for its resting scale.** a PDF uses the destination scale
-  from its first bitmap during an ease and keeps the current raster scale during a gesture.
+**1. Zoom is a picture.** Everything inside a pane, header included, scales with the canvas.
+Only overlay chrome keeps its screen size: the helper bar, resize grips, the selection
+outline, wires and the marquee.
+
+**2. A pane the person opens eases the camera to 100%.** Panes an agent creates never move
+the camera. When one lands out of view, a toast with a jump action says so.
+
+**3. The Files panel shrinks the canvas.** The canvas keeps its left edge and reveals the
+entered pane when the panel covers it.
+
+**4. Zoom never changes a terminal's grid.** Resizing reflows it once, on release.
+
+**5. A new file-backed pane fits its content to the visible canvas at 100%.** Images and
+first PDF pages keep their proportions, and a text preview opens as a reading column. The
+pane's minimum size takes priority when space runs out.
+
+**6. Content you're working in gets the pinch.** A pane that handles pinch gets it when
+entered on the canvas, docked or popped out. Otherwise, the pinch zooms the canvas.
+
+**7. Rasterized content draws for its resting scale.** A PDF rasterizes for the ease's
+destination from its first bitmap and keeps its current raster during a gesture.
+
+**8. Closing the last browser tab closes its pane.** This applies on the canvas, in the
+Files panel and in a pop-out.
 
 ## The pieces
 
@@ -38,6 +49,7 @@ These are product decisions. Code that breaks one is a bug, whatever the test su
 | World and screen px | `units.rs`, `camera.rs` | World px are canvas px at 100% zoom. Screen px are GPUI's. Only `Camera` converts between them, and its fields are private. |
 | `Traits` | `traits.rs` | What a pane kind is: default size, min, aspect, header height, whether it pushes neighbours or docks, and what its body draws. |
 | `open_size`, `Fit` | `open.rs`, `traits.rs` | Size a new pane at 100% from its fit mode and the uncovered viewport. Natural content shrinks uniformly, with room for chrome and a 32 px gap at each canvas edge. |
+| `pinch_owner` | `input.rs` | Chooses whether the canvas or pane content handles a pinch from the pane kind's traits and its current placement. |
 | `step(doc, Intent, &Viewport)` | `step.rs` | The only way to change pane geometry or the camera. Applies the intent, then the size law, the camera law and (debug builds) the invariants, in that order. |
 | `Layout` | `layout.rs` | `layout(camera, pane)` gives the pane's screen rect, header height, body rect, scale, and body size in world px. Render reads this and nothing else. |
 | `rest_scale` | `layout.rs` | Pick the raster scale from the current camera or the ease's destination. Return no scale while a zoom gesture is moving. |

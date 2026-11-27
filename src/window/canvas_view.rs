@@ -599,6 +599,32 @@ impl AppWindow {
         self.canvas_overlay_at(position) || self.canvas_chrome_at(position)
     }
 
+    /// The current host of a pane. Browser pop-outs keep their own window handles.
+    fn placement(&self, id: &str) -> canophy::Placement {
+        let state = &self.canvas_state;
+        if state.popped.contains_key(id) || self.browser_popped(id) {
+            canophy::Placement::Popped
+        } else if state.doc.docked(id) {
+            canophy::Placement::Docked
+        } else {
+            canophy::Placement::Canvas { entered: state.entered() == Some(id) }
+        }
+    }
+
+    fn content_owns_pinch(&self, position: Point<Pixels>) -> bool {
+        let state = &self.canvas_state;
+        if state.entered().is_none() { return false; }
+        let doc = state.shown.as_ref().unwrap_or(&state.doc);
+        let [x, y] = self.wire_local(position);
+        doc.panes.iter().filter(|p| doc.shown(p)).filter(|p| {
+            let [left, top, width, height] = canophy::layout(state.doc.camera, p).screen;
+            x >= left && x < left + width && y >= top && y < top + height
+        }).max_by_key(|p| paint_order(p)).is_some_and(|p| {
+            !self.browser_popped(&p.id)
+                && canophy::pinch_owner(&canophy::traits(&p.kind), self.placement(&p.id)) == canophy::Owner::Content
+        })
+    }
+
     /// Resize the held edge in world pixels, or in screen pixels for a pinned pane.
     fn apply_resize(&mut self, position: Point<Pixels>, pan: canophy::Point, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
@@ -1130,6 +1156,9 @@ impl AppWindow {
             if !pane.boxed() { return self.fail(format!("pane {id} is a {}: close it with canvas.close {{terminal}}", pane.kind_name())); }
             // Its text lives only in canvas.json: an agent must not delete what the person wrote.
             if pane.text().is_some() { return self.fail(format!("pane {id} holds text the person wrote: only they can close it")); }
+            if self.browser_popped(id) && let Err(error) = self.pop_browser(id, window, cx) {
+                return self.fail(error);
+            }
             return self.close_boxed_panes(&[id.to_owned()], cx);
         }
         // The confirmed dialog hands back the panes whose text closing deletes.
@@ -1603,6 +1632,8 @@ impl AppWindow {
                 | canvas::Kind::Mod { .. } | canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. } => {}
             }
         }
+        #[cfg(target_os = "macos")]
+        if rested { self.sync_resting_browser_stills(cx); }
     }
 
     /// Measures the uncovered canvas and re-derives pinned panes when it changes.
@@ -1900,10 +1931,10 @@ impl AppWindow {
         self.set_expanded(&addr, expand, window, cx);
     }
 
-    /// Delay terminal grid resizing and crisp PDF pages until a canvas zoom gesture settles.
+    /// Delay terminal grid resizing and sharp page redraws until a canvas zoom gesture settles.
     fn zoom_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let state = &mut self.canvas_state;
-        if !state.doc.panes.iter().any(|c| c.size().is_some() || matches!(c.kind, canvas::Kind::Pdf { .. })) { return; }
+        if !state.doc.panes.iter().any(|c| c.size().is_some() || matches!(c.kind, canvas::Kind::Pdf { .. } | canvas::Kind::Browser { .. })) { return; }
         let since = std::time::Instant::now();
         state.motion.camera = canophy::Motion::Gesture { since };
         state.zoom_task = Some(cx.spawn_in(window, async move |this, cx| {
@@ -2946,6 +2977,9 @@ impl AppWindow {
                 .capture_any_mouse_down(cx.listener(move |this, e: &MouseDownEvent, window, cx| {
                     if e.button != MouseButton::Left { return; }
                     this.canvas_state.close_panel_focus = false;
+                    if browser && this.canvas_state.entered() != Some(raise.as_str()) {
+                        this.canvas_state.mode = true;
+                    }
                     this.raise_pane(&raise, cx);
                     this.focus.focus(window, cx);
                     this.canvas_state.selected = vec![raise.clone()];
@@ -3233,6 +3267,7 @@ impl AppWindow {
                         window.on_mouse_event(move |e: &PinchEvent, phase, window, cx| {
                             if phase == DispatchPhase::Capture && b.contains(&e.position)
                                 && !pinch.read(cx).canvas_input_covered(e.position)
+                                && !pinch.read(cx).content_owns_pinch(e.position)
                             {
                                 pinch.update(cx, |this, cx| this.canvas_pinch(e, window, cx));
                             }
@@ -4829,7 +4864,7 @@ mod input_tests {
 
         let before = camera(cx);
         cx.simulate_event(PinchEvent { position, delta: -0.1, modifiers: none, phase: TouchPhase::Moved });
-        assert!(camera(cx).zoom() < before.zoom(), "pinch reaches the canvas through an occluding pane");
+        assert!(camera(cx).zoom() < before.zoom(), "pinch reaches the canvas over an entered terminal");
 
         let notch = ScrollWheelEvent { position, delta: ScrollDelta::Lines(point(0., 50.)), modifiers: zoom, touch_phase: TouchPhase::Moved };
         cx.simulate_event(notch.clone());
@@ -4841,6 +4876,31 @@ mod input_tests {
         cx.executor().advance_clock(WHEEL_GESTURE / 2);
         cx.run_until_parked();
         assert!(view.read_with(cx, |this, _| this.canvas_state.wheel_zoom.is_none()), "wheel input without an end ends after a quiet period");
+
+        view.update(cx, |this, cx| {
+            let browser: canvas::Pane = serde_json::from_value(json!({
+                "id":"b1","kind":"browser","props":{"home":""},"rect":[100,120,300,200],"z":2
+            })).unwrap();
+            this.canvas_state.doc.panes.push(browser);
+            this.canvas_state.step(canophy::Intent::Camera(canophy::Camera::default()));
+            this.canvas_state.selected = vec!["b1".into()];
+            this.canvas_state.mode = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let pinch = PinchEvent { position, delta: -0.1, modifiers: none, phase: TouchPhase::Moved };
+        let before = camera(cx);
+        cx.simulate_event(pinch.clone());
+        assert!(camera(cx).zoom() < before.zoom(), "pinch reaches the canvas through an unentered browser pane");
+
+        view.update(cx, |this, cx| {
+            this.canvas_state.mode = false;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let before = camera(cx);
+        cx.simulate_event(pinch);
+        assert_eq!(camera(cx), before, "an entered browser owns the pinch");
     }
 
     #[gpui::test]

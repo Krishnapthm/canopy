@@ -9,7 +9,9 @@
 //! - Law 3. The Files panel shrinks the visible canvas.
 //! - Law 4. Terminal grids reflow on resize, once on release.
 //! - Law 5. New file-backed panes use `open_size` to fit their content to the visible canvas at 100%.
+//! - Law 6. Content with its own zoom gets the pinch when entered, docked or popped out (`input::pinch_owner`).
 //! - Law 7. Rasterized panes use `rest_scale` to draw for the scale at which they will rest.
+//! - Law 8. Closing a browser pane's last tab closes the pane.
 //!
 //! # Step order
 //!
@@ -43,6 +45,7 @@
 pub mod camera;
 #[cfg(any(test, debug_assertions))]
 pub mod check;
+pub mod input;
 pub mod layout;
 pub mod motion;
 pub mod open;
@@ -54,6 +57,7 @@ pub mod units;
 mod tests;
 
 pub use camera::{Camera, focus_fit, reveal, visible, widen, zoom_range};
+pub use input::{Placement, Owner, pinch_owner};
 pub use layout::{Layout, layout, rest_scale};
 pub use open::{Natural, open_size};
 pub use rules::{arrange, cascade, child_position, free_spot, solve, tile};
