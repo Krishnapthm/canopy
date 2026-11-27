@@ -1246,7 +1246,7 @@ buttons. A shut down or unreachable simulator shows a screenshot instead.
 says otherwise), `canopy pane open pN <udid>|booted` (shows it, booting it), `canopy pane open
 pN <url>` (opens an http(s) page in Safari, or an app link, on its device; the device cannot
 read the Mac's files, so serve them over loopback). `new` with a simulator and `open` reply once
-the device is ready: name, runtime, state, the url opened and a screenshot path, or the error.
+the device is ready: name, runtime, state and the url opened (read the pane to see the page), or a screenshot path, or the error.
 `canopy pane read pN` (udid, name, state, live, screen size in points, a fresh
 screenshot file, recent activity by the person and agents). Drive it in device points from the
 top left: `canopy pane tap pN <x> <y>`, `canopy pane swipe pN <x1> <y1> <x2> <y2> [ms]`,

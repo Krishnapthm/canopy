@@ -107,9 +107,10 @@ struct Listed { udid: String, name: String, runtime: String, state: String }
 fn answer(name: &str, args: &Value, reply: &Value) -> String {
     let wired = |w: bool| if w { ", wired to you" } else { "" };
     if let Ok(s) = SimOpened::deserialize(reply) {
-        let opened = s.url.map(|u| format!(", opened {u}")).unwrap_or_default();
+        let opened = s.url.as_ref().map(|u| format!(", opening {u}")).unwrap_or_default();
         let shot = s.screenshot.map(|p| format!(". Screenshot: {p}")).unwrap_or_default();
-        return format!("{}: {} ({}) {} [{}]{opened}{}{shot}. Read it with canopy pane read {}", s.pane, s.name, s.runtime, s.state, s.udid, wired(s.wired), s.pane);
+        let read = if s.url.is_some() { "See the page with" } else { "Read it with" };
+        return format!("{}: {} ({}) {} [{}]{opened}{}{shot}. {read} canopy pane read {}", s.pane, s.name, s.runtime, s.state, s.udid, wired(s.wired), s.pane);
     }
     if let Ok(p) = PageOpened::deserialize(reply) {
         return format!("{}: {} loaded, title {:?}{}. Read it with canopy pane read {}", p.pane, p.url, p.title, wired(p.wired), p.pane);
@@ -196,8 +197,10 @@ mod tests {
         assert_eq!(req(&["type", "p2", "hello", "world"], None).unwrap().1, json!({"pane":"p2","action":"type","text":"hello world"}));
         assert_eq!(req(&["press", "p2", "home"], None).unwrap().1, json!({"pane":"p2","action":"press","button":"home"}));
         assert_eq!(req(&["tap", "p2", "x", "1"], None).unwrap_err(), "x is not a number");
-        let sim = json!({"pane":"p3","kind":"sim","wired":true,"udid":"U","name":"iPhone 17","runtime":"iOS 26.5","state":"booted","url":"http://127.0.0.1:8765/","screenshot":"/tmp/s.png"});
-        assert_eq!(answer("canvas.pane_new", &Value::Null, &sim), "p3: iPhone 17 (iOS 26.5) booted [U], opened http://127.0.0.1:8765/, wired to you. Screenshot: /tmp/s.png. Read it with canopy pane read p3");
+        let sim = json!({"pane":"p3","kind":"sim","wired":true,"udid":"U","name":"iPhone 17","runtime":"iOS 26.5","state":"booted","url":"http://127.0.0.1:8765/"});
+        assert_eq!(answer("canvas.pane_new", &Value::Null, &sim), "p3: iPhone 17 (iOS 26.5) booted [U], opening http://127.0.0.1:8765/, wired to you. See the page with canopy pane read p3");
+        let sim = json!({"pane":"p3","udid":"U","name":"iPhone 17","runtime":"iOS 26.5","state":"booted","screenshot":"/tmp/s.png"});
+        assert_eq!(answer("canvas.pane_open", &Value::Null, &sim), "p3: iPhone 17 (iOS 26.5) booted [U]. Screenshot: /tmp/s.png. Read it with canopy pane read p3");
         let page = json!({"pane":"p2","kind":"browser","wired":false,"url":"http://127.0.0.1:8765/","title":"Claude","loaded":true});
         assert_eq!(answer("canvas.pane_open", &Value::Null, &page), "p2: http://127.0.0.1:8765/ loaded, title \"Claude\". Read it with canopy pane read p2");
         assert_eq!(answer("canvas.sim_devices", &Value::Null, &json!({"devices":[{"udid":"U","name":"iPhone 17","runtime":"iOS 26.5","state":"booted"}]})), "U\tiPhone 17 (iOS 26.5)\tbooted");

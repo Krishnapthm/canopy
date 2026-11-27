@@ -298,7 +298,9 @@ impl AppWindow {
                 Waiter::Opened { tx, mut reply } => {
                     let answer = match (&result, &device) {
                         (Ok(png), Some(device)) => {
-                            let opened = Opened { device: device.into(), url: pending.url.as_ref().filter(|_| device.booted).map(|u| u.as_str().to_owned()), screenshot: png.clone() };
+                            let url = pending.url.as_ref().filter(|_| device.booted).map(|u| u.as_str().to_owned());
+                            // A screenshot taken as the URL opens still shows the previous screen; a read gives a live one.
+                            let opened = Opened { device: device.into(), screenshot: png.clone().filter(|_| url.is_none()), url };
                             if let (Value::Object(r), Ok(Value::Object(o))) = (&mut reply, serde_json::to_value(opened)) { r.extend(o); }
                             reply
                         }
