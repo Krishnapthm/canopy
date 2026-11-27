@@ -8,34 +8,34 @@ use std::sync::mpsc::Sender;
 #[cfg(target_os = "macos")]
 use super::helper_bar::{pane_actions, sim_device_actions};
 #[cfg(target_os = "macos")]
-use super::sim_screen::{AgentStep, By, Live, SimEvent, SimScreen};
+use super::sim_screen::{AgentStep, By, DeviceRoom, Live, SimEvent, SimScreen};
 
 const DEFAULT_SIZE: [f32; 2] = [canophy::traits::SIM.w, canophy::traits::SIM.h];
 
-/// Space for the shared pill and its bottom margin, even when the pill is hidden.
+/// Space for the shared pill and its bottom margin in world px, even when the pill is hidden.
 #[cfg(target_os = "macos")]
 pub(super) const DEVICE_BAR_ROW: f32 = 42.;
 
 #[cfg(target_os = "macos")]
-pub(super) fn device_room([w, h]: [f32; 2]) -> [f32; 2] {
-    [w, (h - DEVICE_BAR_ROW).max(1.)]
+pub(super) fn device_room([w, h]: [f32; 2], zoom: f32) -> [f32; 2] {
+    [w, (h - DEVICE_BAR_ROW * zoom).max(1.)]
 }
 
 /// The world size of a sim pane whose device (`outer` points, bezel included) draws at `scale`
-/// world px per point. The header is in world px. The margin, frame and device bar row
-/// are in screen px and convert to world px at the pane's `zoom`.
+/// world px per point. Only the frame stays in screen px and converts at the pane's `zoom`.
 #[cfg(target_os = "macos")]
 fn sim_pane_size(outer: [f32; 2], scale: f32, zoom: f32) -> [f32; 2] {
-    let fixed = (2. * super::sim_screen::MARGIN + 2.) / zoom;
-    [outer[0] * scale + fixed, outer[1] * scale + fixed + canvas::HEADER + DEVICE_BAR_ROW / zoom]
+    let fixed = 2. * super::sim_screen::MARGIN + 2. / zoom;
+    [outer[0] * scale + fixed, outer[1] * scale + fixed + canvas::HEADER + DEVICE_BAR_ROW]
 }
 
 #[cfg(target_os = "macos")]
 fn bottom_bar_scale(zoom: f32, body_w: f32, buttons: usize) -> Option<f32> {
-    // The pill's buttons, gaps and padding scale. Its two borders and side margins stay fixed.
+    // The pill follows the pane zoom up to the scale that fits. Its two borders and side margins stay fixed.
     let scaled_width = 24. * buttons as f32 + 2. * buttons.saturating_sub(1) as f32 + 4.;
     let max_scale = (body_w - 16. - 2.) / scaled_width;
-    (max_scale >= 0.5).then(|| zoom.clamp(0.75, 1.).min(max_scale))
+    let scale = zoom.min(max_scale);
+    (scale >= 0.5).then_some(scale)
 }
 
 /// What a sim pane's body shows.
@@ -539,8 +539,8 @@ impl AppWindow {
                 return self.answer(r.map(|_| json!({})));
             }
             "canvas.sim_reveal" => {
-                let Some(path) = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()) else { return self.fail("canvas.sim_reveal needs an absolute path") };
-                let r = std::process::Command::new("open").arg("-R").arg(path).status().map_err(|e| format!("Can't show {path}: {e}"));
+                let Some(path) = a["path"].as_str() else { return self.fail("path must be absolute") };
+                let r = crate::file_ops::reveal(std::path::Path::new(path));
                 return self.answer(r.map(|_| json!({})));
             }
             "canvas.sim_input" => return self.sim_input(a, window, cx),
@@ -663,8 +663,8 @@ impl AppWindow {
         let Some(points) = s.points() else { return };
         let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return };
         let layout = canophy::layout(self.canvas_state.doc.camera, pane);
-        let room = device_room(layout.body_size());
-        let Some(fit) = s.fit(room) else { return };
+        let room = device_room(layout.body_size(), layout.scale);
+        let Some(fit) = s.fit_at(room, layout.scale) else { return };
         let scale = fit.scale / layout.scale;
         self.set_sim_size(id, sim_pane_size(s.outer_points(points), scale, layout.scale));
         self.solve_layout(Some(id), None, cx);
@@ -727,7 +727,7 @@ impl AppWindow {
             let _ = opened_by.update(cx, |this, window, cx| match opened {
                 Ok(handle) => {
                     if let Some(view) = this.canvas_state.sims.get_mut(&id) { view.popped = Some(handle); }
-                    screen.update(cx, |s, cx| { s.popped = true; s.shown = true; s.sync(cx); cx.notify(); });
+                    screen.update(cx, |s, cx| { s.set_room(None); s.popped = true; s.shown = true; s.sync(cx); cx.notify(); });
                     cx.notify();
                 }
                 Err(e) => this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":format!("Can't open a window: {e}")}}), window, cx),
@@ -794,7 +794,7 @@ impl AppWindow {
         self.canvas_state.sims.get(id)?.live.as_ref()?;
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
         let mut actions = sim_device_actions();
-        actions.push(pane_actions(pane, None, false).into_iter().find(|a| a.command == "canvas.sim_pop")?);
+        actions.push(pane_actions(pane, None, false, None).into_iter().find(|a| a.command == "canvas.sim_pop")?);
         let actions = self.sim_relabel(id, actions, cx);
         Some(self.bar(id, actions, 1., false, cx).children(self.kept_annotation_send(id, cx)).into_any_element())
     }
@@ -820,16 +820,29 @@ impl AppWindow {
     /// A sim pane's whole body as the canvas card and the panel draw it: the device, Annotate, and
     /// the bottom bar of device actions.
     pub(super) fn sim_card_body(&self, card: &canvas::Pane, layout: canophy::Layout, cx: &mut Context<Self>) -> AnyElement {
+        #[cfg(target_os = "macos")]
+        let has_row = self.has_device_row(card, cx);
+        #[cfg(target_os = "macos")]
+        if let Some(view) = self.canvas_state.sims.get(&card.id)
+            && let Some(screen) = &view.live
+            && view.popped.is_none()
+        {
+            let room = if has_row { device_room(layout.body_size(), layout.scale) } else { layout.body_size() };
+            screen.update(cx, |s, cx| {
+                let room = Some(DeviceRoom { room, zoom: layout.scale });
+                if s.set_room(room) { cx.notify(); }
+            });
+        }
         let body = self.sim_body(card, cx);
         #[cfg(not(target_os = "macos"))]
         let _ = layout;
         #[cfg(target_os = "macos")]
-        if self.has_device_row(card, cx) {
-            let body = div().absolute().top_0().left_0().right_0().bottom(px(DEVICE_BAR_ROW)).child(body);
+        if has_row {
+            let body = div().absolute().top_0().left_0().right_0().bottom(px(DEVICE_BAR_ROW * layout.scale)).child(body);
             let body = self.annotate_body(card, body.into_any_element(), layout.body_size(), cx);
             return div().relative().size_full().child(body)
                 .when_some(self.sim_bottom_bar(card, &layout, cx), |d, bar| d.child(
-                    div().id("sim-device-controls").absolute().bottom(px(12.)).left_0().right_0()
+                    div().id("sim-device-controls").absolute().bottom(px(12. * layout.scale)).left_0().right_0()
                         .flex().items_center().overflow_x_scroll()
                         .child(bar.flex_none().map(|mut bar| {
                             bar.style().margin.left = Some(Length::Auto);
@@ -1026,15 +1039,28 @@ mod tests {
         let scale = 0.75;
         for z in [0.5, 1., 2.] {
             let [w, h] = sim_pane_size(points, scale, z);
-            let room = device_room([w * z - 2., (h - crate::canvas::HEADER) * z - 2.]);
-            assert!((fit(room, points, None, super::super::sim_screen::MARGIN).scale - scale * z).abs() < 1e-4);
+            let room = device_room([w * z - 2., (h - crate::canvas::HEADER) * z - 2.], z);
+            assert!((fit(room, points, None, super::super::sim_screen::MARGIN * z).scale - scale * z).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn device_scale_follows_canvas_zoom() {
+        let points = [402., 874.];
+        let margin = super::super::sim_screen::MARGIN;
+        let [w, h] = [330., 680.];
+        let expected = fit(device_room([w, h], 1.), points, None, margin).scale;
+        for zoom in [0.5, 1., 2.] {
+            let room = device_room([w * zoom, h * zoom], zoom);
+            let scale = fit(room, points, None, margin * zoom).scale;
+            assert!((scale / zoom - expected).abs() < 1e-4);
         }
     }
 
     #[test]
     fn bottom_bar_scale_fits_available_width() {
         assert_eq!(bottom_bar_scale(1., 400., 5), Some(1.));
-        assert_eq!(bottom_bar_scale(2., 400., 5), Some(1.));
+        assert_eq!(bottom_bar_scale(2., 400., 5), Some(2.));
         let s = bottom_bar_scale(1., 100., 5).unwrap();
         assert!(s >= 0.5 && (5. * 24. + 4. * 2. + 2. * 2.) * s + 2. <= 84.);
         assert_eq!(bottom_bar_scale(1., 84., 5), Some(0.5));

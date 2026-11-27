@@ -57,7 +57,7 @@ Guides tell the story and link to feature pages for each control.
 | Keys-and-Mouse | Every default key and gesture, changing keys, `keys.json`. |
 | Layouts-and-Mods | Built-in layouts, changing a layout, writing mods, mod panes. |
 | Classic-Layout | The Classic layout's sidebar, tabs and status bar. |
-| Other-Layouts | The Terminals and Canopy 98 layouts. |
+| Other-Layouts | The Terminals layout. |
 
 ## Reference and help
 

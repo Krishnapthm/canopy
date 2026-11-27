@@ -937,7 +937,7 @@ impl AppWindow {
         let sim_frame = if matches!(a.host, Host::Sim { .. }) {
             self.canvas_state.sims.get(id).and_then(|view| view.live.as_ref()).and_then(|screen| {
                 let screen = screen.read(cx);
-                let fit = screen.fit(super::sim::device_room([w, h]))?;
+                let fit = screen.fit(super::sim::device_room([w, h], screen.zoom()))?;
                 Some((fit, screen.frozen_frame(fit, a.image.clone())))
             })
         } else {

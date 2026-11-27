@@ -119,6 +119,9 @@ fn file_url(path: &std::path::Path) -> Result<String, String> {
         .ok_or_else(|| format!("Invalid browser file path: {}", path.display()))
 }
 
+/// Whether a browser pane can render a local file.
+pub(super) const LOCAL_FILES_SUPPORTED: bool = cfg!(target_os = "macos");
+
 /// Classifies an explicit address. Web pages never call this entry point.
 pub(super) fn browser_target_url(input: &str) -> Result<String, String> {
     let input = input.trim();
@@ -199,6 +202,7 @@ fn fixed_viewport(pane: &canvas::Pane) -> Option<[f32; 2]> {
 /// A fixed viewport scales to fit its body (screen px); a responsive page zooms so its CSS
 /// width stays `width`, the body's world width, and it never reflows as the canvas zooms.
 /// The header scales with the pane too, so its CSS height is the world body's height.
+/// The zoom is applied with the frame in one step.
 fn page_zoom(pane: &canvas::Pane, body: [f32; 2], width: f32) -> f64 {
     match fixed_viewport(pane) {
         Some([w, h]) => (f64::from(body[0]) / f64::from(w)).min(f64::from(body[1]) / f64::from(h)),
@@ -441,15 +445,20 @@ fn find_suffix(root: &std::path::Path, tail: &std::path::Path) -> Option<std::pa
 }
 
 impl AppWindow {
+    pub(super) fn browser_kind(url: String, source: Option<String>) -> canvas::Kind {
+        canvas::Kind::Browser {
+            home: url.clone(), tabs: vec![canvas::Tab { id: "t1".into(), url, title: String::new() }],
+            active: 0, viewport: None, source,
+        }
+    }
+
     /// Adds a browser pane at `point` in `space`. An empty URL focuses its New tab field.
-    pub(super) fn add_browser_pane(&mut self, url: String, point: canophy::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
+    pub(super) fn add_browser_pane(&mut self, url: String, point: canophy::Point, space: Option<String>, source: Option<String>, cx: &mut Context<Self>) -> String {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
         let empty = url.is_empty();
-        let kind = canvas::Kind::Browser {
-            home: url.clone(), tabs: vec![canvas::Tab { id: "t1".into(), url, title: String::new() }], active: 0, viewport: None,
-        };
+        let kind = Self::browser_kind(url, source);
         doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: canophy::WorldRect::new(point[0], point[1], SIZE[0], SIZE[1]), z, space, color: None, pinned: None });
         self.canvas_state.last_browser = Some(id.clone());
         if empty { self.canvas_state.browsers.panes.entry(id.clone()).or_default().focus_url = true; }
@@ -564,11 +573,13 @@ impl AppWindow {
                 let (this, key) = (cx.entity(), self.page_key(&id).unwrap());
                 let zoom_changed = at.scale != next.scale || (preset && at.body_size() != next.body_size());
                 let zoom = zoom_changed.then(|| page_zoom(pane, next.body_size(), next.body_world[0]));
+                if let Some(zoom) = zoom.filter(|z| *z > 0.) {
+                    view.update(cx, |v, _| v.set_zoom(zoom));
+                }
                 cx.defer(move |cx| this.update(cx, |this, _| {
                     let Some(page) = this.canvas_state.browsers.pages.get_mut(&key) else { return };
-                    if page.live == Some(at) && let Some(native) = &page.native {
+                    if page.live == Some(at) && page.native.is_some() {
                         page.live = Some(next);
-                        if let Some(zoom) = zoom.filter(|z| *z > 0.) { let _ = native.raw.raw().zoom(zoom); }
                     }
                 }));
             }
@@ -1275,7 +1286,7 @@ impl AppWindow {
                     ([x - SIZE[0] / 2., y - SIZE[1] / 2.], doc.room.clone())
                 }
             };
-            let id = self.add_browser_pane(String::new(), at, space, cx);
+            let id = self.add_browser_pane(String::new(), at, space, None, cx);
             self.solve_layout(Some(&id), None, cx);
             id
         });
@@ -2714,7 +2725,7 @@ mod tests {
         let mut pane = Pane {
             id: "p1".into(), kind: Kind::Browser {
                 tabs: vec![crate::canvas::Tab { id: "t1".into(), url: String::new(), title: String::new() }],
-                active: 0, home: String::new(), viewport: None,
+                active: 0, home: String::new(), viewport: None, source: None,
             },
             rect: [0., 0., 640., 838.].into(), z: 1, space: None, color: None, pinned: None,
         };

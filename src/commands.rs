@@ -34,7 +34,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.zoom_reset", &[], "Reset canvas zoom."),
     cmd("canvas.arrange", &[opt("layout"), opt("picker"), opt("space")], "Arrange selected cells or the current space: tidy, row, column or wires. Omit layout to repeat the last; picker opens the layout menu."),
     cmd("canvas.undo", &[], "Restore geometry before the last canvas move, resize or arrange."),
-    cmd("canvas.tile", &[], "Tile view: fit every expanded cell of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed cells line up below. Repeat to put everything back."),
+    cmd("canvas.tile", &[], "Tile view: fit every expanded terminal and agent of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed ones line up below. Other panes stay where they are. Repeat to put everything back."),
     cmd("canvas.fit", &[], "Fit the selection, else everything in the current space or Home; repeat to restore the previous camera."),
     cmd("canvas.mode", &[], "Enter canvas mode: its keys take priority and unbound keys are swallowed until Enter or Escape."),
     cmd("canvas.leave", &[], "Cancel a keyboard connection, or leave canvas mode with selection unchanged."),
@@ -116,7 +116,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.pane_color", &[req("pane"), opt("color")], "Set a canvas pane's hue to a named palette color or #RRGGBB. Pass null or omit color to inherit the space's hue."),
     cmd("canvas.pane_color_next", &[req("pane")], "Assign the next unused color in the pane's space."),
     cmd("panel.close_tab", &[req("path"), opt("confirmed"), opt("generation")], "Close a file tab in the Files panel, asking before discarding unsaved changes. The confirm dialog passes confirmed and the draft's generation, and a stale generation closes nothing. Only the person can run it."),
-    cmd("panel.editor", &[opt("choice"), opt("done"), opt("path"), opt("dirty")], "Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state."),
+    cmd("panel.editor", &[opt("choice"), opt("done"), opt("path"), opt("pane"), opt("dirty")], "Choose a file panel editor, return to the read-only view after saving, or report an editor's dirty state (pane names a canvas file pane, else the panel)."),
+    cmd("file.mode", &[req("path"), req("mode"), opt("pane")], "Show a file as its source or its preview. mode is source or preview; pane is the canvas file pane, omitted for the Files panel tab."),
+    cmd("files.auto_save", &[req("on")], "Turn automatic saving of edited files on or off."),
     cmd("preview.open", &[opt("path"), opt("point"), opt("place")], "Open a file tab, or choose a file; place canvas or point pins a canvas card."),
     cmd("canvas.create", &[opt("point"), opt("kind"), opt("space"), opt("argv"), opt("name"), opt("folder")], "Create a canvas terminal or space at a world point (default: the middle of the view); a space with a folder (empty: the root) is made directly, without one the Choose space dialog opens."),
     cmd("panel.pop_out", &[opt("terminal")], "Pop a terminal cell into its own window (default: the last selected cell)."),
@@ -198,6 +200,13 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.pdf_highlight", &[], "Toggle text highlight mode in the last selected PDF pane."),
     cmd("canvas.pdf_prev", &[], "Go to the previous page in the last selected PDF pane."),
     cmd("canvas.pdf_next", &[], "Go to the next page in the last selected PDF pane."),
+    cmd("file.rename", &[req("from"), req("to")], "Rename a local file or folder."),
+    cmd("file.copy", &[req("from"), opt("to"), opt("into")], "Copy a local file or folder to a path, or into a folder with an available name."),
+    cmd("file.move", &[req("from"), opt("to"), opt("into")], "Move a local file or folder to a path, or into a folder with an available name."),
+    cmd("file.mkdir", &[req("path")], "Create a local folder."),
+    cmd("file.new", &[req("path")], "Create an empty local file."),
+    cmd("file.trash", &[req("path")], "Move a local file or folder to the system trash."),
+    cmd("file.reveal", &[req("path")], "Show a local file or folder in the system file browser."),
     cmd("preview.external", &[req("path")], "Open a local image or PDF in macOS Preview."),
     cmd("canvas.pdf_zoom_out", &[], "Zoom out in the last selected PDF pane."),
     cmd("canvas.pdf_zoom_reset", &[], "Reset zoom in the last selected PDF pane: the page fits the pane's width again."),
@@ -232,7 +241,8 @@ pub fn validate_args(c: &Command, args: &Value) -> Result<(), String> {
                 return Err(format!("{}: unknown argument(s): {}; valid arguments: {valid}", c.name, unknown.join(", ")));
             }
             for (key, value) in args {
-                if matches!(key.as_str(), "id" | "pane" | "space" | "terminal" | "target") && !value.is_string() && !value.is_null() {
+                if (matches!(key.as_str(), "id" | "pane" | "space" | "terminal" | "target")
+                    || (c.name.starts_with("file.") && matches!(key.as_str(), "from" | "to" | "into" | "path"))) && !value.is_string() && !value.is_null() {
                     return Err(format!("{}: argument {key} must be a string (or null to omit it)", c.name));
                 }
             }
@@ -312,6 +322,16 @@ mod tests {
                 assert!(validate_args(c, &json!({arg: value})).is_ok());
             }
         }
+    }
+
+    #[test]
+    fn file_commands_validate_path_arguments() {
+        let copy = find("file.copy").unwrap();
+        assert!(validate_args(copy, &json!({"from": "/a", "into": "/folder"})).is_ok());
+        assert!(validate_args(copy, &json!({"from": "/a", "into": true})).is_err());
+        assert!(validate_args(copy, &json!({"from": "/a", "destination": "/b"})).is_err());
+        let rename = find("file.rename").unwrap();
+        assert_eq!(missing(rename, &json!({"from": "/a"})), Some("to"));
     }
 
     #[test]

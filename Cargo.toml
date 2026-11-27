@@ -64,6 +64,9 @@ swash = "=0.2.10"
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_linux = { package = "gpui-pre-linux", version = "=0.3.8", features = ["render-to-image"] }
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui-wry = { path = "vendor/gpui-kit/crates/webview", features = ["inspector"] }
 # Browser panes (src/window/canvas_view/browser.rs): wry builds the WKWebView; objc2 takes its snapshot.
@@ -72,7 +75,7 @@ wry = { package = "lb-wry", version = "0.53.3" }
 block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSImage", "NSOpenPanel", "NSSavePanel", "NSView", "NSWorkspace", "objc2-quartz-core", "NSButton", "NSControl", "NSMenu", "NSMenuItem", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "objc2-core-foundation"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSBundle", "NSData", "NSError", "NSProcessInfo", "NSString", "NSURL", "NSUUID"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSBundle", "NSData", "NSError", "NSFileManager", "NSProcessInfo", "NSString", "NSURL", "NSUUID"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKContentRuleList", "WKContentRuleListStore", "WKContentWorld", "WKFrameInfo", "WKNavigation", "WKWebView", "WKWebViewConfiguration", "WKSnapshotConfiguration", "WKUserContentController"] }
 # Native agent alerts. Already locked through gpui.
 objc2-user-notifications = { version = "0.3", default-features = false, features = ["std", "block2", "UNError", "UNNotification", "UNNotificationContent", "UNNotificationRequest", "UNNotificationResponse", "UNNotificationTrigger", "UNUserNotificationCenter"] }
@@ -80,7 +83,6 @@ objc2-user-notifications = { version = "0.3", default-features = false, features
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAShapeLayer", "objc2-core-foundation", "objc2-core-graphics"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGPath"] }
 gpui_macos = { package = "gpui-pre-macos", version = "=0.3.8", features = ["render-to-image"] }
-libc = "0.2"
 # The CVPixelBuffer type gpui's surface() takes, for live simulator panes.
 core-video = "0.5.2"
 core-foundation = "0.10"
@@ -93,7 +95,7 @@ cc = "1"
 gpui_windows = { package = "gpui-pre-windows", version = "=0.3.8", features = ["render-to-image"] }
 uds_windows = "1.2"
 raw-window-handle = "0.6"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Console", "Win32_System_Com", "Win32_Media_Multimedia"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_Console", "Win32_System_Com", "Win32_Media_Multimedia"] }
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"

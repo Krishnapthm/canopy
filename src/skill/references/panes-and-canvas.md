@@ -97,6 +97,9 @@ take absolute paths; `into` picks a free name inside a folder.
 `file.mode {path, mode: "source" | "preview", pane?}` switches Markdown, JSONL,
 HTML and SVG between source and preview. On macOS, `preview.external {path}`
 opens an image or PDF in Apple Preview.
+HTML opens in a browser pane on macOS and in Source on Linux and Windows. Editing a
+file keeps a draft: closing a file pane or its tab with unsaved edits asks first, and a
+save conflict keeps the draft and pauses Auto save (`files.auto_save {on}`).
 
 ## Seeing the whole window
 

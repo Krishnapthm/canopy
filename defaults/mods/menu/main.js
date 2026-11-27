@@ -211,11 +211,11 @@ export default class Menu extends View {
       // Clicks inside the box never reach the root, which closes the menu.
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .children(list.map((it, i) => !it[1]
-        // shadcn ContextMenuSeparator + ContextMenuLabel; a note is a dim row.
+        // shadcn ContextMenuSeparator + ContextMenuLabel; a note is a dim row. A label with no text is a bare rule.
         ? v_flex()
           .when(it[2].label, el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
-          .child(div().h(it[2].label ? LABEL : ROW).px(8).flex().items_center().text_size(it[2].label ? 11.5 : 12.8).text_color(t.dim)
-            .when(it[2].label, el => el.font_semibold()).child(it[0]))
+          .when(it[0] || !it[2].label, el => el.child(div().h(it[2].label ? LABEL : ROW).px(8).flex().items_center().text_size(it[2].label ? 11.5 : 12.8).text_color(t.dim)
+            .when(it[2].label, el => el.font_semibold()).child(it[0])))
         : v_flex()
           .when(rule(list, i), el => el.child(div().mx(7).my(4).h(1).bg(t.border)))
           .child(row(h_flex()
@@ -244,7 +244,7 @@ export default class Menu extends View {
     const step = (rows, from, d) => { for (let n = 1; n <= rows.length; n++) { const j = (from + d * n + rows.length * n) % rows.length; if (rows[j][1]) return j; } return from; };
     const inSub = sub && this.subAt >= 0;
     // The submenu hangs beside its row: rows above it, their rules and the box padding.
-    const top = this.sub ? list.slice(0, this.sub.i + 1).reduce((y, it, i) => y + (it[1] || !it[2]?.label ? ROW : LABEL) + (rule(list, i) || it[2]?.label ? 9 : 0), 5) - ROW - 5 : 0;
+    const top = this.sub ? list.slice(0, this.sub.i + 1).reduce((y, it, i) => y + (it[1] || !it[2]?.label ? ROW : it[0] ? LABEL : 0) + (rule(list, i) || it[2]?.label ? 9 : 0), 5) - ROW - 5 : 0;
     // The submenu box, or a zero-size marker so the host's mask forgets a closed one.
     const subBox = () => sub
       ? div().mt(top).child(this.box(t, sub, this.subAt, (row, it) => row.on_click(() => this.run(it)), "sub"))

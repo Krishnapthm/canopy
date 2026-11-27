@@ -20,8 +20,8 @@
 //! earlier step read:
 //!
 //! 1. **apply**: the change itself (a move, a resize, a pan, an opened pane).
-//! 2. **size laws**: a pane never shrinks below its kind's `min`, and keeps its `aspect` when it
-//!    has one (`traits`).
+//! 2. **size laws**: a pane never shrinks below its kind's `min` on resize. A simulator's drag resize snaps to its
+//!    device (`snap_sim_size`).
 //! 3. **push**: pushable neighbours make room (`rules::solve`, the canvas push setting).
 //! 4. **camera laws**: the zoom stays inside `ZOOMS` and the place's `zoom_range`, and a
 //!    viewport change brings the entered pane back into the uncovered part

@@ -122,9 +122,8 @@ JSON is the default when piped. Errors use `error.kind`, `error.message`,
 | `machine rm NAME --json`, `machine rename NAME NEW_NAME` | exit code, error.message | `defaults/mods/spaces/main.js:177`, `defaults/frame/settings/main.js:799` |
 | `machine login NAME` | displayed for the person to run | `defaults/frame/settings/main.js:851` |
 
-Welcome and win98 also use `machine ls --json`, filtering temporary and
-reading name (`defaults/frame/welcome/main.js:69`,
-`defaults/mods/win98/dialog.js:68`). `herdr.hc(args)` accepts arbitrary args;
+Welcome also uses `machine ls --json`, filtering temporary machines and
+reading their names (`defaults/frame/welcome/main.js`). `herdr.hc(args)` accepts arbitrary args;
 the table inventories shipped consumers, not third-party mods (`src/mods.rs:956`).
 
 ### Agent commands after the Wire rework

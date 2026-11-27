@@ -91,6 +91,8 @@ A browser pane is either resting or live:
 
 A page lays out at the size its pane is drawn. Canopy waits for that size before taking the first snapshot. A resting page scales like a picture while you zoom the canvas. When the camera settles more than 5% above the snapshot's scale, Canopy takes a sharper snapshot. Choosing another **Viewport** also refits a resting page and retakes its snapshot.
 
+A live page keeps its CSS width while you zoom the canvas. Canopy hands WebKit the new size and page zoom together, so text keeps the same line breaks.
+
 ## The header
 
 A browser pane's header has two rows. The pop-out window draws the same header.

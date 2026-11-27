@@ -7,9 +7,10 @@ use gpui::{
 };
 use gpui::{
     HighlightStyle, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, LayoutId,
-    LongPressEvent, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement as _, Path, Pixels,
-    Point, Position, ShapedLine, SharedString, Size, Style, Styled as _, TextAlign, TextRun,
-    TextStyle, TouchDragEvent, TouchPhase, UnderlineStyle, Window, fill, point, px, relative, size,
+    LongPressEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _,
+    Path, Pixels, Point, Position, ShapedLine, SharedString, Size, Style, Styled as _, TextAlign,
+    TextRun, TextStyle, TouchDragEvent, TouchPhase, UnderlineStyle, Window, fill, point, px,
+    relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -21,7 +22,8 @@ use crate::{
 };
 
 use super::{
-    InputBaseState, PrepaintCaretGeometry, RangeDecorationStyle, TextDecoration,
+    InputBaseState, InputEvent, LineMark, PrepaintCaretGeometry, RangeDecorationStyle,
+    TextDecoration,
     layout::{LastLayout, WhitespaceIndicators},
     mode::LayoutMode,
 };
@@ -44,6 +46,12 @@ fn diagnostic_highlight_style(
         }),
         ..Default::default()
     }
+}
+
+const QUOTE_BUTTON: Pixels = px(16.);
+
+fn ordered_gutter_range(anchor: usize, end: usize) -> (usize, usize) {
+    (anchor.min(end), anchor.max(end))
 }
 
 const BOTTOM_MARGIN_ROWS: usize = 3;
@@ -1114,7 +1122,13 @@ impl<M: InputModeKind> TextElement<M> {
                 None,
             );
 
-            empty_line_number.width + LINE_NUMBER_RIGHT_MARGIN
+            empty_line_number.width
+                + LINE_NUMBER_RIGHT_MARGIN
+                + if state.gutter_quote {
+                    QUOTE_BUTTON
+                } else {
+                    px(0.)
+                }
         } else if state.is_code_editor() {
             LINE_NUMBER_RIGHT_MARGIN
         } else {
@@ -3045,29 +3059,27 @@ impl<M: InputModeKind> Element for TextElement<M> {
             editor_style.background
         };
 
-        // Paint active line
-        let mut offset_y = px(0.);
-        if let Some(line_numbers) = prepaint.line_numbers.as_ref() {
-            offset_y += invisible_top_padding;
-
-            // Each item is the normal lines.
-            for (lines, &buffer_line) in line_numbers
+        // Paint the cursor line, including its wrapped rows.
+        if let Some(bg_color) = active_line_color {
+            let mut y = origin.y + invisible_top_padding;
+            for (line, &buffer_line) in prepaint
+                .last_layout
+                .lines
                 .iter()
-                .zip(prepaint.last_layout.visible_buffer_lines.iter())
+                .zip(&prepaint.last_layout.visible_buffer_lines)
             {
-                let is_active = prepaint.current_row == Some(buffer_line);
-                let p = point(input_bounds.origin.x, origin.y + offset_y);
-                let height = line_height * lines.len() as f32;
-                // Paint the current line background
-                if is_active {
-                    if let Some(bg_color) = active_line_color {
-                        window.paint_quad(fill(
-                            Bounds::new(p, size(bounds.size.width, height)),
-                            bg_color,
-                        ));
-                    }
+                let height = line_height * line.wrapped_lines.len().max(1) as f32;
+                if prepaint.current_row == Some(buffer_line) {
+                    window.paint_quad(fill(
+                        Bounds::new(
+                            point(input_bounds.origin.x, y),
+                            size(bounds.size.width, height),
+                        ),
+                        bg_color,
+                    ));
+                    break;
                 }
-                offset_y += height;
+                y += height;
             }
         }
 
@@ -3257,6 +3269,23 @@ impl<M: InputModeKind> Element for TextElement<M> {
             );
             window.paint_quad(fill(gutter_bounds, gutter_bg));
 
+            let state = self.state.read(cx);
+            let quote = state.gutter_quote;
+            let range = state.gutter_range.map(|(a, b)| ordered_gutter_range(a, b));
+            let (line_marks, mark_colors) = (state.line_marks.clone(), state.mark_colors);
+            let hover = crate::Theme::global(cx).tokens.colors.accent;
+            let mut rows = Vec::new();
+            let mut button = None;
+            let mouse = window.mouse_position();
+            let clip = gutter_bounds.intersect(&window.content_mask().bounds);
+            let gutter_right = input_bounds.origin.x + prepaint.last_layout.line_number_width;
+            let number_right = gutter_right
+                - if state.mode.is_folding() {
+                    FOLD_ICON_HITBOX_WIDTH
+                } else {
+                    px(0.)
+                };
+
             // Each item is the normal lines.
             for (lines, &buffer_line) in line_numbers
                 .iter()
@@ -3279,8 +3308,44 @@ impl<M: InputModeKind> Element for TextElement<M> {
                     }
                 }
 
+                let number = buffer_line + 1;
+                if quote {
+                    let row = Bounds::new(p, size(number_right - p.x, height)).intersect(&clip);
+                    rows.push((number, row));
+                    if row.contains(&mouse) && prepaint.hitbox.is_hovered(window) {
+                        let box_bounds = Bounds::new(
+                            point(p.x, p.y + (line_height - QUOTE_BUTTON).half()),
+                            size(QUOTE_BUTTON, QUOTE_BUTTON),
+                        );
+                        button = Some((number, box_bounds));
+                    }
+                }
+                if range.is_some_and(|(start, end)| (start..=end).contains(&number)) {
+                    window.paint_quad(fill(
+                        Bounds::new(p, size(number_right - p.x, height)),
+                        hover,
+                    ));
+                }
+                if let Some((kind, colors)) = line_marks.get(&number).zip(mark_colors) {
+                    let dimensions = match kind {
+                        LineMark::Added | LineMark::Modified => size(px(3.), height),
+                        LineMark::Removed => size(QUOTE_BUTTON, px(3.)),
+                    };
+                    window.paint_quad(fill(
+                        Bounds::new(point(number_right - dimensions.width, p.y), dimensions),
+                        kind.color(colors),
+                    ));
+                }
+
                 for line in lines {
-                    _ = line.paint(p, line_height, TextAlign::Left, None, window, cx);
+                    _ = line.paint(
+                        p + point(if quote { QUOTE_BUTTON } else { px(0.) }, px(0.)),
+                        line_height,
+                        TextAlign::Left,
+                        None,
+                        window,
+                        cx,
+                    );
                     offset_y += line_height;
                 }
 
@@ -3288,6 +3353,108 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 if !prepaint.ghost_lines.is_empty() && prepaint.current_row == Some(buffer_line) {
                     offset_y += prepaint.ghost_lines_height;
                 }
+            }
+            if quote {
+                if let Some((_, bounds)) = button {
+                    window.paint_quad(gpui::quad(
+                        bounds,
+                        px(4.),
+                        hover,
+                        px(0.),
+                        gpui::transparent_black(),
+                        gpui::BorderStyle::default(),
+                    ));
+                    let plus = window.text_system().shape_line(
+                        "+".into(),
+                        px(12.),
+                        &[TextRun {
+                            len: 1,
+                            font: window.text_style().font(),
+                            color: editor_style.muted_foreground,
+                            background_color: None,
+                            underline: None,
+                            strikethrough: None,
+                        }],
+                        None,
+                    );
+                    let p = bounds.origin + point((QUOTE_BUTTON - plus.width).half(), px(0.));
+                    _ = plus.paint(p, QUOTE_BUTTON, TextAlign::Left, None, window, cx);
+                }
+
+                let hitbox = prepaint.hitbox.clone();
+                let rows = Rc::new(rows);
+                let line_at = Rc::new(move |position, window: &Window| {
+                    if !hitbox.is_hovered(window) {
+                        return None;
+                    }
+                    rows.iter()
+                        .find(|(_, bounds)| bounds.contains(&position))
+                        .map(|(line, _)| *line)
+                });
+
+                if let Some((line, bounds)) = button {
+                    let state = self.state.clone();
+                    let hitbox = prepaint.hitbox.clone();
+                    window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                        if phase.capture()
+                            && event.button == MouseButton::Left
+                            && bounds.contains(&event.position)
+                            && hitbox.is_hovered(window)
+                        {
+                            state.update(cx, |state, cx| {
+                                state.gutter_range = Some((line, line));
+                                cx.notify();
+                            });
+                            cx.stop_propagation();
+                        }
+                    });
+                }
+
+                let state = self.state.clone();
+                let release_line = line_at.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                    if !phase.capture() {
+                        return;
+                    }
+                    let line = line_at(event.position, window);
+                    let range = state.read(cx).gutter_range;
+                    if let Some((anchor, end)) = range {
+                        if let Some(line) = line.filter(|line| *line != end) {
+                            state.update(cx, |state, cx| {
+                                state.gutter_range = Some((anchor, line));
+                                cx.notify();
+                            });
+                        }
+                        cx.stop_propagation();
+                    }
+                    if line != button.map(|(line, _)| line) {
+                        cx.notify(state.entity_id());
+                    }
+                });
+
+                let state = self.state.clone();
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+                    if phase.capture()
+                        && event.button == MouseButton::Left
+                        && state.read(cx).gutter_range.is_some()
+                    {
+                        state.update(cx, |state, cx| {
+                            if let Some((anchor, end)) = state.gutter_range.take() {
+                                let (start, end) = ordered_gutter_range(
+                                    anchor,
+                                    release_line(event.position, window).unwrap_or(end),
+                                );
+                                cx.emit(InputEvent::GutterQuote {
+                                    start,
+                                    end,
+                                    position: event.position,
+                                });
+                                cx.notify();
+                            }
+                        });
+                        cx.stop_propagation();
+                    }
+                });
             }
         }
 

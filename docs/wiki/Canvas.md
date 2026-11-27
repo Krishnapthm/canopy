@@ -71,7 +71,7 @@ Tile view temporarily fits your panes into an even grid that fills the screen at
 
 Press `Cmd+Shift+G` (`Ctrl+Shift+G` on Linux and Windows), or click **Tile view** in the canvas menu or the grid button in the top strip.
 
-- With two or more panes selected, only those are tiled. Otherwise every expanded pane in the space is, including panes you open while tile view is on.
+- With two or more panes selected, only those are tiled. Otherwise every expanded terminal and agent pane in the space is, including ones you open while tile view is on. Only terminals and agents tile, so files, notes, browsers, images, PDFs and simulators stay where they are, under the tiles.
 - Collapsed terminals line up along the bottom.
 - Panes get equal space. Turn on `tile_focus_grows` to let the selected pane take more room.
 

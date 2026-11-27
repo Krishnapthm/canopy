@@ -1383,7 +1383,7 @@ const fn is_generated_osr_retry(pc: u32, exit_kind: u32, validation_retry: bool)
         && !validation_retry
 }
 
-#[cfg(all(feature = "compiler", not(target_family = "wasm")))]
+#[cfg(all(feature = "compiler", not(target_family = "wasm"), any(test, feature = "test-support")))]
 fn apply_stress_gc_after_validation(
     frame: &mut rquickjs_core::qjs::JSJitExecFrame,
     stress_gc: bool,
