@@ -34,6 +34,7 @@ pub struct WebView {
     webview: Rc<wry::WebView>,
     visible: bool,
     bounds: Bounds<Pixels>,
+    zoom: Option<f64>,
 }
 
 impl Drop for WebView {
@@ -51,7 +52,16 @@ impl WebView {
             focus_handle: cx.focus_handle(),
             visible: true,
             bounds: Bounds::default(),
+            zoom: None,
             webview: Rc::new(webview),
+        }
+    }
+
+    /// Sets the page zoom to apply together with the next frame. The element applies it
+    /// just before the new bounds, so WebKit never lays out at a mismatched CSS width.
+    pub fn set_zoom(&mut self, zoom: f64) {
+        if zoom.is_finite() && zoom > 0. {
+            self.zoom = Some(zoom);
         }
     }
 
@@ -208,6 +218,9 @@ impl Element for WebViewElement {
             return None;
         }
 
+        if let Some(zoom) = self.parent.update(cx, |p, _| p.zoom.take()) {
+            let _ = self.view.zoom(zoom);
+        }
         let _ = self.view.set_bounds(Rect {
             size: dpi::Size::Logical(LogicalSize {
                 width: bounds.size.width.into(),

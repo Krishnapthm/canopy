@@ -199,6 +199,7 @@ fn fixed_viewport(pane: &canvas::Pane) -> Option<[f32; 2]> {
 /// A fixed viewport scales to fit its body (screen px); a responsive page zooms so its CSS
 /// width stays `width`, the body's world width, and it never reflows as the canvas zooms.
 /// The header scales with the pane too, so its CSS height is the world body's height.
+/// The zoom is applied with the frame in one step.
 fn page_zoom(pane: &canvas::Pane, body: [f32; 2], width: f32) -> f64 {
     match fixed_viewport(pane) {
         Some([w, h]) => (f64::from(body[0]) / f64::from(w)).min(f64::from(body[1]) / f64::from(h)),
@@ -555,11 +556,13 @@ impl AppWindow {
                 let (this, key) = (cx.entity(), self.page_key(&id).unwrap());
                 let zoom_changed = at.scale != next.scale || (preset && at.body_size() != next.body_size());
                 let zoom = zoom_changed.then(|| page_zoom(pane, next.body_size(), next.body_world[0]));
+                if let Some(zoom) = zoom.filter(|z| *z > 0.) {
+                    view.update(cx, |v, _| v.set_zoom(zoom));
+                }
                 cx.defer(move |cx| this.update(cx, |this, _| {
                     let Some(page) = this.canvas_state.browsers.pages.get_mut(&key) else { return };
-                    if page.live == Some(at) && let Some(native) = &page.native {
+                    if page.live == Some(at) && page.native.is_some() {
                         page.live = Some(next);
-                        if let Some(zoom) = zoom.filter(|z| *z > 0.) { let _ = native.raw.raw().zoom(zoom); }
                     }
                 }));
             }
