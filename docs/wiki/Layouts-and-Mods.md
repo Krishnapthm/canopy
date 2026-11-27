@@ -29,11 +29,12 @@ Select a layout in the [command palette](Go-To-and-Palette):
 - **Layout: Canopy** (`main`): the canvas with a floating toolbar and a status strip.
 - **Layout: Classic** (`classic`): spaces and agents on the left, tabs above the panes, and a status bar.
 - **Layout: Terminals** (`terminals`): a space picker and tabs above the terminal panes.
-- **Layout: Canopy 98** (`win98`): a Windows 98 desktop with a taskbar.
 
 ## Change a layout
 
-Shipped layouts and mods update on start. Personal copies do not.
+Shipped layouts and mods update on start. Personal copies do not. When Canopy
+retires a shipped default, startup removes its original copy and keeps edited
+files. If your saved layout is gone, Canopy opens its main layout.
 
 1. Select the layout you want to change.
 2. Select **Duplicate layout** in the command palette.

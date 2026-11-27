@@ -34,7 +34,7 @@ fn page_script() -> String {
     format!("window.__REACT_GRAB_DISABLED__ = true;\n{grab}\n{}", include_str!("browser.js"))
 }
 
-/// How long a load may take before what waits for it is answered anyway.
+/// How long a load may take before its callers get a timeout.
 const LOAD_LIMIT: std::time::Duration = std::time::Duration::from_secs(15);
 /// How long a loaded page gets to render before reads, shots and picks.
 const SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
@@ -119,6 +119,9 @@ fn file_url(path: &std::path::Path) -> Result<String, String> {
         .ok_or_else(|| format!("Invalid browser file path: {}", path.display()))
 }
 
+/// Whether a browser pane can render a local file.
+pub(super) const LOCAL_FILES_SUPPORTED: bool = cfg!(target_os = "macos");
+
 /// Classifies an explicit address. Web pages never call this entry point.
 pub(super) fn browser_target_url(input: &str) -> Result<String, String> {
     let input = input.trim();
@@ -199,6 +202,7 @@ fn fixed_viewport(pane: &canvas::Pane) -> Option<[f32; 2]> {
 /// A fixed viewport scales to fit its body (screen px); a responsive page zooms so its CSS
 /// width stays `width`, the body's world width, and it never reflows as the canvas zooms.
 /// The header scales with the pane too, so its CSS height is the world body's height.
+/// The zoom is applied with the frame in one step.
 fn page_zoom(pane: &canvas::Pane, body: [f32; 2], width: f32) -> f64 {
     match fixed_viewport(pane) {
         Some([w, h]) => (f64::from(body[0]) / f64::from(w)).min(f64::from(body[1]) / f64::from(h)),
@@ -251,8 +255,9 @@ struct Page {
     loading: bool,
     /// Replies held until the page finishes loading.
     waiting: Vec<Ask>,
-    /// Counts loads, so a load's time limit leaves later loads alone.
-    loads: u64,
+    /// The generation of the native navigation these replies are waiting for.
+    load: u64,
+    load_timer: Option<Task<()>>,
     /// Identifies callbacks from this view even if a closed tab's id is used again.
     view_id: u64,
 }
@@ -286,6 +291,7 @@ struct Native {
     raw: gpui_wry::WebViewHandle,
     clip: objc2::rc::Retained<objc2_app_kit::NSView>,
     magnifies: bool,
+    navigation: objc2::rc::Retained<super::browser_navigation::Delegate>,
     // The pending local load may run only while this view is still mounted.
     _local_load: Option<std::rc::Rc<()>>,
 }
@@ -301,17 +307,27 @@ impl Drop for Native {
 enum Ask {
     Read(std::sync::mpsc::Sender<Value>),
     Shot(std::path::PathBuf, std::sync::mpsc::Sender<Value>),
+    /// `canopy pane new browser` or `pane open`: `reply` (pane, url, ...) gains the page's
+    /// title and final URL once it has loaded.
+    Opened(Value, std::sync::mpsc::Sender<Value>),
+}
+
+impl Ask {
+    /// Where the answer goes.
+    fn tx(self) -> std::sync::mpsc::Sender<Value> {
+        match self { Ask::Read(tx) | Ask::Shot(_, tx) | Ask::Opened(_, tx) => tx }
+    }
 }
 
 /// What a web view reports, on the main thread, through `Browsers::events`.
 pub(in crate::window) enum Event {
-    Started,
-    Loaded,
+    Started(u64),
+    Loaded(u64),
     Title(String),
     /// A link asked for a new window: it opens in this pane instead.
     Open(String),
     Blocked(String),
-    LoadError(String),
+    LoadError(u64, String),
     /// The still request and its image (None when WebKit failed).
     Rested((u64, f32), Option<image::RgbaImage>),
     /// A resting page out of sight has media playing.
@@ -429,15 +445,20 @@ fn find_suffix(root: &std::path::Path, tail: &std::path::Path) -> Option<std::pa
 }
 
 impl AppWindow {
+    pub(super) fn browser_kind(url: String, source: Option<String>) -> canvas::Kind {
+        canvas::Kind::Browser {
+            home: url.clone(), tabs: vec![canvas::Tab { id: "t1".into(), url, title: String::new() }],
+            active: 0, viewport: None, source,
+        }
+    }
+
     /// Adds a browser pane at `point` in `space`. An empty URL focuses its New tab field.
-    pub(super) fn add_browser_pane(&mut self, url: String, point: canophy::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
+    pub(super) fn add_browser_pane(&mut self, url: String, point: canophy::Point, space: Option<String>, source: Option<String>, cx: &mut Context<Self>) -> String {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
         let empty = url.is_empty();
-        let kind = canvas::Kind::Browser {
-            home: url.clone(), tabs: vec![canvas::Tab { id: "t1".into(), url, title: String::new() }], active: 0, viewport: None,
-        };
+        let kind = Self::browser_kind(url, source);
         doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: canophy::WorldRect::new(point[0], point[1], SIZE[0], SIZE[1]), z, space, color: None, pinned: None });
         self.canvas_state.last_browser = Some(id.clone());
         if empty { self.canvas_state.browsers.panes.entry(id.clone()).or_default().focus_url = true; }
@@ -473,10 +494,7 @@ impl AppWindow {
             let keep = keys.contains(key);
             if !keep {
                 let _ = std::fs::remove_file(shot_file(key));
-                for ask in page.waiting.drain(..) {
-                    let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
-                    let _ = tx.send(json!({"error": "the browser tab closed"}));
-                }
+                page.cancel_asks("the browser tab closed");
                 #[cfg(target_os = "macos")]
                 if let Some(native) = page.native.take() { destroy(native); }
             }
@@ -555,11 +573,13 @@ impl AppWindow {
                 let (this, key) = (cx.entity(), self.page_key(&id).unwrap());
                 let zoom_changed = at.scale != next.scale || (preset && at.body_size() != next.body_size());
                 let zoom = zoom_changed.then(|| page_zoom(pane, next.body_size(), next.body_world[0]));
+                if let Some(zoom) = zoom.filter(|z| *z > 0.) {
+                    view.update(cx, |v, _| v.set_zoom(zoom));
+                }
                 cx.defer(move |cx| this.update(cx, |this, _| {
                     let Some(page) = this.canvas_state.browsers.pages.get_mut(&key) else { return };
-                    if page.live == Some(at) && let Some(native) = &page.native {
+                    if page.live == Some(at) && page.native.is_some() {
                         page.live = Some(next);
-                        if let Some(zoom) = zoom.filter(|z| *z > 0.) { let _ = native.raw.raw().zoom(zoom); }
                     }
                 }));
             }
@@ -984,8 +1004,10 @@ impl AppWindow {
         let Some((id, tab)) = key.split_once('/') else { return };
         let Some(page) = self.canvas_state.browsers.pages.get_mut(&key).filter(|p| p.view_id == view && p.has_view()) else { return };
         match event {
-            // A navigation inside the page (a link) committed.
-            Event::Started => return self.begin_load(&key, cx),
+            Event::Started(load) => {
+                if load > page.load { self.begin_load(&key, load, window, cx); }
+                return;
+            }
             Event::Title(title) => {
                 // Pages can set any title, as often as they like: keep a short one line.
                 let title: String = title.chars().filter(|c| !c.is_control()).take(300).collect();
@@ -999,19 +1021,25 @@ impl AppWindow {
                     self.canvas_changed(cx);
                 }
             }
-            Event::Loaded => {
+            Event::Loaded(load) => {
+                if !page.matches_load(load) { return; }
+                page.load_timer = None;
                 // Scripts often render after the load event (React does): let the page settle
                 // before answering. The timer runs only while a load is pending.
                 cx.spawn(async move |this, cx| {
                     cx.background_executor().timer(SETTLE).await;
-                    let _ = this.update(cx, |this, cx| this.page_ready(&key, view, cx));
+                    let _ = this.update(cx, |this, cx| this.page_ready(&key, view, load, cx));
                 }).detach();
                 return;
             }
             Event::Open(url) => {
                 let local = self.tab_by_key(&key).is_some_and(|t| t.url.starts_with("file:"));
                 match web_url(&url) {
-                    Ok(url) if !local => self.navigate_browser(&key, &url, cx),
+                    Ok(url) if !local => {
+                        if let Err(e) = self.navigate_browser(&key, &url, window, cx) {
+                            self.command_error("Page not opened", &e, window, cx);
+                        }
+                    }
                     _ => self.command_error("Page not opened", "Open this address explicitly in the browser's address field", window, cx),
                 }
             }
@@ -1023,15 +1051,8 @@ impl AppWindow {
                     action: Some(("pane.focus".into(), json!({"pane": id}))),
                 }, window, cx);
             }
-            Event::LoadError(error) => {
-                let waiting = std::mem::take(&mut page.waiting);
-                page.loading = false;
-                for ask in waiting {
-                    let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
-                    let _ = tx.send(json!({"error":error}));
-                }
-                self.toast(Toast { title: "Page not opened".into(), body: Some(error), level: Level::Error,
-                    action: Some(("pane.focus".into(), json!({"pane": id}))) }, window, cx);
+            Event::LoadError(load, error) => {
+                if page.loading && page.matches_load(load) { self.browser_load_error(&key, &error, window, cx); }
             }
             Event::Rested(request, shot) => {
                 if Some(request) != page.shot_request { return; }
@@ -1064,28 +1085,39 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// Marks the page loading. wry reports no failed load (a refused connection sends no
-    /// event at all), so a page still loading after LOAD_LIMIT is answered anyway; the timer
-    /// runs once per load.
-    fn begin_load(&mut self, key: &str, cx: &mut Context<Self>) {
+    /// A new navigation cancels callers waiting for the previous one on this tab.
+    fn begin_load(&mut self, key: &str, load: u64, window: &mut Window, cx: &mut Context<Self>) {
         let Some(page) = self.canvas_state.browsers.pages.get_mut(key) else { return };
-        page.loading = true;
-        page.loads += 1;
-        let (load, view, key) = (page.loads, page.view_id, key.to_owned());
-        cx.spawn(async move |this, cx| {
+        page.start_load(load);
+        let (view, key) = (page.view_id, key.to_owned());
+        page.load_timer = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(LOAD_LIMIT).await;
-            let _ = this.update(cx, |this, cx| {
-                if this.canvas_state.browsers.pages.get(&key).is_some_and(|p| p.loading && p.loads == load && p.view_id == view) {
-                    this.page_ready(&key, view, cx);
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.canvas_state.browsers.pages.get(&key).is_some_and(|p| p.view_id == view && p.loading && p.matches_load(load)) {
+                    this.browser_load_error(&key, "timed out", window, cx);
                 }
             });
-        }).detach();
+        }));
     }
 
-    /// Answers the tab's waiting replies and refreshes its snapshot if it is resting.
-    fn page_ready(&mut self, key: &str, view: u64, cx: &mut Context<Self>) {
-        let Some(page) = self.canvas_state.browsers.pages.get_mut(key).filter(|p| p.view_id == view && p.has_view()) else { return };
+    fn browser_load_error(&mut self, key: &str, reason: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (id, _) = key.split_once('/').unwrap();
+        let url = self.tab_by_key(key).map_or("", |tab| tab.url.as_str());
+        let error = format!("{url} did not load: {reason}");
+        let page = self.canvas_state.browsers.pages.get_mut(key).unwrap();
         page.loading = false;
+        page.load_timer = None;
+        page.cancel_asks(&error);
+        self.toast(Toast { title: "Page not opened".into(), body: Some(error), level: Level::Error,
+            action: Some(("pane.focus".into(), json!({"pane": id}))) }, window, cx);
+        cx.notify();
+    }
+
+    /// Answers callers only after their navigation finishes settling.
+    fn page_ready(&mut self, key: &str, view: u64, load: u64, cx: &mut Context<Self>) {
+        let Some(page) = self.canvas_state.browsers.pages.get_mut(key).filter(|p| p.view_id == view && p.matches_load(load)) else { return };
+        page.loading = false;
+        page.load_timer = None;
         let waiting = std::mem::take(&mut page.waiting);
         let resting = page.live.is_none();
         self.note_browser_url(key, cx);
@@ -1233,8 +1265,7 @@ impl AppWindow {
         }
         let key = self.page_key(id).ok_or("the browser tab closed")?;
         self.canvas_state.browsers.pages.entry(key).or_default().local_folder = Some((url.to_owned(), folder));
-        self.load_browser(id, url, false, window, cx);
-        Ok(())
+        self.load_browser(id, url, false, window, cx)
     }
 
     /// Opens an HTTP(S) link clicked in a terminal in the last browser here or in a pane beside it.
@@ -1255,7 +1286,7 @@ impl AppWindow {
                     ([x - SIZE[0] / 2., y - SIZE[1] / 2.], doc.room.clone())
                 }
             };
-            let id = self.add_browser_pane(String::new(), at, space, cx);
+            let id = self.add_browser_pane(String::new(), at, space, None, cx);
             self.solve_layout(Some(&id), None, cx);
             id
         });
@@ -1380,7 +1411,9 @@ impl AppWindow {
                 #[cfg(not(target_os = "macos"))]
                 self.fail("browser panes run on macOS only");
             }
-            "canvas.browser_home" => self.load_browser(&id, &home, false, window, cx),
+            "canvas.browser_home" => {
+                if let Err(e) = self.load_browser(&id, &home, false, window, cx) { self.fail(e); }
+            }
             "canvas.browser_reload" => self.eval_or_load(&id, "location.reload()", &url, window, cx),
             "canvas.browser_back" => self.eval_or_load(&id, "history.back()", &url, window, cx),
             "canvas.browser_forward" => self.eval_or_load(&id, "history.forward()", &url, window, cx),
@@ -1470,7 +1503,7 @@ impl AppWindow {
 
     /// Runs script in a page that has a view; else loads `url` (a reload with no view is a load).
     fn eval_or_load(&mut self, id: &str, script: &str, url: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.eval_browser(id, script) { self.load_browser(id, url, false, window, cx); }
+        if !self.eval_browser(id, script) && let Err(e) = self.load_browser(id, url, false, window, cx) { self.fail(e); }
     }
 
     /// `canvas.pane_read` and `canvas.pane_shot` for a browser pane: answered once the page
@@ -1500,6 +1533,17 @@ impl AppWindow {
         Ok(())
     }
 
+    /// Holds the control reply for the tab the command opened, or returns its setup error.
+    pub(super) fn browser_opened(&mut self, id: &str, reply: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let key = reply["tab"].as_str().map(|tab| tab_key(id, tab)).or_else(|| self.page_key(id)).ok_or("the browser tab closed")?;
+        self.ensure_page(&key, window, cx)?;
+        let tx = self.held_reply.take().unwrap();
+        let ask = Ask::Opened(reply.clone(), tx);
+        let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
+        if page.loading { page.waiting.push(ask); } else { self.answer_browser(&key, ask); }
+        Ok(())
+    }
+
     /// Loads a target in the active tab, or in a new tab when requested.
     pub(super) fn browser_open(&mut self, id: &str, target: &str, tab: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<Value, String> {
         let url = browser_target_url(target)?;
@@ -1508,14 +1552,17 @@ impl AppWindow {
             return Ok(json!({"pane":id,"url":url,"tab":tab}));
         }
         if !tab.is_null() { return Err("tab must be new".into()); }
-        self.load_browser(id, &url, true, window, cx);
+        if let Err(e) = self.load_browser(id, &url, true, window, cx) {
+            self.command_error("Page not opened", &e, window, cx);
+            if self.held_reply.is_some() { return Err(e); }
+        }
         Ok(json!({"pane":id,"url":url}))
     }
 
-    /// Loads `url`, saving it (and as Home when `home`); toasts when the view cannot be made.
-    fn load_browser(&mut self, id: &str, url: &str, home: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if url.is_empty() { return; }
-        let Some(key) = self.page_key(id) else { return };
+    /// Loads `url` and saves it (and as Home when `home`).
+    fn load_browser(&mut self, id: &str, url: &str, home: bool, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        if url.is_empty() { return Ok(()); }
+        let key = self.page_key(id).ok_or("the browser tab closed")?;
         #[cfg(target_os = "macos")]
         let previous = self.browser_url(id).unwrap_or_default().to_owned();
         #[cfg(target_os = "macos")]
@@ -1533,17 +1580,21 @@ impl AppWindow {
         if home && let canvas::Kind::Browser { home, .. } = &mut pane.kind { *home = url.to_owned(); }
         self.canvas_changed(cx);
         let made = self.canvas_state.browsers.pages.get(&key).is_some_and(Page::has_view);
-        if let Err(e) = self.ensure_view(id, window, cx) {
-            self.toast(Toast { title: "Page not opened".into(), body: Some(e), level: Level::Error, action: None }, window, cx);
-            return;
-        }
+        self.ensure_page(&key, window, cx)?;
         // A new view already loads the saved URL.
-        if made { self.navigate_browser(&key, url, cx); }
+        if made { self.navigate_browser(&key, url, window, cx)?; }
         #[cfg(target_os = "macos")]
         if let Some(placement) = placement {
             self.canvas_state.browsers.pages.get_mut(&key).unwrap().live = Some(placement);
         }
         cx.notify();
+        Ok(())
+    }
+
+    /// Makes the active page's native view if it is missing.
+    pub(super) fn ensure_view(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let key = self.page_key(id).ok_or_else(|| format!("no browser pane {id}"))?;
+        self.ensure_page(&key, window, cx)
     }
 
     /// The click on a resting page.
@@ -1556,6 +1607,26 @@ impl AppWindow {
 }
 
 impl Page {
+    fn start_load(&mut self, load: u64) {
+        self.cancel_asks("the browser navigation was superseded");
+        self.loading = true;
+        self.load = load;
+    }
+
+    fn matches_load(&self, load: u64) -> bool {
+        if self.load != load { return false; }
+        #[cfg(target_os = "macos")]
+        return self.native.as_ref().is_some_and(|native| native.navigation.load() == load);
+        #[cfg(not(target_os = "macos"))]
+        false
+    }
+
+    fn cancel_asks(&mut self, reason: &str) {
+        for ask in self.waiting.drain(..) {
+            let _ = ask.tx().send(json!({"error": reason}));
+        }
+    }
+
     fn has_view(&self) -> bool {
         #[cfg(target_os = "macos")]
         return self.native.is_some();
@@ -1624,6 +1695,7 @@ fn load_local_file(
     path: &std::path::Path,
     folder: Option<&std::path::Path>,
     alive: std::rc::Weak<()>,
+    navigation: objc2::rc::Retained<super::browser_navigation::Delegate>,
     failed: impl Fn(String) + 'static,
 ) -> Result<(), String> {
     use objc2_foundation::NSURL;
@@ -1648,8 +1720,9 @@ fn load_local_file(
         // SAFETY: the rules apply before the file loads, on the main thread.
         unsafe {
             view.configuration().userContentController().addContentRuleList(&rules);
-            if view.loadFileURL_allowingReadAccessToURL(&file, &access).is_none() {
-                failed("WebKit could not open the local file".into());
+            match view.loadFileURL_allowingReadAccessToURL(&file, &access) {
+                Some(load) => navigation.bind(load),
+                None => failed("WebKit could not open the local file".into()),
             }
         }
     });
@@ -1792,18 +1865,21 @@ impl AppWindow {
     /// Makes the tab's web view (hidden, loading the saved URL) unless it has one. A popped pane's
     /// views are built in its pop-out window, whichever window asked.
     // shortcut: hidden views stay allocated until their tab closes, drop views on rest if memory matters.
-    pub(super) fn ensure_view(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
-        self.require_browser_url(id)?;
-        let key = self.page_key(id).unwrap();
-        if self.canvas_state.browsers.pages.get(&key).is_some_and(Page::has_view) { return Ok(()); }
-        let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id && p.url().is_some()).ok_or_else(|| format!("no browser pane {id}"))?;
-        let (url, frame) = (pane.url().unwrap().to_owned(), self.host_frame(pane));
+    fn ensure_page(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        use super::browser_navigation::{Delegate, FIRST_LOAD};
+        use wry::WebViewExtMacOS as _;
+        let tab = self.tab_by_key(key).ok_or("the browser tab closed")?;
+        if tab.url.is_empty() { return Err(ENTER_URL.into()); }
+        if self.canvas_state.browsers.pages.get(key).is_some_and(Page::has_view) { return Ok(()); }
+        let (id, _) = key.split_once('/').unwrap();
+        let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).unwrap();
+        let (url, frame) = (tab.url.clone(), self.host_frame(pane));
         let magnifies = canophy::pinch_owner(&canophy::traits(&pane.kind), self.placement(id)) == canophy::Owner::Content;
         let local = if url.starts_with("file:") {
             let path = checked_file(&file_path(&url)?)?;
             // Recheck after rest, pop-out, or restore. A stale folder grant cannot follow a
             // symlink to a different file or directory.
-            let folder = self.canvas_state.browsers.pages.get(&key).and_then(|page| page.local_folder.as_ref())
+            let folder = self.canvas_state.browsers.pages.get(key).and_then(|page| page.local_folder.as_ref())
                 .filter(|(granted_url, folder)| granted_url == &url && path.starts_with(folder))
                 .and_then(|(_, folder)| folder.canonicalize().ok().filter(|current| current == folder));
             let address = file_url(&path)?;
@@ -1813,27 +1889,24 @@ impl AppWindow {
         let tx = self.browser_events(window, cx);
         self.canvas_state.browsers.next_view += 1;
         let view_id = self.canvas_state.browsers.next_view;
-        let build_key = key.clone();
+        let build_key = key.to_owned();
         let build = move |window: &mut Window, cx: &mut App| -> Result<Native, String> {
             let key = build_key;
             let send = |event: fn(String) -> Event| {
                 let (tx, key) = (tx.clone(), key.clone());
                 move |s: String| { let _ = tx.try_send((key.clone(), view_id, event(s))); }
             };
-            let (load_tx, load_key) = (tx.clone(), key.clone());
             let (open_tx, open_key) = (tx.clone(), key.clone());
             let (nav_tx, nav_key) = (tx.clone(), key.clone());
             let local_url = local.as_ref().map(|(address, _, _)| address.clone());
             let is_local = local.is_some();
-            let download_error = send(Event::LoadError);
+            let local_error = send(|error| Event::LoadError(FIRST_LOAD, error));
+            let download_error = local_error.clone();
             // Local pages never use an incognito store, where their live view never drew: the
             // shared web store, or WebKit's default one where that is unsupported (before macOS
             // 14). Their own content rules still block network loads.
-            let builder = match (is_local, persistent_browser_store()) {
-                (true, true) => browser_store(wry::WebViewBuilder::new()),
-                (true, false) => wry::WebViewBuilder::new(),
-                (false, _) => browser_store(wry::WebViewBuilder::new()).with_url(url),
-            };
+            let builder = wry::WebViewBuilder::new();
+            let builder = if is_local && !persistent_browser_store() { builder } else { browser_store(builder) };
             let webview = builder
                 .with_navigation_handler(move |url| {
                     let permitted = permits_navigation(local_url.as_deref(), &url);
@@ -1847,10 +1920,6 @@ impl AppWindow {
                 .with_accept_first_mouse(true)
                 .with_initialization_script_for_main_only(page_script(), true)
                 .with_document_title_changed_handler(send(Event::Title))
-                .with_on_page_load_handler(move |event, _| {
-                    let event = match event { wry::PageLoadEvent::Started => Event::Started, wry::PageLoadEvent::Finished => Event::Loaded };
-                    let _ = load_tx.try_send((load_key.clone(), view_id, event));
-                })
                 .with_new_window_req_handler(move |url, _| {
                     let _ = open_tx.try_send((open_key.clone(), view_id, Event::Open(url)));
                     wry::NewWindowResponse::Deny
@@ -1863,11 +1932,19 @@ impl AppWindow {
                 .build_as_child(window)
                 .map_err(|e| format!("cannot make the web view: {e}"))?;
             set_magnification(&webview, magnifies);
+            let wk = webview.webview();
+            let navigation = Delegate::attach(&wk, move |event| {
+                let _ = tx.try_send((key.clone(), view_id, event));
+            })?;
             let local_load = if let Some((_, path, folder)) = local {
+                navigation.expect_load();
                 let token = std::rc::Rc::new(());
-                load_local_file(&webview, &path, folder.as_deref(), std::rc::Rc::downgrade(&token), send(Event::LoadError))?;
+                load_local_file(&webview, &path, folder.as_deref(), std::rc::Rc::downgrade(&token), navigation.clone(), local_error)?;
                 Some(token)
-            } else { None };
+            } else {
+                navigation.open(&url)?;
+                None
+            };
             let clip = super::browser_mask::wrap(&webview)?;
             let view = cx.new(|cx| gpui_wry::WebView::new(webview, window, cx));
             let raw = view.update(cx, |v, _| {
@@ -1876,17 +1953,18 @@ impl AppWindow {
                 if popped.is_none() { fit_view(v, frame); }
                 v.handle()
             });
-            Ok(Native { view, raw, clip, magnifies, _local_load: local_load })
+            Ok(Native { view, raw, clip, magnifies, navigation, _local_load: local_load })
         };
         // The window that asked may itself be the pop-out, which cannot be updated from inside.
         let native = match popped {
             Some(handle) if handle != window.window_handle() => handle.update(cx, |_, window, cx| build(window, cx)).map_err(|e| e.to_string())??,
             _ => build(window, cx)?,
         };
-        let page = self.canvas_state.browsers.pages.entry(key.clone()).or_default();
+        let load = native.navigation.load();
+        let page = self.canvas_state.browsers.pages.entry(key.to_owned()).or_default();
         page.native = Some(native);
         page.view_id = view_id;
-        self.begin_load(&key, cx);
+        self.begin_load(key, load, window, cx);
         Ok(())
     }
 
@@ -2015,10 +2093,8 @@ impl AppWindow {
         let Some(page) = self.canvas_state.browsers.pages.get_mut(key) else { return };
         if let Some(native) = page.native.take() { destroy(native); }
         (page.live, page.loading, page.watch) = (None, false, false);
-        for ask in std::mem::take(&mut page.waiting) {
-            let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
-            let _ = tx.send(json!({"error": why}));
-        }
+        page.load_timer = None;
+        page.cancel_asks(why);
     }
 
     /// The pop-out's page area at window size `view`: the active tab's view (shown, the others
@@ -2287,10 +2363,22 @@ impl AppWindow {
         cx.notify();
     }
 
-    fn navigate_browser(&mut self, key: &str, url: &str, cx: &mut Context<Self>) {
-        let Some(raw) = self.raw_page(key) else { return };
-        self.begin_load(key, cx);
-        let _ = raw.raw().load_url(url);
+    fn navigate_browser(&mut self, key: &str, url: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let page = self.canvas_state.browsers.pages.get_mut(key).ok_or("the browser tab closed")?;
+        let native = page.native.as_ref().ok_or("the browser page closed")?;
+        match native.navigation.open(url) {
+            Ok(()) => {
+                let load = native.navigation.load();
+                self.begin_load(key, load, window, cx);
+            }
+            Err(error) => {
+                page.loading = false;
+                page.load_timer = None;
+                page.cancel_asks(&error);
+                return Err(error);
+            }
+        }
+        Ok(())
     }
 
     /// Answers one held reply from the loaded page.
@@ -2298,15 +2386,24 @@ impl AppWindow {
         let Some(raw) = self.raw_page(key) else { return };
         // No page ever committed (the server refused or never answered): say so, since
         // WebKit would drop the script callback and the caller would hear nothing.
-        if page_url(raw.raw()).is_none() {
+        let Some(url) = page_url(raw.raw()) else {
             let url = self.tab_by_key(key).map(|tab| tab.url.as_str()).unwrap_or_default();
             let error = json!({"error": format!("{url} did not load: is its server running?")});
-            let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
-            let _ = tx.send(error);
+            let _ = ask.tx().send(error);
             return;
-        }
+        };
         let id = key.split_once('/').unwrap().0.to_owned();
         match ask {
+            Ask::Opened(mut reply, tx) => {
+                use wry::WebViewExtMacOS as _;
+                // Read both properties now, before another navigation can replace the document.
+                let wk = raw.raw().webview();
+                reply["url"] = json!(url);
+                // SAFETY: this is a live WKWebView on the main thread.
+                reply["title"] = json!(unsafe { wk.title() }.map(|title| title.to_string()).unwrap_or_default());
+                reply["loaded"] = json!(true);
+                let _ = tx.send(reply);
+            }
             Ask::Read(tx) => {
                 let tx = std::sync::Mutex::new(Some(tx));
                 let script = "JSON.stringify({url: location.href, title: document.title, text: document.body ? document.body.innerText : ''})";
@@ -2490,8 +2587,7 @@ pub(crate) fn forget_browser_data_if_until_quit() -> Option<impl std::future::Fu
 
 #[cfg(not(target_os = "macos"))]
 impl AppWindow {
-    fn ensure_view(&mut self, id: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
-        self.require_browser_url(id)?;
+    fn ensure_page(&mut self, _: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
         Err("browser panes run on macOS only for now".into())
     }
     pub(super) fn wake_browser_result(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
@@ -2513,7 +2609,9 @@ impl AppWindow {
     }
     pub(super) fn watch_pages(&self, _: &[String], _: &mut Context<Self>) {}
     pub(super) fn eval_browser(&mut self, _: &str, _: &str) -> bool { false }
-    fn navigate_browser(&mut self, _: &str, _: &str, _: &mut Context<Self>) {}
+    fn navigate_browser(&mut self, _: &str, _: &str, _: &mut Window, _: &mut Context<Self>) -> Result<(), String> {
+        Err("browser panes run on macOS only for now".into())
+    }
     fn answer_browser(&mut self, _: &str, _: Ask) {}
 }
 
@@ -2526,6 +2624,28 @@ mod tests {
     use crate::canvas::{Kind, Pane};
     use crate::settings::{KeepCookies, OpenLinks};
     use serde_json::json;
+
+    #[test]
+    fn a_new_navigation_cancels_waiters_in_its_own_tab() {
+        use super::{Ask, Page};
+        use std::sync::mpsc;
+
+        let (first, first_reply) = mpsc::channel();
+        let (other, other_reply) = mpsc::channel();
+        let mut tab = Page::default();
+        let mut other_tab = Page::default();
+        tab.start_load(1);
+        other_tab.start_load(1);
+        tab.waiting.push(Ask::Opened(json!({"url":"http://localhost/first"}), first));
+        other_tab.waiting.push(Ask::Opened(json!({"url":"http://localhost/other"}), other));
+
+        tab.start_load(2);
+        assert_eq!(first_reply.try_recv().unwrap()["error"], "the browser navigation was superseded");
+        assert!(tab.loading && tab.waiting.is_empty());
+        assert_eq!(tab.load, 2);
+        assert_eq!(other_reply.try_recv(), Err(mpsc::TryRecvError::Empty));
+        assert_eq!(other_tab.waiting.len(), 1);
+    }
 
     #[test]
     fn menu_marks_the_current_choices() {
@@ -2605,7 +2725,7 @@ mod tests {
         let mut pane = Pane {
             id: "p1".into(), kind: Kind::Browser {
                 tabs: vec![crate::canvas::Tab { id: "t1".into(), url: String::new(), title: String::new() }],
-                active: 0, home: String::new(), viewport: None,
+                active: 0, home: String::new(), viewport: None, source: None,
             },
             rect: [0., 0., 640., 838.].into(), z: 1, space: None, color: None, pinned: None,
         };

@@ -5,7 +5,7 @@ impl AppWindow {
     /// Runs one canvas.pane_* command and answers the caller. `person` is false for agents and
     /// scripts on the control socket.
     pub(in crate::window) fn pane_command(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let r = match name {
+        let mut r = match name {
             "canvas.pane_new" => self.pane_new(a, person, window, cx),
             "canvas.pane_pin" => {
                 let id = a["pane"].as_str().map(str::to_owned).or_else(|| self.canvas_state.selected.last().cloned());
@@ -32,13 +32,45 @@ impl AppWindow {
                     Err(e) => Err(e),
                 }
             }
+            // A sim pane still asking simctl answers once it knows.
+            "canvas.pane_read" if a["pane"].as_str().is_some_and(|id| self.sim_loading(id)) => {
+                let id = a["pane"].as_str().unwrap().to_owned();
+                if self.hold_sim_reply(&id, super::sim::Waiter::Read) { return; }
+                self.pane_read(a, cx)
+            }
             "canvas.pane_read" => self.pane_read(a, cx),
             "canvas.pane_set" => self.pane_set(a, cx),
             "canvas.pane_shot" => self.pane_shot(a, window),
             _ if self.is_browser(a) => self.browser_open(a["pane"].as_str().unwrap(), a["target"].as_str().unwrap_or_default(), &a["tab"], window, cx),
             _ => self.pane_open(a, window, cx),
         };
+        // An agent hears how a simulator or page it opened turned out, not just that it started.
+        if let Ok(reply) = &r && matches!(name, "canvas.pane_new" | "canvas.pane_open") {
+            match self.hold_opened(name, a, reply, window, cx) {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(error) => r = Err(error),
+            }
+        }
         self.answer(r);
+    }
+
+    /// Holds an open reply until its simulator request or browser navigation finishes.
+    fn hold_opened(&mut self, name: &str, a: &Value, reply: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<bool, String> {
+        let Some(id) = reply["pane"].as_str() else { return Ok(false); };
+        if self.held_reply.is_none() { return Ok(false); }
+        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return Ok(false); };
+        match &pane.kind {
+            canvas::Kind::Sim { .. } => {
+                let named = name == "canvas.pane_open" || a["udid"].is_string() || a["url"].is_string();
+                Ok(named && self.hold_sim_reply(id, |tx| super::sim::Waiter::Opened { tx, reply: reply.clone() }))
+            }
+            canvas::Kind::Browser { .. } if reply["url"].as_str().is_some_and(|url| !url.is_empty()) => {
+                self.browser_opened(id, reply, window, cx)?;
+                Ok(true)
+            }
+            canvas::Kind::Browser { .. } | canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } | canvas::Kind::File { .. } | canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } | canvas::Kind::Mod { .. } => Ok(false),
+        }
     }
 
     /// Whether `a["pane"]` names a browser pane.
@@ -78,21 +110,27 @@ impl AppWindow {
                 _ => return Err("canvas.pane_new: url must be a string".into()),
             })
         } else { None };
-        // A named simulator must exist before a pane points at it.
-        let udid = match a["udid"].as_str() { Some(target) if kind == "sim" => self.resolve_sim(target)?, _ => String::new() };
+        // A sim's target and URL resolve in its refresh, off the UI thread; parse them here.
+        let (target, sim_url) = if kind == "sim" {
+            let target = match &a["udid"] { Value::Null => None, Value::String(t) => Some(crate::sim::Target::parse(t)), _ => return Err("canvas.pane_new: udid must be a string".into()) };
+            let sim_url = match &a["url"] { Value::Null => None, Value::String(u) => Some(crate::sim::Url::parse(u)?), _ => return Err("canvas.pane_new: url must be a string".into()) };
+            if sim_url.is_some() && target.is_none() { return Err("canvas.pane_new: a sim url needs udid (a simulator or \"booted\")".into()); }
+            if let Some(crate::sim::Target::Udid(udid)) = &target && self.canvas_state.shutting_down_sims.contains(udid) { return Err("The simulator is shutting down".into()); }
+            (target, sim_url)
+        } else { (None, None) };
         use super::dock::Home;
         let home = Home::parse(a, kind)?;
         let browser_or_sim = matches!(kind, "browser" | "sim");
         // File and mod opening still places panes directly on the canvas.
         let before = (home == Home::Pinned && !browser_or_sim).then(|| canvas::Rest::capture(doc));
         let (id, path, kind) = if let Some(url) = url.clone() {
-            (self.add_browser_pane(url, point, space, cx), None, kind.to_owned())
+            (self.add_browser_pane(url, point, space, None, cx), None, kind.to_owned())
         } else if kind == "file" {
             let path = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()).ok_or("canvas.pane_new: path must be absolute")?;
             let (id, path, kind) = self.add_file_pane(std::path::Path::new(path), point, space, window, cx)?;
             (id, Some(path), kind)
         } else if kind == "sim" {
-            (self.add_sim_pane(udid.clone(), point, space, window, cx), None, kind.to_owned())
+            (self.add_sim_pane(target, sim_url, point, space, window, cx), None, kind.to_owned())
         } else {
             (self.add_mod_pane(kind.to_owned(), point, space, cx), None, kind.to_owned())
         };
@@ -113,7 +151,6 @@ impl AppWindow {
         if home == Home::Panel { reply["docked"] = json!(true); }
         if let Some(path) = path { reply["path"] = json!(path); }
         if let Some(url) = url { reply["url"] = json!(url); }
-        if kind == "sim" { reply["udid"] = json!(udid); }
         Ok(reply)
     }
 
@@ -240,17 +277,21 @@ impl AppWindow {
         let Some(id) = a["pane"].as_str() else { return Err("canvas.pane_open needs pane".into()); };
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
         if pane.sim().is_none() { return Err(format!("pane {id} ({}) has no verb open", pane.kind_name())); }
-        // A sim pane shows the simulator (a udid or "booted"), booting it; its own udid refreshes.
+        // A sim pane shows a simulator (a udid or "booted"), booting it, or opens a URL on it.
         let target = a["target"].as_str().ok_or("canvas.pane_open needs target")?;
-        let udid = self.resolve_sim(target)?;
-        self.point_sim(id, udid.clone(), window, cx);
-        Ok(json!({"pane":id,"udid":udid}))
+        if !crate::sim::available() { return Err("Simulator panes need Xcode on macOS".into()); }
+        let id = id.to_owned();
+        match crate::sim::Open::parse(target)? {
+            crate::sim::Open::Device(device) => self.point_sim(&id, Some(device), window, cx)?,
+            crate::sim::Open::Url(url) => self.open_sim_url(&id, url, window, cx)?,
+        }
+        Ok(json!({"pane":id}))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{canvas, json, Bounds, point, px, size, TestAppContext, Value};
+    use super::{canvas, json, FileHost, FileMode, Bounds, point, px, size, TestAppContext, Value};
     use crate::window::tests::{in_own_process, open_window, running_alone};
     const TEST: &str = "window::canvas_view::pane_commands::tests::pane_commands_headless";
 
@@ -304,7 +345,10 @@ mod tests {
     #[gpui::test]
     fn pane_commands_headless(cx: &mut TestAppContext) {
         if !running_alone(TEST) { return; }
-        let (view, cx) = open_window(cx, "pane-commands", "", json!({"id":"root","type":"canvas"}));
+        let (view, cx) = open_window(cx, "files", r#"
+import { View, div } from "gpui-kit";
+export default class extends View { render() { return div(); } }
+"#, json!({"id":"root","type":"canvas"}));
         view.update_in(cx, |this, window, cx| {
             let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md");
             this.canvas_state.doc.place("t1", [0., 0.], [220., 36.]);
@@ -401,12 +445,12 @@ mod tests {
             let draft = canvas::PanelTab::File(draft_path.clone());
             this.canvas_state.doc.panel.tabs.push(draft.clone());
             this.canvas_state.file = Some(draft.clone());
-            this.canvas_state.editing = Some(draft_path.clone());
+            this.canvas_state.modes.insert((FileHost::Panel, draft_path.clone()), FileMode::Source);
             this.canvas_state.dirty = Some(draft_path.clone());
             assert_eq!(this.pane_dock(&did, Some(true), window, cx), Ok(true));
             assert!(this.canvas_state.doc.docked(&did));
             assert_eq!(this.canvas_state.file.as_ref(), Some(&draft));
-            assert_eq!(this.canvas_state.editing.as_ref(), Some(&draft_path));
+            assert_eq!(this.canvas_state.file_mode(&FileHost::Panel, &draft_path), FileMode::Source);
             assert_eq!(this.canvas_state.dirty.as_ref(), Some(&draft_path));
             assert!(this.pane_dock("t1", None, window, cx).is_err(), "a terminal does not dock");
             assert_eq!(this.run_as(close, json!({"pane":did}), false, window, cx), json!({"ok":true}));
@@ -438,6 +482,7 @@ mod tests {
             assert_eq!(this.pane_read(&json!({"pane":"missing"}), cx).unwrap_err(), "no pane missing");
             assert_eq!(this.pane_read(&json!({"pane":"t1"}), cx).unwrap_err(), "pane t1 is a terminal: read it with hc read t1");
             assert_eq!(this.pane_open(&json!({"pane":id,"target":"x"}), window, cx).unwrap_err(), format!("pane {id} (file) has no verb open"));
+            this.model.add_space("other", "Fixture", path.parent().unwrap().to_str().unwrap(), crate::model::Tab::new("tb1", "", "fixture", "t99"));
             this.canvas_state.doc.room = Some("other".into());
             assert_eq!(this.pane_shot(&json!({"pane":id}), window).unwrap_err(), format!("pane {id} is in another space: go there first"));
             let moved = this.pane_new(&json!({"kind":"file","path":path,"point":[10000,10000]}), false, window, cx).unwrap();
@@ -446,9 +491,72 @@ mod tests {
             assert!(this.canvas_state.doc.wires.is_empty(), "a pane moved to another space leaves its wires");
             this.bounds.borrow_mut().insert("canopy-canvas".into(), Bounds::new(point(px(0.), px(0.)), size(px(800.), px(600.))));
             assert_eq!(this.pane_shot(&json!({"pane":id}), window).unwrap_err(), format!("pane {id} is off screen: bring it into view first"));
+            let source = reply["path"].as_str().unwrap();
+            let preview = json!({"path":source,"pane":id,"mode":"preview"});
+            assert_eq!(this.run_as("file.mode", json!({"path":source,"pane":id,"mode":"source"}), false, window, cx)["ok"], true);
+            this.panel_editor(&json!({"path":source,"pane":id,"dirty":true}), window, cx);
+            assert!(this.run_as("file.mode", preview, false, window, cx)["error"].is_string());
+            let slot = FileHost::Card { pane: id.into() }.slot();
+            let editor = this.copies[&slot].id;
+            assert!(this.copies[&slot].root.is_some());
+            this.go_room(None, window, cx);
+            assert!(!this.panel_mods().iter().any(|(key, _)| key == &slot));
+            assert_eq!(this.copies.get(&slot).map(|copy| copy.id), Some(editor), "a hidden draft keeps its editor");
+            assert!(this.run_as("canvas.close", json!({"pane":id}), false, window, cx)["error"].is_string());
+            assert!(this.run_as("canvas.close", json!({"panes":[id]}), false, window, cx)["error"].is_string());
+            assert!(this.run_as("panel.editor", json!({"path":source,"pane":id,"dirty":false}), false, window, cx)["error"].is_string());
+            this.dispatch("space.close", &json!({"id":"other","confirmed":true}), false, window, cx);
+            assert!(this.model.space("other").is_some(), "deleting a space must keep its draft");
+            this.go_room(Some("other".into()), window, cx);
+            this.canvas_state.selected = vec![id.into()];
+            assert!(this.run_as("canvas.close_focused", json!({}), true, window, cx)["error"].is_string());
+            assert_eq!(this.copies[&slot].id, editor);
+            this.panel_editor(&json!({"path":source,"pane":id,"done":true}), window, cx);
+            assert_eq!(this.canvas_state.file_mode(&FileHost::Card { pane: id.into() }, source), FileMode::Source);
+            this.panel_editor(&json!({"path":source,"pane":id,"dirty":false}), window, cx);
+            this.panel_editor(&json!({"path":source,"pane":id,"done":true}), window, cx);
+            assert_eq!(this.canvas_state.file_mode(&FileHost::Card { pane: id.into() }, source), FileMode::Preview);
             this.close_canvas_cell(&json!({"pane":id}), window, cx);
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == id));
             assert!(this.canvas_state.doc.wires.is_empty());
+            // macOS swaps the same pane between Preview and Source. Linux and Windows keep Source.
+            let html = std::env::temp_dir().join(format!("canopy-mode-{}.html", std::process::id()));
+            std::fs::write(&html, "<p>hi</p>").unwrap();
+            let opened = this.pane_new(&json!({"kind":"file","path":html}), false, window, cx).unwrap();
+            let (id, html) = (opened["pane"].as_str().unwrap().to_owned(), opened["path"].as_str().unwrap().to_owned());
+            let panes = this.canvas_state.doc.panes.len();
+            let kind = |this: &crate::window::AppWindow| this.canvas_state.doc.panes.iter().find(|p| p.id == id).map(|p| p.kind.clone());
+            let preview = json!({"path":html,"pane":id,"mode":"preview"});
+            let has_mode_action = |this: &crate::window::AppWindow| {
+                let pane = this.canvas_state.doc.panes.iter().find(|pane| pane.id == id).unwrap();
+                super::super::helper_bar::pane_actions(pane, None, false, None)
+                    .iter().any(|action| action.command == "file.mode")
+            };
+            if cfg!(target_os = "macos") {
+                assert!(matches!(kind(this), Some(canvas::Kind::Browser { source: Some(s), .. }) if s == html));
+                assert_eq!(this.run_as("file.mode", json!({"path":html,"pane":id,"mode":"source"}), false, window, cx)["ok"], true);
+                assert!(matches!(kind(this), Some(canvas::Kind::File { path }) if path == html));
+                assert!(has_mode_action(this));
+                assert_eq!(this.run_as("file.mode", preview, false, window, cx)["ok"], true);
+                assert!(matches!(kind(this), Some(canvas::Kind::Browser { source: Some(s), .. }) if s == html));
+            } else {
+                assert!(matches!(kind(this), Some(canvas::Kind::File { path }) if path == html));
+                assert!(!has_mode_action(this));
+                assert!(this.run_as("file.mode", preview, false, window, cx)["error"].is_string());
+                assert!(matches!(kind(this), Some(canvas::Kind::File { path }) if path == html));
+            }
+            assert_eq!(this.pane_new(&json!({"kind":"file","path":html}), false, window, cx).unwrap()["pane"], id.as_str());
+            assert_eq!(this.canvas_state.doc.panes.len(), panes, "no pane added or left behind");
+            this.close_canvas_cell(&json!({"pane":id}), window, cx);
+            this.open_preview(json!({"path":html}), false, window, cx);
+            if cfg!(target_os = "macos") {
+                assert_eq!(this.canvas_state.file, this.html_panel_tab(&html));
+                assert!(this.canvas_state.active_panel_pane().is_some());
+            } else {
+                assert_eq!(this.canvas_state.file_path(), Some(&html));
+                assert_eq!(this.canvas_state.shown_mode(&FileHost::Panel, &html), FileMode::Source);
+            }
+            let _ = std::fs::remove_file(&html);
         });
     }
     const VIEWERS_TEST: &str = "window::canvas_view::pane_commands::tests::viewer_pane_commands_headless";

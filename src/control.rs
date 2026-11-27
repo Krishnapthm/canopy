@@ -44,12 +44,15 @@ fn serve(stream: UnixStream, tx: async_channel::Sender<Request>) {
     }
     let reply = match serde_json::from_str::<Value>(&line) {
         Ok(cmd) => {
-            // A shot, or a browser pane read or shot waiting for its page, can take a while.
-            let slow = cmd.get("shot").is_some() || matches!(cmd["do"].as_str(), Some("canvas.pane_read" | "canvas.pane_shot"));
+            // A shot, a page loading, or a simulator booting or listing can take a while.
+            let slow = cmd.get("shot").is_some() || matches!(cmd["do"].as_str(), Some("canvas.pane_read" | "canvas.pane_shot" | "canvas.pane_new" | "canvas.pane_open" | "canvas.sim_shutdown" | "canvas.sim_devices"));
             let timeout = Duration::from_secs(if slow { 30 } else { 5 });
             let (reply_tx, reply_rx) = std::sync::mpsc::channel();
             let _ = tx.send_blocking(Request::Control { cmd, reply: reply_tx });
-            reply_rx.recv_timeout(timeout).unwrap_or_else(|_| json!({ "error": "the window did not answer" }))
+            reply_rx.recv_timeout(timeout).unwrap_or_else(|e| match e {
+                std::sync::mpsc::RecvTimeoutError::Timeout if slow => json!({ "error": format!("no answer within {} s: a page or simulator may still be loading; canopy pane read shows where it is", timeout.as_secs()) }),
+                std::sync::mpsc::RecvTimeoutError::Timeout | std::sync::mpsc::RecvTimeoutError::Disconnected => json!({ "error": "the window did not answer" }),
+            })
         }
         Err(e) => json!({ "error": format!("bad request: {e}") }),
     };

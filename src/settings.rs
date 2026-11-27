@@ -70,10 +70,9 @@ fn preset(name: &str) -> Option<&'static Palette> {
 /// The shipped theme files (defaults/themes), written to `themes/` when missing.
 const THEMES: &[(&str, &str)] = &[
     ("atom-one-dark", include_str!("../defaults/themes/atom-one-dark.json")),
-    ("win98", include_str!("../defaults/themes/win98.json")),
 ];
 #[cfg(test)]
-pub const SHIPPED_THEMES: &[&str] = &["atom-one-dark", "win98"];
+pub const SHIPPED_THEMES: &[&str] = &["atom-one-dark"];
 
 /// `themes/<name>.json`: a palette, plus `colors` overrides like settings.json's.
 #[derive(Deserialize)]
@@ -105,40 +104,19 @@ const PREVIOUS_THEMES: &[(&str, &str)] = &[
   ]
 }
 "##),
-    ("win98", r##"{
-  "background": "#ffffff",
-  "foreground": "#c0c0c0",
-  "selection": "#000080",
-  "cursor": "#c0c0c0",
-  "ansi": [
-    "#000000", "#aa0000", "#00aa00", "#aa5500", "#0000aa", "#aa00aa", "#00aaaa", "#aaaaaa",
-    "#555555", "#ff5555", "#55ff55", "#ffff55", "#5555ff", "#ff55ff", "#55ffff", "#ffffff"
-  ],
-  "colors": {
-    "foreground": "#000000",
-    "surface": "#c0c0c0",
-    "popover": "#c0c0c0",
-    "raised": "#dfdfdf",
-    "hover": "#dfdfdf",
-    "border": "#808080",
-    "input": "#ffffff",
-    "muted": "#404040",
-    "dim": "#808080",
-    "accent": "#000080",
-    "accent_foreground": "#ffffff",
-    "ring": "#000000",
-    "working": "#808000",
-    "blocked": "#ff0000",
-    "done": "#0000ff",
-    "idle": "#808080",
-    "unknown": "#808080"
-  }
-}
-"##),
 ];
 
 pub fn install_themes() {
-    let _ = std::fs::create_dir_all(crate::mods::app_dir().join("themes"));
+    let dir = crate::mods::app_dir().join("themes");
+    let _ = std::fs::create_dir_all(&dir);
+    crate::mods::remove_retired_asset(
+        &dir,
+        "win98.json",
+        &[
+            "8cc91a0c04b04c33a984848843257138d4c4d91d16128114185ea442c21f1dd0",
+            "bc20e7639c9ade1a905fcdde89bb4a57b47ced8d5f84ba10277bb50527f65959",
+        ],
+    );
     for (name, text) in THEMES {
         install_theme(&theme_path(name), name, text);
     }
@@ -911,7 +889,7 @@ pub fn note_fonts(names: Vec<String>) {
 }
 
 /// Font files the home brings: `fonts/` and each mod's `fonts/` (a layout's
-/// look travels with its mod, as Canopy 98's does). Loads the ones not loaded
+/// look travels with its mod). Loads the ones not loaded
 /// yet; true when any was.
 pub fn load_home_fonts(cx: &mut gpui::App) -> bool {
     static LOADED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
@@ -1124,17 +1102,14 @@ mod tests {
         assert!(main.look.theme.is_none() && main.look.colors.is_none() && main.look.font.is_none() && main.look.font_size.is_none() && main.look.ui_font.is_none());
         assert_eq!(Settings::compose(&Person::default(), &main.look, true).font_size, 14.0);
         assert_eq!(main.look.terminal_padding, Some([14.0, 12.0]));
-        let terminals: Node = serde_json::from_str(include_str!("../defaults/layouts/terminals.json")).unwrap();
+        let mut terminals: Node = serde_json::from_str(include_str!("../defaults/layouts/terminals.json")).unwrap();
         assert_eq!(Settings::compose(&person, &terminals.look, true).font_size, 15.0);
         let main_settings = Settings::compose(&person, &main.look, true);
         assert_eq!((main_settings.font_size, main_settings.theme.as_str()), (19.0, "moss"));
-        let mut win98: Node = serde_json::from_str(include_str!("../defaults/layouts/win98.json")).unwrap();
-        let win_settings = Settings::compose(&person, &win98.look, true);
-        assert_eq!(win_settings.theme, "win98");
-        assert_eq!(win_settings.font_family, "PxPlus IBM VGA 8x16");
+        assert_eq!(Settings::compose(&person, &terminals.look, true).theme, "graphite");
         let clicks = crate::layout_sync::State { theme: Some(ThemeChoice::One("ink".into())), ..Default::default() };
-        clicks.apply(&mut win98);
-        assert_eq!(Settings::compose(&person, &win98.look, true).theme, "ink");
+        clicks.apply(&mut terminals);
+        assert_eq!(Settings::compose(&person, &terminals.look, true).theme, "ink");
     }
 
     #[test]

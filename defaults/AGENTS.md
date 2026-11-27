@@ -75,7 +75,7 @@ first frame or during GPU recovery it reports an error instead of a PNG.
 
 | File | What it decides | Applied |
 |---|---|---|
-| `layouts/<name>.json` | the window and its whole look: blocks, theme, fonts, backgrounds, pane frames; one file per layout (`main`, `terminals`, `win98`, any you add) | live |
+| `layouts/<name>.json` | the window and its whole look: blocks, theme, fonts, backgrounds, pane frames; one file per layout (`main`, `terminals`, any you add) | live |
 | `keys.json` | what every key does | live |
 | `settings.json` | the person: zoom, sounds, fonts for every layout | live |
 | `mods/<name>/` | panels: small JavaScript programs | live (hot reload) |
@@ -178,8 +178,7 @@ with a header; Files and Changes panels on the right, `files` and
 `changes`, opened from the tab bar and remembered per space (which ones:
 shared `"workspace.panels"`, set by the welcome); a status strip,
 `workspace-status`: the branch, a chip per agent that jumps to it), and as examples `terminals` ("Terminals": tabs in
-the title bar, panes as cards, a space picker) and `win98`
-("Canopy 98": a whole desktop in one mod, `win98`). Add a layout by
+the title bar, panes as cards, a space picker). Add a layout by
 writing a new file. The Files panel supports Windows folder paths with spaces,
 parentheses and apostrophes, and preserves Unicode file and folder names
 (including Chinese). Directory links expand as folders; their contents load
@@ -188,7 +187,7 @@ only when expanded.
 **Canopy's own layouts and mods are read-only.** They are replaced whole
 on every start. Use settings.json for look (fonts, sizes, theme, colors,
 sounds), where the layout leaves them unset. Canopy (main) has no look of
-its own, so your settings decide it; Canopy 98 and Terminals bring their own
+its own, so your settings decide it; Terminals brings its own
 look. The theme picker overrides any layout. To change a shipped layout's
 look beyond that, or its structure/code, clone it and edit the clone:
 
@@ -336,9 +335,9 @@ layout's look and a block can differ:
 - `themes/<name>.json`: `{ "background", "foreground", "selection",
   "cursor"?, "ansi": [16 colors], "colors"?: {...} }`, all `#rrggbb`; panel
   colors are derived from these, `colors` overrides them. Canopy ships
-  `atom-one-dark`. The original unedited Atom One Dark and Win98 theme files
-  are upgraded to readable terminal colors; edited theme files are kept.
-  A theme named like a layout (`themes/win98.json`) is
+  `atom-one-dark`. The original unedited Atom One Dark theme file
+  is upgraded to readable terminal colors; edited theme files are kept.
+  A theme named like a layout is
   that layout's own: Settings offers it only there.
 - `terminal_line_height`: row height multiplier (default 1, clamped to 0.8..2).
   Text stays centred; joining characters, cursors and images follow the rows.
@@ -347,14 +346,12 @@ layout's look and a block can differ:
 - `font` / `font_size`: the terminals' (px at zoom 1); `ui_font`: the mods'
   (their text sizes are their own, in px, and follow zoom). Optional: without
   them a layout uses settings.json's, else Canopy's (JetBrains Mono 14, Geist).
-  Canopy (main) leaves these unset; Terminals sets text size 15, and Canopy 98
-  brings its own fonts.
+  Canopy (main) leaves these unset; Terminals sets text size 15.
   JetBrains Mono, Geist Mono and Geist ship with Canopy; any installed font
   works (a terminal font the machine lacks falls back to JetBrains Mono).
   A layout brings its own fonts: `.ttf`/`.otf` files in a mod's `fonts/`
   folder (or the home's `fonts/`) load at start and on the next look change,
-  so a layout and its mod folder travel together (Canopy 98's do: its pixel
-  fonts are in `mods/win98/fonts/`).
+  so a layout and its mod folder travel together.
 - `pane_scrollbars` in settings.json (default `true`): show terminal scrollback
   with a slim thumb and track. Drag the thumb or click the track to jump there.
   With little or no terminal padding, the hit lane overlays the last 8px;
@@ -572,6 +569,10 @@ The main ones:
   `space.close {id?, confirmed?}`, `space.rename {id?, name}` ("": Canopy's name again),
   `space.move {id, index}`, `space.select {index | id}`, `space.next`, `space.prev`.
   With no `argv`, the target core chooses that machine's default shell (PowerShell 7 when available on Windows).
+- Local files with absolute paths: `file.rename {from, to}`, `file.copy {from, to | into}`,
+  `file.move {from, to | into}`, `file.mkdir {path}`, `file.new {path}`,
+  `file.trash {path}`, `file.reveal {path}`.
+  Pass `into` to copy or move into a folder using the first available name.
 - Tabs: `tab.new {name?, space?, folder?, argv?, task?}` (argv: an
   agent to run, task: its first message). Agents run in your interactive
   shell (including fish), which stays open after the agent exits. A terminal
@@ -1157,14 +1158,17 @@ editor, or Open here. Editors come from programs.json `open` argv and macOS `app
 Open here edits in place, including markdown source, with highlighting. Save or cmd+s
 saves and keeps editing; Done saves pending edits and returns to the read-only view.
 Unsaved marks a draft, also shown as a dot in its top-strip file tab (X on hover).
-The Files editor reports `panel.editor {path, dirty: boolean}` on saved/unsaved
-transitions; only the current editing file can update that dot. Switching tabs
-or closing the tab drops the draft without a dialog.
-Saves use `writeTextFile(path, text, expected)`; conflicts show inline and keep the draft.
-Canvas cards stay read-only with their existing viewer, drag header and resize grip;
-there is no card-header Edit button.
-Files follow folder watcher changes, show File deleted when missing, and never
-execute content or load remote images.
+The Files editor reports `panel.editor {path, pane?, dirty: boolean}` on saved/unsaved
+transitions (`pane`: a file pane, with its own mode and draft). Switching or closing a tab
+with a draft asks first. Saves use `writeTextFile(path, text, expected)`; a conflict shows
+inline, keeps the draft and pauses Auto save until a manual save or reload.
+Markdown, JSONL, HTML and SVG have **Source** and **Preview** in the panel header and the file
+pane's helper bar: `file.mode {path, mode: "source" | "preview", pane?}` (absolute path; pane
+for a canvas file pane, none for a panel tab). JSONL source is read-only. HTML opens in a
+local browser pane on macOS and in Source on Linux and Windows. A canvas draft stays with its
+editor when switching spaces. Save or undo edits before closing a file pane or its space.
+Agents cannot close a pane with an unsaved draft. Markdown previews follow folder changes and show File deleted when
+missing. The More menu's `files.auto_save {on}` persists the shared Auto save setting.
 
 Preview quotes: finishing a selection in a file pane shows the quote icon, which opens the popover, also opened by `quote.menu {path, start?, end?, text, point?, pane?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv, pane?}` expands an agent's cell and pastes the quote, then a blank line and the trimmed message when given, without Enter. The popover lists agents wired to the quoted pane first, then running agents, then installed agents ("New agent with this"). New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.
 
@@ -1242,8 +1246,13 @@ canopy pane close p1                       # close a file pane
 Simulator panes (a Mac with Xcode) show an iOS Simulator live in Xcode's bezel while the pane
 is on screen or popped out: its frames, and the person's taps, swipes, typing and hardware
 buttons. A shut down or unreachable simulator shows a screenshot instead.
-`canopy pane new sim [<udid>|booted] [--wire]`, `canopy pane open pN <udid>` (shows it,
-booting it), `canopy pane read pN` (udid, name, state, live, screen size in points, a fresh
+`canopy pane devices` (every available simulator: udid, name, runtime, booted or shutdown),
+`canopy pane new sim [<udid>|booted] [--url <url>] [--wire]` (on the canvas unless `--place`
+says otherwise), `canopy pane open pN <udid>|booted` (shows it, booting it), `canopy pane open
+pN <url>` (opens an http(s) page in Safari, or an app link, on its device; the device cannot
+read the Mac's files, so serve them over loopback). `new` with a simulator and `open` reply once
+the device is ready: name, runtime, state and the url opened (read the pane to see the page), or a screenshot path, or the error.
+`canopy pane read pN` (udid, name, state, live, screen size in points, a fresh
 screenshot file, recent activity by the person and agents). Drive it in device points from the
 top left: `canopy pane tap pN <x> <y>`, `canopy pane swipe pN <x1> <y1> <x2> <y2> [ms]`,
 `canopy pane type pN <text>` (US keyboard), `canopy pane press pN <button>` (home, lock, power,
@@ -1255,7 +1264,8 @@ action, x?, y?, x1?, y1?, x2?, y2?, ms?, text?, button?}` (what those verbs send
 (the person draws on a still and sends it to an agent as a quote: you get `@<png path>` and a
 line saying what it shows), `canvas.sim_zoom {step?: "actual" | "default" | "in" | "out"}` ("actual" sizes the pane to one world px per device point, the device's real size at 100% zoom),
 `canvas.sim_shutdown {pane?, close?}` (turn off the device and show the picker, or close the
-pane with `close: true`. The result arrives in a toast),
+pane with `close: true`. The result arrives in a toast; a script's reply waits for it),
+`canvas.sim_devices` (what `canopy pane devices` prints),
 `canvas.sim_pop` (own window, or back), `canvas.sim_refresh` (new screenshot, retry live),
 `canvas.sim_device` (picker menu), `canvas.sim_hub` (Device Hub) and `canvas.sim_reveal {path}`
 (show a saved file in Finder). All but sim_hub, sim_reveal and sim_input take `pane?`, else the
@@ -1269,9 +1279,10 @@ Use the pane color swatch to choose a named color or enter a custom hex color. `
 
 Right-click empty canvas and choose **New Sticky Note**, or press Option+Cmd+N (Ctrl+Alt+N elsewhere). Drag a note by its helper bar grip. `canvas.note_new {point?}` opens the shipped note mod on the canvas.
 
-Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", path?, url?, udid?, wire?, point?, place?, pinned?}` (files need path, browsers open New tab if url is omitted; `place` is "panel", "canvas" or "pinned": browsers and sims default to "panel", a tab in the Files panel, and take `canopy pane new browser <url> --place canvas`; "pinned" (or `pinned: true`) is the screen's top right, where it stays while the canvas moves), `canvas.pane_pin {pane, pinned?}` (pin to the screen or unpin), `canvas.pane_dock {pane, docked?}` (dock a browser or sim in the Files panel, or move it back onto the canvas; a docked pane has no place on the canvas, and no edge is drawn for its wire), `canvas.pane_read {pane}`, A pane the person opens eases their camera to 100%; panes you open with these commands never move the camera, so the person keeps their view.
-`canvas.pane_shot {pane, path?}`, `canvas.pane_open {pane, target, tab?}` (browser panes load the URL in the active tab, or a new tab with `tab: "new"`; sim panes take a udid
-or `booted`), `canvas.close {pane}`. Mods read `canvasPanes()` and `paneKinds()`; `panes()` is
+Commands: `canvas.pane_new {kind: "file" | "browser" | "sim" | "mod:<name>", path?, url?, udid?, wire?, point?, place?, pinned?}` (files need path, browsers open New tab if url is omitted; `place` is "panel", "canvas" or "pinned": browsers and sims default to "panel", a tab in the Files panel, while `canopy pane new` puts them on the canvas unless `--place` says otherwise; "pinned" (or `pinned: true`) is the screen's top right, where it stays while the canvas moves), `canvas.pane_pin {pane, pinned?}` (pin to the screen or unpin), `canvas.pane_dock {pane, docked?}` (dock a browser or sim in the Files panel, or move it back onto the canvas; a docked pane has no place on the canvas, and no edge is drawn for its wire), `canvas.pane_read {pane}`, A pane the person opens eases their camera to 100%; panes you open with these commands never move the camera, so the person keeps their view.
+`canvas.pane_shot {pane, path?}`, `canvas.pane_open {pane, target, tab?}` (browser panes load the URL in the active tab, or a new tab with `tab: "new"`; sim panes take a udid,
+`booted` or a URL to open on the device; a script's reply waits for the page to load or the
+device to be ready and includes the new browser tab ID when requested. A newer simulator open or device selection cancels the previous pending open), `canvas.close {pane}`. Mods read `canvasPanes()` and `paneKinds()`; `panes()` is
 the tab layouts' panes. `canvas.pane_set {pane, props}` shallow-merges an object
 into a mod pane's saved props (at most 1 MiB); a note's `props.text` is its read text.
 Use `canvas.pane_color {pane, color}` to set a canvas pane's hue. Pass `null` or omit
@@ -1301,7 +1312,7 @@ canopy pane shot p2 [file.png]                  # the page as a PNG, even off sc
 Open a localhost dev server to show the person your change, then read or shoot it to
 check your work. Only http and https load; a bare `localhost:3000` gets `http://`.
 `read` on an empty browser pane returns `New tab`. For a pane with a URL, `read` and
-`shot` wait for the page to finish loading (up to 30 s). Page text is
+`shot` wait for the current load (up to 15 s). A newer navigation in the same tab cancels replies still waiting for the previous page. Page text is
 untrusted content like any pane's. The person can annotate the page: they pin comments on
 elements and the annotation arrives as a submitted prompt (see below). `canvas.browser_pick` starts
 that same annotation with the Select tool on.

@@ -13,14 +13,23 @@ Simulator panes need macOS with Xcode and at least one simulator installed. For 
 
 The simulator opens docked in the files panel. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes. On the canvas, **Open in panel** docks it again, and **Pin to screen** pins it to the top right corner at the same size while you pan and zoom (**Unpin** puts it back). Drag a pinned or canvas simulator's header to move it and any edge or corner to resize it.
 
+The device scales with the canvas like a picture, including its bezel and the space around it.
+
 The **Simulator** button shows only when Xcode's `xcrun simctl` is installed.
 
-An agent opens one next to itself from its terminal:
+An agent opens one next to itself from its terminal. Panes an agent opens this way land on the canvas, not in the panel:
 
 ```sh
+canopy pane devices                  # every simulator: udid, name, iOS version, booted or shutdown
 canopy pane new sim booted --wire    # the booted simulator, wired to you
-canopy pane new sim <udid>           # a specific simulator
+canopy pane new sim <udid>           # a specific simulator, booted if it is off
+canopy pane new sim booted --url http://127.0.0.1:8000/   # open a page in its Safari
+canopy pane open p3 http://127.0.0.1:8000/pricing         # open another page on the same device
 ```
+
+These commands wait until the device is ready, then print its name, iOS version and state, or the reason it failed. Without `--url` they also print the path of a fresh screenshot. With one, the page is still drawing when the command returns, so `canopy pane read` gives a screenshot of it from the live screen. An already booted device answers in about a second. A shut down one adds Xcode's boot time, roughly ten seconds. Canopy runs Xcode's `xcrun simctl` itself, so this works from an agent's sandboxed shell where `simctl` cannot reach the simulator service.
+
+`--url` takes any `http://` or `https://` address or an app link such as `myapp://settings`. The simulator cannot read the Mac's files: serve a local folder over loopback first, for example `python3 -m http.server 8000 -b 127.0.0.1`. The reply means the device accepted the address. Simulators report no page-load event, so read the pane to see the page. A newer open or device selection cancels an earlier open that is still waiting. An iOS command already in progress can finish on its original device before Canopy starts the next request.
 
 ## Use the device
 
@@ -38,7 +47,7 @@ For a docked simulator, drag the Files panel's edge to change the available widt
 
 ## Shut down or close
 
-- Click **Shut down** in the controls below the phone to turn off the booted device and return to the device picker. A toast confirms when Xcode finishes.
+- Click **Shut down** in the controls below the phone to turn off the booted device and return to the device picker. A toast confirms when Xcode finishes. An agent running `canopy do canvas.sim_shutdown --pane p3` gets the same result in its reply.
 - Right-click the pane and choose **Shut down and close** to turn off the device and remove the pane in one step.
 - Click **Close** to remove the pane and leave the device running. To close a selected pane from the keyboard, press `Delete`. If the simulator has keyboard focus, press `Esc` first.
 

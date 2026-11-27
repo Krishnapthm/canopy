@@ -15,7 +15,7 @@ const SECTIONS = [
   { id: "alerts", title: "Alerts", icon: "bell" },
 ];
 
-const LOOKS = { main: "Canopy", terminals: "Terminals", win98: "Canopy 98" };
+const LOOKS = { main: "Canopy", terminals: "Terminals" };
 const APPEARANCES = [
   ["system", "System"],
   ["light", "Light"],
@@ -447,7 +447,7 @@ export default class Settings extends View {
       .flex_wrap()
       .gap(8)
       .children(
-        // A theme named like a layout (themes/win98.json) is that layout's own.
+        // A theme named like a layout is that layout's own.
         themes()
           .filter((x) => Boolean(x.light) === light && (x.name === shared("layout") || !layouts().includes(x.name)))
           .map(({ name, colors: c }) => {

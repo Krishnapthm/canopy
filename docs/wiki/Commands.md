@@ -53,7 +53,7 @@ No arguments.
 
 ## `canvas.tile`
 
-Tile view: fit every expanded cell of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed cells line up below. Repeat to put everything back.
+Tile view: fit every expanded terminal and agent of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed ones line up below. Other panes stay where they are. Repeat to put everything back.
 
 No arguments.
 
@@ -193,7 +193,7 @@ Open a sticky note on the canvas. The optional point is in world coordinates.
 
 ## `canvas.pane_new`
 
-Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick. place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable.
+Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or "booted") or lists devices to pick; with udid, url (http(s) or an app link) opens on it once booted, and the reply waits for the device: name, runtime, state and url, or a screenshot path when no url was opened (read the pane to see the page). place is "panel" (a tab in the Files panel, the default for browsers and sims), "canvas" (at point, the middle of the view by default) or "pinned" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path or url when applicable; for a browser with a url it waits until the page has loaded and adds title. `canopy pane new` puts browsers and sims on the canvas unless place says otherwise.
 
 | Argument | Required |
 |---|---|
@@ -260,7 +260,7 @@ Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); ref
 
 ## `canvas.pane_open`
 
-Point a browser or simulator pane at a target. A browser loads an HTTP(S) address, an absolute local path or a file URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" and refreshes the screenshot when already showing that device.
+Point a browser or simulator pane at a target. A browser loads an HTTP(S) address, an absolute local path or a file URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or "booted" (refreshing the screenshot when already showing that device) or a URL to open on its device, booting it first; the reply waits for the device and includes name, runtime, state and url, or a screenshot path when no url was opened. A browser reply waits until the page has loaded and adds title.
 
 | Argument | Required |
 |---|---|
@@ -532,12 +532,18 @@ Resize a simulator pane: step actual (one device point per canvas unit, requires
 
 ## `canvas.sim_shutdown`
 
-Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast.
+Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast, and a script's reply waits for it: pane, udid and state shutdown.
 
 | Argument | Required |
 |---|---|
 | `pane` | no |
 | `close` | no |
+
+## `canvas.sim_devices`
+
+List the available simulators (udid, name, runtime, state booted or shutdown) for a script, without opening a pane. `canopy pane devices` prints them.
+
+No arguments.
 
 ## `canvas.sim_pop`
 
@@ -727,14 +733,33 @@ Close a file tab in the Files panel, asking before discarding unsaved changes. T
 
 ## `panel.editor`
 
-Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state.
+Choose a file panel editor, return to the read-only view after saving, or report an editor's dirty state (pane names a canvas file pane, else the panel).
 
 | Argument | Required |
 |---|---|
 | `choice` | no |
 | `done` | no |
 | `path` | no |
+| `pane` | no |
 | `dirty` | no |
+
+## `file.mode`
+
+Show a file as its source or its preview. mode is source or preview; pane is the canvas file pane, omitted for the Files panel tab.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+| `mode` | yes |
+| `pane` | no |
+
+## `files.auto_save`
+
+Turn automatic saving of edited files on or off.
+
+| Argument | Required |
+|---|---|
+| `on` | yes |
 
 ## `preview.open`
 
@@ -1332,6 +1357,67 @@ No arguments.
 Go to the next page in the last selected PDF pane.
 
 No arguments.
+
+## `file.rename`
+
+Rename a local file or folder.
+
+| Argument | Required |
+|---|---|
+| `from` | yes |
+| `to` | yes |
+
+## `file.copy`
+
+Copy a local file or folder to a path, or into a folder with an available name.
+
+| Argument | Required |
+|---|---|
+| `from` | yes |
+| `to` | no |
+| `into` | no |
+
+## `file.move`
+
+Move a local file or folder to a path, or into a folder with an available name.
+
+| Argument | Required |
+|---|---|
+| `from` | yes |
+| `to` | no |
+| `into` | no |
+
+## `file.mkdir`
+
+Create a local folder.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `file.new`
+
+Create an empty local file.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `file.trash`
+
+Move a local file or folder to the system trash.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `file.reveal`
+
+Show a local file or folder in the system file browser.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
 
 ## `preview.external`
 

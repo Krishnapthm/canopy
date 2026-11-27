@@ -11,13 +11,15 @@ The browser opens docked in the files panel, as a tab. Choose **Move to canvas**
 
 A bare local address like `localhost:3000` gets `http://`, and other bare hosts get `https://`.
 
-Agents can open a browser pane too, usually wired to themselves:
+Agents can open a browser pane too, usually wired to themselves. A pane an agent opens lands on the canvas beside it:
 
 ```sh
 canopy pane new browser localhost:3000 --wire
-canopy pane new browser localhost:3000 --place canvas  # on the canvas, not in the panel
+canopy pane new browser localhost:3000 --place panel  # a tab in the files panel instead
 canopy pane open p2 http://localhost:3000/pricing  # point an existing pane at another page
 ```
+
+Both commands wait until the page has loaded and print its address and title. If you navigate the same tab again while an open is waiting, Canopy cancels the earlier reply. A failed load returns WebKit's error, or a timeout after 15 seconds.
 
 `canopy pane open` also makes the new address the pane's **Home**.
 
@@ -88,6 +90,8 @@ A browser pane is either resting or live:
 - **Click outside the pane** to rest the page and take a fresh snapshot.
 
 A page lays out at the size its pane is drawn. Canopy waits for that size before taking the first snapshot. A resting page scales like a picture while you zoom the canvas. When the camera settles more than 5% above the snapshot's scale, Canopy takes a sharper snapshot. Choosing another **Viewport** also refits a resting page and retakes its snapshot.
+
+A live page keeps its CSS width while you zoom the canvas. Canopy hands WebKit the new size and page zoom together, so text keeps the same line breaks.
 
 ## The header
 
@@ -204,7 +208,7 @@ canopy pane read p2   # the URL, title and text of the page
 canopy pane shot p2   # a PNG screenshot of the page
 ```
 
-Reading an empty pane returns `New tab`. When the pane has a URL, both commands wait for the page to finish loading, time out after 30 seconds, and work even when the pane is off screen. See [Let Agents Show You](Let-Agents-Show-You#show-me-the-running-app).
+Reading an empty pane returns `New tab`. When the pane has a URL, both commands wait for the current load for up to 15 seconds and work even when the pane is off screen. See [Let Agents Show You](Let-Agents-Show-You#show-me-the-running-app).
 
 ## Privacy
 

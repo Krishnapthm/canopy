@@ -15,14 +15,20 @@ On macOS, right-click a local image or PDF in the file tree and choose **Open in
 - click **Expand panel** to fill the window. click **Restore panel** or resize the panel to return to the canvas.
 - click **Close panel** to hide it. docked panes stay docked while it is hidden. to return to a docked browser or simulator, open the panel and select the pane's tab.
 
-## Browse and preview files
+## File tree
 
 The canvas tree shows the folder of the space you are in. On Home it shows the space whose card you last clicked, or else the space you entered most recently.
 In the classic layout, the tree follows the focused pane's folder, or the active space's folder when none is focused.
 
 1. Click a folder to expand or collapse it.
-2. Type in **Search files** to filter the list.
-3. Click a file to preview it. On macOS, right-click a file in the canvas tree and choose **Open in Canopy browser** to render it. [Supported browser formats](Browser-Pane#open-a-local-file)
+2. Type a file name in **Filter, or ? to search in files**. To find text inside files, type `?` followed by at least two characters, such as `?TODO`.
+3. Click a file or search result to open it. On macOS, right-click a local file in the canvas tree and choose **Open in Canopy browser** to render it. See [supported browser formats](Browser-Pane#open-a-local-file).
+
+Use **Collapse all** beside the canvas filter to close every expanded folder and keep the root entries visible. Right-click a local row to copy its absolute or relative path, rename it, move it to the system trash, show it in the system file browser, or open a terminal in its folder. Moving to the trash asks for confirmation. Folder rows also let you create a file or subfolder.
+
+Choose **Copy** or **Cut** on a row, then **Paste** on a folder or any file inside it. If the name is taken, Canopy uses a name like `notes copy.txt` or `notes copy 2.txt`. A successful cut and paste clears that item from the Files clipboard. Remote rows offer **Copy path** and **Copy relative path**. Click a remote file to read it in the tree panel, then choose **Back to files** to return.
+
+Content search starts 300 ms after you stop typing. In a Git working tree it searches tracked files using Git. Elsewhere it uses recursive grep. It matches literal text, skips binary files, and shows up to five matching lines per file and 200 lines total.
 
 - On the canvas, file tabs appear in the top strip above the panel.
 - Click a tab to select it. Hover for its full path. Click its X to close it.
@@ -30,6 +36,33 @@ In the classic layout, the tree follows the focused pane's folder, or the active
 - Other text previews accept files up to 1 MiB and show the first 400,000 UTF-16 code units.
 - The tree loads at most 500 entries per folder and 5,000 entries in total.
 - For files on the canvas, see [File and Note Panes](File-and-Note-Panes).
+
+## Copy, move, and rename files
+
+Right-click a local file or folder to **Copy**, **Cut**, or **Rename** it.
+To copy or move it, right-click the destination folder and choose **Paste**.
+Paste picks an available name. If another operation claims that name first,
+Canopy reports a conflict and preserves the existing item.
+
+On macOS and Linux, copies start with access restricted to the owner. Canopy
+restores the source's permission bits as each file or folder finishes copying.
+Moves between file systems use the same copy rules.
+
+## Switch between Source and Preview
+
+Markdown (`.md`, `.markdown`, `.mdx`), JSONL and SVG open in **Preview**.
+Click **Source** in the file header to see the text, and **Preview** to return.
+The same controls appear in a canvas file pane's helper bar. JSONL source is
+read-only. On macOS, HTML opens in a local browser pane in the same tab or
+canvas position. Click **Source** in its header or helper bar to return to the file.
+On Linux and Windows, HTML opens in **Source**.
+A Files tab and a canvas pane of the same file keep their own mode and unsaved
+edits, so switching or closing one never changes the other.
+
+- Click **Outline** in a Markdown preview to show the heading rail. Select a heading to scroll to it.
+- Click a web link to open a browser pane. A file link opens a Files tab. Relative links resolve from the Markdown file's folder.
+- Click **Collapse folders** while the tree is visible to fold open folders.
+- Open **More** to find **Auto save**. The checked setting is the default and is shared across spaces.
 
 ## Browsers and simulators in the panel
 
@@ -43,16 +76,15 @@ A browser or simulator opens as a tab in this panel, so it sits beside your work
 
 A docked pane is not on the canvas: layout, tiling and wire lines skip it. Canopy remembers docked panes between runs. On the canvas, use **Open in panel** from the browser’s **⋯** menu or its equivalent on the simulator’s helper bar. The pages themselves work as described in [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices).
 
-## Edit a file
+## Editing
 
-1. Open the arrow menu beside the editor button.
-2. Select **Open here** to edit in the panel.
-3. Edit the text.
-4. Click **Save** to save it, or **Done** to save and return to the preview.
+Use **Source** to make a quick edit or quote an exact line without leaving the panel. For files with a rendered view, use **Preview** to switch back. You can also choose **Open here** from the menu beside the editor button.
 
-an unsaved dot replaces the tab's X until you hover over it. switching to another tab, returning to the tree with **Files**, or closing the dirty tab asks **Discard unsaved changes?**. cancel to keep editing. if you edit the file again after the dialog opened, the old answer does nothing. agents cannot close a file tab.
-Editing accepts text files up to 1 MiB.
-If the file changes outside Canopy, saving fails and keeps your draft.
+- Edits save automatically one second after you stop typing. To turn this off, open **More** and uncheck **Auto save**. The editor then shows **Save**. Press **Cmd+S** on macOS or **Ctrl+S** on Linux and Windows to save in either setting.
+- Hover a line number and click **+** to open the quote menu for that line. Drag from **+** to another line to quote the whole range. This also works in read-only source views.
+- The bar beside a line number shows a Git change. Green marks additions, blue marks edits, and a short red bar shows where lines were deleted. The bars refresh when you open or save the file.
+
+The editor wraps long lines and highlights the line with the cursor. It accepts text files up to 1 MiB. If another program changes the file before you save, Canopy shows one error, keeps your draft and pauses auto save. Use **Save** to retry by hand. Copy your edits before reopening so you can use them with the version from disk. An unsaved dot appears on the tab, and leaving a dirty tab asks whether to discard your changes.
 
 ## Changes
 

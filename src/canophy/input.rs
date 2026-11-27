@@ -42,7 +42,7 @@ mod tests {
 
     #[test]
     fn pinch_follows_the_content_and_its_placement() {
-        let browser = traits(&Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None });
+        let browser = traits(&Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None, source: None });
         assert_eq!(pinch_owner(&browser, Placement::Canvas { entered: false }), Owner::Canvas);
         for at in [Placement::Canvas { entered: true }, Placement::Docked, Placement::Popped] {
             assert_eq!(pinch_owner(&browser, at), Owner::Content);

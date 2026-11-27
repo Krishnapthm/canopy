@@ -3908,7 +3908,20 @@ impl ShellRuntime {
                     payload.set("secondary", *secondary)?;
                     payload.set("shift", *shift)?;
                 }
-                InputEvent::Change | InputEvent::Focus | InputEvent::Blur | InputEvent::PasteWithoutText => {}
+                InputEvent::GutterQuote {
+                    start,
+                    end,
+                    position,
+                } => {
+                    payload.set("start", *start)?;
+                    payload.set("end", *end)?;
+                    payload.set("x", position.x.to_f64())?;
+                    payload.set("y", position.y.to_f64())?;
+                }
+                InputEvent::Change
+                | InputEvent::Focus
+                | InputEvent::Blur
+                | InputEvent::PasteWithoutText => {}
             }
             handler.call::<_, ()>((
                 payload,
@@ -7110,6 +7123,7 @@ globalThis.__gpui = (() => {
           value: () => __editor_value(handle),
           // HERDR: null or text with 1-based inclusive source lines.
           selection: () => JSON.parse(__editor_selection(handle)),
+          set_line_marks: (marks) => __editor_set_line_marks(handle, JSON.stringify(marks)),
           set_value: (value) => __editor_set_value(handle, String(value)),
           on: (event, handler) => __editor_on(handle, String(event), handler),
           release: () => __editor_release(handle),

@@ -11,8 +11,10 @@ Read AGENTS.local.md too when present.
 - Never touch the daily herdr app, core session, config or user data.
 - Never stop, signal or restart processes you did not start.
 - Launch only with an isolated app home and core session/socket. The
-  orchestrator owns app launches after review. Never run a bare app binary.
-- Never leave an app or core you started running after a step.
+  orchestrator owns app launches after review, except the dev window (see
+  Build and checks). Never run a bare app binary.
+- Never leave an app or core you started running after a step, except the dev
+  window.
 - No telemetry, update checks, feedback uploads or app-owned network requests.
 - No push, repo creation, publishing or release without Krishna's instruction.
 - No em dashes. Commit as type(scope): description, lowercase, imperative,
@@ -28,7 +30,7 @@ Read AGENTS.local.md too when present.
   cannot express it. Use CLI files, editor integration, flags and hooks, never
   vendor APIs or credentials.
 - Preserve released data and APIs unless the task explicitly changes them.
-- Keep defaults/AGENTS.md and src/SKILL.md current with agent-facing behavior.
+- Keep defaults/AGENTS.md and src/skill/ (SKILL.md and its references) current with agent-facing behavior.
   The generated .d.ts files describe the full mod API.
 - Do not edit CHANGELOG.md. Preserve LICENSE and THIRD-PARTY-NOTICES.
 - Docs travel with the change. Whoever touches a feature updates its page in
@@ -126,6 +128,9 @@ No sweeping rewrites.
   once, at the boundary. A bad input becomes a toast.
 - Match domain enums exhaustively, with no `_ =>` catch-all.
 - Derive types from the authoritative schema; never hand-copy one.
+- Prefer a typed, shared solution over a one-off fix when behavior repeats
+  across panes, kinds or places: declare it once (a Traits field, an enum,
+  one function) and let every caller read it.
 - Don't force it. Keep boring code when the shape is local and won't grow.
 
 ## Toasts
@@ -179,10 +184,27 @@ that to the orchestrator.
 
 scripts/dev opens the isolated development window; close it before
 scripts/dev-stop stops only its reserved core. Do not run either during
-source-only work.
+source-only work (docs, tests, refactors with nothing visible to check).
+
+When a change is ready for Krishna to see working (anything visible in the
+app), start the dev window yourself; do not ask them to. Run
+`cargo build --locked` first (scripts/dev needs the debug app), then
+`scripts/dev` in the background, and say what to look at. The window is theirs
+to close: never stop or restart it, and if a scratch core is still reserved,
+ask before running scripts/dev-stop.
+
+Once the change works and the checks pass, ask Krishna what to do next: build
+locally (`just build`), push the branch, open a PR, or keep iterating. Do none
+of them before they answer. `just install` stays with the orchestrator.
 
 On Linux use scripts/sandbox up, do <command> [json], status, shot,
 move|click|drag, type, key, hc, restart and down for isolated UI checks.
 It uses a private Weston/Xwayland display, home and core under
 /var/tmp/herdr-app-sandbox. Never fake input on a real display.
 Run scripts/sandbox down when finished.
+
+<!-- canopy:begin -->
+## Canopy
+
+This project is open in Canopy, a canvas of terminals, agents and panes (files, notes). When the person mentions panes, the canvas, wiring, quotes or peers, use the `canopy` skill.
+<!-- canopy:end -->

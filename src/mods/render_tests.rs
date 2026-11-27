@@ -506,7 +506,8 @@ fn canvas_files_slots_describe_tree_and_viewer(cx: &mut TestAppContext) {
             json!({"canvas":if mode=="editing" {"viewer"} else {mode},"editing":mode=="editing","root":"/fixture","file":if mode!="tree" {Some("hello.rs")} else {None}}), None).unwrap();
         assert!(!tree.is_empty());
         if mode == "tree" { assert!(tree.contains("canvas-files-tree"), "{tree}"); }
-        if mode == "editing" { assert!(tree.contains("Save") && tree.contains("Done"), "{tree}"); }
+        // Auto save is on by default: a status, no Save button, and the Source/Preview toggle replaced Done.
+        if mode == "editing" { assert!(tree.contains("Saved") && !tree.contains("Done"), "{tree}"); }
     }
 }
 

@@ -1,64 +1,65 @@
-# Canopy
+<h1>Canopy</h1>
 
-Canopy is a desktop app for terminals and coding agents. Put them on one canvas,
-connect them with wires, and see which agent needs you.
+<p align="center">
+  <img src="assets/icons/canopy.svg" width="128" height="128" alt="Canopy icon">
+</p>
 
-Terminals keep running when you close the window. Canopy runs them on
-[herdr-core](https://github.com/herdrdev/herdr-core).
+<p align="center"><b>the canvas your coding agents work on.</b></p>
+
+<p align="center">
+  <a href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start">quick start</a> · <a href="https://github.com/Krishnapthm/canopy/wiki">docs</a> · <a href="CONTRIBUTING.md">contributing</a>
+</p>
+
+canopy puts your coding agents, terminals, browser and an iOS simulator on a single figma like canvas. wire agents with browsers/simulators, let them interract, see which one is waiting on you, and open files. close the window and everything keeps running.
 
 ## Install
 
-macOS (Apple Silicon) and Linux:
+macOS (apple silicon) & linux
 
 ```sh
 curl -fsSL https://github.com/Krishnapthm/canopy/releases/latest/download/install.sh | sh
 ```
 
-The installer adds Canopy and, if it is missing, herdr-core.
-Open Canopy from your apps or run `canopy`.
-Then follow the [Quick start](https://github.com/Krishnapthm/canopy/wiki/Quick-Start).
+the installer also sets up herdr-core if you don't have it yet. open canopy from your apps or run `canopy`, then follow the [quick start](https://github.com/Krishnapthm/canopy/wiki/Quick-Start) to set up your first canvas.
 
-To update, run the installer again. The app never updates itself.
+canopy never updates itself. to update, run the same command again.
 
-To uninstall, delete the app and its config in `~/.config/canopy`:
+<details>
+<summary>uninstall</summary>
 
-- macOS: `~/Applications/Canopy.app` and the `~/.local/bin/canopy` link.
-- Linux: `~/.local/share/canopy`, `~/.local/bin/canopy`,
-  `~/.local/share/applications/canopy.desktop` and
-  `~/.local/share/icons/hicolor/scalable/apps/canopy.svg`.
+delete the app, its command-line link and its config in `~/.config/canopy`.
 
-herdr-core stays, because other apps can use it.
+on macOS the app is `~/Applications/Canopy.app` and the link is `~/.local/bin/canopy`.
 
-## Docs
+on linux, remove `~/.local/share/canopy`, `~/.local/bin/canopy`, `~/.local/share/applications/canopy.desktop` and `~/.local/share/icons/hicolor/scalable/apps/canopy.svg`.
 
-The [wiki](https://github.com/Krishnapthm/canopy/wiki) has every feature, how to use it and how to fix problems.
+herdr-core is the engine herdr runs on too, so keep it if you use herdr. if you only installed it for canopy, run `hc server stop` to stop it, which ends any terminals still running in it. then delete `~/.local/bin/herdr-core`, `~/.local/bin/hc`, `~/.config/herdr-core` and `~/.local/state/herdr-core`, plus `~/.local/share/herdr-core` on macOS.
 
-## Build from source
+</details>
 
-You need Rust, Zig 0.16 and herdr-core. On macOS:
+## Requirements
+
+- [rust](https://rustup.rs) 1.95 or newer
+- [zig](https://ziglang.org/download/) 0.16
+- [herdr-core](https://github.com/herdrdev/herdr-core), which runs your terminals
+
+on linux you also need the system libraries for windowing and fonts. the wiki's [build from source](https://github.com/Krishnapthm/canopy/wiki/Build-from-Source) page lists them.
+
+## Build and run locally
 
 ```sh
-brew install zig@0.16
-export PATH="$(brew --prefix zig@0.16)/bin:$PATH"
+git clone https://github.com/Krishnapthm/canopy.git
+cd canopy
 cargo build --locked
-cargo test --locked
-```
-
-Open an isolated development window with its own home and core:
-
-```sh
 scripts/dev
 ```
 
-Close that window, then stop its core:
+`--locked` builds exactly the dependency versions pinned in `Cargo.lock`. `scripts/dev` opens a development window with its own scratch home and core, so it never touches your installed canopy. close the window, then run `scripts/dev-stop`.
 
-```sh
-scripts/dev-stop
-```
+## Built on herdr
 
-[Build from source](https://github.com/Krishnapthm/canopy/wiki/Build-from-Source) has the details.
+canopy is a fork of [herdr-app](https://github.com/herdrdev/herdr-app), and every terminal in canopy runs on [herdr-core](https://github.com/herdrdev/herdr-core). both are made by [herdr](https://github.com/herdrdev). if you like canopy, give herdr a try too.
 
 ## License
 
-Apache-2.0. Based on [herdr-app](https://github.com/herdrdev/herdr-app).
-See LICENSE, NOTICE and THIRD-PARTY-NOTICES.
+canopy is licensed under Apache-2.0, like herdr-app. see [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES).

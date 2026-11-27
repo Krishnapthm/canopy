@@ -17,6 +17,94 @@ pub struct Device {
     pub device_type: String,
 }
 
+/// Whether a simulator is running, as agents read it in replies.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum State { Booted, Shutdown }
+
+impl Device {
+    pub fn state(&self) -> State { if self.booted { State::Booted } else { State::Shutdown } }
+}
+
+/// One simulator as `canopy pane devices` and sim pane replies report it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct Listing { pub udid: String, pub name: String, pub runtime: String, pub state: State }
+
+impl From<&Device> for Listing {
+    fn from(d: &Device) -> Self { Listing { udid: d.udid.clone(), name: d.name.clone(), runtime: d.runtime.clone(), state: d.state() } }
+}
+
+/// The simulator a command names: the first booted one, or one by UDID.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Target { Booted, Udid(String) }
+
+impl Target {
+    pub fn parse(word: &str) -> Self { if word == "booted" { Target::Booted } else { Target::Udid(word.to_owned()) } }
+
+    /// The device this names in `devices` (sorted booted first, so `Booted` is the most recent).
+    pub fn find<'a>(&self, devices: &'a [Device]) -> Option<&'a Device> {
+        match self {
+            Target::Booted => devices.iter().find(|d| d.booted),
+            Target::Udid(udid) => devices.iter().find(|d| &d.udid == udid),
+        }
+    }
+
+    /// Why `find` found nothing.
+    pub fn missing(&self) -> String {
+        match self {
+            Target::Booted => "No simulator is booted: pick one from canopy pane devices".into(),
+            Target::Udid(udid) => format!("{udid} is not an available simulator (canopy pane devices lists them)"),
+        }
+    }
+}
+
+/// What `canopy pane open <sim pane> <target>` names: a simulator to show, or a URL to open on it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Open { Device(Target), Url(Url) }
+
+impl Open {
+    pub fn parse(word: &str) -> Result<Self, String> {
+        if word == "booted" || is_udid(word) { return Ok(Open::Device(Target::parse(word))); }
+        // Paths and file URLs get Url's own advice about serving files.
+        if word.contains("://") || word.starts_with(['/', '.', '~']) || word.starts_with("file:") { return Url::parse(word).map(Open::Url); }
+        Err(format!("{word} is neither a simulator (a UDID or booted) nor a URL such as http://127.0.0.1:8000/"))
+    }
+}
+
+/// simctl's device id shape: 8-4-4-4-12 hex digits.
+fn is_udid(word: &str) -> bool {
+    word.len() == 36 && word.bytes().enumerate().all(|(i, b)| if matches!(i, 8 | 13 | 18 | 23) { b == b'-' } else { b.is_ascii_hexdigit() })
+}
+
+/// An address for a simulator to open with `simctl openurl`: a web page (http, https)
+/// or an app link (myapp://...). Never a host file: the device cannot read the Mac's disk.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Url(String);
+
+impl Url {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let text = text.trim();
+        let Some((scheme, rest)) = text.split_once("://") else {
+            return Err(format!("{text} is not a URL: give a full address such as http://127.0.0.1:8000/ (the simulator cannot open the Mac's files, so serve them over loopback)"));
+        };
+        let valid_scheme = scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && scheme.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+        if !valid_scheme || rest.is_empty() { return Err(format!("{text} is not a URL")); }
+        if scheme.eq_ignore_ascii_case("file") {
+            return Err("The simulator cannot open the Mac's files: serve the folder over loopback (for example python3 -m http.server -b 127.0.0.1) and open its http:// address".into());
+        }
+        Ok(Url(text.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
+/// Opens `url` on a booted device: Safari for web pages, the owning app for app links.
+/// Returns once the device accepted it, not when the page has loaded.
+pub fn open_url(udid: &str, url: &Url) -> Result<(), String> {
+    simctl(&["openurl", udid, url.as_str()]).map(drop)
+}
+
 /// True when this Mac has Xcode's simctl. Checked once per run.
 pub fn available() -> bool {
     static FOUND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -40,9 +128,7 @@ pub fn boot(udid: &str) -> Result<(), String> {
 /// Shuts down one device. An already stopped device succeeds too.
 pub fn shutdown(udid: &str) -> Result<(), String> {
     // simctl also accepts aliases such as `all` and `booted`. Only address the pane's device.
-    if udid.len() != 36 || !udid.bytes().enumerate().all(|(i, b)| {
-        if matches!(i, 8 | 13 | 18 | 23) { b == b'-' } else { b.is_ascii_hexdigit() }
-    }) {
+    if !is_udid(udid) {
         return Err(format!("Invalid device: {udid}"));
     }
     simctl(&["shutdown", udid]).map(drop)
@@ -155,5 +241,27 @@ mod tests {
         assert!(!already_shutdown(Some(148), off));
         assert!(!already_shutdown(Some(149), "Unable to shutdown device in current state: Shutting Down"));
         assert!(shutdown("all").is_err());
+    }
+
+    #[test]
+    fn targets_and_urls_parse_at_the_boundary() {
+        let devices = parse(r#"{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[
+            {"udid":"A","name":"iPhone 17","state":"Shutdown"},{"udid":"B","name":"iPad","state":"Booted"}]}}"#).unwrap();
+        assert_eq!(Target::parse("booted").find(&devices).map(|d| d.udid.as_str()), Some("B"));
+        assert_eq!(Target::parse("A").find(&devices).map(|d| d.name.as_str()), Some("iPhone 17"));
+        assert!(Target::parse("Z").find(&devices).is_none());
+        assert_eq!(Target::Booted.find(&devices[1..]), None);
+        assert_eq!(serde_json::to_value(Listing::from(&devices[0])).unwrap(), serde_json::json!({"udid":"B","name":"iPad","runtime":"iOS 26.5","state":"booted"}));
+        assert_eq!(Url::parse(" http://127.0.0.1:8765/claude.html ").unwrap().as_str(), "http://127.0.0.1:8765/claude.html");
+        assert!(Url::parse("myapp://settings").is_ok());
+        let udid = "0123ABCD-0123-0123-0123-0123456789AB";
+        assert_eq!(Open::parse(udid).unwrap(), Open::Device(Target::Udid(udid.into())));
+        assert_eq!(Open::parse("booted").unwrap(), Open::Device(Target::Booted));
+        assert!(matches!(Open::parse("http://127.0.0.1:8765/"), Ok(Open::Url(_))));
+        assert!(Open::parse("./claude.html").unwrap_err().contains("loopback"));
+        assert!(Open::parse("iPhone").unwrap_err().contains("neither"));
+        for bad in ["localhost:3000", "./index.html", "/tmp/a.html", "file:///tmp/a.html", "http://", "1x://a"] {
+            assert!(Url::parse(bad).is_err(), "{bad}");
+        }
     }
 }

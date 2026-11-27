@@ -22,10 +22,13 @@ If the file already has a pane, Canopy moves that pane to you instead of opening
 
 - **Read it.** Double-click the pane to enter it, then scroll through the file's text right on the canvas. Until you enter it, scrolling over it pans the canvas.
 - **Quote from it.** Select lines and click the quote icon to send them to an agent with the path and line numbers. See [Point Agents at Things](Point-Agents-at-Things#lines-in-a-file).
-- **Edit it.** Click **Open as tab** in the helper bar to open the file in the [Files panel](Files-Panel), where you can edit and save it.
+- **Edit it.** Enter the pane and type in **Source**. For files that open in **Preview**, choose **Source** in the helper bar first. **Open as tab** opens a separate editor in the [Files panel](Files-Panel).
 - **Wire it.** Click **Connect** and then an agent. The agent then sees the file in `canopy wire` and can read it with `canopy pane read`. A file can be wired to terminals and agents, but not to another file.
 
-**Close** in the helper bar closes the pane without asking. The file on disk is untouched.
+Switch spaces freely while editing. Canopy keeps the draft and any pending
+Auto save in the pane's editor while it is hidden.
+To close a pane with unsaved changes, save or undo the edits first. The same
+rule applies when closing its space or when an agent runs `canopy pane close`.
 
 ## Note panes
 

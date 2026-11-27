@@ -455,6 +455,22 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                         .map_err(|error| Exception::throw_type(&ctx, &error.to_string()))?;
                     colors.insert(name.clone(), color);
                 }
+                let mark_colors = options
+                    .mark_colors
+                    .as_ref()
+                    .map(|colors| {
+                        let parse = |color: &String| {
+                            crate::value::Bridged::Str(color.clone())
+                                .as_color()
+                                .map_err(|error| Exception::throw_type(&ctx, &error.to_string()))
+                        };
+                        Ok::<_, rquickjs::Error>([
+                            parse(&colors.added)?,
+                            parse(&colors.modified)?,
+                            parse(&colors.removed)?,
+                        ])
+                    })
+                    .transpose()?;
                 let style = gpui_base::input::InputEditorStyle {
                     highlight_styles: std::sync::Arc::new(crate::syntax::SyntaxStyles(colors)),
                     ..Default::default()
@@ -466,6 +482,7 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
                         .create_editor(
                             options,
                             style,
+                            mark_colors,
                             scope::current_application_generation(),
                             window,
                             cx,
@@ -508,6 +525,22 @@ pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) 
         Func::from(
             move |ctx: Ctx<'_>, handle: EntityHandle, value: String| -> JsResult<()> {
                 write_value(&ctx, &live_editor(&ctx, &write_editor, handle)?, value)
+            },
+        ),
+    )?;
+
+    let marks_editor = runtime.clone();
+    globals.set(
+        "__editor_set_line_marks",
+        Func::from(
+            move |ctx: Ctx<'_>, handle: EntityHandle, json: String| -> JsResult<()> {
+                let state = live_editor(&ctx, &marks_editor, handle)?;
+                let marks = parse_line_marks(&json)
+                    .map_err(|error| Exception::throw_type(&ctx, &error.to_string()))?;
+                scope::with_current_app(|cx| {
+                    state.update(cx, |state, cx| state.set_line_marks(marks, cx))
+                })
+                .ok_or_else(|| needs_call(&ctx, "set_line_marks()"))
             },
         ),
     )?;
@@ -1387,6 +1420,12 @@ fn subscribe(
         )
     })?;
 
+    if event == InputEventName::GutterQuote && what != "editor" {
+        return Err(Exception::throw_type(
+            ctx,
+            "gutter_quote requires an editor",
+        ));
+    }
     let saved = handler.0;
     let dispatch = runtime.clone();
     let store = alive(ctx, runtime)?;
@@ -1842,4 +1881,25 @@ fn needs_call(ctx: &Ctx<'_>, what: &str) -> rquickjs::Error {
         ctx,
         &format!("{what} needs a live host call; call it from render or an event handler"),
     )
+}
+
+fn parse_line_marks(json: &str) -> serde_json::Result<Vec<(usize, gpui_base::input::LineMark)>> {
+    use gpui_base::input::LineMark;
+    #[derive(serde::Deserialize)]
+    struct Mark {
+        line: usize,
+        kind: String,
+    }
+    Ok(serde_json::from_str::<Vec<Mark>>(json)?
+        .into_iter()
+        .filter_map(|mark| {
+            let kind = match mark.kind.as_str() {
+                "added" => LineMark::Added,
+                "modified" => LineMark::Modified,
+                "removed" => LineMark::Removed,
+                _ => return None,
+            };
+            Some((mark.line, kind))
+        })
+        .collect())
 }

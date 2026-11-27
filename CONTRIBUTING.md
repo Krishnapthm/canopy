@@ -16,7 +16,7 @@ Show what you built in [Discussions](https://github.com/Krishnapthm/canopy/discu
 
 Discuss bigger changes in an issue first. Keep PRs small and focused.
 
-See [build from source](README.md#build-from-source) for setup. Run `just build` and `just check` (or `cargo test --locked`). On Linux, test UI changes with `scripts/sandbox up`, `scripts/sandbox shot` and `scripts/sandbox down`; it uses its own app home, core and display. Don't test against someone else's running app or core.
+See [requirements](README.md#requirements) and [build and run locally](README.md#build-and-run-locally) for setup. Run `just build` and `just check` (or `cargo test --locked`). On Linux, test UI changes with `scripts/sandbox up`, `scripts/sandbox shot` and `scripts/sandbox down`; it uses its own app home, core and display. Don't test against someone else's running app or core.
 
 Keep OS-specific code only where the OS really differs. Keep small quirks near their use; put larger differences behind one small module per concern. Test macOS changes on macOS.
 

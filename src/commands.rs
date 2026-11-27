@@ -34,7 +34,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.zoom_reset", &[], "Reset canvas zoom."),
     cmd("canvas.arrange", &[opt("layout"), opt("picker"), opt("space")], "Arrange selected cells or the current space: tidy, row, column or wires. Omit layout to repeat the last; picker opens the layout menu."),
     cmd("canvas.undo", &[], "Restore geometry before the last canvas move, resize or arrange."),
-    cmd("canvas.tile", &[], "Tile view: fit every expanded cell of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed cells line up below. Repeat to put everything back."),
+    cmd("canvas.tile", &[], "Tile view: fit every expanded terminal and agent of the current space into the visible canvas, tmux-style, with the selected one largest; collapsed ones line up below. Other panes stay where they are. Repeat to put everything back."),
     cmd("canvas.fit", &[], "Fit the selection, else everything in the current space or Home; repeat to restore the previous camera."),
     cmd("canvas.mode", &[], "Enter canvas mode: its keys take priority and unbound keys are swallowed until Enter or Escape."),
     cmd("canvas.leave", &[], "Cancel a keyboard connection, or leave canvas mode with selection unchanged."),
@@ -53,14 +53,14 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.close_focused", &[], "Close the focused Files panel tab, or the one selected canvas pane. A browser closes its active tab, and its last tab closes the pane; with several or no panes selected, nothing closes. Only the person can run it."),
     cmd("canvas.close", &[opt("terminal"), opt("terminals"), opt("confirmed"), opt("dont_ask"), opt("pane"), opt("panes")], "Close every selected pane (else the focused one) behind one dialog listing them, the named terminal, or one file or mod pane by id (pane; a mod pane holding text refuses); terminals and panes are the confirmed lists, closed without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts."),
     cmd("canvas.note_new", &[opt("point")], "Open a sticky note on the canvas. The optional point is in world coordinates."),
-    cmd("canvas.pane_new", &[req("kind"), opt("path"), opt("url"), opt("udid"), opt("wire"), opt("point"), opt("place"), opt("pinned")], "Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or \"booted\") or lists devices to pick. place is \"panel\" (a tab in the Files panel, the default for browsers and sims), \"canvas\" (at point, the middle of the view by default) or \"pinned\" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable."),
+    cmd("canvas.pane_new", &[req("kind"), opt("path"), opt("url"), opt("udid"), opt("wire"), opt("point"), opt("place"), opt("pinned")], "Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or \"booted\") or lists devices to pick; with udid, url (http(s) or an app link) opens on it once booted, and the reply waits for the device: name, runtime, state and url, or a screenshot path when no url was opened (read the pane to see the page). place is \"panel\" (a tab in the Files panel, the default for browsers and sims), \"canvas\" (at point, the middle of the view by default) or \"pinned\" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path or url when applicable; for a browser with a url it waits until the page has loaded and adds title. `canopy pane new` puts browsers and sims on the canvas unless place says otherwise."),
     cmd("canvas.pane_dock", &[opt("pane"), opt("docked")], "Dock a browser or sim pane as a tab in the Files panel, or with docked false move it back onto the canvas at its saved place. Without docked it toggles. Acts on pane, else the selected pane. Replies with pane and docked."),
     cmd("canvas.pane_pin", &[opt("pane"), opt("pinned")], "Pin a pane where it shows on screen, so it stays there while the canvas pans and zooms, or with pinned false move it back onto the canvas. Without pinned it toggles. Acts on pane, else the selected pane. Replies with pane and pinned."),
     cmd("canvas.pane_set", &[req("pane"), req("props")], "Merge props (an object) into a mod pane's saved props; mods save their state with it, and a string props.text is what canopy pane read returns. Replies with nothing."),
     cmd("canvas.hand", &[opt("on")], "Hand tool: while on, a left drag anywhere on the canvas pans, as with Space held. Without on it toggles."),
     cmd("canvas.pane_read", &[req("pane")], "A pane's text inside a <pane-content> envelope that marks it as untrusted, cut at 256 KiB. Replies with text."),
     cmd("canvas.pane_shot", &[req("pane"), opt("path")], "Save a pane as drawn on screen to a PNG (default: <temp>/canopy/<pane>.png); refuses when it is off screen. Replies with path."),
-    cmd("canvas.pane_open", &[req("pane"), req("target"), opt("tab")], "Point a browser or simulator pane at a target. A browser loads an HTTP(S) address, an absolute local path or a file URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or \"booted\" and refreshes the screenshot when already showing that device."),
+    cmd("canvas.pane_open", &[req("pane"), req("target"), opt("tab")], "Point a browser or simulator pane at a target. A browser loads an HTTP(S) address, an absolute local path or a file URL in its active tab and makes it Home. Pass tab: new to open the URL in a new browser tab. A bare localhost:3000 uses http. Open URL without a target focuses the address field when a browser pane is given or selected. A sim takes a udid or \"booted\" (refreshing the screenshot when already showing that device) or a URL to open on its device, booting it first; the reply waits for the device and includes name, runtime, state and url, or a screenshot path when no url was opened. A browser reply waits until the page has loaded and adds title."),
     cmd("canvas.browser_tab_new", &[opt("pane"), opt("url")], "Open a new tab in a browser pane. Pass an HTTP(S) address, an absolute local path or a file URL, or omit url for an empty tab. Replies with pane and tab. With no pane and no single browser pane selected, runs canvas.new."),
     cmd("canvas.browser_tab_close", &[opt("pane"), opt("tab")], "Close a tab in a browser pane. Without tab, closes the active tab. Closing the last tab closes the pane. With no pane and no single browser pane selected, runs tab.close if bound."),
     cmd("canvas.browser_tab_select", &[opt("pane"), req("tab")], "Switch to a browser tab by id. Pass pane or use the selected browser pane."),
@@ -93,7 +93,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.annotate_action", &[req("pane"), req("action")], "Run a tool, colour, stroke, undo or redo in an active annotation, or choose its target agent with `agent:<terminal>`. Used by its menus."),
     cmd("canvas.annotate_agent", &[opt("pane")], "Open the menu that chooses which agent an annotation is sent to (wired agents first). Acts on pane, else the selected annotation."),
     cmd("canvas.sim_zoom", &[opt("step"), opt("pane")], "Resize a simulator pane: step actual (one device point per canvas unit, requires a live frame), default (340x700 on screen), in or out. Omit step for actual. Acts on pane, else the selected simulator pane."),
-    cmd("canvas.sim_shutdown", &[opt("pane"), opt("close")], "Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast."),
+    cmd("canvas.sim_shutdown", &[opt("pane"), opt("close")], "Shut down the device in the named or selected simulator pane. On success, show the device picker or close the pane if close is true. The result appears in a toast, and a script's reply waits for it: pane, udid and state shutdown."),
+    cmd("canvas.sim_devices", &[], "List the available simulators (udid, name, runtime, state booted or shutdown) for a script, without opening a pane. `canopy pane devices` prints them."),
     cmd("canvas.sim_pop", &[opt("pane")], "Pop a simulator pane's device out into its own window, or bring it back. Acts on pane, else the selected simulator pane."),
     cmd("canvas.sim_reveal", &[req("path")], "Show a saved screenshot or recording in Finder."),
     cmd("canvas.sim_input", &[req("pane"), req("action"), opt("x"), opt("y"), opt("x1"), opt("y1"), opt("x2"), opt("y2"), opt("ms"), opt("text"), opt("button")], "An agent's input for a live simulator pane, in device points from the top left: action tap (x, y), swipe (x1, y1, x2, y2, ms, default 300), type (text, US keyboard) or press (button: home, lock, power, siri, volume-up, volume-down, action). Starts the device if the pane is off screen."),
@@ -115,7 +116,9 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.pane_color", &[req("pane"), opt("color")], "Set a canvas pane's hue to a named palette color or #RRGGBB. Pass null or omit color to inherit the space's hue."),
     cmd("canvas.pane_color_next", &[req("pane")], "Assign the next unused color in the pane's space."),
     cmd("panel.close_tab", &[req("path"), opt("confirmed"), opt("generation")], "Close a file tab in the Files panel, asking before discarding unsaved changes. The confirm dialog passes confirmed and the draft's generation, and a stale generation closes nothing. Only the person can run it."),
-    cmd("panel.editor", &[opt("choice"), opt("done"), opt("path"), opt("dirty")], "Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state."),
+    cmd("panel.editor", &[opt("choice"), opt("done"), opt("path"), opt("pane"), opt("dirty")], "Choose a file panel editor, return to the read-only view after saving, or report an editor's dirty state (pane names a canvas file pane, else the panel)."),
+    cmd("file.mode", &[req("path"), req("mode"), opt("pane")], "Show a file as its source or its preview. mode is source or preview; pane is the canvas file pane, omitted for the Files panel tab."),
+    cmd("files.auto_save", &[req("on")], "Turn automatic saving of edited files on or off."),
     cmd("preview.open", &[opt("path"), opt("point"), opt("place")], "Open a file tab, or choose a file; place canvas or point pins a canvas card."),
     cmd("canvas.create", &[opt("point"), opt("kind"), opt("space"), opt("argv"), opt("name"), opt("folder")], "Create a canvas terminal or space at a world point (default: the middle of the view); a space with a folder (empty: the root) is made directly, without one the Choose space dialog opens."),
     cmd("panel.pop_out", &[opt("terminal")], "Pop a terminal cell into its own window (default: the last selected cell)."),
@@ -197,6 +200,13 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.pdf_highlight", &[], "Toggle text highlight mode in the last selected PDF pane."),
     cmd("canvas.pdf_prev", &[], "Go to the previous page in the last selected PDF pane."),
     cmd("canvas.pdf_next", &[], "Go to the next page in the last selected PDF pane."),
+    cmd("file.rename", &[req("from"), req("to")], "Rename a local file or folder."),
+    cmd("file.copy", &[req("from"), opt("to"), opt("into")], "Copy a local file or folder to a path, or into a folder with an available name."),
+    cmd("file.move", &[req("from"), opt("to"), opt("into")], "Move a local file or folder to a path, or into a folder with an available name."),
+    cmd("file.mkdir", &[req("path")], "Create a local folder."),
+    cmd("file.new", &[req("path")], "Create an empty local file."),
+    cmd("file.trash", &[req("path")], "Move a local file or folder to the system trash."),
+    cmd("file.reveal", &[req("path")], "Show a local file or folder in the system file browser."),
     cmd("preview.external", &[req("path")], "Open a local image or PDF in macOS Preview."),
     cmd("canvas.pdf_zoom_out", &[], "Zoom out in the last selected PDF pane."),
     cmd("canvas.pdf_zoom_reset", &[], "Reset zoom in the last selected PDF pane: the page fits the pane's width again."),
@@ -231,7 +241,8 @@ pub fn validate_args(c: &Command, args: &Value) -> Result<(), String> {
                 return Err(format!("{}: unknown argument(s): {}; valid arguments: {valid}", c.name, unknown.join(", ")));
             }
             for (key, value) in args {
-                if matches!(key.as_str(), "id" | "pane" | "space" | "terminal" | "target") && !value.is_string() && !value.is_null() {
+                if (matches!(key.as_str(), "id" | "pane" | "space" | "terminal" | "target")
+                    || (c.name.starts_with("file.") && matches!(key.as_str(), "from" | "to" | "into" | "path"))) && !value.is_string() && !value.is_null() {
                     return Err(format!("{}: argument {key} must be a string (or null to omit it)", c.name));
                 }
             }
@@ -311,6 +322,16 @@ mod tests {
                 assert!(validate_args(c, &json!({arg: value})).is_ok());
             }
         }
+    }
+
+    #[test]
+    fn file_commands_validate_path_arguments() {
+        let copy = find("file.copy").unwrap();
+        assert!(validate_args(copy, &json!({"from": "/a", "into": "/folder"})).is_ok());
+        assert!(validate_args(copy, &json!({"from": "/a", "into": true})).is_err());
+        assert!(validate_args(copy, &json!({"from": "/a", "destination": "/b"})).is_err());
+        let rename = find("file.rename").unwrap();
+        assert_eq!(missing(rename, &json!({"from": "/a"})), Some("to"));
     }
 
     #[test]
