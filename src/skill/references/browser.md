@@ -13,8 +13,9 @@ canopy pane shot p2 /tmp/page.png                      # the page as a PNG, even
 ```
 
 - `new` and `open` wait until the page has loaded and print its URL and title.
-  A page whose server is not running prints `did not load: is its server running?`.
-  `read` and `shot` also wait for loading (up to 30 s).
+  A new tab opened with `canvas.pane_open {pane, target, tab: "new"}` also waits and returns its tab ID.
+  Canopy reports load errors or times out after 15 seconds. Navigating the same tab again cancels the waiting reply.
+  `read` and `shot` also wait for the current load.
 - A bare `localhost:3000` gets `http://`; other bare hosts get `https://`. Only
   http, https and local files load. Paths starting `./` or `../` resolve from
   your folder.

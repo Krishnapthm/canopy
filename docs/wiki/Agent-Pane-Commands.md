@@ -17,7 +17,7 @@ canopy pane new mod:note --wire         # open a note beside the calling agent
 - See [Browser Pane](Browser-Pane) and [Simulator Devices](Simulator-Devices) for their opening commands.
 
 `canopy pane open <pane> <target>` changes a browser or simulator pane's target. File panes refuse `open`.
-A browser accepts a web address, a local `file:` URL or an absolute file path. The CLI also resolves paths starting with `./` or `../` against the directory you ran it from. A simulator accepts a UDID, `booted`, or a URL to open on its device. Like `new`, `open` waits for the page or device and prints how it turned out.
+A browser accepts a web address, a local `file:` URL or an absolute file path. The CLI also resolves paths starting with `./` or `../` against the directory you ran it from. A simulator accepts a UDID, `booted`, or a URL to open on its device. Like `new`, `open` waits for the page or device and prints how it turned out. To wait for a new browser tab, pass `tab: "new"` to `canvas.pane_open`. Its reply includes the tab ID.
 
 See [Browser Pane](Browser-Pane) for browser targets and [Simulator Devices](Simulator-Devices) for `tap`, `swipe`, `type` and `press`.
 

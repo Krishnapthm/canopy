@@ -5,7 +5,7 @@ impl AppWindow {
     /// Runs one canvas.pane_* command and answers the caller. `person` is false for agents and
     /// scripts on the control socket.
     pub(in crate::window) fn pane_command(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let r = match name {
+        let mut r = match name {
             "canvas.pane_new" => self.pane_new(a, person, window, cx),
             "canvas.pane_pin" => {
                 let id = a["pane"].as_str().map(str::to_owned).or_else(|| self.canvas_state.selected.last().cloned());
@@ -45,31 +45,31 @@ impl AppWindow {
             _ => self.pane_open(a, window, cx),
         };
         // An agent hears how a simulator or page it opened turned out, not just that it started.
-        if let Ok(reply) = &r && matches!(name, "canvas.pane_new" | "canvas.pane_open") && self.hold_opened(name, a, reply, window, cx) { return; }
+        if let Ok(reply) = &r && matches!(name, "canvas.pane_new" | "canvas.pane_open") {
+            match self.hold_opened(name, a, reply, window, cx) {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(error) => r = Err(error),
+            }
+        }
         self.answer(r);
     }
 
-    /// Holds the `canopy pane` reply for a sim pane that was pointed at a simulator or URL until
-    /// its refresh finishes, or for a browser page until it loads. False when nothing waits.
-    fn hold_opened(&mut self, name: &str, a: &Value, reply: &Value, window: &mut Window, cx: &mut Context<Self>) -> bool {
-        let Some(id) = reply["pane"].as_str().map(str::to_owned) else { return false };
-        if self.held_reply.is_none() { return false; }
-        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return false };
+    /// Holds an open reply until its simulator request or browser navigation finishes.
+    fn hold_opened(&mut self, name: &str, a: &Value, reply: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<bool, String> {
+        let Some(id) = reply["pane"].as_str() else { return Ok(false); };
+        if self.held_reply.is_none() { return Ok(false); }
+        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return Ok(false); };
         match &pane.kind {
             canvas::Kind::Sim { .. } => {
                 let named = name == "canvas.pane_open" || a["udid"].is_string() || a["url"].is_string();
-                named && self.hold_sim_reply(&id, |tx| super::sim::Waiter::Opened { tx, reply: reply.clone() })
+                Ok(named && self.hold_sim_reply(id, |tx| super::sim::Waiter::Opened { tx, reply: reply.clone() }))
             }
-            canvas::Kind::Browser { .. } => {
-                // A new tab is not the active page; New tab has nothing to load.
-                if a["tab"] == "new" || reply["url"].as_str().is_none_or(str::is_empty) { return false; }
-                let tx = self.held_reply.take().unwrap();
-                match self.browser_opened(&id, tx, reply.clone(), window, cx) {
-                    Ok(()) => true,
-                    Err((tx, _)) => { self.held_reply = Some(tx); false }
-                }
+            canvas::Kind::Browser { .. } if reply["url"].as_str().is_some_and(|url| !url.is_empty()) => {
+                self.browser_opened(id, reply, window, cx)?;
+                Ok(true)
             }
-            canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } | canvas::Kind::File { .. } | canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } | canvas::Kind::Mod { .. } => false,
+            canvas::Kind::Browser { .. } | canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } | canvas::Kind::File { .. } | canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } | canvas::Kind::Mod { .. } => Ok(false),
         }
     }
 
