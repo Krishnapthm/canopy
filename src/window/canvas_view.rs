@@ -100,7 +100,7 @@ pub(super) struct State {
     /// A finished selection waiting behind a small quote icon: the quote (with its
     /// window `point`) and the TextView it came from, None for the Files code viewer.
     quote_chip: Option<(Value, Option<Entity<gpui_base::TextViewState>>)>,
-    /// The panel's active tab when it was closed, for the folder button to bring back.
+    /// The tab active when the panel closed. Files restores it only if it is a file.
     closed: Option<canvas::PanelTab>,
     /// Per expanded cell: the layout before it grew, and what growing moved. Collapse puts those back.
     moves: HashMap<String, (canvas::Rest, canvas::Rest)>,
@@ -179,6 +179,19 @@ struct WheelZoom {
     anchor: canophy::Point,
     timeout: Option<Task<()>>,
 }
+/// Files cycles from a tab to the tree to closed, and restores only a file tab.
+fn files_button(
+    open: bool,
+    file: Option<&canvas::PanelTab>,
+    closed: Option<&canvas::PanelTab>,
+    tabs: &[canvas::PanelTab],
+) -> (bool, Option<canvas::PanelTab>) {
+    if open {
+        return (file.is_some(), None);
+    }
+    (true, closed.filter(|tab| tab.file().is_some() && tabs.contains(tab)).cloned())
+}
+
 impl State {
     /// The file open in the panel, when its active tab is a file.
     pub(super) fn file_path(&self) -> Option<&String> {
@@ -1323,6 +1336,43 @@ impl AppWindow {
         if self.canvas_state.doc.panel.space.as_deref().and_then(|id| self.model.space(id)).is_some_and(|s| s.machine.is_some()) {
             vec![]
         } else { self.canvas_state.editors.clone() }
+    }
+
+    /// Switches the panel view after confirming any unsaved edits in its active file.
+    fn select_panel_tab(&mut self, tab: Option<canvas::PanelTab>, window: &mut Window, cx: &mut Context<Self>) {
+        let state = &self.canvas_state;
+        if state.file == tab || tab.as_ref().is_some_and(|tab| !state.doc.panel.tabs.contains(tab)) { return; }
+        if let Some(path) = state.file_path().filter(|path| state.dirty.as_ref() == Some(*path)).cloned() {
+            let generation = state.dirty_generation;
+            let answer = window.prompt(
+                gpui::PromptLevel::Warning,
+                "Discard unsaved changes?",
+                Some("Your changes to this file will be lost."),
+                &[gpui::PromptButton::cancel("Cancel"), gpui::PromptButton::new("Discard changes")],
+                cx,
+            );
+            cx.spawn_in(window, async move |this, cx| {
+                if !matches!(answer.await, Ok(1)) { return; }
+                let _ = this.update_in(cx, |this, window, cx| {
+                    let state = &mut this.canvas_state;
+                    if state.file_path() != Some(&path) || state.dirty_generation != generation
+                        || tab.as_ref().is_some_and(|tab| !state.doc.panel.tabs.contains(tab)) { return; }
+                    state.dirty = None;
+                    state.editing = None;
+                    this.select_panel_tab(tab, window, cx);
+                });
+            }).detach();
+            return;
+        }
+        let state = &mut self.canvas_state;
+        if tab.is_none() {
+            state.files = true;
+            state.doc.panel.tree_hidden = false;
+        }
+        state.file = tab;
+        self.focus.focus(window, cx);
+        self.sync(window, cx);
+        cx.notify();
     }
 
     pub(super) fn panel_editor(&mut self, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
@@ -2877,7 +2927,7 @@ impl AppWindow {
             }
             "panel.close" => {
                 state.dirty = None;
-                // The tabs stay (a docked pane lives in them); the folder button reopens on this one.
+                // The tabs stay, including any docked panes.
                 if let Some(tab) = state.file.take() { state.closed = Some(tab); }
                 state.files = false;
                 state.panel_expanded = false;
@@ -3939,21 +3989,23 @@ impl AppWindow {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(|this, _, window, cx| this.run_key("space.new", json!({}), window, cx))));
         let mut tabs = control();
-        // Like Claude's titlebar: the folder opens or closes the files pane (tree and preview).
-        let open = state.file.is_some() || state.files;
+        // The folder returns to the tree from any active tab.
         tabs = tabs.child(
             panel_button("canvas-files", "mods/files/folder.svg", c("muted-foreground"), c("hover"))
                 .aria_label("Files").tooltip(strip_tooltip("Files".into(), None))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    if open {
+                .on_click(cx.listener(|this, _, window, cx| {
+                    let state = &mut this.canvas_state;
+                    let open = state.file.is_some() || state.files;
+                    let (show, tab) = files_button(open, state.file.as_ref(), state.closed.as_ref(), &state.doc.panel.tabs);
+                    if !show {
                         this.canvas_command("panel.close", window, cx);
+                    } else if open {
+                        this.select_panel_tab(tab, window, cx);
                     } else {
-                        this.canvas_state.files = true;
-                        this.canvas_state.doc.panel.tree_hidden = false;
-                        let tabs = &this.canvas_state.doc.panel.tabs;
-                        this.canvas_state.file = this.canvas_state.closed.take()
-                            .filter(|tab| tabs.contains(tab))
-                            .or_else(|| tabs.last().cloned());
+                        state.files = true;
+                        state.doc.panel.tree_hidden = false;
+                        state.file = tab;
+                        state.closed = None;
                         this.sync(window, cx);
                         cx.notify();
                     }
@@ -4071,12 +4123,7 @@ impl AppWindow {
                     .tooltip(strip_tooltip(tip, None))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, window, cx| {
-                        if this.canvas_state.file.as_ref() == Some(&activate) { return; }
-                        this.canvas_state.dirty = None;
-                        this.canvas_state.file = Some(activate.clone());
-                        this.focus.focus(window, cx);
-                        this.sync(window, cx);
-                        cx.notify();
+                        this.select_panel_tab(Some(activate.clone()), window, cx);
                     }))
                     .child(svg().path(icon).flex_none().size(px(14.)).text_color(c(if active { "foreground" } else { "muted-foreground" })).group_hover(group.clone(), |s| s.text_color(c("foreground"))))
                     .child(div().flex_1().min_w_0().truncate().child(label))
@@ -4590,6 +4637,26 @@ fn numbered_code(text: &str) -> String {
         .map(|(i, line)| format!("    {:>4}  {line}", i + 1))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod files_button_tests {
+    #[test]
+    fn files_button_restores_file_tabs_and_cycles_through_the_tree() {
+        use super::files_button;
+        use crate::canvas::PanelTab::{File, Pane};
+
+        let file = File("/tmp/example.txt".into());
+        let browser = Pane("browser".into());
+        let tabs = [file.clone(), browser.clone()];
+        assert_eq!(files_button(false, None, None, &tabs), (true, None));
+        assert_eq!(files_button(false, None, Some(&browser), &tabs), (true, None));
+        assert_eq!(files_button(false, None, Some(&file), &tabs), (true, Some(file.clone())));
+        assert_eq!(files_button(false, None, Some(&file), &[]), (true, None));
+        assert_eq!(files_button(true, Some(&browser), None, &tabs), (true, None));
+        assert_eq!(files_button(true, Some(&file), None, &tabs), (true, None));
+        assert_eq!(files_button(true, None, None, &tabs), (false, None));
+    }
 }
 
 #[cfg(test)]

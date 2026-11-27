@@ -171,21 +171,21 @@ The bar sits at the bottom of the pane. It has four icon tools and an **x** to s
 | **Box** | Draws a rectangle. |
 | **Text** | Click, type a label, then press `Enter`. |
 
-Colour and stroke width appear in the bar only while **Pen**, **Box** or **Text** is on (**Text** has no stroke). The batch appears at the top of the page after you add the first item. Drawings and comments appear in the order you added them. Use **Send** above the page to send the batch. If the send fails before it reaches the agent’s prompt, the batch stays available to edit or send again. `Cmd+Z` undoes and `Shift+Cmd+Z` redoes.
+colour and stroke width appear in the bar only while **Pen**, **Box** or **Text** is on (**Text** has no stroke). each comment appears on a one-line card beside its numbered pin. click the pin or card to edit it, or use the **Delete comment** button on the card. `Cmd+Z` undoes a change, including a deletion, and `Shift+Cmd+Z` redoes it. pins outside the still sit at its nearest edge.
+
+click the **x** or press `Esc` with the comment box closed to return to the page. **Annotate** reopens the same still with its marks and comments. to send them while using the live page, click **Send annotations (N)** in the header, where N counts all marks and comments. use **Send** in the annotation bar while working on the still. the batch stays with the pane until you send it or close the pane. if sending fails before it reaches the agent’s prompt, you can edit or send the batch again.
 
 ### The comment box
 
-The comment box is a single line that grows when you press `Shift+Enter` for a new line. Press `Enter` to **Add** the comment to the queue, or `Cmd+Enter` to **Send** everything queued. Both buttons are inside the box. For a selected element, **Copy reference** copies the page URL and the element’s source file and line when available, or its CSS selector when the source file is unavailable. You can copy the reference before adding a comment. `Esc` closes the box and keeps the annotation. Click a pin later to edit its comment. Saving an edited comment with no text deletes it.
+the comment box grows when you press `Shift+Enter` for a new line. press `Enter` or click **Add** to save the comment. `Cmd+Enter` saves it and sends the batch. if you already have marks or comments, hover over the dimmed **Send** button to see **Finish the comment**. for a selected element, **Copy reference** copies the page URL and the element’s source file and line when available, or its CSS selector when the source file is unavailable. `Esc` closes the box and keeps the existing annotations. saving an edited comment with no text deletes it.
 
-Hold `Space` to scroll or interact with the live page. Release it to take a fresh still. Element pins follow their elements. Area and text annotations keep their original page coordinates.
+hold `Space` to scroll or interact with the live page. release it to take a fresh still. element pins follow their elements. area and text annotations keep their original page coordinates.
 
 ### Choose the agent
 
-With exactly one agent wired to the pane, **Send** goes to it and there is nothing to choose. With several wired agents or only unwired agents available, **Choose agent** appears in the header next to **Annotate** until you pick one. It lists agents wired to the pane first, then the other running agents. **Send** with no agent chosen asks you to choose one first. If the recipient changes while Canopy saves the screenshot, check the agent and press **Send** again.
+with exactly one agent wired to the pane, **Send** goes to it. with several wired agents or only unwired agents available, **Choose agent** appears in the header next to **Annotate** until you pick one. it lists agents wired to the pane first, then the other running agents. if **Send** shows **Wire or pick an agent**, wire the pane to an agent or pick a recipient. if the recipient changes while Canopy saves the screenshot, check the agent and press **Send** again.
 
-The agent receives the annotated screenshot, then the URL, viewport and numbered comments. Element comments include the selector, visible text, a short HTML excerpt and styles. Text labels are listed with their coordinates in the message.
-
-Click the **x** or press `Esc` with no comment box open to leave. With marks or comments on the still, choose **Keep editing** or **Discard**.
+the agent receives the annotated screenshot, then the URL, viewport and numbered comments. element comments include the selector, visible text, a short HTML excerpt and styles. text labels are listed with their coordinates in the message.
 
 Run `canvas.browser_pick` to start annotating with **Select** already on. It is the same tool, so there is no separate picker.
 

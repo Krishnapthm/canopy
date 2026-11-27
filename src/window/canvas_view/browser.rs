@@ -704,8 +704,10 @@ impl AppWindow {
         let reset = id.to_owned();
         let annotate = id.to_owned();
         let picker = self.annotation_picker(id);
+        #[cfg(target_os = "macos")]
+        let send = self.kept_annotation_send(id, cx);
         let docked = host == Host::Pane && self.canvas_state.doc.docked(id);
-        div().id("browser-navigation").flex().items_center().h(wpx(32.)).min_w_0().overflow_x_scroll().px(wpx(8.)).gap(wpx(4.))
+        let navigation = div().id("browser-navigation").flex().items_center().h(wpx(32.)).min_w_0().overflow_x_scroll().px(wpx(8.)).gap(wpx(4.))
             .bg(c(self.browser_tab_colors(docked).1))
             .child(self.browser_button(id, "browser-back", "icons/arrow-left.svg", "Back", "canvas.browser_back", cx))
             .child(self.browser_button(id, "browser-forward", "icons/arrow-right.svg", "Forward", "canvas.browser_forward", cx))
@@ -731,8 +733,10 @@ impl AppWindow {
                 .tooltip(strip_tooltip("Annotate".into(), Some("canvas.browser_annotate")))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |this, _, window, cx| this.run_key("canvas.browser_annotate", json!({"pane": annotate}), window, cx)))
-                .child("Annotate"))
-            .into_any_element()
+                .child("Annotate"));
+        #[cfg(target_os = "macos")]
+        let navigation = navigation.children(send);
+        navigation.into_any_element()
     }
 
     /// The two-row canvas or pop-out header. Buttons stop mouse-down so empty space
@@ -2021,7 +2025,7 @@ impl AppWindow {
     /// hidden, and all hidden while the menu is open or an annotation shows its still, since a
     /// native view draws over GPUI), or a note for an empty tab.
     fn popped_body(&self, id: &str, view: Size<Pixels>, cx: &mut Context<Self>) -> AnyElement {
-        let annotating = self.canvas_state.annotations.get(id).is_some_and(|a| !a.live);
+        let annotating = self.canvas_state.annotations.get(id).is_some_and(|a| a.shows_still());
         // The ⋯ menu is cut out of the page, which stays visible around it.
         let menu = self.canvas_state.browsers.panes.get(id).and_then(|ui| ui.pop_menu.as_ref())
             .map(|(at, items)| pop_menu_rect(*at, items, view));
@@ -2139,6 +2143,20 @@ impl AppWindow {
         if self.active_page(id).is_some_and(|page| page.live.is_some()) {
             self.rest_browser(id, cx);
         }
+    }
+
+    /// Hides a live web view before showing a kept annotation's existing still.
+    pub(super) fn hide_browser_for_annotation(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+        let Some(key) = self.page_key(id) else { return false };
+        let Some(page) = self.canvas_state.browsers.pages.get_mut(&key) else { return false };
+        if page.live.take().is_none() { return false; }
+        self.canvas_state.browsers.last_masks.borrow_mut().remove(&key);
+        if let Some(native) = &page.native {
+            native.view.update(cx, |view, _| { let _ = view.focus_parent(); view.hide(); });
+            super::browser_mask::clear_mask(native.raw.raw());
+        }
+        page.watch = true;
+        true
     }
 
     /// Steps a live page aside: snapshot, then hide (in `Event::Rested`), so the pane never

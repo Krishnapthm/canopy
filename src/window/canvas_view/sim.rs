@@ -545,7 +545,7 @@ impl AppWindow {
         for a in &mut actions {
             match a.command.as_str() {
                 "canvas.sim_record" if s.recording.is_some() => { a.icon = "icons/square.svg".into(); a.label = "Stop recording".into(); }
-                "canvas.sim_annotate" if self.canvas_state.annotations.contains_key(id) => a.label = "Stop annotating".into(),
+                "canvas.sim_annotate" if self.canvas_state.annotations.get(id).is_some_and(|a| a.annotating()) => a.label = "Stop annotating".into(),
                 "canvas.sim_pop" if s.popped => a.label = "Bring back".into(),
                 _ => {}
             }
@@ -566,17 +566,17 @@ impl AppWindow {
     pub(super) fn sim_bottom_bar(&self, pane: &canvas::Pane, layout: &canophy::Layout, cx: &mut Context<Self>) -> Option<Div> {
         let state = &self.canvas_state;
         let id = &pane.id;
-        let udid = pane.sim().filter(|udid| !udid.is_empty())?;
-        if state.annotations.contains_key(id) || self.bars_hidden() || (state.bar_hover.as_ref() != Some(id) && !state.selected.contains(id)) {
-            return None;
-        }
-        let view = state.sims.get(id)?;
-        if view.popped.is_some() || !matches!(view.screen, Screen::Shot(_) | Screen::Loading) {
-            return None;
-        }
+        if state.annotations.get(id).is_some_and(|a| a.annotating()) || self.bars_hidden() { return None; }
+        let view = state.sims.get(id);
+        if view.is_some_and(|view| view.popped.is_some()) { return None; }
+        let send = self.kept_annotation_send(id, cx);
         // Shown on a fallback screenshot too: Refresh is how the live view comes back.
-        if view.live.as_ref().is_some_and(|s| s.read(cx).device.udid != udid) {
-            return None;
+        let show_controls = (state.bar_hover.as_ref() == Some(id) || state.selected.contains(id))
+            && pane.sim().is_some_and(|udid| !udid.is_empty())
+            && view.is_some_and(|view| matches!(view.screen, Screen::Shot(_) | Screen::Loading)
+                && view.live.as_ref().is_none_or(|s| pane.sim() == Some(s.read(cx).device.udid.as_str())));
+        if !show_controls {
+            return send.map(|button| super::helper_bar::bar_shell(1.).child(button).occlude());
         }
         let mut actions = sim_device_actions();
         if self.sim_device(pane).is_some_and(|device| device.booted) {
@@ -585,7 +585,7 @@ impl AppWindow {
         // A pinned pane keeps its screen size (scale 1), so its bar does too.
         let s = bottom_bar_scale(layout.scale, layout.body[2], actions.len())?;
         let actions = self.sim_relabel(id, actions, cx);
-        Some(self.bar(id, actions, s, false, cx).occlude())
+        Some(self.bar(id, actions, s, false, cx).children(send).occlude())
     }
 
     /// The pop-out's device bar also offers Bring back.
@@ -596,7 +596,7 @@ impl AppWindow {
         let mut actions = sim_device_actions();
         actions.push(pane_actions(pane, None, false).into_iter().find(|a| a.command == "canvas.sim_pop")?);
         let actions = self.sim_relabel(id, actions, cx);
-        Some(self.bar(id, actions, 1., false, cx).into_any_element())
+        Some(self.bar(id, actions, 1., false, cx).children(self.kept_annotation_send(id, cx)).into_any_element())
     }
 
     /// `canopy pane tap|swipe|type|press`: an agent's input for a sim pane, in device points.
