@@ -1566,15 +1566,14 @@ impl AppWindow {
         canophy::widen(self.zoom_range(window, cx), self.canvas_state.doc.camera.zoom())
     }
 
-    /// Measures the canvas from the last frame (the window before the first one) and, when its
-    /// size or uncovered part changed, tells canophy, which re-derives pinned panes. Runs before
-    /// each render; it writes nothing while the window stays the same size.
     /// Pushes each pane's layout into the views that draw it: a terminal's scale and world body
     /// (its grid reflows only once nothing moves the camera or the pane), and a PDF's page
-    /// scale. Runs before each render, after `sync_viewport`, so render only reads.
+    /// display and destination raster scales. Runs after `sync_viewport`, so render only reads.
     pub(in crate::window) fn sync_panes(&mut self, cx: &mut Context<Self>) {
-        let rested = self.camera_rested();
         let state = &self.canvas_state;
+        let now = std::time::Instant::now();
+        let motion = &state.motion.camera;
+        let rested = motion.settled(now);
         let camera = state.doc.camera;
         let doc = state.shown.as_ref().unwrap_or(&state.doc);
         for card in doc.panes.iter().filter(|p| doc.shown(p)) {
@@ -1594,7 +1593,11 @@ impl AppWindow {
                 }
                 canvas::Kind::Pdf { .. } => {
                     let Some(view) = state.pdfs.get(&card.id) else { continue };
-                    view.update(cx, |view, cx| view.set_display_scale(layout.scale, rested, cx));
+                    let raster = canophy::rest_scale(motion, camera, card, now);
+                    view.update(cx, |view, cx| {
+                        view.set_fit_size(layout.body_world, cx);
+                        view.set_display_scale(layout.scale, raster, cx);
+                    });
                 }
                 canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } | canvas::Kind::File { .. } | canvas::Kind::Image { .. }
                 | canvas::Kind::Mod { .. } | canvas::Kind::Browser { .. } | canvas::Kind::Sim { .. } => {}
@@ -1602,6 +1605,7 @@ impl AppWindow {
         }
     }
 
+    /// Measures the uncovered canvas and re-derives pinned panes when it changes.
     pub(in crate::window) fn sync_viewport(&mut self, window: &Window) {
         let size = self.bounds.borrow().get("canopy-canvas").map(|b| b.size).unwrap_or(window.viewport_size());
         let view = canophy::Viewport { size: [f32::from(size.width), f32::from(size.height)], open: self.open_canvas_in(window.viewport_size()) };
@@ -1634,18 +1638,18 @@ impl AppWindow {
             "image" => format!("Can't open {name}: not a readable image"),
             _ => format!("Can't open {}: {e}", path.display()),
         })?.to_string_lossy().into_owned();
-        let at_default = |kind: canvas::Kind| (canophy::traits(&kind).default.into(), kind);
-        let (size, kind): (canophy::Point, _) = match kind {
+        let (kind, natural) = match kind {
             "image" => {
-                let size = self.open_image(path, &canonical).map_err(|_| format!("Can't open {name}: not a readable image"))?;
-                (size, canvas::Kind::Image { path: canonical.clone() })
+                let (w, h) = self.open_image(path, &canonical).map_err(|_| format!("Can't open {name}: not a readable image"))?;
+                let natural = canophy::Natural { content: canophy::WorldSize::new(w as f32, h as f32), chrome: canophy::WorldSize::default() };
+                (canvas::Kind::Image { path: canonical.clone() }, Some(natural))
             }
-            "pdf" => at_default(canvas::Kind::Pdf { path: canonical.clone(), highlights: vec![] }),
-            _ => at_default(canvas::Kind::File { path: canonical.clone() }),
+            "pdf" => (canvas::Kind::Pdf { path: canonical.clone(), highlights: vec![] }, None),
+            _ => (canvas::Kind::File { path: canonical.clone() }, None),
         };
         let path = canonical;
         let doc = &mut self.canvas_state.doc;
-        let (id, kind_name) = if let Some(pane) = doc.panes.iter_mut().find(|p| p.path() == Some(path.as_str())) {
+        let (id, kind_name, parsed) = if let Some(pane) = doc.panes.iter_mut().find(|p| p.path() == Some(path.as_str())) {
             // A reopened file pane moves to where it was opened.
             let (id, rect) = (pane.id.clone(), canophy::WorldRect { x: point[0], y: point[1], ..pane.rect });
             let kind_name = pane.kind_name().to_owned();
@@ -1655,16 +1659,23 @@ impl AppWindow {
                 doc.wires.retain(|w| w.a != id && w.b != id);
             }
             self.canvas_state.step(canophy::Intent::Place(vec![(id.clone(), rect)]));
-            (id, kind_name)
+            (id, kind_name, None)
         } else {
+            let parsed = if let canvas::Kind::Pdf { path, .. } = &kind {
+                pdf::parse_pdf(path).ok()
+            } else {
+                None
+            };
+            let natural = parsed.as_ref().and_then(|(_, doc)| pdf::natural_size(doc)).or(natural);
+            let size = canophy::open_size(&canophy::traits(&kind), natural, &self.canvas_state.viewport);
             let id = doc.next_file_id();
             let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
-            let pane = canvas::Pane { id: id.clone(), kind, rect: canophy::WorldRect::at(point.into(), size.into()), z, space, color: None, pinned: None };
+            let pane = canvas::Pane { id: id.clone(), kind, rect: canophy::WorldRect::at(point.into(), size), z, space, color: None, pinned: None };
             let kind_name = pane.kind_name().to_owned();
             doc.panes.push(pane);
-            (id, kind_name)
+            (id, kind_name, parsed)
         };
-        self.load_previews(window, cx);
+        self.load_previews(parsed.map(|pdf| (id.as_str(), pdf)), window, cx);
         self.solve_layout(Some(&id), None, cx);
         self.canvas_changed(cx);
         cx.notify();
@@ -1684,9 +1695,9 @@ impl AppWindow {
         id
     }
 
-    fn load_previews(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn load_previews(&mut self, parsed: Option<(&str, pdf::ParsedPdf)>, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_browsers(cx);
-        self.sync_pdf_views(window, cx);
+        self.sync_pdf_views(parsed, window, cx);
         self.sync_image_sizes(window, cx);
         let mut paths: Vec<_> = self.canvas_state.doc.panes.iter().filter_map(|p| p.file().map(str::to_owned)).collect();
         if let Some(path) = self.canvas_state.file_path() {
@@ -1902,11 +1913,6 @@ impl AppWindow {
                 cx.notify();
             });
         }));
-    }
-
-    /// Whether expanded cells can refit their terminal grids and PDF pages re-render.
-    pub(super) fn camera_rested(&self) -> bool {
-        self.canvas_state.motion.camera.settled(std::time::Instant::now())
     }
 
     /// One wheel or trackpad event on the canvas: Cmd (Ctrl) zooms at the pointer, else it pans.
@@ -2334,7 +2340,7 @@ impl AppWindow {
         if !self.has_canvas() || !self.listed_once || !core_layout_answered(self.documents.get("")) {
             return;
         }
-        self.load_previews(window, cx);
+        self.load_previews(None, window, cx);
         self.load_sims(window, cx);
         let missing: Vec<_> = self
             .live
@@ -2870,7 +2876,7 @@ impl AppWindow {
         let quote_path = file.to_owned();
         let quote_view = view.clone();
         // The text scales with the pane like a picture (`ScaledPane` in `pane_card`).
-        let body = div().flex_1().min_h_0().overflow_hidden().px(wpx(16.)).py(wpx(12.))
+        let body = div().flex_1().min_h_0().overflow_hidden().px(wpx(canophy::traits::FILE_PAD_X)).py(wpx(12.))
             .child(gpui_base::TextView::new(view).scrollable(true)
                     .image_source(|_| {
                         static BLANK: std::sync::LazyLock<Arc<gpui::Image>> = std::sync::LazyLock::new(|| Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, b"<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>".to_vec())));

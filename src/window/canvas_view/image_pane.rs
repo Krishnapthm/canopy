@@ -3,24 +3,15 @@ use super::*;
 use gpui::{ObjectFit, StyledImage, img};
 use std::path::Path;
 
-fn pane_size((w, h): (u32, u32)) -> canophy::Point {
-    let (w, h) = (w as f32, h as f32);
-    let fit = canophy::traits::PREVIEW;
-    let scale = (fit.w / w).min(fit.h / h).min(1.);
-    [
-        (w * scale).max(160.),
-        (h * scale).max(160.) + canvas::HEADER,
-    ]
-}
-
 fn image_rect(
     body: Bounds<Pixels>,
     (iw, ih): (u32, u32),
+    pane_scale: f32,
     a: Point<Pixels>,
     b: Point<Pixels>,
 ) -> Option<[u32; 4]> {
     let (bw, bh) = (f32::from(body.size.width), f32::from(body.size.height));
-    let scale = (bw / iw as f32).min(bh / ih as f32);
+    let scale = (bw / iw as f32).min(bh / ih as f32).min(pane_scale);
     if !scale.is_finite() || scale <= 0. || iw == 0 || ih == 0 {
         return None;
     }
@@ -61,19 +52,19 @@ fn bounds_key(id: &str) -> String {
 }
 
 impl AppWindow {
-    /// Caches the source dimensions and returns the initial image pane size.
+    /// Caches and returns the source dimensions in pixels.
     pub(super) fn open_image(
         &mut self,
         path: &Path,
         canonical: &str,
-    ) -> image::ImageResult<canophy::Point> {
+    ) -> image::ImageResult<(u32, u32)> {
         if let Some(&size) = self.canvas_state.image_sizes.get(canonical) {
-            return Ok(pane_size(size));
+            return Ok(size);
         }
         let size = image_size(path)?;
         self.canvas_state.image_sizes.insert(canonical.into(), size);
         self.canvas_state.image_errors.remove(canonical);
-        Ok(pane_size(size))
+        Ok(size)
     }
 
     /// Keeps image dimensions and body bounds only while their panes are open.
@@ -141,7 +132,7 @@ impl AppWindow {
         camera: canophy::Camera,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let ready = self.canvas_state.image_sizes.contains_key(path);
+        let dimensions = self.canvas_state.image_sizes.get(path).copied();
         let path = Path::new(path);
         let title = path
             .file_name()
@@ -177,12 +168,17 @@ impl AppWindow {
         let body = div()
             .size_full()
             .relative()
+            .flex()
+            .items_center()
+            .justify_center()
             .overflow_hidden()
             .bg(c("surface"))
-            .when(ready, |body| {
+            .when_some(dimensions, |body, (w, h)| {
                 body.child(
                     img(path.to_owned())
                         .size_full()
+                        .max_w(wpx(w as f32))
+                        .max_h(wpx(h as f32))
                         .object_fit(ObjectFit::Contain)
                         .with_fallback(|| {
                             div()
@@ -192,7 +188,7 @@ impl AppWindow {
                         }),
                 )
             })
-            .when(!ready, |body| {
+            .when(dimensions.is_none(), |body| {
                 body.child(div().p_3().child("Image unavailable"))
             })
             .child(
@@ -203,10 +199,12 @@ impl AppWindow {
                     |_, _, _, _| {},
                 )
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full(),
             )
             .children(selection)
-            .when(ready, |body| {
+            .when(dimensions.is_some(), |body| {
                 body.on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -287,14 +285,11 @@ impl AppWindow {
             return;
         };
         cx.notify();
-        let Some(path) = self
-            .canvas_state
-            .doc
-            .panes
-            .iter()
-            .find(|p| p.id == id)
-            .and_then(|p| p.path())
-        else {
+        let doc = &self.canvas_state.doc;
+        let Some(pane) = doc.panes.iter().find(|p| p.id == id) else {
+            return;
+        };
+        let Some(path) = pane.path() else {
             return;
         };
         let Some(bounds) = self.bounds.borrow().get(&bounds_key(&id)).copied() else {
@@ -303,7 +298,8 @@ impl AppWindow {
         let Some(&dimensions) = self.canvas_state.image_sizes.get(path) else {
             return;
         };
-        let Some(region @ [x, y, w, h]) = image_rect(bounds, dimensions, start, end) else {
+        let scale = canophy::layout(doc.camera, pane).scale;
+        let Some(region @ [x, y, w, h]) = image_rect(bounds, dimensions, scale, start, end) else {
             return;
         };
         let filename_id = id.replace(['/', '\\', ':'], "-");
@@ -363,16 +359,20 @@ mod tests {
         let pt = |x, y| point(px(x), px(y));
         let bounds = Bounds::new(pt(10., 20.), size(px(100.), px(100.)));
         assert_eq!(
-            image_rect(bounds, (100, 50), pt(0., 38.), pt(60., 70.)),
+            image_rect(bounds, (100, 50), 1., pt(0., 38.), pt(60., 70.)),
             Some([0, 0, 50, 25])
         );
         assert_eq!(
-            image_rect(bounds, (50, 100), pt(80., 80.), pt(40., 30.)),
+            image_rect(bounds, (50, 100), 1., pt(80., 80.), pt(40., 30.)),
             Some([5, 10, 40, 50])
         );
         assert_eq!(
-            image_rect(bounds, (50, 100), pt(40., 30.), pt(43., 50.)),
+            image_rect(bounds, (50, 100), 1., pt(40., 30.), pt(43., 50.)),
             None
+        );
+        assert_eq!(
+            image_rect(bounds, (20, 20), 1., pt(50., 60.), pt(60., 70.)),
+            Some([0, 0, 10, 10])
         );
     }
 

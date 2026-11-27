@@ -127,20 +127,22 @@ struct Prepared {
 /// shared by the initial open, a password [`PdfView::unlock`], and
 /// [`PdfView::replace_bytes`].
 fn prepare(bytes: Arc<Vec<u8>>, password: &str) -> Result<Prepared, LoadError> {
-    #[cfg(feature = "forms")]
-    let fields = form_fields(&bytes);
-    let doc = parse_with_password(bytes, password)?;
+    let doc = parse_with_password(bytes.clone(), password)?;
+    Ok(prepare_document(&bytes, doc))
+}
+
+fn prepare_document(_original_bytes: &[u8], doc: Arc<Document>) -> Prepared {
     let dims = page_dims(&doc);
     let toc = crate::outline::outline(&doc);
     let links = crate::outline::page_links(&doc);
-    Ok(Prepared {
+    Prepared {
         doc,
         dims,
         toc,
         links,
         #[cfg(feature = "forms")]
-        fields,
-    })
+        fields: form_fields(_original_bytes),
+    }
 }
 
 /// Each page's `(width, height)` in points — cheap to read (no rasterization), so a
@@ -202,6 +204,8 @@ const PAGE_PAD_Y: f32 = 16.0;
 /// Width of the custom vertical scrollbar gutter (px). The thumb floats over the
 /// right edge of the viewport (overlay-style), so it doesn't shift the page column.
 const SCROLLBAR_W: f32 = 12.0;
+/// The extra width and height around the page column at 100% display scale.
+pub const FIT_CHROME: (f32, f32) = (SCROLLBAR_W + 6.0, 2.0 * PAGE_PAD_Y);
 /// Minimum thumb height (px) so the scrollbar stays grabbable in very long PDFs.
 const MIN_THUMB_H: f32 = 32.0;
 /// Extra pages to keep rasterized above and below the visible range, so scrolling
@@ -562,12 +566,13 @@ pub struct PdfView {
     fit: Option<FitMode>,
     /// Viewport size the fit was last computed for (so a resize re-fits once).
     fit_viewport: (f32, f32),
+    fit_size: Option<[f32; 2]>,
     /// On-screen zoom factor (1.0 = base width). Affects layout and render scale.
     zoom: f32,
     // canopy patch: a host display scale (canvas zoom) on top of `zoom`.
     /// Multiplies layout like `zoom` without changing it or its label.
     display: f32,
-    /// The display scale the visible bitmaps were last rendered for.
+    /// The display scale used to rasterize pages.
     rendered_display: f32,
     /// The quality multiplier the pages were last rendered at; compared against the
     /// `quality` source each frame to detect a host setting change.
@@ -668,6 +673,18 @@ impl PdfView {
         quality: PdfQualityFn,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::with_parsed_document(path, style, quality, None, cx)
+    }
+
+    /// Create a viewer, reusing the original bytes and document if the host
+    /// already parsed the file to measure its first page.
+    pub fn with_parsed_document(
+        path: PathBuf,
+        style: PdfStyleFn,
+        quality: PdfQualityFn,
+        parsed: Option<(Arc<Vec<u8>>, Arc<Document>)>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let load_path = path.clone();
         cx.spawn(async move |this, cx| {
             // Read the file off-thread, keep the bytes (so an encrypted PDF can be
@@ -675,6 +692,10 @@ impl PdfView {
             let loaded = cx
                 .background_executor()
                 .spawn(async move {
+                    if let Some((bytes, doc)) = parsed {
+                        let prepared = prepare_document(&bytes, doc);
+                        return Ok((bytes, Ok(prepared)));
+                    }
                     let bytes = Arc::new(std::fs::read(&load_path).map_err(|e| e.to_string())?);
                     Ok::<_, String>((bytes.clone(), prepare(bytes, "")))
                 })
@@ -727,6 +748,7 @@ impl PdfView {
             scrollbar_drag: None,
             fit: None,
             fit_viewport: (0.0, 0.0),
+            fit_size: None,
             zoom: 1.0,
             display: 1.0,
             rendered_display: 1.0,
@@ -1000,9 +1022,9 @@ impl PdfView {
 
     // canopy patch: a host display scale, so the view scales like a picture.
     /// Scales layout by `scale` (clamped 0.1..8) on top of the zoom, keeping the same
-    /// spot of the document in view. Pages re-render crisp only when `crisp` is true, so a
-    /// host can pass false while a gesture is still changing the scale.
-    pub fn set_display_scale(&mut self, scale: f32, crisp: bool, cx: &mut Context<Self>) {
+    /// spot in view. `raster` supplies the display scale for new bitmaps, such as the
+    /// destination of an ease. Pass `None` to keep the raster scale during a gesture.
+    pub fn set_display_scale(&mut self, scale: f32, raster: Option<f32>, cx: &mut Context<Self>) {
         let scale = scale.clamp(0.1, 8.0);
         if (scale - self.display).abs() > 0.0001 {
             let offset = self.scroll.offset();
@@ -1011,8 +1033,10 @@ impl PdfView {
             self.scroll.set_offset(point(offset.x * ratio, offset.y * ratio));
             cx.notify();
         }
-        if crisp && (self.display - self.rendered_display).abs() > 0.0001 {
-            self.rendered_display = self.display;
+        if let Some(raster) = raster.map(|scale| scale.clamp(0.1, 8.0))
+            && (raster - self.rendered_display).abs() > 0.0001
+        {
+            self.rendered_display = raster;
             self.generation = self.generation.wrapping_add(1);
             cx.notify();
         }
@@ -1435,11 +1459,10 @@ impl PdfView {
     pub fn set_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
         // A manual zoom takes over from any active fit mode.
         self.fit = None;
-        self.apply_zoom(zoom, cx);
+        self.apply_zoom(zoom.clamp(MIN_ZOOM.min(self.zoom), MAX_ZOOM), cx);
     }
 
-    fn apply_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
-        let z = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+    fn apply_zoom(&mut self, z: f32, cx: &mut Context<Self>) {
         if (z - self.zoom).abs() < 0.001 {
             return;
         }
@@ -1475,6 +1498,15 @@ impl PdfView {
         cx.notify();
     }
 
+    /// Sets the unscaled viewport size for sticky fit when the host owns the layout.
+    /// An animated display scale then leaves both the fit and raster size stable.
+    pub fn set_fit_size(&mut self, size: [f32; 2], cx: &mut Context<Self>) {
+        if self.fit_size != Some(size) {
+            self.fit_size = Some(size);
+            self.apply_fit(cx);
+        }
+    }
+
     /// Compute + apply the zoom for the active fit mode against the current
     /// viewport. No-op before first layout (render re-applies once bounds are
     /// known) or with no fit active.
@@ -1482,17 +1514,16 @@ impl PdfView {
         let Some(mode) = self.fit else {
             return;
         };
-        let vp = self.scroll.bounds().size;
-        let (vw, vh) = (f32::from(vp.width), f32::from(vp.height));
+        let [vw, vh] = self.fit_size.unwrap_or_else(|| {
+            let vp = self.scroll.bounds().size;
+            let (vw, vh) = (f32::from(vp.width), f32::from(vp.height));
+            self.fit_viewport = (vw, vh);
+            [vw / self.display, vh / self.display]
+        });
         if vw <= 1.0 || vh <= 1.0 {
             return;
         }
-        self.fit_viewport = (vw, vh);
-        // Chrome around the page column: the overlay scrollbar plus the page
-        // slots' 1px borders and a hair of breathing room.
-        // canopy patch: fit in unscaled px, so a display scale change never changes the zoom.
-        let (vw, vh) = (vw / self.display, vh / self.display);
-        let avail_w = (vw - SCROLLBAR_W - 6.0).max(50.0);
+        let avail_w = (vw - FIT_CHROME.0).max(1.0);
         let zoom = match mode {
             FitMode::Width => avail_w / PAGE_WIDTH,
             FitMode::Page => {
@@ -1502,11 +1533,12 @@ impl PdfView {
                     .copied()
                     .filter(|(w, h)| *w > 0.0 && *h > 0.0)
                     .unwrap_or((612.0, 792.0));
-                let avail_h = (vh - 2.0 * PAGE_PAD_Y).max(50.0);
+                let avail_h = (vh - FIT_CHROME.1).max(1.0);
                 (avail_h / (PAGE_WIDTH * (ph / pw))).min(avail_w / PAGE_WIDTH)
             }
         };
-        self.apply_zoom(zoom, cx);
+        // Fit may need to go below the manual zoom floor on a small canvas.
+        self.apply_zoom(zoom.min(MAX_ZOOM), cx);
     }
 
     /// Zoom in one step.
@@ -1707,9 +1739,10 @@ impl PdfView {
         to_render.sort_by_key(|&i| (i as i64 - center as i64).unsigned_abs());
 
         let pdf = self.pdf.clone().unwrap();
+        let raster_width = PAGE_WIDTH * self.zoom * self.rendered_display;
         for i in to_render {
             let pdf = pdf.clone();
-            let scale = render_scale(page_width, scale_factor, quality, self.dims[i].0);
+            let scale = render_scale(raster_width, scale_factor, quality, self.dims[i].0);
             cx.spawn(async move |this, cx| {
                 let page = cx
                     .background_executor()
@@ -1802,7 +1835,7 @@ impl Render for PdfView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // A sticky fit mode re-fits when the viewport size changes (window or
         // sidebar resize) — and computes the first real fit once layout exists.
-        if self.fit.is_some() {
+        if self.fit.is_some() && self.fit_size.is_none() {
             let vp = self.scroll.bounds().size;
             let (vw, vh) = (f32::from(vp.width), f32::from(vp.height));
             if (vw - self.fit_viewport.0).abs() > 1.0 || (vh - self.fit_viewport.1).abs() > 1.0 {

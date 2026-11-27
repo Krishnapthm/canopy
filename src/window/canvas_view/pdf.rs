@@ -15,17 +15,39 @@ pub(super) fn has_pdf_header(path: &Path) -> bool {
         && &header == b"%PDF-"
 }
 
-/// Returns the PDF's page text in a pane read envelope.
-pub(super) fn read_pdf(id: &str, path: &str) -> Result<String, String> {
+pub(super) type ParsedPdf = (Arc<Vec<u8>>, Arc<gpui_pdf::Document>);
+
+pub(super) fn parse_pdf(path: &str) -> Result<ParsedPdf, String> {
     if !Path::new(path).is_file() {
         return Err(format!("cannot read {path}: not a file"));
     }
-    // shortcut: parse on demand in the command, move reading off-thread if large PDFs stall the canvas.
-    let bytes = std::fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))?;
-    let doc = gpui_pdf::parse(Arc::new(bytes)).map_err(|e| match e {
+    // shortcut: parse for sizing and reads on the canvas thread, move it off-thread if large PDFs stall the canvas.
+    let bytes = Arc::new(std::fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))?);
+    let doc = gpui_pdf::parse(bytes.clone()).map_err(|e| match e {
         gpui_pdf::LoadError::Locked => format!("cannot read {path}: the PDF is password protected"),
         gpui_pdf::LoadError::Other(e) => format!("cannot read {path}: {e}"),
     })?;
+    Ok((bytes, doc))
+}
+
+/// The first page's size at the viewer's base width, with fit-width chrome.
+pub(super) fn natural_size(doc: &gpui_pdf::Document) -> Option<canophy::Natural> {
+    let &(w, h) = gpui_pdf::page_dims(doc).first()?;
+    let width = gpui_pdf::PAGE_WIDTH;
+    let height = width * (h / w);
+    if !(w.is_finite() && w > 0. && height.is_finite() && height > 0.) {
+        return None;
+    }
+    let (chrome_w, chrome_h) = gpui_pdf::FIT_CHROME;
+    Some(canophy::Natural {
+        content: canophy::WorldSize::new(width, height),
+        chrome: canophy::WorldSize::new(chrome_w, chrome_h),
+    })
+}
+
+/// Returns the PDF's page text in a pane read envelope.
+pub(super) fn read_pdf(id: &str, path: &str) -> Result<String, String> {
+    let (_, doc) = parse_pdf(path)?;
     let pages = doc.pages().len();
     let mut text = String::new();
     for page in 0..pages {
@@ -66,7 +88,12 @@ fn view_marks(marks: &[canvas::PdfMark]) -> Vec<Highlight> {
 
 impl AppWindow {
     /// Keeps one viewer per saved PDF pane.
-    pub(super) fn sync_pdf_views(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn sync_pdf_views(
+        &mut self,
+        mut parsed: Option<(&str, ParsedPdf)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.prune_pdf_views();
         for pane in &self.canvas_state.doc.panes {
             let canvas::Kind::Pdf { path, highlights } = &pane.kind else {
@@ -84,12 +111,20 @@ impl AppWindow {
                 header_fg: c("foreground"),
                 header_muted: c("muted-foreground"),
             });
+            let parsed = if parsed.as_ref().is_some_and(|(id, _)| *id == pane.id) {
+                parsed.take().map(|(_, pdf)| pdf)
+            } else {
+                None
+            };
             let path = std::path::PathBuf::from(path);
-            let view = cx.new(|cx| PdfView::new(path.clone(), style, Rc::new(|| 1.), cx));
+            let view = cx.new(|cx| {
+                PdfView::with_parsed_document(path.clone(), style, Rc::new(|| 1.), parsed, cx)
+            });
             let weak = cx.weak_entity();
             let id = pane.id.clone();
             view.update(cx, |view, cx| {
                 view.set_show_header(false, cx);
+                view.fit_width(cx);
                 view.set_highlights(view_marks(highlights), cx);
                 let (owner, pane) = (weak.clone(), id.clone());
                 view.set_on_create_highlight(Rc::new(
