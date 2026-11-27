@@ -399,8 +399,7 @@ can be open. The wheel scrolls a focused expanded terminal and pans the canvas a
 the named or last selected cell; `panel.open {terminal}` only expands. Below 0.5 zoom an expanded cell draws as its
 pill. The side panel shows files and sub-agent transcripts only.
 
-Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor.
-On macOS, pinching an entered, docked or popped-out browser page magnifies the page.
+Canvas navigation: scroll pans; pinch or Cmd+scroll (Ctrl on Linux) zooms at the cursor (on macOS, pinching an entered, docked or popped-out browser page magnifies the page).
 Hold Space with canvas focus and left-drag anywhere to pan, with hand cursors.
 `canvas.arrange {layout?: "tidy" | "row" | "column" | "wires", space?, picker?}`
 arranges selected cells or the current space; no layout repeats the last choice.

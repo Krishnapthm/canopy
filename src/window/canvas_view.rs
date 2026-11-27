@@ -1996,6 +1996,11 @@ impl AppWindow {
         }));
     }
 
+    /// Whether nothing moves the camera, so stills and grids may refit to the zoom.
+    pub(super) fn camera_rested(&self) -> bool {
+        self.canvas_state.motion.camera.settled(std::time::Instant::now())
+    }
+
     /// One wheel or trackpad event on the canvas: Cmd (Ctrl) zooms at the pointer, else it pans.
     fn canvas_wheel(&mut self, e: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
         let zoom = wheel_zooms(e.modifiers);
@@ -4821,6 +4826,7 @@ mod input_tests {
         ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, point, px, size};
     use serde_json::json;
     use std::time::Instant;
+    use crate::{canophy, canvas};
 
     #[test]
     fn a_pan_in_progress_keeps_the_wheel_until_it_goes_quiet() {
@@ -4955,10 +4961,11 @@ mod input_tests {
             cx.notify();
         });
         cx.run_until_parked();
-        let pinch = PinchEvent { position, delta: -0.1, modifiers: none, phase: TouchPhase::Moved };
+        // At zoom 1 this small canvas cannot zoom out further, so pinch in.
+        let pinch = PinchEvent { position, delta: 0.1, modifiers: none, phase: TouchPhase::Moved };
         let before = camera(cx);
         cx.simulate_event(pinch.clone());
-        assert!(camera(cx).zoom() < before.zoom(), "pinch reaches the canvas through an unentered browser pane");
+        assert!(camera(cx).zoom() > before.zoom(), "pinch reaches the canvas through an unentered browser pane");
 
         view.update(cx, |this, cx| {
             this.canvas_state.mode = false;
