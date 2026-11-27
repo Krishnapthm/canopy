@@ -281,7 +281,7 @@ fn every_edge_and_corner_moves_only_its_own_sides() {
 fn traits_keep_the_sizes_the_app_used() {
     use super::traits::{Content, traits};
     use crate::canvas::{Kind, header_height};
-    let browser = Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None };
+    let browser = Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None, source: None };
     let unknown = Kind::Mod { kind: "mod:unknown-traits-test".into(), props: Default::default() };
     let file = Kind::File { path: "/a.md".into() };
     let terminal = Kind::Terminal { size: None };

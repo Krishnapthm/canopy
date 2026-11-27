@@ -609,7 +609,7 @@ impl AppWindow {
         self.canvas_state.sims.get(id)?.live.as_ref()?;
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id)?;
         let mut actions = sim_device_actions();
-        actions.push(pane_actions(pane, None, false).into_iter().find(|a| a.command == "canvas.sim_pop")?);
+        actions.push(pane_actions(pane, None, false, None).into_iter().find(|a| a.command == "canvas.sim_pop")?);
         let actions = self.sim_relabel(id, actions, cx);
         Some(self.bar(id, actions, 1., false, cx).children(self.kept_annotation_send(id, cx)).into_any_element())
     }

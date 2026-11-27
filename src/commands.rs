@@ -116,6 +116,8 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.pane_color_next", &[req("pane")], "Assign the next unused color in the pane's space."),
     cmd("panel.close_tab", &[req("path"), opt("confirmed"), opt("generation")], "Close a file tab in the Files panel, asking before discarding unsaved changes. The confirm dialog passes confirmed and the draft's generation, and a stale generation closes nothing. Only the person can run it."),
     cmd("panel.editor", &[opt("choice"), opt("done"), opt("path"), opt("dirty")], "Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state."),
+    cmd("file.mode", &[req("path"), req("mode"), opt("pane")], "Show a file as its source or its preview. mode is source or preview; pane is the canvas file pane, omitted for the Files panel tab."),
+    cmd("files.auto_save", &[req("on")], "Turn automatic saving of edited files on or off."),
     cmd("preview.open", &[opt("path"), opt("point"), opt("place")], "Open a file tab, or choose a file; place canvas or point pins a canvas card."),
     cmd("canvas.create", &[opt("point"), opt("kind"), opt("space"), opt("argv"), opt("name"), opt("folder")], "Create a canvas terminal or space at a world point (default: the middle of the view); a space with a folder (empty: the root) is made directly, without one the Choose space dialog opens."),
     cmd("panel.pop_out", &[opt("terminal")], "Pop a terminal cell into its own window (default: the last selected cell)."),

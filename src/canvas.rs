@@ -330,7 +330,7 @@ pub enum Kind {
     /// A pane drawn by a mod. kind: "mod:<mod name>"; props: what the mod saved with canvas.pane_set.
     Mod { kind: String, props: serde_json::Map<String, serde_json::Value> },
     /// Web pages in one pane. Home and the optional fixed CSS viewport belong to the pane.
-    Browser { tabs: Vec<Tab>, active: usize, home: String, viewport: Option<[f32; 2]> },
+    Browser { tabs: Vec<Tab>, active: usize, home: String, viewport: Option<[f32; 2]>, source: Option<String> },
     /// An iOS Simulator's screen. udid: the simulator; empty until the person picks one.
     Sim { udid: String },
 }
@@ -384,6 +384,8 @@ enum Builtin {
         home: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         viewport: Option<[f32; 2]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<String>,
     },
     Image { path: String },
     Pdf {
@@ -418,7 +420,7 @@ impl TryFrom<RawKind> for Kind {
             Builtin::Terminal { size } => Self::Terminal { size },
             Builtin::Sub { parent, sub } => Self::Sub { parent, sub },
             Builtin::File { path } => Self::File { path },
-            Builtin::Browser { url, mut tabs, active, home, viewport } => {
+            Builtin::Browser { url, mut tabs, active, home, viewport, source } => {
                 if tabs.is_empty() {
                     tabs.push(Tab { id: "t1".into(), url, title: String::new() });
                 }
@@ -428,7 +430,7 @@ impl TryFrom<RawKind> for Kind {
                 }) {
                     return Err("browser tabs need unique numeric tab ids".into());
                 }
-                Self::Browser { active: active.min(tabs.len() - 1), tabs, home, viewport }
+                Self::Browser { active: active.min(tabs.len() - 1), tabs, home, viewport, source }
             }
             Builtin::Image { path } => Self::Image { path },
             Builtin::Pdf { path, highlights } => Self::Pdf { path, highlights },
@@ -444,10 +446,10 @@ impl From<Kind> for RawKind {
             Kind::Terminal { size } => Builtin::Terminal { size },
             Kind::Sub { parent, sub } => Builtin::Sub { parent, sub },
             Kind::File { path } => Builtin::File { path },
-            Kind::Browser { tabs, active, home, viewport } => {
+            Kind::Browser { tabs, active, home, viewport, source } => {
                 let active = active.min(tabs.len() - 1);
                 let url = tabs[active].url.clone();
-                Builtin::Browser { url, tabs, active, home, viewport }
+                Builtin::Browser { url, tabs, active, home, viewport, source }
             }
             Kind::Image { path } => Builtin::Image { path },
             Kind::Pdf { path, highlights } => Builtin::Pdf { path, highlights },
@@ -1031,7 +1033,7 @@ mod tests {
 
     #[test]
     fn browser_panes_have_the_taller_header() {
-        let browser = Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None };
+        let browser = Kind::Browser { tabs: vec![], active: 0, home: String::new(), viewport: None, source: None };
         assert_eq!(header_height(&browser), BROWSER_HEADER);
         assert_eq!(header_height(&Kind::File { path: "/a.md".into() }), HEADER);
     }
@@ -1041,7 +1043,7 @@ mod tests {
         let legacy = serde_json::json!({"id":"p2","kind":"browser","props":{"url":"http://a","home":"http://a"},"rect":[0.,0.,960.,640.],"z":1});
         let pane: Pane = serde_json::from_value(legacy).unwrap();
         assert_eq!((pane.url(), pane.kind_name(), pane.boxed(), pane.verbs()), (Some("http://a"), "browser", true, &["read", "shot", "open", "close"][..]));
-        assert!(matches!(&pane.kind, Kind::Browser { tabs, active: 0, viewport: None, .. } if tabs.len() == 1));
+        assert!(matches!(&pane.kind, Kind::Browser { tabs, active: 0, viewport: None, source: None, .. } if tabs.len() == 1));
         assert_eq!(pane.active_tab().unwrap().id, "t1");
 
         let mut saved = serde_json::to_value(pane).unwrap();

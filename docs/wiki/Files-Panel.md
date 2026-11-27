@@ -37,6 +37,19 @@ Content search starts 300 ms after you stop typing. In a Git working tree it sea
 - The tree loads at most 500 entries per folder and 5,000 entries in total.
 - For files on the canvas, see [File and Note Panes](File-and-Note-Panes).
 
+## Switch between Source and Preview
+
+Markdown (`.md`, `.markdown`, `.mdx`), JSONL, HTML and SVG open in **Preview**.
+Click **Source** in the file header to see the text, and **Preview** to return.
+The same controls appear in a canvas file pane's helper bar. JSONL source is
+read-only. HTML previews on macOS use a local browser pane in the same tab or
+canvas position. Click **Source** in its header or helper bar to return to the file.
+
+- Click **Outline** in a Markdown preview to show the heading rail. Select a heading to scroll to it.
+- Click a web link to open a browser pane. A file link opens a Files tab. Relative links resolve from the Markdown file's folder.
+- Click **Collapse folders** while the tree is visible to fold open folders.
+- Open **More** to find **Auto save**. The checked setting is the default and is shared across spaces.
+
 ## Browsers and simulators in the panel
 
 A browser or simulator opens as a tab in this panel, so it sits beside your work without taking canvas space. Click **Browser** or **Simulator** in the [top strip](Spaces#the-top-strip), or let an agent run `canopy pane new browser localhost:3000`. If you have an unsaved edit, the pane opens in a background tab and your editor stays active.

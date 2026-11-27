@@ -1453,9 +1453,19 @@ impl AppWindow {
 
     /// Creates what's visible, drops what isn't, publishes state, saves, focuses.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.canvas_state.editing.as_ref() != self.canvas_state.file_path() { self.canvas_state.editing = None; }
         // The picker finds open file tabs by this; set_shared is a no-op when unchanged.
-        mods::set_shared("canvas.files".into(), json!(self.canvas_state.doc.panel.tabs.iter().filter_map(crate::canvas::PanelTab::file).collect::<Vec<_>>()));
+        let doc = &self.canvas_state.doc;
+        let files: Vec<_> = doc.panel.tabs.iter().filter_map(|tab| {
+            tab.file().or_else(|| {
+                let id = tab.pane()?;
+                let pane = doc.panes.iter().find(|pane| pane.id == *id)?;
+                match &pane.kind {
+                    crate::canvas::Kind::Browser { source, .. } => source.as_ref(),
+                    _ => None,
+                }
+            })
+        }).collect();
+        mods::set_shared("canvas.files".into(), json!(files));
         self.sync_canvas(window,cx);
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
@@ -3161,6 +3171,11 @@ impl AppWindow {
                     if state.doc.panel.tabs.contains(&tab) { self.close_panel_tab(&tab, window, cx); }
                 }
             }
+            "file.mode" => self.file_mode_command(a, window, cx),
+            "files.auto_save" => match a["on"].as_bool() {
+                Some(on) => mods::set_shared("files.auto_save".into(), json!(on)),
+                None => self.fail("files.auto_save requires a boolean on"),
+            },
             "panel.editor" => self.panel_editor(a, window, cx),
             "file.rename" => self.file_operation(crate::file_ops::Operation::Rename, a, window, cx),
             "file.copy" => self.file_operation(crate::file_ops::Operation::Copy, a, window, cx),

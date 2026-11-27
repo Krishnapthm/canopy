@@ -1161,10 +1161,13 @@ The Files editor reports `panel.editor {path, dirty: boolean}` on saved/unsaved
 transitions; only the current editing file can update that dot. Switching tabs
 or closing the tab drops the draft without a dialog.
 Saves use `writeTextFile(path, text, expected)`; conflicts show inline and keep the draft.
-Canvas cards stay read-only with their existing viewer, drag header and resize grip;
-there is no card-header Edit button.
-Files follow folder watcher changes, show File deleted when missing, and never
-execute content or load remote images.
+Markdown, JSONL, HTML and SVG have **Source** and **Preview** actions in the Files
+panel header and on the canvas file pane's helper bar. Use
+`file.mode {path, mode: "source" | "preview", pane?}` with an absolute path.
+Pass the pane ID for a canvas file pane. Omit it for a Files panel tab.
+JSONL source is read-only. On macOS, HTML Preview uses a local browser pane.
+Markdown previews follow folder changes and show File deleted when missing.
+The Files panel More menu uses `files.auto_save {on}` to persist the shared Auto save setting.
 
 Preview quotes: finishing a selection in a file pane shows the quote icon, which opens the popover, also opened by `quote.menu {path, start?, end?, text, point?, pane?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv, pane?}` expands an agent's cell and pastes the quote, then a blank line and the trimmed message when given, without Enter. The popover lists agents wired to the quoted pane first, then running agents, then installed agents ("New agent with this"). New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.
 

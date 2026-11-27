@@ -430,15 +430,20 @@ fn find_suffix(root: &std::path::Path, tail: &std::path::Path) -> Option<std::pa
 }
 
 impl AppWindow {
+    pub(super) fn browser_kind(url: String, source: Option<String>) -> canvas::Kind {
+        canvas::Kind::Browser {
+            home: url.clone(), tabs: vec![canvas::Tab { id: "t1".into(), url, title: String::new() }],
+            active: 0, viewport: None, source,
+        }
+    }
+
     /// Adds a browser pane at `point` in `space`. An empty URL focuses its New tab field.
-    pub(super) fn add_browser_pane(&mut self, url: String, point: canophy::Point, space: Option<String>, cx: &mut Context<Self>) -> String {
+    pub(super) fn add_browser_pane(&mut self, url: String, point: canophy::Point, space: Option<String>, source: Option<String>, cx: &mut Context<Self>) -> String {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
         let empty = url.is_empty();
-        let kind = canvas::Kind::Browser {
-            home: url.clone(), tabs: vec![canvas::Tab { id: "t1".into(), url, title: String::new() }], active: 0, viewport: None,
-        };
+        let kind = Self::browser_kind(url, source);
         doc.panes.push(canvas::Pane { id: id.clone(), kind, rect: canophy::WorldRect::new(point[0], point[1], SIZE[0], SIZE[1]), z, space, color: None, pinned: None });
         self.canvas_state.last_browser = Some(id.clone());
         if empty { self.canvas_state.browsers.panes.entry(id.clone()).or_default().focus_url = true; }
@@ -1258,7 +1263,7 @@ impl AppWindow {
                     ([x - SIZE[0] / 2., y - SIZE[1] / 2.], doc.room.clone())
                 }
             };
-            let id = self.add_browser_pane(String::new(), at, space, cx);
+            let id = self.add_browser_pane(String::new(), at, space, None, cx);
             self.solve_layout(Some(&id), None, cx);
             id
         });
@@ -2608,7 +2613,7 @@ mod tests {
         let mut pane = Pane {
             id: "p1".into(), kind: Kind::Browser {
                 tabs: vec![crate::canvas::Tab { id: "t1".into(), url: String::new(), title: String::new() }],
-                active: 0, home: String::new(), viewport: None,
+                active: 0, home: String::new(), viewport: None, source: None,
             },
             rect: [0., 0., 640., 838.].into(), z: 1, space: None, color: None, pinned: None,
         };

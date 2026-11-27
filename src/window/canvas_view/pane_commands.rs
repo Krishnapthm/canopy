@@ -86,7 +86,7 @@ impl AppWindow {
         // File and mod opening still places panes directly on the canvas.
         let before = (home == Home::Pinned && !browser_or_sim).then(|| canvas::Rest::capture(doc));
         let (id, path, kind) = if let Some(url) = url.clone() {
-            (self.add_browser_pane(url, point, space, cx), None, kind.to_owned())
+            (self.add_browser_pane(url, point, space, None, cx), None, kind.to_owned())
         } else if kind == "file" {
             let path = a["path"].as_str().filter(|p| std::path::Path::new(p).is_absolute()).ok_or("canvas.pane_new: path must be absolute")?;
             let (id, path, kind) = self.add_file_pane(std::path::Path::new(path), point, space, window, cx)?;
@@ -250,7 +250,7 @@ impl AppWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{canvas, json, Bounds, point, px, size, TestAppContext, Value};
+    use super::{canvas, json, FileMode, Bounds, point, px, size, TestAppContext, Value};
     use crate::window::tests::{in_own_process, open_window, running_alone};
     const TEST: &str = "window::canvas_view::pane_commands::tests::pane_commands_headless";
 
@@ -401,12 +401,12 @@ mod tests {
             let draft = canvas::PanelTab::File(draft_path.clone());
             this.canvas_state.doc.panel.tabs.push(draft.clone());
             this.canvas_state.file = Some(draft.clone());
-            this.canvas_state.editing = Some(draft_path.clone());
+            this.canvas_state.modes.insert(draft_path.clone(), FileMode::Source);
             this.canvas_state.dirty = Some(draft_path.clone());
             assert_eq!(this.pane_dock(&did, Some(true), window, cx), Ok(true));
             assert!(this.canvas_state.doc.docked(&did));
             assert_eq!(this.canvas_state.file.as_ref(), Some(&draft));
-            assert_eq!(this.canvas_state.editing.as_ref(), Some(&draft_path));
+            assert_eq!(this.canvas_state.file_mode(&draft_path), FileMode::Source);
             assert_eq!(this.canvas_state.dirty.as_ref(), Some(&draft_path));
             assert!(this.pane_dock("t1", None, window, cx).is_err(), "a terminal does not dock");
             assert_eq!(this.run_as(close, json!({"pane":did}), false, window, cx), json!({"ok":true}));
@@ -446,6 +446,13 @@ mod tests {
             assert!(this.canvas_state.doc.wires.is_empty(), "a pane moved to another space leaves its wires");
             this.bounds.borrow_mut().insert("canopy-canvas".into(), Bounds::new(point(px(0.), px(0.)), size(px(800.), px(600.))));
             assert_eq!(this.pane_shot(&json!({"pane":id}), window).unwrap_err(), format!("pane {id} is off screen: bring it into view first"));
+            let source = reply["path"].as_str().unwrap();
+            let preview = json!({"path":source,"pane":id,"mode":"preview"});
+            assert_eq!(this.run_as("file.mode", json!({"path":source,"pane":id,"mode":"source"}), false, window, cx)["ok"], true);
+            this.panel_editor(&json!({"path":source,"dirty":true}), window, cx);
+            assert!(this.run_as("file.mode", preview, false, window, cx)["error"].is_string());
+            this.panel_editor(&json!({"path":source,"done":true}), window, cx);
+            assert_eq!(this.canvas_state.file_mode(source), FileMode::Preview);
             this.close_canvas_cell(&json!({"pane":id}), window, cx);
             assert!(!this.canvas_state.doc.panes.iter().any(|p| p.id == id));
             assert!(this.canvas_state.doc.wires.is_empty());
