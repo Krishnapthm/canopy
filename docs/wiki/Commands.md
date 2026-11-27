@@ -736,6 +736,24 @@ Choose a file panel editor, return to the read-only view after saving, or report
 | `path` | no |
 | `dirty` | no |
 
+## `file.mode`
+
+Show a file as its source or its preview. mode is source or preview; pane is the canvas file pane, omitted for the Files panel tab.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+| `mode` | yes |
+| `pane` | no |
+
+## `files.auto_save`
+
+Turn automatic saving of edited files on or off.
+
+| Argument | Required |
+|---|---|
+| `on` | yes |
+
 ## `preview.open`
 
 Open a file tab, or choose a file; place canvas or point pins a canvas card.
@@ -1332,6 +1350,67 @@ No arguments.
 Go to the next page in the last selected PDF pane.
 
 No arguments.
+
+## `file.rename`
+
+Rename a local file or folder.
+
+| Argument | Required |
+|---|---|
+| `from` | yes |
+| `to` | yes |
+
+## `file.copy`
+
+Copy a local file or folder to a path, or into a folder with an available name.
+
+| Argument | Required |
+|---|---|
+| `from` | yes |
+| `to` | no |
+| `into` | no |
+
+## `file.move`
+
+Move a local file or folder to a path, or into a folder with an available name.
+
+| Argument | Required |
+|---|---|
+| `from` | yes |
+| `to` | no |
+| `into` | no |
+
+## `file.mkdir`
+
+Create a local folder.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `file.new`
+
+Create an empty local file.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `file.trash`
+
+Move a local file or folder to the system trash.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
+
+## `file.reveal`
+
+Show a local file or folder in the system file browser.
+
+| Argument | Required |
+|---|---|
+| `path` | yes |
 
 ## `preview.external`
 
