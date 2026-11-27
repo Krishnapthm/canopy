@@ -8792,6 +8792,7 @@ fn emit_opt_specialized_call(
     native: Option<&NativeCallSite>,
     guard: u32,
     scalar_result: bool,
+    #[cfg_attr(not(feature = "test-support"), allow(unused_variables))]
     diagnostic_key: Option<crate::runtime::FunctionKey>,
 ) -> Result<usize, CompileFailure> {
     use cranelift_codegen::ir::{types, InstBuilder, MemFlags};
