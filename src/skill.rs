@@ -15,7 +15,7 @@ const FILES: &[(&str, &str)] = &[
     ("references/mods.md", include_str!("skill/references/mods.md")),
     ("references/customize.md", include_str!("skill/references/customize.md")),
 ];
-/// Marks a file Canopy wrote; a SKILL.md without it is someone else's and the folder stays untouched.
+/// Identifies each file Canopy installed.
 const MARK: &str = "<!-- Installed by Canopy, rewritten on start. `canopy skill remove` deletes it. -->";
 
 fn text(body: &str) -> String { format!("{}\n\n{MARK}\n", body.trim_end()) }
@@ -28,45 +28,84 @@ pub fn printed() -> String {
     out
 }
 
-/// Whether `<dir>/canopy/` is Canopy's to write: missing, or its SKILL.md carries the mark.
-fn ours(dir: &Path) -> std::io::Result<bool> {
-    match std::fs::read_to_string(dir.join("canopy/SKILL.md")) {
-        Ok(old) => Ok(old.contains(MARK)),
+enum File {
+    Missing,
+    Foreign,
+    Owned(Vec<u8>),
+}
+
+fn installed_file(path: &Path) -> std::io::Result<File> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.is_file() => Ok(File::Foreign),
+        Ok(_) => {
+            let bytes = std::fs::read(path)?;
+            if bytes.split(|&b| b == b'\n').any(|line| line == MARK.as_bytes()) {
+                Ok(File::Owned(bytes))
+            } else {
+                Ok(File::Foreign)
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(File::Missing),
+        Err(e) => Err(e),
+    }
+}
+
+/// Accepts a missing directory or a real directory. A link belongs to its creator.
+fn skill_directory(path: &Path) -> std::io::Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata.is_dir()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
         Err(e) => Err(e),
     }
 }
 
-/// Writes every skill file under `<dir>/canopy/` that is missing or differs, when the folder
-/// is Canopy's. True when anything was written.
+/// Installs missing files and updates marked files. A foreign SKILL.md reserves the folder.
 pub fn install(dir: &Path) -> std::io::Result<bool> {
-    if !ours(dir)? { return Ok(false); }
+    let dir = dir.join("canopy");
+    if !skill_directory(&dir)? { return Ok(false); }
+    let (main, references) = FILES.split_first().unwrap();
+    let skill = installed_file(&dir.join(main.0))?;
+    if matches!(skill, File::Foreign) { return Ok(false); }
     let mut wrote = false;
-    // SKILL.md last: a half-written install still has no mark, so the next start finishes it.
-    for (path, body) in FILES.iter().rev() {
-        let path = dir.join("canopy").join(path);
+    let mut write = |path: &Path, body, existing| -> std::io::Result<()> {
         let text = text(body);
-        if std::fs::read_to_string(&path).is_ok_and(|old| old == text) { continue; }
+        if matches!(existing, File::Foreign) || matches!(existing, File::Owned(old) if old == text.as_bytes()) {
+            return Ok(());
+        }
         std::fs::create_dir_all(path.parent().unwrap())?;
-        crate::persist::write_atomic(&path, text.as_bytes())?;
+        crate::persist::write_atomic(path, text.as_bytes())?;
         wrote = true;
+        Ok(())
+    };
+    if skill_directory(&dir.join("references"))? {
+        for (path, body) in references {
+            let path = dir.join(path);
+            write(&path, body, installed_file(&path)?)?;
+        }
     }
+    // Publish the entry point after its references so a later start can finish an interrupted install.
+    write(&dir.join(main.0), main.1, skill)?;
     Ok(wrote)
 }
 
-/// Deletes the skill files when Canopy wrote them, then `references/` and `canopy/` if empty.
-/// True when deleted.
+/// Removes marked files, leaving SKILL.md until last so cleanup can be retried.
 pub fn remove(dir: &Path) -> std::io::Result<bool> {
-    let skill = dir.join("canopy/SKILL.md");
-    if !skill.exists() || !ours(dir)? { return Ok(false); }
-    for (path, _) in FILES {
-        match std::fs::remove_file(dir.join("canopy").join(path)) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
-            _ => {}
-        }
+    let dir = dir.join("canopy");
+    let (main, references) = FILES.split_first().unwrap();
+    let skill = dir.join(main.0);
+    if !skill_directory(&dir)? || !matches!(installed_file(&skill)?, File::Owned(_)) {
+        return Ok(false);
     }
-    let _ = std::fs::remove_dir(dir.join("canopy/references"));
-    let _ = std::fs::remove_dir(dir.join("canopy"));
+    let reference_dir = dir.join("references");
+    if skill_directory(&reference_dir)? {
+        for (path, _) in references {
+            let path = dir.join(path);
+            if matches!(installed_file(&path)?, File::Owned(_)) { std::fs::remove_file(path)?; }
+        }
+        let _ = std::fs::remove_dir(reference_dir);
+    }
+    std::fs::remove_file(skill)?;
+    let _ = std::fs::remove_dir(dir);
     Ok(true)
 }
 
@@ -175,6 +214,25 @@ mod tests {
         assert!(remove(&dir.0).unwrap());
         assert!(!dir.path().exists());
         assert_eq!(std::fs::read_to_string(extra).unwrap(), "keep");
+    }
+
+    #[test]
+    fn install_and_remove_preserve_unmarked_references() {
+        let dir = Temp::new();
+        let foreign = dir.0.join("canopy/references/browser.md");
+        std::fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+        // Foreign files can also be binary or predate the main skill.
+        std::fs::write(&foreign, b"custom\xff").unwrap();
+        assert!(install(&dir.0).unwrap());
+        let owned = dir.0.join("canopy/references/simulator.md");
+        assert!(owned.exists());
+        assert_eq!(std::fs::read(&foreign).unwrap(), b"custom\xff");
+        std::fs::write(&owned, format!("older\n{MARK}\n")).unwrap();
+        assert!(install(&dir.0).unwrap());
+        assert_eq!(std::fs::read_to_string(&owned).unwrap(), text(FILES[1].1));
+        assert!(remove(&dir.0).unwrap());
+        assert!(!owned.exists());
+        assert_eq!(std::fs::read(&foreign).unwrap(), b"custom\xff");
     }
 
     #[test]

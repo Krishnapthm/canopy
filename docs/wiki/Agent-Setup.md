@@ -20,7 +20,7 @@ Canopy installs it every time it starts, for each installed agent whose `program
 | Codex | `~/.agents/skills/canopy/SKILL.md` and `references/` |
 | Others with a `skills` folder | `<skills>/canopy/SKILL.md` and `references/` |
 
-Canopy writes only its own `canopy` folder. It marks the files it installs, updates only marked files, and leaves an unmarked `SKILL.md` alone, so your own edits are never overwritten.
+Canopy writes only its own `canopy` folder. It marks each file it installs and checks each file for that mark before updating or removing it. If you provide an unmarked `SKILL.md`, Canopy leaves the entire folder alone.
 
 To print the skill, for an agent CLI without skill support, run `canopy --skill`. It prints `SKILL.md` followed by every reference file.
 
