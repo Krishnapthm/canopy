@@ -83,9 +83,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # ci.yml runs on the commit once it is on main; a tag publishes only after
-  # it passed. Waits while ci is still running (a timer only while work is
-  # pending), fails if ci failed or never ran for this commit.
+  # A tag publishes only after full CI passes on the same commit. Site-only
+  # pushes skip CI, so run it manually before tagging one for release.
   ci-passed:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
@@ -98,12 +97,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           while :; do
-            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&per_page=1" \
-              --jq '.workflow_runs[0] // {} | "\(.status) \(.conclusion)"') || run="api error"
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&per_page=100" \
+              --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")][0] // {} | "\(.status) \(.conclusion)"') || run="api error"
             echo "ci for $GITHUB_SHA: $run"
             case "$run" in
               "completed success") exit 0 ;;
-              "null null") echo "no ci run for this commit: push it to main first"; exit 1 ;;
+              "null null") echo "no ci run for this commit: run the full ci workflow for this commit before tagging"; exit 1 ;;
               "completed cancelled") echo "cancelled by a newer push: rerun that ci run, this job keeps waiting" ;;
               completed*) exit 1 ;;
             esac

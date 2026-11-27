@@ -30,3 +30,7 @@ and open `http://localhost:8000/#features` to preview it.
 
 The GitHub Pages workflow publishes `site/` when changes merge to `main`.
 The repository's Pages source must be set to GitHub Actions.
+
+Changes confined to `site/` and the Pages workflow skip app CI. To release
+from a site-only commit, run the `ci` workflow manually on that commit before
+tagging it. The release checks for a successful full run on the tagged commit.
