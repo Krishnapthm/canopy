@@ -90,14 +90,10 @@ pub fn destination(from: &Path, to: Option<&Path>, into: Option<&Path>) -> Resul
 pub fn rename(from: &Path, to: &Path) -> Result<(), String> {
     absolute(from)?;
     absolute(to)?;
+    // shortcut: the vacancy check and the rename are two steps, so a file created in between is
+    // replaced; use a native no-replace rename if agents start racing the tree.
     vacant(to)?;
-    rename_exclusive(from, to).map_err(|e| io_error(to, e))
-}
-
-// shortcut: the vacancy check and the rename are two steps, so a file created in between is
-// replaced; use a native no-replace rename if agents start racing the tree.
-fn rename_exclusive(from: &Path, to: &Path) -> io::Result<()> {
-    fs::rename(from, to)
+    fs::rename(from, to).map_err(|e| io_error(to, e))
 }
 
 fn copy_entry(from: &Path, to: &Path) -> io::Result<()> {
@@ -169,8 +165,9 @@ pub fn copy(from: &Path, to: &Path) -> Result<(), String> {
 pub fn move_entry(from: &Path, to: &Path) -> Result<(), String> {
     absolute(from)?;
     absolute(to)?;
+    // shortcut: the same check-then-rename gap as `rename`.
     vacant(to)?;
-    match rename_exclusive(from, to) {
+    match fs::rename(from, to) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
             copy(from, to)?;

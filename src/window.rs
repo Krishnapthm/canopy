@@ -2937,30 +2937,44 @@ impl AppWindow {
         }
     }
 
-    /// Runs a local file operation; a failure reaches the person as a toast, since a mod's
-    /// `run` gets no answer back.
+    /// Runs a local file operation off the UI thread (a folder copy can take long); a failure
+    /// reaches the person as a toast, since a mod's `run` gets no answer back. A control caller
+    /// is answered when the operation finishes.
     fn file_operation(&mut self, operation: crate::file_ops::Operation, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
         use crate::file_ops::{self, Operation::*};
-        let path = |key: &str| args[key].as_str().map(Path::new);
-        let required = |key| path(key).ok_or_else(|| format!("{key} must be a path"));
-        let result = (|| match operation {
-            Rename => file_ops::rename(required("from")?, required("to")?),
-            Copy | Move => {
-                let from = required("from")?;
-                let to = file_ops::destination(from, path("to"), path("into"))?;
-                if matches!(operation, Copy) { file_ops::copy(from, &to) } else { file_ops::move_entry(from, &to) }
-            }
-            Mkdir => file_ops::mkdir(required("path")?),
-            New => file_ops::new_file(required("path")?),
-            Trash => file_ops::trash(required("path")?),
-            Reveal => file_ops::reveal(required("path")?),
-        })();
-        if result.is_ok() && !matches!(operation, Reveal) {
+        let args = args.clone();
+        let reply = self.held_reply.take();
+        let work = cx.background_executor().spawn(async move {
+            let path = |key: &str| args[key].as_str().map(Path::new);
+            let required = |key| path(key).ok_or_else(|| format!("{key} must be a path"));
+            let result = (|| match operation {
+                Rename => file_ops::rename(required("from")?, required("to")?),
+                Copy | Move => {
+                    let from = required("from")?;
+                    let to = file_ops::destination(from, path("to"), path("into"))?;
+                    if matches!(operation, Copy) { file_ops::copy(from, &to) } else { file_ops::move_entry(from, &to) }
+                }
+                Mkdir => file_ops::mkdir(required("path")?),
+                New => file_ops::new_file(required("path")?),
+                Trash => file_ops::trash(required("path")?),
+                Reveal => file_ops::reveal(required("path")?),
+            })();
             let moved = (matches!(operation, Move) && path("into").is_some()).then(|| args["from"].clone());
-            mods::send_command("files", &json!({"name":"file_changed","args":{"moved":moved}}).to_string());
-        }
-        if let Err(error) = &result { self.command_error("File", error, window, cx); }
-        self.answer(result.map(|_| json!({})));
+            (result, moved)
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let (result, moved) = work.await;
+            let _ = this.update_in(cx, |this, window, cx| match &result {
+                Ok(()) if !matches!(operation, Reveal) => {
+                    mods::send_command("files", &json!({"name":"file_changed","args":{"moved":moved}}).to_string());
+                }
+                Ok(()) => {}
+                Err(error) => this.command_error("File", error, window, cx),
+            });
+            if let Some(reply) = reply {
+                let _ = reply.send(result.map_or_else(|e| json!({"error":e}), |()| json!({})));
+            }
+        }).detach();
     }
 
     fn command_error(&mut self, name: &str, error: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -3036,14 +3050,12 @@ impl AppWindow {
             }
             return json!({"asked":"url"});
         }
-        if person && name.ends_with(".rename") && args.get("name").is_none_or(Value::is_null) {
+        if person && matches!(name, "space.rename" | "tab.rename") && args.get("name").is_none_or(Value::is_null) {
             self.ask_name(name, args, window, cx);
             return json!({ "asked": "name" });
         }
         if let Some(arg) = crate::commands::missing(command, &args) {
             return json!({ "error": format!("{name} needs {arg}") });
-        }
-        if person {
         }
         if name == "space.new" {
             let machine = new_space_machine(&args, person, &self.model);
