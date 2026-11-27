@@ -1456,12 +1456,12 @@ impl AppWindow {
         }).detach();
     }
 
-    /// The folder the canvas file tree shows: the room being shown, else the Home card last
-    /// clicked, else the most recently entered space.
-    fn panel_root(&self) -> Option<String> {
+    /// The space the file tree follows: the current room, the last clicked Home card,
+    /// or the most recently entered space.
+    fn panel_space(&self) -> Option<&crate::model::Space> {
         let state = &self.canvas_state;
         let mut ids = state.doc.room.iter().chain(state.doc.panel.space.iter()).chain(state.recent.iter());
-        ids.find_map(|id| self.model.space(id)).map(|s| s.folder.clone())
+        ids.find_map(|id| self.model.space(id))
     }
     /// The space a window position belongs to: the room being shown, else the Home card under it.
     fn space_at(&self, position: Point<Pixels>) -> Option<String> {
@@ -1565,13 +1565,13 @@ impl AppWindow {
             }
         }
         if self.canvas_state.file.is_none() && !self.canvas_state.files { return slots; }
-        let root = self.panel_root();
+        let space = self.panel_space();
         if !self.canvas_state.doc.panel.tree_hidden {
             slots.push((
                 "canvas-tree".into(),
                 Instance {
                     name: "files".into(),
-                    props: json!({"canvas":"tree","root":root}),
+                    props: json!({"canvas":"tree","root":space.map(|s| &s.folder),"on":space.and_then(|s| s.machine.as_deref())}),
                 },
             ));
         }
@@ -4189,7 +4189,7 @@ impl AppWindow {
             if let Some((header, body)) = docked {
                 panel = panel.child(header).child(body);
             } else {
-            let root = self.panel_root();
+            let root = self.panel_space().map(|s| s.folder.clone());
             let path = state.file_path().map(String::as_str).or(root.as_deref()).unwrap_or("");
             // Outside the tree's folder, paths read from home.
             // A sub-agent reads as itself, not as a file in its agent's data folder.

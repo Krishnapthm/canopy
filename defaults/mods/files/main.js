@@ -36,7 +36,7 @@ async function fileMarks(file, text, options) {
 }
 
 function location() {
-  if (props()?.canvas) return { cwd: props().root, on: null };
+  if (props()?.canvas) return { cwd: props().root, on: props().on ?? null };
   const space = spaces().find(s => s.active), f = focused();
   const pane = f?.pane ? panes().find(p => p.pane === f.pane) : null;
   const on = f?.pane === null ? (f.terminal?.includes("/") ? f.terminal.split("/")[0] : null) : space?.machine ?? null;
@@ -52,6 +52,40 @@ function icon(entry) {
   if (entry.dir) return "folder";
   const ext = entry.name.includes(".") ? entry.name.split(".").pop().toLowerCase() : "";
   return ext === "md" || ext === "mdx" ? "sticky-note" : CODE.has(ext) ? "code" : "file";
+}
+
+/** @typedef {{kind: "file" | "dir", path: string, on?: string | null, canvas?: boolean}} TreeTarget */
+/** @type {ReadonlyArray<{id: string, label: string, when: (target: TreeTarget, clip: unknown) => boolean} | null>} */
+export const TREE_ACTIONS = [
+  { id: "copy-path", label: "Copy path", when: () => true },
+  { id: "copy-relative", label: "Copy relative path", when: () => true },
+  null,
+  { id: "copy", label: "Copy", when: () => true },
+  { id: "cut", label: "Cut", when: () => true },
+  { id: "paste", label: "Paste", when: (_t, clip) => Boolean(clip) },
+  null,
+  { id: "new-file", label: "New file", when: t => t.kind === "dir" },
+  { id: "new-folder", label: "New folder", when: t => t.kind === "dir" },
+  { id: "rename", label: "Rename", when: () => true },
+  { id: "trash", label: "Move to Trash", when: () => true },
+  null,
+  { id: "reveal", label: "Reveal in Finder", when: () => true },
+  { id: "terminal", label: "Open terminal here", when: () => true },
+  { id: "browser", label: "Open in Canopy browser", when: t => t.canvas && t.kind === "file" },
+  { id: "preview", label: "Open in Preview", when: t => t.kind === "file" && /\.(pdf|png|jpe?g|gif|webp)$/i.test(t.path) },
+];
+
+export function menuItems(target, clip, platform) {
+  return TREE_ACTIONS.flatMap(action => {
+    if (!action) return target.on ? [] : [null];
+    const { id, label, when } = action;
+    if ((target.on && id !== "copy-path" && id !== "copy-relative") || (id === "preview" && platform !== "macos") || !when(target, clip)) return [];
+    return [{ id, label: id === "reveal" && platform !== "macos" ? "Show in folder" : label }];
+  });
+}
+
+export function parseFilter(text) {
+  return text.startsWith("?") ? { kind: "content", query: text.slice(1).trim() } : { kind: "name", query: text };
 }
 
 function matchesFile(entry, filter) {
@@ -85,13 +119,40 @@ async function directory(path, on) {
 
 export default class Files extends View {
   init(_props, cx) {
-    this.filter = "";
-    this.input = InputState.new({ placeholder: "Search files" });
-    this.input.on("change", (_e, cx) => { this.filter = this.input.value(); cx.notify(); });
-    if (props()?.canvas === "tree") cx.spawn(async cx => {
+    this.filter = parseFilter("");
+    this.treeId = Math.random().toString(36);
+    this.input = InputState.new({ placeholder: "Filter, or ? to search in files" });
+    this.input.on("change", (_e, cx) => {
+      this.filter = parseFilter(this.input.value());
+      this.search(cx);
+      cx.notify();
+    });
+    if (props()?.canvas !== "viewer") cx.spawn(async cx => {
       while (true) {
-        const command = await nextCommand();
-        try { const selected = JSON.parse(command).selected; if (selected !== this.selected) { this.selected = selected; cx.notify(); } } catch {}
+        const message = await nextCommand();
+        try {
+          // A command with arguments arrives as `{"name","args"}` JSON, without them as its name.
+          const { name, args = {} } = message.startsWith("{") ? JSON.parse(message) : { name: message };
+          if (name === "selected" && args.path !== this.selected) {
+            this.selected = args.path;
+            cx.notify();
+          } else if (name === "collapse_all" && (!args?.treeId || args.treeId === this.treeId)) {
+            this.folders.clear();
+            for (const path of this.entries.keys()) if (path) this.entries.delete(path);
+            cx.notify();
+          } else if (name === "tree_action" && args.treeId === this.treeId && args.context === this.context?.key && this.current(this.context)) {
+            this.treeAction(args, cx);
+          } else if (name === "file_changed" && !this.on) {
+            const clip = shared("files.clipboard");
+            if (args.moved && clip?.op === "cut" && clip.paths.includes(args.moved)) {
+              const paths = clip.paths.filter(path => path !== args.moved);
+              setShared("files.clipboard", paths.length ? { ...clip, paths } : null);
+            }
+            this.refresh(cx);
+          }
+        } catch (e) {
+          notify({ title: "File action failed", body: String(e), level: "error" });
+        }
       }
     });
     this.saved = new Map();
@@ -281,11 +342,99 @@ export default class Files extends View {
     });
   }
 
+  treeAction({ id, path, kind, name }, cx) {
+    const prefix = `${this.root}/`;
+    if (typeof path !== "string" || !path.startsWith(prefix) || !["file", "dir"].includes(kind)) {
+      throw new Error("Select a file or folder in this tree");
+    }
+    const relative = path.slice(prefix.length);
+    if (id === "copy-path" || id === "copy-relative") {
+      const text = id === "copy-path" ? path : relative;
+      cx.write_to_clipboard(text);
+      notify({ title: "Path copied", body: text, level: "success" });
+      return;
+    }
+    if (this.on) return;
+    const clip = shared("files.clipboard");
+    const leaf = path.split("/").at(-1);
+    const parent = path.slice(0, -leaf.length);
+    const folder = kind === "dir" ? path : parent;
+    if (id === "copy" || id === "cut") {
+      setShared("files.clipboard", { op: id, paths: [path] });
+    } else if (id === "paste" && clip) {
+      for (const from of clip.paths) run(clip.op === "cut" ? "file.move" : "file.copy", { from, into: folder });
+    } else if (id === "new-file" || id === "new-folder" || id === "rename") {
+      if (name === undefined) {
+        openOverlay({ mod: "prompt", kind: "dialog", width: 380, props: {
+          title: id === "rename" ? "Rename" : id === "new-file" ? "New file" : "New folder",
+          value: id === "rename" ? leaf : "",
+          command: { name: "files.tree_action", args: { id, path, kind, treeId: this.treeId, context: this.context.key } },
+        } });
+        return;
+      }
+      if (!name.trim() || name === "." || name === ".." || /[\/\\\0]/.test(name) || (window()?.platform === "windows" && name.includes(":"))) {
+        notify({ title: "Enter a file or folder name", level: "error" });
+        return;
+      }
+      if (id === "rename" && name !== leaf) run("file.rename", { from: path, to: parent + name });
+      if (id !== "rename") run(id === "new-file" ? "file.new" : "file.mkdir", { path: folder + "/" + name });
+    } else if (id === "trash") {
+      openOverlay({ mod: "confirm", kind: "dialog", width: 380, props: {
+        title: `Move ${leaf} to the Trash?`, accept: "Move to Trash", destructive: true,
+        command: { name: "file.trash", args: { path } },
+      } });
+    } else if (id === "reveal") run("file.reveal", { path });
+    else if (id === "terminal") run("terminal.open", { folder });
+    else if (id === "browser") run("canvas.pane_new", { kind: "browser", url: path });
+    else if (id === "preview") run("preview.external", { path });
+  }
+
+  search(cx) {
+    this.searchTimer?.cancel();
+    const filter = this.filter, context = this.searchContext = this.context;
+    this.hits = [];
+    this.searching = filter.kind === "content" && filter.query.length >= 2 && Boolean(context?.cwd);
+    if (!this.searching) return;
+    this.searchTimer = cx.timer.after(300, cx => cx.spawn(async cx => {
+      const current = () => this.filter === filter && this.current(context);
+      if (!current()) return;
+      const { cwd, on } = context;
+      try {
+        const top = await exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd, on }).catch(() => null);
+        if (!current()) return;
+        const git = top?.code === 0 && top.stdout.trim() === "true";
+        const options = ["--max-count=5", "-e", filter.query];
+        const result = git
+          ? await exec("git", ["grep", "-nzIF", ...options, "--", "."], { cwd, on })
+          : await exec("grep", ["-rHnIF", "--null", ...options, "."], { cwd, on });
+        if (!current()) return;
+        if (result.code !== 0 && result.code !== 1) throw new Error(result.stderr || "Cannot search files");
+        const pattern = git ? /([^\0]+)\0(\d+)\0([^\n]*)\n?/g : /([^\0]+)\0(\d+):([^\n]*)\n?/g;
+        for (const [, path, line, text] of result.stdout.matchAll(pattern)) {
+          this.hits.push({ path: path.replace(/^\.\//, ""), line, text: text.trim() });
+          if (this.hits.length === HITS) break;
+        }
+      } catch (e) {
+        if (current()) notify({ title: "File search failed", body: String(e), level: "error" });
+      } finally {
+        if (current()) { this.searching = false; cx.notify(); }
+      }
+    }));
+  }
+
   rows(prefix, depth, out, t) {
     if (out.length >= TOTAL || depth > 40) return out;
-    if (this.filter && this.all && !depth) {
+    if (this.filter.kind === "content") {
+      if (this.searchContext !== this.context) return out;
+      if (!this.hits.length) out.push(div().p(8).text_size(12).text_color(t.dim).child(this.searching ? "Searching" : "No matches"));
+      for (const { path, line, text } of this.hits) {
+        out.push(this.row(path, { name: path, dir: false }, 0, t, `${line}  ${text}`, line));
+      }
+      return out;
+    }
+    if (this.filter.query && this.all && !depth) {
       // shortcut: substring match on the relative path, outside git the tree filter below applies; add fuzzy ranking if lists get noisy.
-      const q = this.filter.toLowerCase();
+      const q = this.filter.query.toLowerCase();
       for (const path of this.all) {
         if (!path.toLowerCase().includes(q)) continue;
         // Rows are built every render, so a short query stays fast.
@@ -297,7 +446,7 @@ export default class Files extends View {
     }
     for (const entry of this.entries.get(prefix) ?? []) {
       if (out.length >= TOTAL) break;
-      if (!matchesFile(entry, this.filter)) continue;
+      if (!matchesFile(entry, this.filter.query)) continue;
       const path = prefix ? `${prefix}/${entry.name}` : entry.name;
       out.push(this.row(path, entry, depth, t, ""));
       if (entry.dir && this.folders.has(path)) this.rows(path, depth + 1, out, t);
@@ -306,21 +455,20 @@ export default class Files extends View {
   }
 
   // One tree or search row; `hint` is the dimmed folder shown beside a search hit.
-  row(path, entry, depth, t, hint) {
+  row(path, entry, depth, t, hint, line) {
     const open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
-    const localFile = !this.on && !entry.dir && window()?.platform === "macos";
     const filePath = `${this.root}/${path}`;
-    const actions = [];
-    if (localFile && props()?.canvas) actions.push(["Open in Canopy browser", "canvas.pane_new", { kind: "browser", url: filePath }]);
-    if (localFile && /\.(pdf|png|jpe?g|gif|webp)$/i.test(path)) actions.push(["Open in Preview", "preview.external", { path: filePath }]);
+    const kind = entry.dir ? "dir" : "file";
     const tone = mark === "A" ? t.ansi2 : mark === "D" || mark === "U" ? t.ansi1 : mark ? t.blocked : null;
-    return h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover)).when((this.file === path || this.selected === `${this.root}/${path}`), el => el.bg(t.hover))
-      .when(actions.length > 0, el => el.on_mouse_down("right", (_e, cx) => {
+    return h_flex().id(`file-${path}${line ? `:${line}` : ""}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover)).when((this.file === path || this.selected === `${this.root}/${path}`), el => el.bg(t.hover))
+      .on_mouse_down("right", (_e, cx) => {
+        const actions = menuItems({ kind, path: filePath, on: this.on, canvas: Boolean(props()?.canvas) }, shared("files.clipboard"), window()?.platform)
+          .map(item => item ? [item.label, "files.tree_action", { id: item.id, path: filePath, kind, treeId: this.treeId, context: this.context.key }] : ["", null, { label: true }]);
         cx.stop_propagation();
         openOverlay({ mod: "menu", kind: "popup", width: 230, frame: "none",
           props: { tab: "primary", target: { items: actions } } });
-      }))
-      .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : props()?.canvas ? (this.selected = `${this.root}/${path}`, run("preview.open", { path: `${this.root}/${path}` }), cx.notify()) : this.show(path, cx))
+      })
+      .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : props()?.canvas && !this.on ? (this.selected = filePath, run("preview.open", { path: filePath }), cx.notify()) : this.show(path, cx))
       .child(entry.dir ? svg(`mods/files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())
       .child(svg(`mods/files/${icon(entry)}.svg`).size(14).flex_none().text_color(t.muted))
       .child(div().min_w(0).truncate().text_color(tone ?? t.foreground).child(entry.name))
@@ -360,14 +508,21 @@ export default class Files extends View {
               .child(h_flex().justify_end().child(div().id("auto-save-tip-ok").px(8).py(4).rounded(ui.size.radiusSm)
                 .bg(t.hover).cursor_pointer().on_click(dismissTip).child("Got it"))))));
     }
-    const list = props()?.canvas === "tree" ? this.rows("", 0, [], t) : null;
-    if (props()?.canvas === "tree") return v_flex().size_full().min_h(0).text_size(13).text_color(t.muted)
-      .child(div().p(8).flex_none().child(Input.new(this.input).w_full().h(30).px(10).gap(8).rounded(8).border_1().border_color(t.border).text_size(12)
-        .child(svg("mods/files/search.svg").size(14).flex_none().text_color(t.dim))))
-      .child(v_flex().id("canvas-files-tree").flex_1().min_h(0).overflow_y_scrollbar().px(6).pb(6).children(list)
-        .when(Boolean(this.filter) && !list.length && Boolean(this.entries.get("")?.length), el => el.child(div().p(8).text_size(12).text_color(t.dim).child("No matching files")))
-        .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files" : this.root ? "No files" : "Click a space to see its files"))))
-        .when(this.limited, el => el.child(div().p(8).text_size(11).child("File list limited"))));
+    if (props()?.canvas === "tree") {
+      if (this.filter.kind === "content" && this.searchContext !== this.context) this.search(cx);
+      if (this.on && this.file) return v_flex().size_full().min_h(0)
+        .child(div().id("files-remote-back").p(8).cursor_pointer().hover(s => s.bg(t.hover))
+          .on_click((_e, cx) => { this.show(null); cx.notify(); }).child("Back to files"))
+        .child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(8).child(this.fileError || "Loading file"));
+      const list = this.rows("", 0, [], t);
+      return v_flex().size_full().min_h(0).text_size(13).text_color(t.muted)
+        .child(div().p(8).flex_none().child(Input.new(this.input).w_full().h(30).px(10).gap(8).rounded(8).border_1().border_color(t.border).text_size(12)
+          .child(svg("mods/files/search.svg").size(14).flex_none().text_color(t.dim))))
+        .child(v_flex().id("canvas-files-tree").flex_1().min_h(0).overflow_y_scrollbar().px(6).pb(6).children(list)
+          .when(this.filter.kind === "name" && Boolean(this.filter.query) && !list.length && Boolean(this.entries.get("")?.length), el => el.child(div().p(8).text_size(12).text_color(t.dim).child("No matching files")))
+          .when(this.filter.kind === "name" && (Boolean(this.error) || !this.entries.get("")?.length), el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files" : this.root ? "No files" : "Click a space to see its files"))))
+          .when(this.limited, el => el.child(div().p(8).text_size(11).child("File list limited"))));
+    }
     return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
         .when(Boolean(this.file), el => el.child(div().id("files-back").w(20).cursor_pointer().text_color(t.muted).on_click((_e, cx) => { this.show(null); cx.notify(); }).child("←")))

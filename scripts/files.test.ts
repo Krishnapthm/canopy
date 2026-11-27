@@ -177,7 +177,7 @@ test("Files edits full markdown source instead of the bounded read-only preview"
   const options: any[] = [];
   let editing = true, pending: Promise<void> | undefined;
   const Files = new Function("View", "readTextFile", "theme", "settings", "EditorState", "props",
-    source.replace(/^import .*;\n/gm, "").replace("export default class", "class").replace("export function lineMarks", "function lineMarks") + "; return Files;")(
+    source.replace(/^import .*;\n/gm, "").replace(/^export (?:default )?/gm, "") + "; return Files;")(
     class {}, async () => text, () => ({}), () => ({}),
     { new(o: any) { options.push(o); return { on() {}, release() {} }; } }, () => ({ editing }),
   );
@@ -274,4 +274,69 @@ test("Files replaces the pending auto-save timer and cancels it when edits are r
   pending.delete(last);
   last(cx);
   expect(saves).toBe(1);
+});
+
+const { parseFilter, menuItems } = new Function(
+  source.slice(source.indexOf("/** @typedef"), source.indexOf("function matchesFile")).replace(/^export /gm, "") +
+    "; return { parseFilter, menuItems };",
+)();
+
+test("Files recognizes a content filter only at the start", () => {
+  expect(parseFilter("main?")).toEqual({ kind: "name", query: "main?" });
+  expect(parseFilter("?  a+b  ")).toEqual({ kind: "content", query: "a+b" });
+  expect(parseFilter("? ")).toEqual({ kind: "content", query: "" });
+});
+
+test("Files scopes menu actions to the row, clipboard, and machine", () => {
+  const file = { kind: "file", path: "/project/report.pdf", canvas: true };
+  const dir = { kind: "dir", path: "/project/docs" };
+  const ids = (items: any[]) => items.filter(Boolean).map(item => item.id);
+  expect(ids(menuItems(dir, null, "linux"))).toContain("new-folder");
+  expect(ids(menuItems(dir, null, "linux"))).toContain("new-file");
+  expect(ids(menuItems(dir, null, "linux"))).not.toContain("paste");
+  const clip = { op: "copy", paths: [file.path] };
+  const actions = ids(menuItems(file, clip, "macos"));
+  expect(actions).toContain("paste");
+  expect(actions).toContain("preview");
+  expect(actions).toContain("browser");
+  expect(actions).not.toContain("new-file");
+  expect(actions).not.toContain("new-folder");
+  expect(menuItems(file, clip, "linux")).toContainEqual({ id: "reveal", label: "Show in folder" });
+  expect(ids(menuItems({ ...file, on: "remote" }, clip, "macos"))).toEqual(["copy-path", "copy-relative"]);
+});
+
+test("Files debounces content search and parses numbered Git hits", async () => {
+  const calls: unknown[] = [];
+  const Files = new Function("View", "HITS", "exec", source.slice(source.indexOf("export default class"))
+    .replace("export default ", "") + "; return Files;")(
+    class {}, 200,
+    async (command: string, args: string[], options: unknown) => {
+      calls.push([command, args, options]);
+      return { code: 0, stdout: args[0] === "rev-parse" ? "true\n" : "folder/a:1.txt\u000012\u0000   literal + hit   \n", stderr: "" };
+    },
+  );
+  const files = new Files();
+  files.context = { cwd: "/project", on: null };
+  files.current = () => true;
+  const timers: { ms: number; callback: Function; cancelled: boolean }[] = [];
+  const cx = {
+    notify() {},
+    spawn(callback: Function) { return callback(cx); },
+    timer: { after(ms: number, callback: Function) {
+      const timer = { ms, callback, cancelled: false };
+      timers.push(timer);
+      return { cancel() { timer.cancelled = true; } };
+    } },
+  };
+  files.filter = parseFilter("? first");
+  files.search(cx);
+  files.filter = parseFilter("? literal + hit");
+  files.search(cx);
+  expect(timers[0].cancelled).toBe(true);
+  expect(timers[1].ms).toBe(300);
+  expect(files.searching).toBe(true);
+  await timers[1].callback(cx);
+  expect(calls[1]).toEqual(["git", ["grep", "-nzIF", "--max-count=5", "-e", "literal + hit", "--", "."], { cwd: "/project", on: null }]);
+  expect(files.hits).toEqual([{ path: "folder/a:1.txt", line: "12", text: "literal + hit" }]);
+  expect(files.searching).toBe(false);
 });

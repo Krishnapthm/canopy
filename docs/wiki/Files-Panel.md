@@ -15,14 +15,20 @@ On macOS, right-click a local image or PDF in the file tree and choose **Open in
 - click **Expand panel** to fill the window. click **Restore panel** or resize the panel to return to the canvas.
 - click **Close panel** to hide it. docked panes stay docked while it is hidden. to return to a docked browser or simulator, open the panel and select the pane's tab.
 
-## Browse and preview files
+## File tree
 
 The canvas tree shows the folder of the space you are in. On Home it shows the space whose card you last clicked, or else the space you entered most recently.
 In the classic layout, the tree follows the focused pane's folder, or the active space's folder when none is focused.
 
 1. Click a folder to expand or collapse it.
-2. Type in **Search files** to filter the list.
-3. Click a file to preview it. On macOS, right-click a file in the canvas tree and choose **Open in Canopy browser** to render it. [Supported browser formats](Browser-Pane#open-a-local-file)
+2. Type a file name in **Filter, or ? to search in files**. To find text inside files, type `?` followed by at least two characters, such as `?TODO`.
+3. Click a file or search result to open its preview. Right-click a local file in the canvas tree and choose **Open in Canopy browser** to render it. [Supported browser formats](Browser-Pane#open-a-local-file)
+
+Use **Collapse all** beside the canvas filter to close every expanded folder and keep the root entries visible. Right-click a local row to copy its absolute or relative path, rename it, move it to the system trash, show it in the system file browser, or open a terminal in its folder. Moving to the trash asks for confirmation. Folder rows also let you create a file or subfolder.
+
+Choose **Copy** or **Cut** on a row, then **Paste** on a folder or any file inside it. If the name is taken, Canopy uses a name like `notes copy.txt` or `notes copy 2.txt`. A successful cut and paste clears that item from the Files clipboard. Remote rows offer **Copy path** and **Copy relative path**. Click a remote file to read it in the tree panel, then choose **Back to files** to return.
+
+Content search starts 300 ms after you stop typing. In a Git working tree it searches tracked files using Git. Elsewhere it uses recursive grep. It matches literal text, skips binary files, and shows up to five matching lines per file and 200 lines total.
 
 - On the canvas, file tabs appear in the top strip above the panel.
 - Click a tab to select it. Hover for its full path. Click its X to close it.

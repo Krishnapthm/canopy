@@ -569,6 +569,10 @@ The main ones:
   `space.close {id?, confirmed?}`, `space.rename {id?, name}` ("": Canopy's name again),
   `space.move {id, index}`, `space.select {index | id}`, `space.next`, `space.prev`.
   With no `argv`, the target core chooses that machine's default shell (PowerShell 7 when available on Windows).
+- Local files with absolute paths: `file.rename {from, to}`, `file.copy {from, to | into}`,
+  `file.move {from, to | into}`, `file.mkdir {path}`, `file.new {path}`,
+  `file.trash {path}`, `file.reveal {path}`.
+  Pass `into` to copy or move into a folder using the first available name.
 - Tabs: `tab.new {name?, space?, folder?, argv?, task?}` (argv: an
   agent to run, task: its first message). Agents run in your interactive
   shell (including fish), which stays open after the agent exits. A terminal

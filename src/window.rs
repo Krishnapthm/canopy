@@ -28,7 +28,7 @@ use gpui_shell::{ShellRoot, ShellRuntime, Watcher};
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -1528,7 +1528,7 @@ impl AppWindow {
         }
         self.publish_shown_copies();
         if let Some(copy) = self.copies.get("canvas-tree") {
-            mods::send_command_to(copy.id, &json!({"selected":self.canvas_state.file_path()}).to_string());
+            mods::send_command_to(copy.id, &json!({"name":"selected","args":{"path":self.canvas_state.file_path()}}).to_string());
         }
 
         // Keyboard to the focused pane when it changes (never steal it from an open dialog).
@@ -2927,6 +2927,32 @@ impl AppWindow {
         }
     }
 
+    /// Runs a local file operation; a failure reaches the person as a toast, since a mod's
+    /// `run` gets no answer back.
+    fn file_operation(&mut self, operation: crate::file_ops::Operation, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::file_ops::{self, Operation::*};
+        let path = |key: &str| args[key].as_str().map(Path::new);
+        let required = |key| path(key).ok_or_else(|| format!("{key} must be a path"));
+        let result = (|| match operation {
+            Rename => file_ops::rename(required("from")?, required("to")?),
+            Copy | Move => {
+                let from = required("from")?;
+                let to = file_ops::destination(from, path("to"), path("into"))?;
+                if matches!(operation, Copy) { file_ops::copy(from, &to) } else { file_ops::move_entry(from, &to) }
+            }
+            Mkdir => file_ops::mkdir(required("path")?),
+            New => file_ops::new_file(required("path")?),
+            Trash => file_ops::trash(required("path")?),
+            Reveal => file_ops::reveal(required("path")?),
+        })();
+        if result.is_ok() && !matches!(operation, Reveal) {
+            let moved = (matches!(operation, Move) && path("into").is_some()).then(|| args["from"].clone());
+            mods::send_command("files", &json!({"name":"file_changed","args":{"moved":moved}}).to_string());
+        }
+        if let Err(error) = &result { self.command_error("File", error, window, cx); }
+        self.answer(result.map(|_| json!({})));
+    }
+
     fn command_error(&mut self, name: &str, error: &str, window: &mut Window, cx: &mut Context<Self>) {
         let spec = json!({"kind":"toast", "notification":{"title":format!("{name} failed"),"body":error,"level":"error"}});
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
@@ -2958,7 +2984,12 @@ impl AppWindow {
         let Some(command) = crate::commands::find(name) else {
             // `<mod>.<command>` goes to that mod's nextCommand().
             if let Some((m, c)) = name.split_once('.')
-                && mods::send_command(m, c)
+                // With arguments the mod gets `{"name","args"}` as JSON, else just the name.
+                && mods::send_command(m, &if args.as_object().is_some_and(|a| !a.is_empty()) {
+                    json!({"name":c,"args":args}).to_string()
+                } else {
+                    c.to_owned()
+                })
             {
                 return json!({ "ok": true });
             }
@@ -3131,6 +3162,13 @@ impl AppWindow {
                 }
             }
             "panel.editor" => self.panel_editor(a, window, cx),
+            "file.rename" => self.file_operation(crate::file_ops::Operation::Rename, a, window, cx),
+            "file.copy" => self.file_operation(crate::file_ops::Operation::Copy, a, window, cx),
+            "file.move" => self.file_operation(crate::file_ops::Operation::Move, a, window, cx),
+            "file.mkdir" => self.file_operation(crate::file_ops::Operation::Mkdir, a, window, cx),
+            "file.new" => self.file_operation(crate::file_ops::Operation::New, a, window, cx),
+            "file.trash" => self.file_operation(crate::file_ops::Operation::Trash, a, window, cx),
+            "file.reveal" => self.file_operation(crate::file_ops::Operation::Reveal, a, window, cx),
             "preview.external" => self.open_in_preview(a, window, cx),
             "preview.open" => self.open_preview(a.clone(), person, window, cx),
             "canvas.hand" => {
