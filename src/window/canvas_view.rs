@@ -15,6 +15,8 @@ mod dock;
 mod pane_commands;
 pub(super) mod browser;
 mod browser_mask;
+#[cfg(target_os = "macos")]
+mod browser_navigation;
 mod annotate;
 mod image_pane;
 mod pdf;

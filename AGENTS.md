@@ -30,7 +30,7 @@ Read AGENTS.local.md too when present.
   cannot express it. Use CLI files, editor integration, flags and hooks, never
   vendor APIs or credentials.
 - Preserve released data and APIs unless the task explicitly changes them.
-- Keep defaults/AGENTS.md and src/SKILL.md current with agent-facing behavior.
+- Keep defaults/AGENTS.md and src/skill/ (SKILL.md and its references) current with agent-facing behavior.
   The generated .d.ts files describe the full mod API.
 - Do not edit CHANGELOG.md. Preserve LICENSE and THIRD-PARTY-NOTICES.
 - Docs travel with the change. Whoever touches a feature updates its page in

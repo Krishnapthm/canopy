@@ -11,13 +11,15 @@ The browser opens docked in the files panel, as a tab. Choose **Move to canvas**
 
 A bare local address like `localhost:3000` gets `http://`, and other bare hosts get `https://`.
 
-Agents can open a browser pane too, usually wired to themselves:
+Agents can open a browser pane too, usually wired to themselves. A pane an agent opens lands on the canvas beside it:
 
 ```sh
 canopy pane new browser localhost:3000 --wire
-canopy pane new browser localhost:3000 --place canvas  # on the canvas, not in the panel
+canopy pane new browser localhost:3000 --place panel  # a tab in the files panel instead
 canopy pane open p2 http://localhost:3000/pricing  # point an existing pane at another page
 ```
+
+Both commands wait until the page has loaded and print its address and title. If you navigate the same tab again while an open is waiting, Canopy cancels the earlier reply. A failed load returns WebKit's error, or a timeout after 15 seconds.
 
 `canopy pane open` also makes the new address the pane's **Home**.
 
@@ -206,7 +208,7 @@ canopy pane read p2   # the URL, title and text of the page
 canopy pane shot p2   # a PNG screenshot of the page
 ```
 
-Reading an empty pane returns `New tab`. When the pane has a URL, both commands wait for the page to finish loading, time out after 30 seconds, and work even when the pane is off screen. See [Let Agents Show You](Let-Agents-Show-You#show-me-the-running-app).
+Reading an empty pane returns `New tab`. When the pane has a URL, both commands wait for the current load for up to 15 seconds and work even when the pane is off screen. See [Let Agents Show You](Let-Agents-Show-You#show-me-the-running-app).
 
 ## Privacy
 

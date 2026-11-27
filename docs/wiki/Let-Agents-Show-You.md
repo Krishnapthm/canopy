@@ -59,6 +59,7 @@ The agent builds and installs with Xcode's own tools (`xcodebuild`, `xcrun simct
 
 ```sh
 canopy pane new sim booted --wire   # the booted simulator, wired to the agent
+canopy pane open p3 http://127.0.0.1:8000/   # a web page in its Safari, no typing
 canopy pane tap p3 200 640          # tap at device points (x, y)
 canopy pane type p3 "test@example.com"
 canopy pane read p3                 # device state and a fresh screenshot path

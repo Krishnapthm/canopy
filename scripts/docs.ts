@@ -121,7 +121,9 @@ async function main() {
     if (mode === "generate") await writeFile(file, content);
     else if (await readFile(file, "utf8").catch(() => "") !== content) errors.push(`${file}:1: stale generated page; run just docs-generate`);
   }
-  const files = ["README.md", ...(await readdir("docs/wiki")).filter(f => f.endsWith(".md")).sort().map(f => `docs/wiki/${f}`)];
+  // The agent skill's examples are checked like the wiki's, so a renamed flag or command fails here.
+  const skill = ["src/skill/SKILL.md", ...(await readdir("src/skill/references")).filter(f => f.endsWith(".md")).sort().map(f => `src/skill/references/${f}`)];
+  const files = ["README.md", ...(await readdir("docs/wiki")).filter(f => f.endsWith(".md")).sort().map(f => `docs/wiki/${f}`), ...skill];
   for (const file of files) errors.push(...checkMarkdown(file, await readFile(file, "utf8"), ref));
   for (const file of await wikiPages()) errors.push(...lintStyle(file, await readFile(file, "utf8")));
   if (errors.length) throw new Error(errors.join("\n"));

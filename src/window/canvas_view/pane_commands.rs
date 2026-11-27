@@ -5,7 +5,7 @@ impl AppWindow {
     /// Runs one canvas.pane_* command and answers the caller. `person` is false for agents and
     /// scripts on the control socket.
     pub(in crate::window) fn pane_command(&mut self, name: &str, a: &Value, person: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let r = match name {
+        let mut r = match name {
             "canvas.pane_new" => self.pane_new(a, person, window, cx),
             "canvas.pane_pin" => {
                 let id = a["pane"].as_str().map(str::to_owned).or_else(|| self.canvas_state.selected.last().cloned());
@@ -32,13 +32,45 @@ impl AppWindow {
                     Err(e) => Err(e),
                 }
             }
+            // A sim pane still asking simctl answers once it knows.
+            "canvas.pane_read" if a["pane"].as_str().is_some_and(|id| self.sim_loading(id)) => {
+                let id = a["pane"].as_str().unwrap().to_owned();
+                if self.hold_sim_reply(&id, super::sim::Waiter::Read) { return; }
+                self.pane_read(a, cx)
+            }
             "canvas.pane_read" => self.pane_read(a, cx),
             "canvas.pane_set" => self.pane_set(a, cx),
             "canvas.pane_shot" => self.pane_shot(a, window),
             _ if self.is_browser(a) => self.browser_open(a["pane"].as_str().unwrap(), a["target"].as_str().unwrap_or_default(), &a["tab"], window, cx),
             _ => self.pane_open(a, window, cx),
         };
+        // An agent hears how a simulator or page it opened turned out, not just that it started.
+        if let Ok(reply) = &r && matches!(name, "canvas.pane_new" | "canvas.pane_open") {
+            match self.hold_opened(name, a, reply, window, cx) {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(error) => r = Err(error),
+            }
+        }
         self.answer(r);
+    }
+
+    /// Holds an open reply until its simulator request or browser navigation finishes.
+    fn hold_opened(&mut self, name: &str, a: &Value, reply: &Value, window: &mut Window, cx: &mut Context<Self>) -> Result<bool, String> {
+        let Some(id) = reply["pane"].as_str() else { return Ok(false); };
+        if self.held_reply.is_none() { return Ok(false); }
+        let Some(pane) = self.canvas_state.doc.panes.iter().find(|p| p.id == id) else { return Ok(false); };
+        match &pane.kind {
+            canvas::Kind::Sim { .. } => {
+                let named = name == "canvas.pane_open" || a["udid"].is_string() || a["url"].is_string();
+                Ok(named && self.hold_sim_reply(id, |tx| super::sim::Waiter::Opened { tx, reply: reply.clone() }))
+            }
+            canvas::Kind::Browser { .. } if reply["url"].as_str().is_some_and(|url| !url.is_empty()) => {
+                self.browser_opened(id, reply, window, cx)?;
+                Ok(true)
+            }
+            canvas::Kind::Browser { .. } | canvas::Kind::Terminal { .. } | canvas::Kind::Sub { .. } | canvas::Kind::File { .. } | canvas::Kind::Image { .. } | canvas::Kind::Pdf { .. } | canvas::Kind::Mod { .. } => Ok(false),
+        }
     }
 
     /// Whether `a["pane"]` names a browser pane.
@@ -78,8 +110,14 @@ impl AppWindow {
                 _ => return Err("canvas.pane_new: url must be a string".into()),
             })
         } else { None };
-        // A named simulator must exist before a pane points at it.
-        let udid = match a["udid"].as_str() { Some(target) if kind == "sim" => self.resolve_sim(target)?, _ => String::new() };
+        // A sim's target and URL resolve in its refresh, off the UI thread; parse them here.
+        let (target, sim_url) = if kind == "sim" {
+            let target = match &a["udid"] { Value::Null => None, Value::String(t) => Some(crate::sim::Target::parse(t)), _ => return Err("canvas.pane_new: udid must be a string".into()) };
+            let sim_url = match &a["url"] { Value::Null => None, Value::String(u) => Some(crate::sim::Url::parse(u)?), _ => return Err("canvas.pane_new: url must be a string".into()) };
+            if sim_url.is_some() && target.is_none() { return Err("canvas.pane_new: a sim url needs udid (a simulator or \"booted\")".into()); }
+            if let Some(crate::sim::Target::Udid(udid)) = &target && self.canvas_state.shutting_down_sims.contains(udid) { return Err("The simulator is shutting down".into()); }
+            (target, sim_url)
+        } else { (None, None) };
         use super::dock::Home;
         let home = Home::parse(a, kind)?;
         let browser_or_sim = matches!(kind, "browser" | "sim");
@@ -92,7 +130,7 @@ impl AppWindow {
             let (id, path, kind) = self.add_file_pane(std::path::Path::new(path), point, space, window, cx)?;
             (id, Some(path), kind)
         } else if kind == "sim" {
-            (self.add_sim_pane(udid.clone(), point, space, window, cx), None, kind.to_owned())
+            (self.add_sim_pane(target, sim_url, point, space, window, cx), None, kind.to_owned())
         } else {
             (self.add_mod_pane(kind.to_owned(), point, space, cx), None, kind.to_owned())
         };
@@ -113,7 +151,6 @@ impl AppWindow {
         if home == Home::Panel { reply["docked"] = json!(true); }
         if let Some(path) = path { reply["path"] = json!(path); }
         if let Some(url) = url { reply["url"] = json!(url); }
-        if kind == "sim" { reply["udid"] = json!(udid); }
         Ok(reply)
     }
 
@@ -240,11 +277,15 @@ impl AppWindow {
         let Some(id) = a["pane"].as_str() else { return Err("canvas.pane_open needs pane".into()); };
         let pane = self.canvas_state.doc.panes.iter().find(|p| p.id == id).ok_or_else(|| format!("no pane {id}"))?;
         if pane.sim().is_none() { return Err(format!("pane {id} ({}) has no verb open", pane.kind_name())); }
-        // A sim pane shows the simulator (a udid or "booted"), booting it; its own udid refreshes.
+        // A sim pane shows a simulator (a udid or "booted"), booting it, or opens a URL on it.
         let target = a["target"].as_str().ok_or("canvas.pane_open needs target")?;
-        let udid = self.resolve_sim(target)?;
-        self.point_sim(id, udid.clone(), window, cx);
-        Ok(json!({"pane":id,"udid":udid}))
+        if !crate::sim::available() { return Err("Simulator panes need Xcode on macOS".into()); }
+        let id = id.to_owned();
+        match crate::sim::Open::parse(target)? {
+            crate::sim::Open::Device(device) => self.point_sim(&id, Some(device), window, cx)?,
+            crate::sim::Open::Url(url) => self.open_sim_url(&id, url, window, cx)?,
+        }
+        Ok(json!({"pane":id}))
     }
 }
 

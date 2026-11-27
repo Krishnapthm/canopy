@@ -433,7 +433,7 @@ export function shared(key: string): unknown;
 export function setShared(key: string, value: unknown): null;
 
 /**
- * Waits for the next key command for this mod ("alt-s": "<mod>:<command>" in keys.json).
+ * Waits for the next key command for this mod ("alt-s": "<mod>.<command>" in keys.json).
  * With "focusable": true in mod.json, pane.go can move onto this copy and send "focus".
  * Focus your own handle then (this.handle.focus()) and handle keys with on_key_down.
  * The copy gets "focus" again when a popup over it closes. Leave with pane.go.
