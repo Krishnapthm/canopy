@@ -141,7 +141,7 @@ fn main() {
         None => {}
         Some("-h" | "--help" | "help") => return print!("{HELP}"),
         Some("config") => return print!("{}", settings::config()),
-        Some("--skill") => return print!("{}", include_str!("SKILL.md")),
+        Some("--skill") => return print!("{}", skill::printed()),
         Some("-V" | "--version" | "version") => return println!("canopy {}", env!("CARGO_PKG_VERSION")),
         Some(other) => {
             eprint!("canopy: unknown argument {other:?}\n\n{HELP}");

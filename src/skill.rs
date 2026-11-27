@@ -1,37 +1,71 @@
-//! Canopy's skill (src/SKILL.md) in each installed agent's global skills folder (programs.json `skills`). Written on start, only into `<folder>/canopy/`, and only over a file Canopy wrote. docs/wiki/Agent-Setup.md.
+//! Canopy's skill (src/skill/: SKILL.md and the references it links) in each installed
+//! agent's global skills folder (programs.json `skills`). Written on start, only into
+//! `<folder>/canopy/`, and only over files Canopy wrote. docs/wiki/Agent-Setup.md.
 
 use std::path::Path;
 
-const TEXT: &str = include_str!("SKILL.md");
-/// Marks a SKILL.md Canopy wrote; one without it is someone else's and stays untouched.
+/// The skill's files, by path inside `<skills>/canopy/`. SKILL.md comes first: its mark says
+/// the folder is Canopy's. A harness loads SKILL.md, and the agent opens a reference when
+/// SKILL.md sends it there.
+const FILES: &[(&str, &str)] = &[
+    ("SKILL.md", include_str!("skill/SKILL.md")),
+    ("references/simulator.md", include_str!("skill/references/simulator.md")),
+    ("references/browser.md", include_str!("skill/references/browser.md")),
+    ("references/panes-and-canvas.md", include_str!("skill/references/panes-and-canvas.md")),
+    ("references/mods.md", include_str!("skill/references/mods.md")),
+    ("references/customize.md", include_str!("skill/references/customize.md")),
+];
+/// Marks a file Canopy wrote; a SKILL.md without it is someone else's and the folder stays untouched.
 const MARK: &str = "<!-- Installed by Canopy, rewritten on start. `canopy skill remove` deletes it. -->";
 
-fn text() -> String { format!("{}\n\n{MARK}\n", TEXT.trim_end()) }
+fn text(body: &str) -> String { format!("{}\n\n{MARK}\n", body.trim_end()) }
 
-/// Writes `<dir>/canopy/SKILL.md` when missing or Canopy's and different. True when written.
-pub fn install(dir: &Path) -> std::io::Result<bool> {
-    let path = dir.join("canopy").join("SKILL.md");
-    match std::fs::read_to_string(&path) {
-        Ok(old) if !old.contains(MARK) || old == text() => return Ok(false),
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
-    }
-    std::fs::create_dir_all(dir.join("canopy"))?;
-    crate::persist::write_atomic(&path, text().as_bytes())?;
-    Ok(true)
+/// `canopy --skill`: SKILL.md, then every reference under its path, for harnesses without skills.
+pub fn printed() -> String {
+    let mut out = FILES[0].1.trim_end().to_owned();
+    for (path, body) in &FILES[1..] { out.push_str(&format!("\n\n<!-- {path} -->\n\n{}", body.trim_end())); }
+    out.push('\n');
+    out
 }
 
-/// Deletes `<dir>/canopy/SKILL.md` when Canopy wrote it, then the `canopy` folder if empty. True when deleted.
-pub fn remove(dir: &Path) -> std::io::Result<bool> {
-    let path = dir.join("canopy").join("SKILL.md");
-    match std::fs::read_to_string(&path) {
-        Ok(old) if !old.contains(MARK) => return Ok(false),
-        Ok(_) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(e),
+/// Whether `<dir>/canopy/` is Canopy's to write: missing, or its SKILL.md carries the mark.
+fn ours(dir: &Path) -> std::io::Result<bool> {
+    match std::fs::read_to_string(dir.join("canopy/SKILL.md")) {
+        Ok(old) => Ok(old.contains(MARK)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(e) => Err(e),
     }
-    std::fs::remove_file(path)?;
+}
+
+/// Writes every skill file under `<dir>/canopy/` that is missing or differs, when the folder
+/// is Canopy's. True when anything was written.
+pub fn install(dir: &Path) -> std::io::Result<bool> {
+    if !ours(dir)? { return Ok(false); }
+    let mut wrote = false;
+    // SKILL.md last: a half-written install still has no mark, so the next start finishes it.
+    for (path, body) in FILES.iter().rev() {
+        let path = dir.join("canopy").join(path);
+        let text = text(body);
+        if std::fs::read_to_string(&path).is_ok_and(|old| old == text) { continue; }
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        crate::persist::write_atomic(&path, text.as_bytes())?;
+        wrote = true;
+    }
+    Ok(wrote)
+}
+
+/// Deletes the skill files when Canopy wrote them, then `references/` and `canopy/` if empty.
+/// True when deleted.
+pub fn remove(dir: &Path) -> std::io::Result<bool> {
+    let skill = dir.join("canopy/SKILL.md");
+    if !skill.exists() || !ours(dir)? { return Ok(false); }
+    for (path, _) in FILES {
+        match std::fs::remove_file(dir.join("canopy").join(path)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    let _ = std::fs::remove_dir(dir.join("canopy/references"));
     let _ = std::fs::remove_dir(dir.join("canopy"));
     Ok(true)
 }
@@ -103,7 +137,8 @@ mod tests {
         let dir = Temp::new();
         assert!(install(&dir.0).unwrap());
         let first = std::fs::read(dir.path()).unwrap();
-        assert_eq!(first, text().as_bytes());
+        assert_eq!(first, text(FILES[0].1).as_bytes());
+        for (path, body) in FILES { assert_eq!(std::fs::read_to_string(dir.0.join("canopy").join(path)).unwrap(), text(body)); }
         assert!(!install(&dir.0).unwrap());
         assert_eq!(std::fs::read(dir.path()).unwrap(), first);
     }
@@ -114,7 +149,7 @@ mod tests {
         std::fs::create_dir_all(dir.0.join("canopy")).unwrap();
         std::fs::write(dir.path(), format!("old\n{MARK}")).unwrap();
         assert!(install(&dir.0).unwrap());
-        assert_eq!(std::fs::read_to_string(dir.path()).unwrap(), text());
+        assert_eq!(std::fs::read_to_string(dir.path()).unwrap(), text(FILES[0].1));
     }
 
     #[test]
@@ -133,7 +168,7 @@ mod tests {
         assert!(!remove(&dir.0).unwrap());
         install(&dir.0).unwrap();
         assert!(remove(&dir.0).unwrap());
-        assert!(!dir.0.join("canopy").exists());
+        assert!(!dir.0.join("canopy").exists(), "references/ and canopy/ go too");
         install(&dir.0).unwrap();
         let extra = dir.0.join("canopy/extra");
         std::fs::write(&extra, "keep").unwrap();
@@ -143,7 +178,10 @@ mod tests {
     }
 
     #[test]
-    fn skill_has_discoverable_frontmatter() {
-        assert!(TEXT.starts_with("---\nname: canopy\ndescription: "));
+    fn skill_has_discoverable_frontmatter_and_links_every_reference() {
+        let skill = FILES[0].1;
+        assert!(skill.starts_with("---\nname: canopy\ndescription: "));
+        // A reference SKILL.md never names is one no agent opens; mods.md links customize.md itself.
+        for (path, _) in &FILES[1..] { assert!(skill.contains(&format!("]({path})")), "SKILL.md links {path}"); }
     }
 }
