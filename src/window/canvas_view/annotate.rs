@@ -1258,6 +1258,7 @@ impl AppWindow {
         let width = w.min(274.);
         let top = (y + 14.).clamp(0., (h - 118.).max(0.));
         let (add, send, copy) = (id.to_owned(), id.to_owned(), id.to_owned());
+        let send_colors = self.annotation_send_colors(id);
         div().id("annotation-composer").absolute()
             .left(px((x + 12.).clamp(0., (w - width).max(0.)))).top(px(top)).w(px(width))
             .flex().flex_col().gap(px(4.)).p(px(4.)).occlude()
@@ -1266,26 +1267,29 @@ impl AppWindow {
             .child(div().px(px(6.)).py(px(2.)).text_size(px(13.)).text_color(c("foreground"))
                 .child(gpui_base::Textarea::new(&draft.input)))
             .child(div().flex().flex_wrap().justify_end().gap(px(2.))
-                .children(reference.map(|reference| annotation_text_button("Copy reference", false)
+                .children(reference.map(|reference| annotation_text_button("Copy reference", None)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(reference.clone()));
                         this.toast(Toast { title: "Element reference copied".into(), body: None, level: Level::Success,
                             action: Some(("pane.focus".into(), json!({"pane": copy}))) }, window, cx);
                     }))))
-                .child(annotation_text_button("Add", false).tooltip(strip_tooltip("Add (Enter)".into(), None))
+                .child(annotation_text_button("Add", None).tooltip(strip_tooltip("Add (Enter)".into(), None))
                     .on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&add, false, window, cx))))
-                .child(annotation_text_button("Send", true).tooltip(strip_tooltip("Send (Cmd+Enter)".into(), None))
+                .child(annotation_text_button("Send", Some(send_colors)).tooltip(strip_tooltip("Send (Cmd+Enter)".into(), None))
                     .on_click(cx.listener(move |this, _, window, cx| this.annotation_commit(&send, true, window, cx)))))
     }
 }
 
 #[cfg(target_os = "macos")]
-fn annotation_text_button(label: &'static str, primary: bool) -> Stateful<Div> {
+/// `primary` is the (background, label) of a Send button; None draws a plain text button.
+fn annotation_text_button(label: &'static str, primary: Option<(Hsla, Hsla)>) -> Stateful<Div> {
     div().id(label).role(gpui::Role::Button).aria_label(label)
         .flex().items_center().flex_none().h(px(24.)).px(px(6.)).rounded(px(ui::RADIUS_SM))
         .text_size(px(12.)).cursor_pointer().child(label)
-        .when(primary, |button| button.bg(c("accent")).text_color(c("accent-foreground")).hover(|d| d.opacity(0.85)))
-        .when(!primary, |button| button.text_color(c("foreground")).hover(|d| d.bg(c("hover"))))
+        .map(|button| match primary {
+            Some((bg, text)) => button.bg(bg).text_color(text).hover(|d| d.opacity(0.85)),
+            None => button.text_color(c("foreground")).hover(|d| d.bg(c("hover"))),
+        })
 }
 
 #[cfg(target_os = "macos")]
@@ -1398,7 +1402,7 @@ impl AppWindow {
 
     fn annotation_send_button(&self, id: &str, a: &Annotate, cx: &mut Context<Self>) -> Stateful<Div> {
         let enabled = !a.live && !a.refreshing && a.draft.is_none() && !a.outgoing.as_ref().is_some_and(|o| o.sending);
-        annotation_text_button("Send", true).opacity(if enabled { 1. } else { 0.45 })
+        annotation_text_button("Send", Some(self.annotation_send_colors(id))).opacity(if enabled { 1. } else { 0.45 })
             .when(enabled, |button| button.on_click(self.annotation_click(id, "send", cx)))
     }
 
@@ -1502,6 +1506,18 @@ impl AppWindow {
         let agents = self.annotation_agents(id);
         if agents.is_empty() || agents.iter().filter(|x| x.1).count() == 1 { return None; }
         Some(a.target.as_ref().filter(|t| agents.iter().any(|x| &x.0 == *t)).map_or_else(|| "Choose agent".to_owned(), |t| self.pill_name(t)))
+    }
+
+    /// Send's (background, label): the target agent's color with a label that reads on it, or the
+    /// theme's plain foreground-on-background when Send has no target yet.
+    fn annotation_send_colors(&self, id: &str) -> (Hsla, Hsla) {
+        let hue = self.annotation_target(id).ok().and_then(|addr| self.canvas_state.doc.effective_color(&addr));
+        let Some(hue) = hue else { return (c("foreground"), c("background")) };
+        let bg = c(&hue.tint_token());
+        let rgba: Rgba = bg.into();
+        let to_u8 = |v: f32| (v * 255.).round() as u8;
+        let ink = crate::vt::readable(crate::vt::Rgb(255, 255, 255), crate::vt::Rgb(to_u8(rgba.r), to_u8(rgba.g), to_u8(rgba.b)), 4.5);
+        (bg, Rgba { r: f32::from(ink.0) / 255., g: f32::from(ink.1) / 255., b: f32::from(ink.2) / 255., a: 1. }.into())
     }
 
     /// Where Send goes: the sole wired agent, else the one picked beside Annotate.

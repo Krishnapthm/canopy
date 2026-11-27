@@ -43,7 +43,7 @@ fn preserves_graphics_color(text: &str) -> bool {
 }
 
 /// `fg`, or near-white / near-black when it would vanish into `bg`.
-fn readable(fg: Rgb, bg: Rgb, minimum: f32) -> Rgb {
+pub(crate) fn readable(fg: Rgb, bg: Rgb, minimum: f32) -> Rgb {
     if minimum <= 1.0 || contrast(fg, bg) >= minimum {
         return fg;
     }
