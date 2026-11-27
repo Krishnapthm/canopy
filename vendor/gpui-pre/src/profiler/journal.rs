@@ -434,6 +434,8 @@ impl ForegroundRunnableCounter {
     }
 
     fn finished(&self) {
+        // `try_update` replaces it, but CI's pinned Rust 1.95 predates it.
+        #[allow(deprecated)]
         let _ = self
             .0
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {

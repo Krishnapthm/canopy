@@ -192,9 +192,18 @@ pub(crate) struct EditorOptions {
     pub folding: bool,
     pub readonly: bool,
     pub soft_wrap: bool,
+    pub active_line: bool,
+    pub mark_colors: Option<EditorMarkColors>,
     pub syntax: HashMap<String, String>,
     pub font_family: Option<String>,
     pub font_size: Option<f32>,
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct EditorMarkColors {
+    pub added: String,
+    pub modified: String,
+    pub removed: String,
 }
 
 impl Default for EditorOptions {
@@ -206,6 +215,8 @@ impl Default for EditorOptions {
             folding: true,
             readonly: false,
             soft_wrap: false,
+            active_line: false,
+            mark_colors: None,
             syntax: HashMap::new(),
             font_family: None,
             font_size: None,
@@ -462,6 +473,7 @@ impl EntityStore {
         &mut self,
         options: EditorOptions,
         style: InputEditorStyle,
+        mark_colors: Option<[gpui::Hsla; 3]>,
         application: Option<Rc<ApplicationGeneration>>,
         window: &mut Window,
         cx: &mut App,
@@ -473,6 +485,8 @@ impl EntityStore {
                 .line_number(options.line_numbers)
                 .folding(options.folding)
                 .soft_wrap(options.soft_wrap);
+            state.set_active_line(options.active_line);
+            state.set_mark_colors(mark_colors);
             state.set_readonly(options.readonly, cx);
             state.set_editor_style(style);
             state.set_highlighter_factory(
@@ -847,6 +861,9 @@ impl EntityStore {
             }
             // HERDR: code editors emit the same input events.
             Some(Record::Editor { state, .. }) => {
+                if event == InputEventName::GutterQuote {
+                    state.update(cx, |state, cx| state.enable_gutter_quote(cx));
+                }
                 subscribe_to_events(&state.clone(), event, window, cx, handler)
             }
             _ => return false,
@@ -1293,6 +1310,7 @@ pub enum InputEventName {
     Blur,
     /// A paste with no text on the clipboard (an image): the script reads it.
     PasteOther,
+    GutterQuote,
 }
 
 impl InputEventName {
@@ -1303,6 +1321,7 @@ impl InputEventName {
             "focus" => Some(Self::Focus),
             "blur" => Some(Self::Blur),
             "paste_other" => Some(Self::PasteOther),
+            "gutter_quote" => Some(Self::GutterQuote),
             _ => None,
         }
     }
@@ -1317,6 +1336,7 @@ impl InputEventName {
                 | (Self::Focus, InputEvent::Focus)
                 | (Self::Blur, InputEvent::Blur)
                 | (Self::PasteOther, InputEvent::PasteWithoutText)
+                | (Self::GutterQuote, InputEvent::GutterQuote { .. })
         )
     }
 }

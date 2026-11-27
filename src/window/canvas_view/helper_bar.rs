@@ -13,8 +13,17 @@ pub(super) struct BarAction {
 /// panes also pin to the screen (or unpin), and dock in the Files panel, before Connect.
 /// Docked, the bar is the panel header's: it offers Move to canvas, and leaves out Expand and
 /// Close (the tab closes the pane).
-pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>, docked: bool) -> Vec<BarAction> {
+pub(super) fn pane_actions(pane: &canvas::Pane, hint: Option<&mods::PaneHint>, docked: bool, mode: Option<FileMode>) -> Vec<BarAction> {
     let mut actions = kind_actions(pane, hint);
+    match &pane.kind {
+        canvas::Kind::File { path } if file_view::can_preview(Path::new(path)) => {
+            actions.insert(0, file_view::mode_action(path, file_view::file_host_mode(path, mode.unwrap_or_else(|| FileMode::default_for(Path::new(path)))), Some(&pane.id)));
+        }
+        canvas::Kind::Browser { source: Some(path), .. } => {
+            actions.insert(0, file_view::mode_action(path, FileMode::Preview, Some(&pane.id)));
+        }
+        _ => {}
+    }
     if let Some(path) = pane.path().filter(|path| cfg!(target_os = "macos") && preview_external_path(Path::new(path))) {
         let at = actions.iter().position(|a| a.command == "canvas.connect").unwrap_or(actions.len());
         actions.insert(at, BarAction { icon: "icons/external-link.svg".into(), label: "Open in Preview".into(), command: "preview.external".into(), args: json!({"path":path}) });
@@ -184,7 +193,7 @@ impl AppWindow {
 
     fn helper_actions(&self, pane: &canvas::Pane, cx: &App) -> Vec<BarAction> {
         let hint = pane.mod_name().and_then(|name| self.folders.get(name)).and_then(|f| f.hint.pane.as_ref());
-        let actions = pane_actions(pane, hint, false);
+        let actions = pane_actions(pane, hint, false, pane.file().map(|path| self.canvas_state.file_mode(&FileHost::Card { pane: pane.id.clone() }, path)));
         #[cfg(target_os = "macos")]
         let actions = self.sim_relabel(&pane.id, actions, cx);
         #[cfg(not(target_os = "macos"))]
@@ -268,30 +277,30 @@ mod helper_bar_tests {
     #[test]
     fn actions_follow_the_pane_kind() {
         let mut pane = canvas::Pane { id: "t1".into(), kind: canvas::Kind::Terminal { size: None }, rect: [0., 0., 220., 36.].into(), z: 1, space: None, color: None, pinned: None };
-        let commands = |pane: &canvas::Pane| pane_actions(pane, None, false).into_iter().map(|a| a.command).collect::<Vec<_>>();
+        let commands = |pane: &canvas::Pane| pane_actions(pane, None, false, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
         assert_eq!(commands(&pane), ["canvas.enter", "canvas.expand", "canvas.connect", "canvas.close"]);
         *pane.size_mut().unwrap() = Some([800., 500.]);
         assert_eq!(commands(&pane)[1], "canvas.collapse");
         pane.kind = canvas::Kind::File { path: "/tmp/a.md".into() };
-        assert_eq!(commands(&pane), ["preview.open", "canvas.connect", "canvas.close"]);
-        assert_eq!(pane_actions(&pane, None, false)[0].args, json!({"path":"/tmp/a.md"}));
+        assert_eq!(commands(&pane), ["file.mode", "preview.open", "canvas.connect", "canvas.close"]);
+        assert_eq!(pane_actions(&pane, None, false, None)[0].args, json!({"path":"/tmp/a.md","mode":"source","pane":pane.id}));
         pane.kind = canvas::Kind::Mod { kind: "mod:note".into(), props: Default::default() };
         let hint = crate::mods::PaneHint { label: "Note".into(), icon: "mods/note/sticky-note.svg".into(), actions: vec![crate::mods::PaneAction { icon: "icons/quote.svg".into(), label: "Clear".into(), command: "canvas.pane_set".into(), args: json!({"props":{"text":""}}) }], ..Default::default() };
-        assert_eq!(pane_actions(&pane, Some(&hint), false).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
+        assert_eq!(pane_actions(&pane, Some(&hint), false, None).into_iter().map(|a| a.command).collect::<Vec<_>>(), ["canvas.pane_set", "canvas.connect", "canvas.close"]);
         assert_eq!(commands(&pane), ["canvas.connect", "canvas.close"]);
         pane.kind = serde_json::from_value(json!({"kind":"browser","props":{"url":"http://localhost:3000","home":"http://localhost:3000"}})).unwrap();
         assert!(commands(&pane).is_empty());
-        assert!(pane_actions(&pane, None, true).is_empty());
+        assert!(pane_actions(&pane, None, true, None).is_empty());
         pane.kind = canvas::Kind::Sim { udid: String::new() };
         assert_eq!(commands(&pane), ["canvas.sim_device", "canvas.sim_hub", "canvas.pane_pin", "canvas.pane_dock", "canvas.connect", "canvas.close"]);
         // Pinned, the same button unpins it.
-        let pin = |pane: &canvas::Pane| pane_actions(pane, None, false).into_iter().find(|a| a.command == "canvas.pane_pin").map(|a| (a.label, a.args)).unwrap();
+        let pin = |pane: &canvas::Pane| pane_actions(pane, None, false, None).into_iter().find(|a| a.command == "canvas.pane_pin").map(|a| (a.label, a.args)).unwrap();
         assert_eq!(pin(&pane), ("Pin to screen".into(), json!({"pinned":true})));
         pane.pinned = Some([0., 0., 340., 700.]);
         assert_eq!(pin(&pane), ("Unpin".into(), json!({"pinned":false})));
         pane.pinned = None;
         // Docked, the bar moves it to the canvas and has no Expand, Pin or Close.
-        let docked = pane_actions(&pane, None, true).into_iter().map(|a| (a.label.to_string(), a.command)).collect::<Vec<_>>();
+        let docked = pane_actions(&pane, None, true, None).into_iter().map(|a| (a.label.to_string(), a.command)).collect::<Vec<_>>();
         assert!(docked.contains(&("Move to canvas".to_owned(), "canvas.pane_dock".to_owned())));
         assert!(docked.iter().all(|(_, c)| c != "canvas.pane_pin" && c != "canvas.close"));
         pane.kind = canvas::Kind::Sim { udid: "U1".into() };
@@ -301,12 +310,12 @@ mod helper_bar_tests {
         assert_eq!(sim_device_actions().into_iter().map(|a| a.command).collect::<Vec<_>>(),
             ["canvas.sim_home", "canvas.sim_refresh", "canvas.sim_screenshot", "canvas.sim_record", "canvas.sim_annotate"]);
         pane.kind = canvas::Kind::Sub { parent: "t1".into(), sub: "a".into() };
-        assert!(pane_actions(&pane, None, false).is_empty());
+        assert!(pane_actions(&pane, None, false, None).is_empty());
     }
     #[test]
     fn viewer_actions_include_clear_only_when_there_are_marks() {
         let mut pane = canvas::Pane { id: "p1".into(), kind: canvas::Kind::Image { path: "/a.png".into() }, rect: [0.; 4].into(), z: 0, space: None, color: None, pinned: None };
-        let commands = |pane: &canvas::Pane| pane_actions(pane, None, false).into_iter().map(|a| a.command).collect::<Vec<_>>();
+        let commands = |pane: &canvas::Pane| pane_actions(pane, None, false, None).into_iter().map(|a| a.command).collect::<Vec<_>>();
         let image = commands(&pane);
         assert_eq!(image[0], "canvas.pane_quote");
         assert_eq!(image.iter().any(|c| c == "preview.external"), cfg!(target_os = "macos"));

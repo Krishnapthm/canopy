@@ -28,7 +28,7 @@ use gpui_shell::{ShellRoot, ShellRuntime, Watcher};
 use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -159,14 +159,12 @@ const LAYOUTS: &[(&str, &str)] = &[
     ("main", include_str!("../defaults/layouts/main.json")),
     ("classic", include_str!("../defaults/layouts/classic.json")),
     ("terminals", include_str!("../defaults/layouts/terminals.json")),
-    ("win98", include_str!("../defaults/layouts/win98.json")),
 ];
 
 /// Pictures shipped layouts name as their `preview`, written beside them.
 const LAYOUT_PREVIEWS: &[(&str, &str)] = &[
     ("main.svg", include_str!("../defaults/layouts/main.svg")),
     ("main-light.svg", include_str!("../defaults/layouts/main-light.svg")),
-    ("win98.svg", include_str!("../defaults/layouts/win98.svg")),
 ];
 
 pub fn shipped_layouts() -> Vec<&'static str> {
@@ -259,6 +257,14 @@ fn install_layouts() {
     if let Err(e) = mods::sync_layouts(&mods::app_dir(), LAYOUTS) {
         tracing::warn!("cannot install layouts: {e}");
     }
+    let dir = file("layouts");
+    crate::mods::remove_retired_asset(
+        &dir,
+        "win98.svg",
+        &[
+            "e678058d704b89dc809d85c9ecfd4b1b011d01a3589ff85d2e056091561b1c45",
+        ],
+    );
     for (name, text) in LAYOUT_PREVIEWS {
         let _ = std::fs::write(file(&format!("layouts/{name}")), text);
     }
@@ -376,8 +382,7 @@ struct Overlay {
     /// A window: where its top left is (None: centered) and its name (`key`).
     place: Option<Point<Pixels>>,
     key: Option<String>,
-    /// The app's own screen (a `frame-` mod: What's new, the welcome): only
-    /// its own close ends it, never a layout switch.
+    /// An app-owned overlay that stays open across layout switches.
     frame: bool,
 }
 
@@ -1281,6 +1286,7 @@ impl AppWindow {
     /// tab (zoomed or not shown), and the overlays.
     fn owned_mods(&self) -> HashMap<String, Instance> {
         let mut out: HashMap<String, Instance> = self.panel_mods().into_iter().collect();
+        out.extend(self.draft_mods());
         let inst = |name: &String, props: &Value| Instance { name: name.clone(), props: props.clone() };
         for n in self.chrome.walk() {
             if let Some(Content::Mod { name, props }) = n.content() {
@@ -1448,9 +1454,19 @@ impl AppWindow {
 
     /// Creates what's visible, drops what isn't, publishes state, saves, focuses.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.canvas_state.editing.as_ref() != self.canvas_state.file_path() { self.canvas_state.editing = None; }
         // The picker finds open file tabs by this; set_shared is a no-op when unchanged.
-        mods::set_shared("canvas.files".into(), json!(self.canvas_state.doc.panel.tabs.iter().filter_map(crate::canvas::PanelTab::file).collect::<Vec<_>>()));
+        let doc = &self.canvas_state.doc;
+        let files: Vec<_> = doc.panel.tabs.iter().filter_map(|tab| {
+            tab.file().or_else(|| {
+                let id = tab.pane()?;
+                let pane = doc.panes.iter().find(|pane| pane.id == *id)?;
+                match &pane.kind {
+                    crate::canvas::Kind::Browser { source, .. } => source.as_ref(),
+                    _ => None,
+                }
+            })
+        }).collect();
+        mods::set_shared("canvas.files".into(), json!(files));
         self.sync_canvas(window,cx);
         self.model.order_spaces();
         let (model, live) = (&self.model, &self.live);
@@ -1523,7 +1539,7 @@ impl AppWindow {
         }
         self.publish_shown_copies();
         if let Some(copy) = self.copies.get("canvas-tree") {
-            mods::send_command_to(copy.id, &json!({"selected":self.canvas_state.file_path()}).to_string());
+            mods::send_command_to(copy.id, &json!({"name":"selected","args":{"path":self.canvas_state.file_path()}}).to_string());
         }
 
         // Keyboard to the focused pane when it changes (never steal it from an open dialog).
@@ -2922,6 +2938,46 @@ impl AppWindow {
         }
     }
 
+    /// Runs a local file operation off the UI thread (a folder copy can take long); a failure
+    /// reaches the person as a toast, since a mod's `run` gets no answer back. A control caller
+    /// is answered when the operation finishes.
+    fn file_operation(&mut self, operation: crate::file_ops::Operation, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::file_ops::{self, Operation::*};
+        let args = args.clone();
+        let reply = self.held_reply.take();
+        let work = cx.background_executor().spawn(async move {
+            let path = |key: &str| args[key].as_str().map(Path::new);
+            let required = |key| path(key).ok_or_else(|| format!("{key} must be a path"));
+            let result = (|| match operation {
+                Rename => file_ops::rename(required("from")?, required("to")?),
+                Copy | Move => {
+                    let from = required("from")?;
+                    let to = file_ops::destination(from, path("to"), path("into"))?;
+                    if matches!(operation, Copy) { file_ops::copy(from, &to) } else { file_ops::move_entry(from, &to) }
+                }
+                Mkdir => file_ops::mkdir(required("path")?),
+                New => file_ops::new_file(required("path")?),
+                Trash => file_ops::trash(required("path")?),
+                Reveal => file_ops::reveal(required("path")?),
+            })();
+            let moved = (matches!(operation, Move) && path("into").is_some()).then(|| args["from"].clone());
+            (result, moved)
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let (result, moved) = work.await;
+            let _ = this.update_in(cx, |this, window, cx| match &result {
+                Ok(()) if !matches!(operation, Reveal) => {
+                    mods::send_command("files", &json!({"name":"file_changed","args":{"moved":moved}}).to_string());
+                }
+                Ok(()) => {}
+                Err(error) => this.command_error("File", error, window, cx),
+            });
+            if let Some(reply) = reply {
+                let _ = reply.send(result.map_or_else(|e| json!({"error":e}), |()| json!({})));
+            }
+        }).detach();
+    }
+
     fn command_error(&mut self, name: &str, error: &str, window: &mut Window, cx: &mut Context<Self>) {
         let spec = json!({"kind":"toast", "notification":{"title":format!("{name} failed"),"body":error,"level":"error"}});
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
@@ -2953,7 +3009,12 @@ impl AppWindow {
         let Some(command) = crate::commands::find(name) else {
             // `<mod>.<command>` goes to that mod's nextCommand().
             if let Some((m, c)) = name.split_once('.')
-                && mods::send_command(m, c)
+                // With arguments the mod gets `{"name","args"}` as JSON, else just the name.
+                && mods::send_command(m, &if args.as_object().is_some_and(|a| !a.is_empty()) {
+                    json!({"name":c,"args":args}).to_string()
+                } else {
+                    c.to_owned()
+                })
             {
                 return json!({ "ok": true });
             }
@@ -2990,14 +3051,12 @@ impl AppWindow {
             }
             return json!({"asked":"url"});
         }
-        if person && name.ends_with(".rename") && args.get("name").is_none_or(Value::is_null) {
+        if person && matches!(name, "space.rename" | "tab.rename") && args.get("name").is_none_or(Value::is_null) {
             self.ask_name(name, args, window, cx);
             return json!({ "asked": "name" });
         }
         if let Some(arg) = crate::commands::missing(command, &args) {
             return json!({ "error": format!("{name} needs {arg}") });
-        }
-        if person {
         }
         if name == "space.new" {
             let machine = new_space_machine(&args, person, &self.model);
@@ -3125,7 +3184,20 @@ impl AppWindow {
                     if state.doc.panel.tabs.contains(&tab) { self.close_panel_tab(&tab, window, cx); }
                 }
             }
+            "file.mode" => self.file_mode_command(a, window, cx),
+            "files.auto_save" => match a["on"].as_bool() {
+                Some(on) => mods::set_shared("files.auto_save".into(), json!(on)),
+                None => self.fail("files.auto_save requires a boolean on"),
+            },
+            "panel.editor" if !person && a["dirty"].is_boolean() => return self.fail("only the editor can report unsaved changes"),
             "panel.editor" => self.panel_editor(a, window, cx),
+            "file.rename" => self.file_operation(crate::file_ops::Operation::Rename, a, window, cx),
+            "file.copy" => self.file_operation(crate::file_ops::Operation::Copy, a, window, cx),
+            "file.move" => self.file_operation(crate::file_ops::Operation::Move, a, window, cx),
+            "file.mkdir" => self.file_operation(crate::file_ops::Operation::Mkdir, a, window, cx),
+            "file.new" => self.file_operation(crate::file_ops::Operation::New, a, window, cx),
+            "file.trash" => self.file_operation(crate::file_ops::Operation::Trash, a, window, cx),
+            "file.reveal" => self.file_operation(crate::file_ops::Operation::Reveal, a, window, cx),
             "preview.external" => self.open_in_preview(a, window, cx),
             "preview.open" => self.open_preview(a.clone(), person, window, cx),
             "canvas.hand" => {
@@ -3171,6 +3243,8 @@ impl AppWindow {
             }
             "space.close" => {
                 let Some(id) = Self::owned(a, "id").or_else(|| self.model.active.clone()) else { return self.fail("no space to close") };
+                let boxed: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.boxed() && p.space.as_deref() == Some(id.as_str())).map(|p| p.id.clone()).collect();
+                if self.refuse_to_close_drafts(&boxed) { return; }
                 let Some(p) = self.model.space(&id) else { return self.fail(format!("no space {id:?}")) };
                 if a.get("confirmed").and_then(Value::as_bool) != Some(true) {
                     if !person {
@@ -3184,7 +3258,6 @@ impl AppWindow {
                 let addrs = self.model.remove_space(&id);
                 self.kill(&addrs, cx);
                 // Terminals went with the space; its file, browser and other boxed panes stay on the canvas document, so close them too (this tears down browser pages).
-                let boxed: Vec<_> = self.canvas_state.doc.panes.iter().filter(|p| p.boxed() && p.space.as_deref() == Some(id.as_str())).map(|p| p.id.clone()).collect();
                 if !boxed.is_empty() { self.close_boxed_panes(&boxed, cx); }
             }
             "space.rename" => {
@@ -7031,6 +7104,7 @@ export default class SystemToast extends View {
     #[test]
     fn shipped_layouts_parse_and_show_what_they_promise() {
         let main = super::default_layout("main");
+        assert_eq!(super::default_layout("missing-layout"), main);
         assert!(main.walk().iter().any(|n| matches!(n.kind, super::Kind::Canvas)));
         assert!(main.find("status").is_some());
         assert!(main.find("sidebar").is_none());

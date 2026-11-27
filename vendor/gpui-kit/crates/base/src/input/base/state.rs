@@ -123,6 +123,24 @@ actions!(
     ]
 );
 
+/// A Git change anchored to a one-based source line.
+#[derive(Clone, Copy)]
+pub enum LineMark {
+    Added,
+    Modified,
+    Removed,
+}
+
+impl LineMark {
+    pub fn color(self, [added, modified, removed]: [gpui::Hsla; 3]) -> gpui::Hsla {
+        match self {
+            Self::Added => added,
+            Self::Modified => modified,
+            Self::Removed => removed,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum InputEvent {
     Change,
@@ -131,6 +149,11 @@ pub enum InputEvent {
     Blur,
     /// A paste found no text on the clipboard (an image, say): the owner may read it.
     PasteWithoutText,
+    GutterQuote {
+        start: usize,
+        end: usize,
+        position: gpui::Point<Pixels>,
+    },
 }
 
 pub(super) const CONTEXT: &str = "Input";
@@ -499,6 +522,11 @@ pub struct InputBaseState<M: InputModeKind> {
     /// every colour left unset resolved from the palette that is current. It
     /// is rebuilt at the top of every render, which is what keeps it current
     /// when the palette changes after the state was built.
+    pub(super) active_line: bool,
+    pub(super) gutter_quote: bool,
+    pub(super) gutter_range: Option<(usize, usize)>,
+    pub(super) mark_colors: Option<[gpui::Hsla; 3]>,
+    pub(super) line_marks: std::collections::HashMap<usize, LineMark>,
     pub(super) editor_style: InputEditorStyle,
     /// What a consumer projected, kept verbatim so that resolution never
     /// consumes its own output: resolving in place would fill the unset
@@ -863,6 +891,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             placeholder: SharedString::default(),
             mask_pattern: MaskPattern::default(),
             mask_pattern_set: false,
+            active_line: false,
+            gutter_quote: false,
+            gutter_range: None,
+            mark_colors: None,
+            line_marks: Default::default(),
             editor_style: InputEditorStyle::default(),
             projected_editor_style: InputEditorStyle::default(),
             diagnostic_popover: None,
@@ -953,6 +986,33 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Install a default adapter without replacing an application-provided one.
     pub fn ensure_highlighter_factory(&mut self, factory: InputHighlighterFactory) {
         self.mode.ensure_highlighter_factory(factory);
+    }
+
+    pub fn set_active_line(&mut self, active: bool) {
+        self.active_line = active;
+    }
+
+    pub fn enable_gutter_quote(&mut self, cx: &mut Context<Self>) {
+        self.gutter_quote = true;
+        cx.notify();
+    }
+
+    pub fn set_mark_colors(&mut self, colors: Option<[gpui::Hsla; 3]>) {
+        self.mark_colors = colors;
+    }
+
+    /// Replaces the marks, ignoring lines outside the current buffer.
+    pub fn set_line_marks(
+        &mut self,
+        marks: impl IntoIterator<Item = (usize, LineMark)>,
+        cx: &mut Context<Self>,
+    ) {
+        let count = self.text.lines_len();
+        self.line_marks = marks
+            .into_iter()
+            .filter(|(line, _)| (1..=count).contains(line))
+            .collect();
+        cx.notify();
     }
 
     pub fn set_editor_style(&mut self, style: InputEditorStyle) {
@@ -4603,6 +4663,10 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
         self.editor_style = self
             .projected_editor_style
             .resolved(&crate::Theme::global(cx).tokens);
+        if self.active_line {
+            self.editor_style.editor_active_line =
+                Some(crate::Theme::global(cx).tokens.colors.accent);
+        }
         let entity = cx.entity();
         if self._pending_update {
             self.mode.update_highlighter::<M>(

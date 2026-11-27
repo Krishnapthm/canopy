@@ -13,6 +13,8 @@ Simulator panes need macOS with Xcode and at least one simulator installed. For 
 
 The simulator opens docked in the files panel. Click **Move to canvas** on its helper bar to put it on the canvas, where it moves and scales with your other panes. On the canvas, **Open in panel** docks it again, and **Pin to screen** pins it to the top right corner at the same size while you pan and zoom (**Unpin** puts it back). Drag a pinned or canvas simulator's header to move it and any edge or corner to resize it.
 
+The device scales with the canvas like a picture, including its bezel and the space around it.
+
 The **Simulator** button shows only when Xcode's `xcrun simctl` is installed.
 
 An agent opens one next to itself from its terminal:
