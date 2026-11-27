@@ -65,7 +65,9 @@ pub(super) struct State {
     preview_drag: Option<(String, Option<canophy::Point>, Point<Pixels>)>,
     /// The panel's active tab (its tabs are `doc.panel.tabs`).
     pub file: Option<canvas::PanelTab>,
-    modes: HashMap<String, FileMode>,
+    /// A chosen mode per editor and file; missing means the file's default.
+    modes: HashMap<(FileHost, String), FileMode>,
+    /// Canvas file panes (by id) with unsaved text. The panel's draft is `dirty`.
     card_drafts: HashSet<String>,
     outline: bool,
     /// The Files editor reports transitions between saved and unsaved text.
@@ -197,11 +199,17 @@ fn files_button(
 }
 
 impl State {
-    /// The file open in the panel, when its active tab is a file.
-    fn file_mode(&self, path: &str) -> FileMode {
-        self.modes.get(path).copied().unwrap_or_else(|| FileMode::default_for(Path::new(path)))
+    /// The mode an editor chose for a file, else the file's default.
+    fn file_mode(&self, host: &FileHost, path: &str) -> FileMode {
+        self.modes.get(&(host.clone(), path.to_owned())).copied().unwrap_or_else(|| FileMode::default_for(Path::new(path)))
     }
 
+    /// The mode the editor actually shows (an HTML file pane is always its source).
+    fn shown_mode(&self, host: &FileHost, path: &str) -> FileMode {
+        file_view::file_host_mode(path, self.file_mode(host, path))
+    }
+
+    /// The file open in the panel, when its active tab is a file.
     pub(super) fn file_path(&self) -> Option<&String> {
         self.file.as_ref().and_then(canvas::PanelTab::file)
     }
@@ -1170,9 +1178,9 @@ impl AppWindow {
         state.selected.retain(|id| !ids.contains(id));
         self.forget_sims(ids, cx);
         let state = &mut self.canvas_state;
+        state.modes.retain(|(host, _), _| !matches!(host, FileHost::Card { pane } if ids.contains(pane)));
+        state.card_drafts.retain(|pane| !ids.contains(pane));
         for path in paths {
-            state.modes.remove(&path);
-            state.card_drafts.remove(&path);
             if state.file_path() != Some(&path) && !state.doc.panes.iter().any(|p| p.file() == Some(path.as_str())) {
                 state.previews.remove(&path);
             }
@@ -1401,7 +1409,7 @@ impl AppWindow {
                     if state.file_path() != Some(&path) || state.dirty_generation != generation
                         || tab.as_ref().is_some_and(|tab| !state.doc.panel.tabs.contains(tab)) { return; }
                     state.dirty = None;
-                    state.modes.remove(&path);
+                    state.modes.remove(&(FileHost::Panel, path));
                     this.select_panel_tab(tab, window, cx);
                 });
             }).detach();
@@ -1424,18 +1432,21 @@ impl AppWindow {
         let Some(path) = args["path"].as_str().or(active.map(String::as_str)).map(str::to_owned) else { return };
         let dirty = args["dirty"].as_bool();
         let done = args["done"].as_bool() == Some(true);
-        let pane = if active == Some(&path) {
-            None
-        } else {
-            if dirty.is_none() && !done { return; }
-            let Some(pane) = self.canvas_state.doc.panes.iter().find(|pane| pane.file() == Some(path.as_str())) else { return };
-            Some(pane.id.clone())
+        // A card viewer names its pane; without one the report is the panel's active file.
+        let pane = match args["pane"].as_str() {
+            Some(id) => {
+                if !self.canvas_state.doc.panes.iter().any(|pane| pane.id == id && pane.file() == Some(path.as_str())) { return; }
+                Some(id.to_owned())
+            }
+            None if active == Some(&path) => None,
+            None => return,
         };
+        let host = pane.clone().map_or(FileHost::Panel, |pane| FileHost::Card { pane });
         if let Some(dirty) = dirty {
-            if self.canvas_state.file_mode(&path) == FileMode::Source {
-                if pane.is_some() {
-                    if dirty { self.canvas_state.card_drafts.insert(path); }
-                    else { self.canvas_state.card_drafts.remove(&path); }
+            if self.canvas_state.shown_mode(&host, &path) == FileMode::Source {
+                if let Some(pane) = pane {
+                    if dirty { self.canvas_state.card_drafts.insert(pane); }
+                    else { self.canvas_state.card_drafts.remove(&pane); }
                 } else {
                     if dirty && self.canvas_state.dirty.is_none() { self.canvas_state.dirty_generation += 1; }
                     self.canvas_state.dirty = dirty.then_some(path);
@@ -1445,8 +1456,10 @@ impl AppWindow {
             return;
         }
         if done {
-            if pane.is_some() { self.canvas_state.card_drafts.remove(&path); }
-            else { self.canvas_state.dirty = None; }
+            match &pane {
+                Some(pane) => { self.canvas_state.card_drafts.remove(pane); }
+                None => self.canvas_state.dirty = None,
+            }
             if previewable(Path::new(&path)).is_some() {
                 if let Err(error) = self.set_file_mode(&path, FileMode::Preview, pane.as_deref(), window, cx) {
                     self.command_error("panel.editor", &error, window, cx);
@@ -1456,7 +1469,7 @@ impl AppWindow {
         } else {
             let choice = args["choice"].as_str().unwrap_or("here");
             if choice == "here" {
-                self.canvas_state.modes.insert(path.clone(), FileMode::Source);
+                self.canvas_state.modes.insert((host, path.clone()), FileMode::Source);
                 self.canvas_state.dirty = None;
             } else {
                 let Some(editor) = self.panel_editors().into_iter().find(|e| e.key == choice) else { return };
@@ -1603,8 +1616,9 @@ impl AppWindow {
         }
         for pane in &self.canvas_state.doc.panes {
             if !self.canvas_state.doc.shown(pane) { continue; }
-            if let Some(path) = pane.file().filter(|path| file_view::file_host_mode(path, self.canvas_state.file_mode(path)) == FileMode::Source) {
-                slots.push(file_view::viewer_slot(path, FileHost::Card { pane: pane.id.clone() }));
+            let host = FileHost::Card { pane: pane.id.clone() };
+            if let Some(path) = pane.file().filter(|path| self.canvas_state.shown_mode(&host, path) == FileMode::Source) {
+                slots.push(file_view::viewer_slot(path, host));
             }
             if let Some(name) = pane.mod_name().filter(|name| self.folders.get(*name).is_some_and(|f| f.hint.pane.is_some())) {
                 slots.push((format!("pane:{}", pane.id), Instance { name: name.into(), props: json!({"pane":pane.id}) }));
@@ -1621,7 +1635,7 @@ impl AppWindow {
                 },
             ));
         }
-        if let Some(path) = self.canvas_state.file_path().filter(|path| file_view::file_host_mode(path, self.canvas_state.file_mode(path)) == FileMode::Source) {
+        if let Some(path) = self.canvas_state.file_path().filter(|path| self.canvas_state.shown_mode(&FileHost::Panel, path) == FileMode::Source) {
             slots.push(file_view::viewer_slot(path, FileHost::Panel));
         }
         slots
@@ -1680,12 +1694,12 @@ impl AppWindow {
             if self.canvas_state.file.as_ref() != Some(&tab) { self.canvas_state.dirty = None; }
             self.canvas_state.file = Some(tab);
             if previewable(Path::new(&path)) == Some(Previewable::Html)
-                && self.canvas_state.file_mode(&path) == FileMode::Preview
+                && self.canvas_state.file_mode(&FileHost::Panel, &path) == FileMode::Preview
             {
                 match self.set_file_mode(&path, FileMode::Preview, None, window, cx) {
                     Ok(()) => return,
                     Err(error) => {
-                        self.canvas_state.modes.insert(path, FileMode::Source);
+                        self.canvas_state.modes.insert((FileHost::Panel, path), FileMode::Source);
                         self.command_error("file.mode", &error, window, cx);
                     }
                 }
@@ -1810,7 +1824,10 @@ impl AppWindow {
         };
         let path = canonical;
         let doc = &mut self.canvas_state.doc;
-        let (id, kind_name, parsed) = if let Some(pane) = doc.panes.iter_mut().find(|p| p.path() == Some(path.as_str())) {
+        // An HTML file showing its Preview is a browser pane on the canvas; reopening keeps it.
+        let reuse = doc.panes.iter().find(|p| p.path() == Some(path.as_str()) || (!doc.docked(&p.id)
+            && matches!(&p.kind, canvas::Kind::Browser { source: Some(source), .. } if *source == path))).map(|p| p.id.clone());
+        let (id, kind_name, parsed) = if let Some(pane) = reuse.and_then(|id| doc.panes.iter_mut().find(|p| p.id == id)) {
             // A reopened file pane moves to where it was opened.
             let (id, rect) = (pane.id.clone(), canophy::WorldRect { x: point[0], y: point[1], ..pane.rect });
             let kind_name = pane.kind_name().to_owned();
@@ -1837,10 +1854,10 @@ impl AppWindow {
             (id, kind_name, parsed)
         };
         if kind_name == "file" && previewable(Path::new(&path)) == Some(Previewable::Html)
-            && self.canvas_state.file_mode(&path) == FileMode::Preview
+            && self.canvas_state.file_mode(&FileHost::Card { pane: id.clone() }, &path) == FileMode::Preview
         {
             if let Err(error) = self.set_file_mode(&path, FileMode::Preview, Some(&id), window, cx) {
-                self.canvas_state.modes.insert(path.clone(), FileMode::Source);
+                self.canvas_state.modes.insert((FileHost::Card { pane: id.clone() }, path.clone()), FileMode::Source);
                 self.command_error("file.mode", &error, window, cx);
             }
         }
@@ -4257,7 +4274,7 @@ impl AppWindow {
                 None => canvas::breadcrumb(path, root.as_deref().filter(|r| std::path::Path::new(path).starts_with(r)).or(Some(&home()))),
             };
             let outline_available = state.file_path().is_some_and(|path| {
-                state.file_mode(path) == FileMode::Preview && previewable(Path::new(path)) == Some(Previewable::Markdown)
+                state.file_mode(&FileHost::Panel, path) == FileMode::Preview && previewable(Path::new(path)) == Some(Previewable::Markdown)
             });
             panel = panel.child(
                 div()
@@ -4284,7 +4301,7 @@ impl AppWindow {
                             .on_click(cx.listener(move |this, _, window, cx| this.run("preview.external", json!({"path":path}), window, cx))))
                     })
                     .when_some(state.file_path().filter(|path| previewable(Path::new(path)).is_some()), |d, path| {
-                        let action = file_view::mode_action(path, file_view::file_host_mode(path, state.file_mode(path)), None);
+                        let action = file_view::mode_action(path, state.shown_mode(&FileHost::Panel, path), None);
                         d.child(panel_button("panel-file-mode", action.icon, c("muted-foreground"), c("hover"))
                             .aria_label(action.label.clone())
                             .tooltip(strip_tooltip(action.label.to_string(), Some("file.mode")))

@@ -44,6 +44,8 @@ Click **Source** in the file header to see the text, and **Preview** to return.
 The same controls appear in a canvas file pane's helper bar. JSONL source is
 read-only. HTML previews on macOS use a local browser pane in the same tab or
 canvas position. Click **Source** in its header or helper bar to return to the file.
+A Files tab and a canvas pane of the same file keep their own mode and unsaved
+edits, so switching or closing one never changes the other.
 
 - Click **Outline** in a Markdown preview to show the heading rail. Select a heading to scroll to it.
 - Click a web link to open a browser pane. A file link opens a Files tab. Relative links resolve from the Markdown file's folder.
@@ -70,7 +72,7 @@ Use **Source** to make a quick edit or quote an exact line without leaving the p
 - Hover a line number and click **+** to open the quote menu for that line. Drag from **+** to another line to quote the whole range. This also works in read-only source views.
 - The bar beside a line number shows a Git change. Green marks additions, blue marks edits, and a short red bar shows where lines were deleted. The bars refresh when you open or save the file.
 
-The editor wraps long lines and highlights the line with the cursor. It accepts text files up to 1 MiB. If another program changes the file before you save, Canopy shows an error and keeps your draft. An unsaved dot appears on the tab, and leaving a dirty tab asks whether to discard your changes.
+The editor wraps long lines and highlights the line with the cursor. It accepts text files up to 1 MiB. If another program changes the file before you save, Canopy shows one error, keeps your draft and pauses auto save until you save by hand or reopen the file. Copy your edits before reopening: reopening loads the new version. An unsaved dot appears on the tab, and leaving a dirty tab asks whether to discard your changes.
 
 ## Changes
 

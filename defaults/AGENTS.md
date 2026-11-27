@@ -1157,17 +1157,15 @@ editor, or Open here. Editors come from programs.json `open` argv and macOS `app
 Open here edits in place, including markdown source, with highlighting. Save or cmd+s
 saves and keeps editing; Done saves pending edits and returns to the read-only view.
 Unsaved marks a draft, also shown as a dot in its top-strip file tab (X on hover).
-The Files editor reports `panel.editor {path, dirty: boolean}` on saved/unsaved
-transitions; only the current editing file can update that dot. Switching tabs
-or closing the tab drops the draft without a dialog.
-Saves use `writeTextFile(path, text, expected)`; conflicts show inline and keep the draft.
-Markdown, JSONL, HTML and SVG have **Source** and **Preview** actions in the Files
-panel header and on the canvas file pane's helper bar. Use
-`file.mode {path, mode: "source" | "preview", pane?}` with an absolute path.
-Pass the pane ID for a canvas file pane. Omit it for a Files panel tab.
-JSONL source is read-only. On macOS, HTML Preview uses a local browser pane.
-Markdown previews follow folder changes and show File deleted when missing.
-The Files panel More menu uses `files.auto_save {on}` to persist the shared Auto save setting.
+The Files editor reports `panel.editor {path, pane?, dirty: boolean}` on saved/unsaved
+transitions (`pane`: a file pane, with its own mode and draft). Switching or closing a tab
+with a draft asks first. Saves use `writeTextFile(path, text, expected)`; a conflict shows
+inline, keeps the draft and pauses Auto save until a manual save or reload.
+Markdown, JSONL, HTML and SVG have **Source** and **Preview** in the panel header and the file
+pane's helper bar: `file.mode {path, mode: "source" | "preview", pane?}` (absolute path; pane
+for a canvas file pane, none for a panel tab). JSONL source is read-only. On macOS, HTML Preview
+uses a local browser pane. Markdown previews follow folder changes and show File deleted when
+missing. The More menu's `files.auto_save {on}` persists the shared Auto save setting.
 
 Preview quotes: finishing a selection in a file pane shows the quote icon, which opens the popover, also opened by `quote.menu {path, start?, end?, text, point?, pane?}` (point is window pixels, default the pointer). `quote.send {path, start?, end?, text, message?, terminal | argv, pane?}` expands an agent's cell and pastes the quote, then a blank line and the trimmed message when given, without Enter. The popover lists agents wired to the quoted pane first, then running agents, then installed agents ("New agent with this"). New agents start in the panel space. Delivery waits up to 30 seconds for bracketed paste; on timeout nothing is sent. Paths must be absolute; source lines are 1-based and inclusive. Delivery uses a path relative to the agent cwd when possible.
 

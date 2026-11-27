@@ -158,7 +158,8 @@ export default class Files extends View {
     this.saved = new Map();
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {};
     this.refresh(cx);
-    cx.timer.every(10000, cx => this.refresh(cx));
+    // A viewer shows no tree: its folder watch is enough to notice outside edits.
+    if (props()?.canvas !== "viewer") cx.timer.every(10000, cx => this.refresh(cx));
   }
 
   watch(root, cx) {
@@ -261,6 +262,7 @@ export default class Files extends View {
         if (text.includes("\0")) { this.fileError = "Can't preview"; return; }
         const t = theme(), ext = path.includes(".") ? path.split(".").pop() : "txt";
         this.original = text;
+        this.conflict = false;
         const viewer = props()?.canvas === "viewer";
         const code = this.code = EditorState.new({ language: LANG[ext] ?? ext, readonly: !props()?.editing,
           value: !props()?.editing && text.length > 400000 ? text.slice(0, 400000) + "\n… (file truncated)" : text,
@@ -272,7 +274,7 @@ export default class Files extends View {
           this.saveTimer?.cancel();
           this.saveTimer = null;
           this.queuedSave = null;
-          if (viewer && props()?.editing && autoSave() && (this.saving || code.value() !== this.original)) {
+          if (viewer && props()?.editing && autoSave() && !this.conflict && (this.saving || code.value() !== this.original)) {
             this.saveTimer = cx.timer.after(1000, cx => {
               this.saveTimer = null;
               if (this.code === code && props()?.editing && autoSave()) this.save(false, cx);
@@ -301,7 +303,7 @@ export default class Files extends View {
     const dirty = this.code.value() !== this.original;
     if (dirty === this.reportedDirty) return;
     this.reportedDirty = dirty;
-    run("panel.editor", { path: `${this.root}/${this.file}`, dirty });
+    run("panel.editor", { path: `${this.root}/${this.file}`, pane: props()?.pane ?? undefined, dirty });
   }
 
   save(manual, cx) {
@@ -323,6 +325,7 @@ export default class Files extends View {
         await writeTextFile(path, text, this.original);
         if (this.code !== code) return;
         this.original = text;
+        this.conflict = false;
         this.reportDirty();
         cx.spawn(async () => {
           const marks = await fileMarks(file, text, { cwd: root, on });
@@ -330,13 +333,15 @@ export default class Files extends View {
         });
       } catch (e) {
         if (this.code === code) this.saveError = String(e);
+        // One toast per failure: auto save waits for a manual save or a reload, or every pause would toast again.
+        if (!manual && this.code === code) this.conflict = true;
         notify({ title: `Could not save ${file.split("/").pop()}`, body: String(e), level: "error",
           action: { name: "preview.open", args: { path } } });
       } finally {
         this.saving = false;
         const queued = this.queuedSave;
         this.queuedSave = null;
-        if (queued && queued.code === this.code && (queued.manual || autoSave())) this.save(queued.manual, cx);
+        if (queued && queued.code === this.code && (queued.manual || (autoSave() && !this.conflict))) this.save(queued.manual, cx);
         cx.notify();
       }
     });

@@ -193,7 +193,7 @@ impl AppWindow {
 
     fn helper_actions(&self, pane: &canvas::Pane, cx: &App) -> Vec<BarAction> {
         let hint = pane.mod_name().and_then(|name| self.folders.get(name)).and_then(|f| f.hint.pane.as_ref());
-        let actions = pane_actions(pane, hint, false, pane.file().map(|path| self.canvas_state.file_mode(path)));
+        let actions = pane_actions(pane, hint, false, pane.file().map(|path| self.canvas_state.file_mode(&FileHost::Card { pane: pane.id.clone() }, path)));
         #[cfg(target_os = "macos")]
         let actions = self.sim_relabel(&pane.id, actions, cx);
         #[cfg(not(target_os = "macos"))]

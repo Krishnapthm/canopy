@@ -40,7 +40,9 @@ impl FileMode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// One editor instance of a file: the Files panel, or a canvas file pane. Each keeps its own
+/// mode and draft, so a panel tab and a card of the same file never change each other.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum FileHost {
     Panel,
     Card { pane: String },
@@ -64,14 +66,19 @@ pub(super) fn file_host_mode(path: &str, mode: FileMode) -> FileMode {
     }
 }
 
+/// A card viewer gets its pane id, so its dirty reports name the editor they come from.
 pub(super) fn viewer_slot(path: &str, host: FileHost) -> (String, Instance) {
     let path = Path::new(path);
+    let pane = match &host {
+        FileHost::Panel => None,
+        FileHost::Card { pane } => Some(pane.clone()),
+    };
     (
         host.slot(),
         Instance {
             name: "files".into(),
             props: json!({"canvas":"viewer","editing":previewable(path) != Some(Previewable::Jsonl),
-            "root":path.parent(),"file":path.file_name().map(|name| name.to_string_lossy())}),
+            "root":path.parent(),"file":path.file_name().map(|name| name.to_string_lossy()),"pane":pane}),
         },
     )
 }
@@ -140,12 +147,6 @@ impl AppWindow {
         if mode == FileMode::Preview && kind.is_none() {
             return Err(format!("No preview available for {path}"));
         }
-        if mode == FileMode::Preview
-            && (self.canvas_state.dirty.as_deref() == Some(path)
-                || self.canvas_state.card_drafts.contains(path))
-        {
-            return Err("Save or discard your changes before opening Preview".into());
-        }
         let file_tab = canvas::PanelTab::File(path.into());
         let panel_browser = if pane.is_none() {
             self.html_panel_tab(path)
@@ -164,6 +165,18 @@ impl AppWindow {
             }
         } else if !doc.panel.tabs.contains(&file_tab) {
             return Err(format!("No file tab for {path}"));
+        }
+        // A docked HTML preview is the panel's editor, not a card's.
+        let host = match target {
+            Some(id) if !doc.panel.tabs.contains(&canvas::PanelTab::Pane(id.into())) => FileHost::Card { pane: id.into() },
+            _ => FileHost::Panel,
+        };
+        let drafted = match &host {
+            FileHost::Panel => self.canvas_state.dirty.as_deref() == Some(path),
+            FileHost::Card { pane } => self.canvas_state.card_drafts.contains(pane),
+        };
+        if mode == FileMode::Preview && drafted {
+            return Err("Save or discard your changes before opening Preview".into());
         }
 
         if kind == Some(Previewable::Html) {
@@ -231,7 +244,7 @@ impl AppWindow {
                 }
             }
         }
-        self.canvas_state.modes.insert(path.into(), mode);
+        self.canvas_state.modes.insert((host, path.into()), mode);
         self.load_previews(None, window, cx);
         self.sync(window, cx);
         cx.notify();
@@ -253,9 +266,7 @@ impl AppWindow {
             .h_full()
             .overflow_hidden();
         let kind = previewable(Path::new(path));
-        if kind.is_none()
-            || file_host_mode(path, self.canvas_state.file_mode(path)) == FileMode::Source
-        {
+        if kind.is_none() || self.canvas_state.shown_mode(&host, path) == FileMode::Source {
             return body
                 .child(self.render_slot(&host.slot(), cx))
                 .into_any_element();

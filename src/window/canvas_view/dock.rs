@@ -104,7 +104,7 @@ impl AppWindow {
         let state = &mut self.canvas_state;
         match tab {
             PanelTab::File(path) => {
-                state.modes.remove(path);
+                state.modes.remove(&(FileHost::Panel, path.clone()));
                 if !state.doc.panes.iter().any(|pane| pane.file() == Some(path)) {
                     state.previews.remove(path);
                 }

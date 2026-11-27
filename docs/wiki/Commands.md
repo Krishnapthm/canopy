@@ -727,13 +727,14 @@ Close a file tab in the Files panel, asking before discarding unsaved changes. T
 
 ## `panel.editor`
 
-Choose a file panel editor, return to the read-only view after saving, or report the current editing file's dirty state.
+Choose a file panel editor, return to the read-only view after saving, or report an editor's dirty state (pane names a canvas file pane, else the panel).
 
 | Argument | Required |
 |---|---|
 | `choice` | no |
 | `done` | no |
 | `path` | no |
+| `pane` | no |
 | `dirty` | no |
 
 ## `file.mode`
