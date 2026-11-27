@@ -301,7 +301,21 @@ impl Drop for Native {
 enum Ask {
     Read(std::sync::mpsc::Sender<Value>),
     Shot(std::path::PathBuf, std::sync::mpsc::Sender<Value>),
+    /// `canopy pane new browser` or `pane open`: `reply` (pane, url, ...) gains the page's
+    /// title and final URL once it has loaded.
+    Opened(Value, std::sync::mpsc::Sender<Value>),
 }
+
+impl Ask {
+    /// Where the answer goes.
+    fn tx(self) -> std::sync::mpsc::Sender<Value> {
+        match self { Ask::Read(tx) | Ask::Shot(_, tx) | Ask::Opened(_, tx) => tx }
+    }
+}
+
+/// What an opened page adds to its `new`/`open` reply.
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Loaded { url: String, title: String }
 
 /// What a web view reports, on the main thread, through `Browsers::events`.
 pub(in crate::window) enum Event {
@@ -474,8 +488,7 @@ impl AppWindow {
             if !keep {
                 let _ = std::fs::remove_file(shot_file(key));
                 for ask in page.waiting.drain(..) {
-                    let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
-                    let _ = tx.send(json!({"error": "the browser tab closed"}));
+                    let _ = ask.tx().send(json!({"error": "the browser tab closed"}));
                 }
                 #[cfg(target_os = "macos")]
                 if let Some(native) = page.native.take() { destroy(native); }
@@ -1027,8 +1040,7 @@ impl AppWindow {
                 let waiting = std::mem::take(&mut page.waiting);
                 page.loading = false;
                 for ask in waiting {
-                    let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
-                    let _ = tx.send(json!({"error":error}));
+                    let _ = ask.tx().send(json!({"error":error}));
                 }
                 self.toast(Toast { title: "Page not opened".into(), body: Some(error), level: Level::Error,
                     action: Some(("pane.focus".into(), json!({"pane": id}))) }, window, cx);
@@ -1496,6 +1508,17 @@ impl AppWindow {
         self.ensure_view(id, window, cx)?;
         let key = self.page_key(id).unwrap();
         let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
+        if page.loading { page.waiting.push(ask); } else { self.answer_browser(&key, ask); }
+        Ok(())
+    }
+
+    /// Answers `tx` with `reply` plus the page's title once the pane's active page has loaded.
+    /// Err hands `tx` back when the page cannot be watched (no view on this platform).
+    pub(super) fn browser_opened(&mut self, id: &str, tx: std::sync::mpsc::Sender<Value>, reply: Value, window: &mut Window, cx: &mut Context<Self>) -> Result<(), (std::sync::mpsc::Sender<Value>, String)> {
+        if let Err(e) = self.require_browser_url(id).and_then(|_| self.ensure_view(id, window, cx)) { return Err((tx, e)); }
+        let key = self.page_key(id).unwrap();
+        let page = self.canvas_state.browsers.pages.get_mut(&key).unwrap();
+        let ask = Ask::Opened(reply, tx);
         if page.loading { page.waiting.push(ask); } else { self.answer_browser(&key, ask); }
         Ok(())
     }
@@ -2016,8 +2039,7 @@ impl AppWindow {
         if let Some(native) = page.native.take() { destroy(native); }
         (page.live, page.loading, page.watch) = (None, false, false);
         for ask in std::mem::take(&mut page.waiting) {
-            let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
-            let _ = tx.send(json!({"error": why}));
+            let _ = ask.tx().send(json!({"error": why}));
         }
     }
 
@@ -2301,12 +2323,23 @@ impl AppWindow {
         if page_url(raw.raw()).is_none() {
             let url = self.tab_by_key(key).map(|tab| tab.url.as_str()).unwrap_or_default();
             let error = json!({"error": format!("{url} did not load: is its server running?")});
-            let (Ask::Read(tx) | Ask::Shot(_, tx)) = ask;
-            let _ = tx.send(error);
+            let _ = ask.tx().send(error);
             return;
         }
         let id = key.split_once('/').unwrap().0.to_owned();
         match ask {
+            Ask::Opened(reply, tx) => {
+                // The callback is Fn: take the reply and sender out once.
+                let tx = std::sync::Mutex::new(Some((reply, tx)));
+                let _ = raw.raw().evaluate_script_with_callback("JSON.stringify({url: location.href, title: document.title})", move |result| {
+                    let Some((mut reply, tx)) = tx.lock().unwrap().take() else { return };
+                    // wry hands back the script's value as JSON: here a JSON string of JSON.
+                    let loaded = serde_json::from_str::<String>(&result).ok().and_then(|s| serde_json::from_str::<Loaded>(&s).ok());
+                    if let (Value::Object(r), Some(Ok(Value::Object(l)))) = (&mut reply, loaded.map(serde_json::to_value)) { r.extend(l); }
+                    reply["loaded"] = json!(true);
+                    let _ = tx.send(reply);
+                });
+            }
             Ask::Read(tx) => {
                 let tx = std::sync::Mutex::new(Some(tx));
                 let script = "JSON.stringify({url: location.href, title: document.title, text: document.body ? document.body.innerText : ''})";

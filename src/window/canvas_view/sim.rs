@@ -3,7 +3,8 @@
 //! a simctl screenshot, taken when the pane opens, on Refresh and on `canopy pane open`, is the
 //! resting and fallback picture. Nothing polls. See docs/wiki/Simulator-Devices.md.
 use super::*;
-use crate::sim::{self, Device};
+use crate::sim::{self, Device, Target};
+use std::sync::mpsc::Sender;
 #[cfg(target_os = "macos")]
 use super::helper_bar::{pane_actions, sim_device_actions};
 #[cfg(target_os = "macos")]
@@ -60,6 +61,8 @@ pub(super) struct SimView {
     pub devices: Vec<Device>,
     /// The latest screenshot as a file, for `canopy pane read`.
     pub png: Option<std::path::PathBuf>,
+    /// What the running refresh must do and who waits for it.
+    pub pending: Pending,
     /// The device itself, once a booted simulator is known.
     #[cfg(target_os = "macos")]
     pub live: Option<Entity<SimScreen>>,
@@ -71,32 +74,77 @@ pub(super) struct SimView {
     _events: Option<Subscription>,
 }
 
+/// What the next refresh does beyond a screenshot. It stays on the view until a refresh
+/// finishes, so a newer refresh (Refresh, a live fallback) carries it rather than dropping it.
+#[derive(Default)]
+pub(super) struct Pending {
+    /// A simulator named by an agent, not yet resolved to the pane's saved udid.
+    pub target: Option<Target>,
+    /// An address to open once the device is booted.
+    pub url: Option<sim::Url>,
+    pub waiting: Vec<Waiter>,
+}
+
+/// A held `canopy pane` reply that the running refresh answers.
+pub(super) enum Waiter {
+    /// `pane new sim <target>` or `pane open`: `reply` is the immediate reply the result extends.
+    Opened { tx: Sender<Value>, reply: Value },
+    /// `pane read` while the pane was still loading.
+    Read(Sender<Value>),
+}
+
+/// The device part of a sim pane's `new`/`open` reply.
+#[derive(serde::Serialize)]
+struct Opened {
+    #[serde(flatten)]
+    device: sim::Listing,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    screenshot: Option<std::path::PathBuf>,
+}
+
+/// `canvas.sim_shutdown`'s reply once the device is off.
+#[derive(serde::Serialize)]
+struct ShutDown { pane: String, udid: String, state: sim::State }
+
+/// `canvas.sim_devices`'s reply.
+#[derive(serde::Serialize)]
+struct Devices { devices: Vec<sim::Listing> }
+
 /// What a background refresh found.
 enum Found {
     Pick(Vec<Device>),
     Gone(Vec<Device>),
+    /// The simulator an agent named does not exist (or none is booted).
+    Missing(String, Vec<Device>),
     Off(Device, Vec<Device>),
     Shot(Device, Vec<Device>, Arc<RenderImage>, std::path::PathBuf),
 }
 
-/// Asks simctl about `udid` (empty: list devices to pick), boots it when asked,
-/// and takes a screenshot of a booted device. Blocking.
-fn look(pane: &str, udid: &str, boot: bool) -> Result<Found, String> {
+/// Asks simctl about the pane's simulator (None: list devices to pick), boots it when asked,
+/// opens `url` on it, and takes a screenshot of a booted device. `named` is true when an
+/// agent just named the target, so a miss is its error rather than a vanished device. Blocking.
+fn look(pane: &str, target: Option<Target>, named: bool, boot: bool, url: Option<sim::Url>) -> Result<Found, String> {
     let devices = sim::devices()?;
     sim::xcode_version();
-    if udid.is_empty() { return Ok(Found::Pick(devices)); }
-    let Some(mut device) = devices.iter().find(|d| d.udid == udid).cloned() else { return Ok(Found::Gone(devices)) };
+    let Some(target) = target else { return Ok(Found::Pick(devices)) };
+    let Some(mut device) = target.find(&devices).cloned() else {
+        return Ok(if named { Found::Missing(target.missing(), devices) } else { Found::Gone(devices) });
+    };
+    let udid = device.udid.clone();
     if boot && !device.booted {
-        sim::boot(udid)?;
+        sim::boot(&udid)?;
         device.booted = true;
     }
     if !device.booted { return Ok(Found::Off(device, devices)); }
+    if let Some(url) = &url { sim::open_url(&udid, url)?; }
     let path = std::env::temp_dir().join("canopy").join(format!("sim-{pane}.png"));
     std::fs::create_dir_all(path.parent().unwrap()).map_err(|e| format!("Can't save the screenshot: {e}"))?;
     // A dropped refresh's simctl keeps running: each one writes its own file, then renames it.
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
     let fresh = path.with_file_name(format!("sim-{pane}-{nanos}.png"));
-    let shot = sim::screenshot(udid, &fresh).and_then(|_| std::fs::read(&fresh).map_err(|e| format!("Can't read the screenshot: {e}")));
+    let shot = sim::screenshot(&udid, &fresh).and_then(|_| std::fs::read(&fresh).map_err(|e| format!("Can't read the screenshot: {e}")));
     let saved = if shot.is_ok() { std::fs::rename(&fresh, &path) } else { std::fs::remove_file(&fresh) };
     let png = shot?;
     saved.map_err(|e| format!("Can't save the screenshot: {e}"))?;
@@ -107,17 +155,6 @@ fn look(pane: &str, udid: &str, boot: bool) -> Result<Found, String> {
 }
 
 impl AppWindow {
-    /// Finds a simulator by UDID, or the first booted one for `booted`.
-    /// shortcut: blocks the UI thread for one simctl list (about 0.4 s) so the agent gets a real error; move off-thread if control replies become async.
-    pub(super) fn resolve_sim(&self, target: &str) -> Result<String, String> {
-        if !sim::available() { return Err("Simulator panes need Xcode on macOS".into()); }
-        let devices = sim::devices()?;
-        let found = if target == "booted" { devices.into_iter().find(|d| d.booted) } else { devices.into_iter().find(|d| d.udid == target) };
-        let udid = found.map(|d| d.udid).ok_or_else(|| if target == "booted" { "No simulator is booted".into() } else { format!("{target} is not an available simulator (xcrun simctl list devices available)") })?;
-        if self.canvas_state.shutting_down_sims.contains(&udid) { return Err("The simulator is shutting down".into()); }
-        Ok(udid)
-    }
-
     /// Starts a refresh for each sim pane without a view, and drops views of closed panes.
     pub(super) fn load_sims(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ids: Vec<String> = self.canvas_state.doc.panes.iter().filter(|p| p.sim().is_some()).map(|p| p.id.clone()).collect();
@@ -128,17 +165,42 @@ impl AppWindow {
         }
     }
 
-    /// Adds a sim pane (udid empty: it lists simulators to pick) and starts showing it.
-    pub(super) fn add_sim_pane(&mut self, udid: String, point: canophy::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> String {
+    /// Adds a sim pane showing `target` (None: it lists simulators to pick), opening `url`
+    /// once it is booted, and starts showing it.
+    pub(super) fn add_sim_pane(&mut self, target: Option<Target>, url: Option<sim::Url>, point: canophy::Point, space: Option<String>, window: &mut Window, cx: &mut Context<Self>) -> String {
         let doc = &mut self.canvas_state.doc;
         let id = doc.next_file_id();
         let z = doc.panes.iter().map(|p| p.z).max().unwrap_or(0) + 1;
         // A phone in its bezel (about 1:2) under the header, in world px like every pane.
         let [w, h] = DEFAULT_SIZE;
-        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid }, rect: canophy::WorldRect::new(point[0], point[1], w, h), z, space, color: None, pinned: None });
+        doc.panes.push(canvas::Pane { id: id.clone(), kind: canvas::Kind::Sim { udid: String::new() }, rect: canophy::WorldRect::new(point[0], point[1], w, h), z, space, color: None, pinned: None });
         self.canvas_changed(cx);
+        self.new_sim_view(&id).pending = Pending { target, url, waiting: vec![] };
         self.refresh_sim(&id, true, window, cx);
         id
+    }
+
+    fn new_sim_view(&mut self, id: &str) -> &mut SimView {
+        self.canvas_state.sims.entry(id.to_owned()).or_insert_with(|| SimView {
+            screen: Screen::Loading, device: None, devices: vec![], png: None, pending: Pending::default(), _task: None,
+            #[cfg(target_os = "macos")] live: None,
+            #[cfg(target_os = "macos")] popped: None,
+            #[cfg(target_os = "macos")] _events: None,
+        })
+    }
+
+    /// Makes the held `canopy pane` reply wait for the pane's running refresh. False when there
+    /// is no held reply (the person ran the command) or no such pane.
+    pub(super) fn hold_sim_reply(&mut self, id: &str, waiter: impl FnOnce(Sender<Value>) -> Waiter) -> bool {
+        let Some(view) = self.canvas_state.sims.get_mut(id) else { return false };
+        let Some(tx) = self.held_reply.take() else { return false };
+        view.pending.waiting.push(waiter(tx));
+        true
+    }
+
+    /// Whether the pane is waiting on simctl, so a read should wait for the result.
+    pub(super) fn sim_loading(&self, id: &str) -> bool {
+        self.canvas_state.sims.get(id).is_some_and(|v| matches!(v.screen, Screen::Loading | Screen::Booting))
     }
 
     /// Drops the views of closed sim panes: frees their screenshots, stops their helpers and
@@ -146,6 +208,10 @@ impl AppWindow {
     pub(super) fn forget_sims(&mut self, ids: &[String], cx: &mut App) {
         for id in ids {
             let Some(view) = self.canvas_state.sims.remove(id) else { continue };
+            for waiter in view.pending.waiting {
+                let (Waiter::Opened { tx, .. } | Waiter::Read(tx)) = waiter;
+                let _ = tx.send(json!({"error": format!("the simulator pane {id} closed")}));
+            }
             if let Screen::Shot(old) = view.screen { drop_shot(old, cx); }
             #[cfg(target_os = "macos")]
             {
@@ -161,22 +227,22 @@ impl AppWindow {
         }
     }
 
-    /// Asks simctl again for a sim pane; `boot` boots a shut down simulator first.
-    /// The last screenshot stays up until the new one is ready.
+    /// Asks simctl again for a sim pane; `boot` boots a shut down simulator first. A pending
+    /// target or URL (see Pending) boots too. The last screenshot stays up until the new one is ready.
     pub(super) fn refresh_sim(&mut self, id: &str, boot: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(udid) = self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| p.sim()).map(str::to_owned) else { return };
-        if self.canvas_state.shutting_down_sims.contains(&udid) { return; }
-        let view = self.canvas_state.sims.entry(id.to_owned()).or_insert(SimView {
-            screen: Screen::Loading, device: None, devices: vec![], png: None, _task: None,
-            #[cfg(target_os = "macos")] live: None,
-            #[cfg(target_os = "macos")] popped: None,
-            #[cfg(target_os = "macos")] _events: None,
-        });
+        let Some(saved) = self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| p.sim()).map(str::to_owned) else { return };
+        if self.canvas_state.shutting_down_sims.contains(&saved) { return; }
+        let view = self.new_sim_view(id);
         if !sim::available() {
             view.screen = Screen::NoXcode;
             return;
         }
-        let booting = boot && !udid.is_empty() && !view.device.as_ref().is_some_and(|d| d.booted && d.udid == udid);
+        let named = view.pending.target.is_some();
+        let target = view.pending.target.clone().or_else(|| (!saved.is_empty()).then(|| Target::Udid(saved.clone())));
+        let url = view.pending.url.clone();
+        let boot = boot || named || url.is_some();
+        let showing = |udid: &str| view.device.as_ref().is_some_and(|d| d.booted && d.udid == udid);
+        let booting = boot && match &target { Some(Target::Udid(udid)) => !showing(udid), Some(Target::Booted) | None => false };
         if booting {
             set_screen(view, Screen::Booting, cx);
         } else if !matches!(view.screen, Screen::Shot(_)) {
@@ -185,29 +251,68 @@ impl AppWindow {
         let pane = id.to_owned();
         view._task = Some(cx.spawn_in(window, async move |this, cx| {
             let look_pane = pane.clone();
-            let found = cx.background_executor().spawn(async move { look(&look_pane, &udid, boot) }).await;
-            let _ = this.update_in(cx, |this, window, cx| {
-                let Some(view) = this.canvas_state.sims.get_mut(&pane) else { return };
-                match found {
-                    Ok(Found::Pick(devices)) => { view.device = None; view.devices = devices.clone(); set_screen(view, Screen::Pick(devices), cx); }
-                    Ok(Found::Gone(devices)) => { view.device = None; view.devices = devices; set_screen(view, Screen::Gone, cx); }
-                    Ok(Found::Off(device, devices)) => { view.device = Some(device); view.devices = devices; set_screen(view, Screen::Off, cx); }
-                    Ok(Found::Shot(device, devices, image, png)) => {
-                        view.device = Some(device);
-                        view.devices = devices;
-                        view.png = Some(png);
-                        set_screen(view, Screen::Shot(image), cx);
-                    }
-                    Err(error) => {
-                        set_screen(view, Screen::Failed(error.clone()), cx);
-                        this.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":error}}), window, cx);
-                    }
-                }
-                #[cfg(target_os = "macos")]
-                this.attach_live(&pane, window, cx);
-                cx.notify();
-            });
+            let found = cx.background_executor().spawn(async move { look(&look_pane, target, named, boot, url) }).await;
+            let _ = this.update_in(cx, |this, window, cx| this.sim_found(&pane, found, window, cx));
         }));
+        cx.notify();
+    }
+
+    /// Shows what a refresh found, saves a newly resolved device, and answers its waiters.
+    fn sim_found(&mut self, pane: &str, found: Result<Found, String>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.canvas_state.sims.get_mut(pane) else { return };
+        // This refresh used everything pending: every change to it starts a newer refresh.
+        let pending = std::mem::take(&mut view.pending);
+        let result = match found {
+            Ok(Found::Pick(devices)) => { view.device = None; view.devices = devices.clone(); set_screen(view, Screen::Pick(devices), cx); Err("No simulator picked yet".to_owned()) }
+            Ok(Found::Missing(why, devices)) => { view.device = None; view.devices = devices.clone(); set_screen(view, Screen::Pick(devices), cx); Err(format!("{why}. The pane {pane} shows the simulator picker")) }
+            Ok(Found::Gone(devices)) => { view.device = None; view.devices = devices; set_screen(view, Screen::Gone, cx); Err("This simulator no longer exists".to_owned()) }
+            Ok(Found::Off(device, devices)) => { view.device = Some(device); view.devices = devices; set_screen(view, Screen::Off, cx); Ok(None) }
+            Ok(Found::Shot(device, devices, image, png)) => {
+                view.device = Some(device);
+                view.devices = devices;
+                view.png = Some(png.clone());
+                set_screen(view, Screen::Shot(image), cx);
+                Ok(Some(png))
+            }
+            Err(error) => {
+                set_screen(view, Screen::Failed(error.clone()), cx);
+                // Only the person needs the toast: an agent that asked reads the error in its reply.
+                if pending.waiting.is_empty() { self.open_overlay(mods::new_overlay_id(), json!({"kind":"toast","notification":{"title":error.clone()}}), window, cx); }
+                Err(error)
+            }
+        };
+        let device = self.canvas_state.sims.get(pane).and_then(|v| v.device.clone());
+        // An agent's target is now a known device: the pane keeps showing it.
+        if let (Some(_), Some(device)) = (&pending.target, &device) {
+            if let Some(p) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == pane) {
+                if let canvas::Kind::Sim { udid } = &mut p.kind && *udid != device.udid {
+                    *udid = device.udid.clone();
+                    self.canvas_changed(cx);
+                }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        self.attach_live(pane, window, cx);
+        for waiter in pending.waiting {
+            match waiter {
+                Waiter::Opened { tx, mut reply } => {
+                    let answer = match (&result, &device) {
+                        (Ok(png), Some(device)) => {
+                            let opened = Opened { device: device.into(), url: pending.url.as_ref().filter(|_| device.booted).map(|u| u.as_str().to_owned()), screenshot: png.clone() };
+                            if let (Value::Object(r), Ok(Value::Object(o))) = (&mut reply, serde_json::to_value(opened)) { r.extend(o); }
+                            reply
+                        }
+                        (Err(error), _) => json!({"error": error}),
+                        (Ok(_), None) => json!({"error": "The simulator is not available"}),
+                    };
+                    let _ = tx.send(answer);
+                }
+                Waiter::Read(tx) => {
+                    let udid = device.as_ref().map(|d| d.udid.clone()).unwrap_or_default();
+                    let _ = tx.send(json!({"text": self.sim_read(pane, &udid, cx)}));
+                }
+            }
+        }
         cx.notify();
     }
 
@@ -265,18 +370,39 @@ impl AppWindow {
         cx.defer(move |cx| for (screen, shown) in changed { screen.update(cx, |s, cx| { s.shown = shown; s.sync(cx); }); });
     }
 
-    /// Points a sim pane at a simulator (empty: back to the list) and shows it, booting it if needed.
-    pub(super) fn point_sim(&mut self, id: &str, udid: String, window: &mut Window, cx: &mut Context<Self>) {
-        if self.canvas_state.shutting_down_sims.contains(&udid) {
-            return self.command_error("Choose simulator", "The simulator is shutting down", window, cx);
+    /// Points a sim pane at a simulator (None: back to the list) and shows it, booting it if needed.
+    /// `booted` resolves in the refresh, off the UI thread.
+    pub(super) fn point_sim(&mut self, id: &str, target: Option<Target>, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        if let Some(Target::Udid(udid)) = &target && self.canvas_state.shutting_down_sims.contains(udid) {
+            return Err("The simulator is shutting down".into());
         }
-        let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return };
-        let canvas::Kind::Sim { udid: saved } = &mut pane.kind else { return };
+        let Some(pane) = self.canvas_state.doc.panes.iter_mut().find(|p| p.id == id) else { return Err(format!("no pane {id}")) };
+        let canvas::Kind::Sim { udid: saved } = &mut pane.kind else { return Err(format!("pane {id} is not a simulator pane")) };
+        let (udid, pending) = match target {
+            Some(Target::Udid(udid)) => (udid, None),
+            Some(Target::Booted) => (saved.clone(), Some(Target::Booted)),
+            None => (String::new(), None),
+        };
         if *saved != udid {
             *saved = udid;
             self.canvas_changed(cx);
         }
+        self.new_sim_view(id).pending.target = pending;
         self.refresh_sim(id, true, window, cx);
+        Ok(())
+    }
+
+    /// Opens `url` on the pane's simulator, booting it first if needed.
+    pub(super) fn open_sim_url(&mut self, id: &str, url: sim::Url, window: &mut Window, cx: &mut Context<Self>) -> Result<(), String> {
+        let saved = self.canvas_state.doc.panes.iter().find(|p| p.id == id).and_then(|p| p.sim()).unwrap_or_default().to_owned();
+        if self.canvas_state.shutting_down_sims.contains(&saved) { return Err("The simulator is shutting down".into()); }
+        let view = self.new_sim_view(id);
+        if saved.is_empty() && view.pending.target.is_none() {
+            return Err(format!("Pick a simulator first: canopy pane open {id} booted (or a udid from canopy pane devices)"));
+        }
+        view.pending.url = Some(url);
+        self.refresh_sim(id, true, window, cx);
+        Ok(())
     }
 
     /// The selected sim pane, for its helper bar commands.
@@ -307,6 +433,8 @@ impl AppWindow {
         }).collect();
         self.forget_sims(&panes, cx);
         cx.notify();
+        // `canopy pane` hears the result; the person sees the toast.
+        let caller = self.held_reply.take();
         let id = id.to_owned();
         cx.spawn_in(window, async move |this, cx| {
             #[cfg(target_os = "macos")]
@@ -325,10 +453,16 @@ impl AppWindow {
                     if current && close {
                         this.close_boxed_panes(std::slice::from_ref(&id), cx);
                     } else if current {
-                        this.point_sim(&id, String::new(), window, cx);
+                        let _ = this.point_sim(&id, None, window, cx);
                     }
                 }
                 this.load_sims(window, cx);
+                if let Some(tx) = caller {
+                    let _ = tx.send(match &result {
+                        Ok(()) => serde_json::to_value(ShutDown { pane: id.clone(), udid: udid.clone(), state: sim::State::Shutdown }).unwrap_or_default(),
+                        Err(error) => json!({"error": format!("Could not shut down {device_name}: {error}")}),
+                    });
+                }
                 let mut notification = match result {
                     Ok(()) => json!({"title":format!("{device_name} shut down")}),
                     Err(error) => json!({"title":format!("Could not shut down {device_name}"),"body":error,"level":"error"}),
@@ -359,6 +493,7 @@ impl AppWindow {
                 return self.answer(r.map(|_| json!({})));
             }
             "canvas.sim_input" => return self.sim_input(a, window, cx),
+            "canvas.sim_devices" => return self.sim_devices(window, cx),
             _ => {}
         }
         let named = a["pane"].as_str().filter(|id| self.canvas_state.doc.panes.iter().any(|p| &p.id == id && p.sim().is_some())).map(str::to_owned);
@@ -406,6 +541,20 @@ impl AppWindow {
             _ => return self.fail("Live simulators need macOS"),
         }
         self.answer(Ok(json!({})));
+    }
+
+    /// `canopy pane devices`: every available simulator, listed off the UI thread and answered
+    /// through the held reply.
+    fn sim_devices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !sim::available() { return self.fail("Simulator panes need Xcode on macOS"); }
+        let Some(tx) = self.held_reply.take() else { return self.fail("canvas.sim_devices answers only canopy pane devices (an agent or script)") };
+        cx.spawn_in(window, async move |_, cx| {
+            let found = cx.background_executor().spawn(async { sim::devices() }).await;
+            let _ = tx.send(match found {
+                Ok(devices) => serde_json::to_value(Devices { devices: devices.iter().map(sim::Listing::from).collect() }).unwrap_or_default(),
+                Err(error) => json!({"error": error}),
+            });
+        }).detach();
     }
 
     /// The simulator picker: every available simulator, the current one checked, with Xcode's
@@ -681,7 +830,7 @@ impl AppWindow {
             Screen::Loading => center().into_any_element(),
             Screen::Booting => center().child(note(format!("Opening {name}…"))).into_any_element(),
             Screen::Off => center().child(note(format!("{name} is shut down"))).child(button("Boot", cx, |this, id, w, cx| this.refresh_sim(id, true, w, cx))).into_any_element(),
-            Screen::Gone => center().child(note("This simulator no longer exists".into())).child(button("Choose another", cx, |this, id, w, cx| this.point_sim(id, String::new(), w, cx))).into_any_element(),
+            Screen::Gone => center().child(note("This simulator no longer exists".into())).child(button("Choose another", cx, |this, id, w, cx| { let _ = this.point_sim(id, None, w, cx); })).into_any_element(),
             Screen::NoXcode => center().child(note("Simulator panes need Xcode on macOS".into())).into_any_element(),
             Screen::Failed(error) => center().child(note(error.clone())).child(button("Try again", cx, |this, id, w, cx| this.refresh_sim(id, false, w, cx))).into_any_element(),
             Screen::Pick(devices) if devices.is_empty() => center().child(note("No simulators. Add one in Xcode's Device Hub.".into())).into_any_element(),
@@ -693,7 +842,9 @@ impl AppWindow {
                         .child(div().text_ellipsis().child(d.name.clone()))
                         .child(div().text_size(px(12.)).text_color(c("muted-foreground")).child(if d.booted { format!("{} · Booted", d.runtime) } else { d.runtime.clone() }))
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .on_click(cx.listener(move |this, _, window, cx| this.point_sim(&pane, udid.clone(), window, cx)))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            if let Err(e) = this.point_sim(&pane, Some(Target::Udid(udid.clone())), window, cx) { this.command_error("Choose simulator", &e, window, cx); }
+                        }))
                 })).into_any_element(),
         }
     }
