@@ -10,19 +10,19 @@ None of this changes how the agent CLI is configured. Canopy never edits your gl
 
 ## The canopy skill
 
-A skill is a set of instructions an agent loads when a task calls for it, discovered by its name and description. The `canopy` skill explains panes, wiring, quotes, helpers and peer messages, with the exact commands.
+A skill is a set of instructions an agent loads when a task calls for it, discovered by its name and description. The `canopy` skill gives an agent the exact commands for the jobs people ask for most: showing a site in a browser pane and on the iOS simulator, opening files and notes, starting helpers, messaging wired peers, and writing a mod. Its `SKILL.md` stays short. Deeper detail sits in `references/` files that the agent opens only when the task needs them: `simulator.md`, `browser.md`, `panes-and-canvas.md`, `mods.md` (a step-by-step guide to writing a mod, with examples that pass `canopy check`) and `customize.md`. So a person who knows no Rust can still hand the skill to any coding agent and ask for a new pane or panel.
 
 Canopy installs it every time it starts, for each installed agent whose `programs.json` entry names a skills folder:
 
 | Agent | Skill file |
 |---|---|
-| Claude Code | `~/.claude/skills/canopy/SKILL.md` |
-| Codex | `~/.agents/skills/canopy/SKILL.md` |
-| Others with a `skills` folder | `<skills>/canopy/SKILL.md` |
+| Claude Code | `~/.claude/skills/canopy/SKILL.md` and `references/` |
+| Codex | `~/.agents/skills/canopy/SKILL.md` and `references/` |
+| Others with a `skills` folder | `<skills>/canopy/SKILL.md` and `references/` |
 
 Canopy writes only its own `canopy` folder. It marks the files it installs, updates only marked files, and leaves an unmarked `SKILL.md` alone, so your own edits are never overwritten.
 
-To print the skill, for an agent CLI without skill support, run `canopy --skill`.
+To print the skill, for an agent CLI without skill support, run `canopy --skill`. It prints `SKILL.md` followed by every reference file.
 
 `CANOPY_SKILL_HOME` replaces your home folder when Canopy works out these paths. It is useful for testing in a scratch folder. See [Files and Folders](Files-and-Folders) for other environment variables.
 
