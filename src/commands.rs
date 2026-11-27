@@ -50,7 +50,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.new", &[opt("like")], "Create a terminal beside the selected cell, in its space. With like: true, start what the selected cell runs (an agent or other startable program), else a plain terminal."),
     cmd("canvas.agents", &[], "Open the installed agent list beside the selected cell."),
     cmd("quote.menu", &[req("path"), opt("start"), opt("end"), req("text"), opt("point"), opt("pane"), opt("kind"), opt("source")], "Open the quote popover at point or the pointer: agents wired to the quoted pane first, then other running agents, then installed agents to start with the quote."),
-    cmd("canvas.close_focused", &[], "Close the focused Files panel tab, or the one selected canvas pane. A browser closes its active tab; with several or no panes selected, nothing closes. Only the person can run it."),
+    cmd("canvas.close_focused", &[], "Close the focused Files panel tab, or the one selected canvas pane. A browser closes its active tab, and its last tab closes the pane; with several or no panes selected, nothing closes. Only the person can run it."),
     cmd("canvas.close", &[opt("terminal"), opt("terminals"), opt("confirmed"), opt("dont_ask"), opt("pane"), opt("panes")], "Close every selected pane (else the focused one) behind one dialog listing them, the named terminal, or one file or mod pane by id (pane; a mod pane holding text refuses); terminals and panes are the confirmed lists, closed without asking; working sub-agents refuse. Dialogs pass confirmed as agent or terminal, and dont_ask disables future plain-terminal prompts."),
     cmd("canvas.note_new", &[opt("point")], "Open a sticky note on the canvas. The optional point is in world coordinates."),
     cmd("canvas.pane_new", &[req("kind"), opt("path"), opt("url"), opt("udid"), opt("wire"), opt("point"), opt("place"), opt("pinned")], "Open a file, browser, sim (on a Mac with Xcode), or mod:<name> pane. Files require path. A browser accepts an HTTP(S) address, an absolute local path or a file URL, and opens New tab when url is omitted. A sim opens udid (a simulator or \"booted\") or lists devices to pick. place is \"panel\" (a tab in the Files panel, the default for browsers and sims), \"canvas\" (at point, the middle of the view by default) or \"pinned\" (the top right of the screen; pinned: true is the same). Pass wire to place it beside a terminal and wire it in that terminal's space. A file path already open moves its pane. The reply includes pane, kind, wired and the pane's path, url or udid when applicable."),
@@ -199,7 +199,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("canvas.pdf_next", &[], "Go to the next page in the last selected PDF pane."),
     cmd("preview.external", &[req("path")], "Open a local image or PDF in macOS Preview."),
     cmd("canvas.pdf_zoom_out", &[], "Zoom out in the last selected PDF pane."),
-    cmd("canvas.pdf_zoom_reset", &[], "Reset zoom in the last selected PDF pane."),
+    cmd("canvas.pdf_zoom_reset", &[], "Reset zoom in the last selected PDF pane: the page fits the pane's width again."),
     cmd("canvas.pdf_zoom_in", &[], "Zoom in in the last selected PDF pane."),
     cmd("canvas.pdf_clear", &[], "Clear all highlights in the last selected PDF pane."),
 ];
