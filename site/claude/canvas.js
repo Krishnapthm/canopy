@@ -1,4 +1,4 @@
-// The canopy canvas in claude.html's hero: its panes (drawn by scenes.js) that move by their headers
+// The canopy canvas in the landing page's hero: its panes (drawn by scenes.js) that move by their headers
 // and nothing else (no pan, no zoom), and wires that follow them. Uses scenes.js for wire geometry.
 
 const stage = document.querySelector("[data-stage]");
@@ -139,7 +139,7 @@ function makeRoom(dragged, home) {
 function glide(p) {
   const { x: fromX, y: fromY } = p.drawn;
   const { x, y } = p;
-  animate(p, 500, (progress) => {
+  animate(p, 320, (progress) => {
     paintPane(p, fromX + (x - fromX) * progress, fromY + (y - fromY) * progress);
     drawLinks();
   });
@@ -161,12 +161,16 @@ app.addEventListener("pointerdown", (event) => {
   const move = (e) => {
     pane.x = ox + (e.clientX - sx) / k; pane.y = oy + (e.clientY - sy) / k;
     clamp(pane);
+    const previous = panes.map((p) => [p.x, p.y]);
     fits = makeRoom(pane, home);
     // With no room here the pane floats above the others, which hold the last layout that fitted.
     if (fits) good = new Map(panes.map((p) => [p, [p.x, p.y]]));
     else for (const p of panes) if (p !== pane) [p.x, p.y] = good.get(p);
     place(pane);
-    for (const p of panes) if (p !== pane) glide(p);
+    panes.forEach((p, i) => {
+      const [x, y] = previous[i];
+      if (p !== pane && (p.x !== x || p.y !== y)) glide(p);
+    });
     drawLinks();
   };
   const end = () => {

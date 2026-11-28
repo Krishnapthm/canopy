@@ -1,4 +1,4 @@
-// claude.html behaviour: the footer light that follows the pointer, and the install
+// Landing page behaviour: the footer light that follows the pointer, and the install
 // copy button.
 
 const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -8,13 +8,20 @@ const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 // moves; a light that came down onto the sheet would wash the flat plastic out.
 const footer = document.querySelector("#footer");
 const lights = footer.querySelectorAll("[data-light]");
+const brand = footer.querySelector(".footer-brand");
 const light = { azimuth: 225 };
-const paint = () => lights.forEach((l) => l.setAttribute("azimuth", light.azimuth));
+const paint = () => {
+  const angle = light.azimuth.toFixed(1);
+  for (const lamp of lights) {
+    if (lamp.getAttribute("azimuth") !== angle) lamp.setAttribute("azimuth", angle);
+  }
+};
 // Turn the short way round: pick the equivalent angle nearest the current one.
 const near = (deg) => deg + 360 * Math.round((light.azimuth - deg) / 360);
 const turnTo = (deg, duration) => {
   const from = light.azimuth;
   const to = near(deg);
+  if (Math.abs(to - from) < 0.05) { stopAnimation(light); return; }
   animate(light, duration * 1000, (progress) => {
     light.azimuth = from + (to - from) * progress;
     paint();
@@ -23,10 +30,10 @@ const turnTo = (deg, duration) => {
 if (!calm) {
   footer.addEventListener("pointermove", (e) => {
     if (e.pointerType !== "mouse") return;
-    const box = footer.querySelector(".footer-brand").getBoundingClientRect(); // aim from the artwork's centre
-    turnTo(Math.atan2(e.clientY - (box.top + box.height / 2), e.clientX - (box.left + box.width / 2)) * 180 / Math.PI, .6);
+    const box = brand.getBoundingClientRect();
+    turnTo(Math.atan2(e.clientY - (box.top + box.height / 2), e.clientX - (box.left + box.width / 2)) * 180 / Math.PI, .26);
   });
-  footer.addEventListener("pointerleave", () => turnTo(225, 1.2));
+  footer.addEventListener("pointerleave", () => turnTo(225, .65));
 }
 
 // Copy button: shown only where the clipboard API exists; falls back to selecting the command.

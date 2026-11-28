@@ -1,4 +1,4 @@
-/* canopy marketing page (claude.html). Type follows ignsight.com: one weight (450), three sizes,
+/* Canopy landing page. Type follows ignsight.com: one weight (450), three sizes,
    tracking that tightens as size grows. No rules or borders on the page: space carries the hierarchy.
    The canopy canvas in the stage is the exception: it copies the app's own dark chrome. */
 @font-face {
@@ -96,6 +96,7 @@ svg { display: block; }
 /* Hero */
 .hero { padding-top: clamp(3rem, 9vw, 7.5rem); padding-bottom: clamp(3rem, 6vw, 5rem); }
 .hero .t-display { max-width: 24em; }
+.hero .t-body { max-width: 39em; margin-top: 0.65rem; }
 .actions { display: flex; gap: 0.6rem; margin-top: 2rem; }
 
 /* ---------------------------------------------------------------------------------------------------
@@ -165,6 +166,32 @@ svg { display: block; }
 .dot.done { fill: #4eba65; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
+/* Checkout: the phone scrolls, taps Place order and shows the confirmation on the same clock. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-checkout] [data-scroll] { animation: checkout-scroll 8s ease-in-out infinite; }
+  [data-checkout] [data-btn] {
+    animation: checkout-press 8s ease-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  [data-checkout] [data-done] { animation: checkout-confirm 8s ease-out infinite; }
+  [data-checkout]:not(.checkout-playing) :is([data-scroll], [data-btn], [data-done]) {
+    animation-play-state: paused;
+  }
+}
+@keyframes checkout-scroll {
+  0%, 15%, 89%, 100% { transform: translateY(0); }
+  37.5%, 88% { transform: translateY(-230px); }
+}
+@keyframes checkout-press {
+  0%, 49%, 54.5%, 100% { transform: scale(1); }
+  51% { transform: scale(0.96); }
+}
+@keyframes checkout-confirm {
+  0%, 52.5%, 93%, 100% { opacity: 0; }
+  57.5%, 88% { opacity: 1; }
+}
+
 /* ---------------------------------------------------------------------------------------------------
    Features: one rounded rectangle split in two with no seam, alternating sides. One half is a gradient holding the heading and its
    paragraph (white, then quiet, as on Ignsight); the other is the canvas itself, with no frame. */
@@ -179,12 +206,13 @@ svg { display: block; }
 .feature:nth-child(even) { grid-template-columns: minmax(0, 5fr) minmax(0, 3fr); }
 .feature:nth-child(even) .feature-text { order: 2; }
 .feature-text {
-  --quiet: #ffffffb3;
+  --quiet: #ffffffcc;
   padding: clamp(1.25rem, 3.5vw, 3rem);
   color: #fff;
   background: linear-gradient(#5e5e5e, #565656 45%, #1b1b1b);
   text-wrap: pretty;
 }
+.feature-text p { margin-top: 0.75rem; }
 /* The shot keeps its 740:560 picture whole; the frame is never taller than the screen less the
    scroll margin above it, so "features" lands on a whole frame. */
 .shot { display: grid; place-items: center; background: #111; }
@@ -245,6 +273,7 @@ svg { display: block; }
   background: #315bc5;
 }
 .footer-surface { position: absolute; inset: 0; width: 100%; height: 100%; }
+.footer-grain { mix-blend-mode: hard-light; }
 .footer-relief {
   position: absolute;
   inset: 0;
@@ -252,10 +281,13 @@ svg { display: block; }
   display: grid;
   place-items: center;
   padding-bottom: min(22%, 24dvh);
+}
+.footer-brand {
+  gap: 0.49em;
+  font-size: min(16vw, 27dvh);
   filter: url(#footer-emboss);
   mix-blend-mode: hard-light;
 }
-.footer-brand { gap: 0.49em; font-size: min(16vw, 27dvh); }
 .footer-brand span { font-size: 1.2em; }
 .footer-brand svg { width: 1.22em; height: 1.22em; flex: none; }
 .links {

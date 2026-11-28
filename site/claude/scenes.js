@@ -1,4 +1,4 @@
-// Every picture of canopy on claude.html, drawn as SVG from one set of parts: a pane with its header
+// Every picture of canopy on index.html, drawn as SVG from one set of parts: a pane with its header
 // and state dot, terminal rows, a browser, an iPhone, the Harbor shop they show, the Files panel and
 // wires. The hero canvas and the feature shots use the same parts and the same session, so the page
 // reads as one afternoon on one project. Text is real SVG text in the page's fonts (Geist, JetBrains
@@ -422,7 +422,7 @@ const Scenes = (() => {
     "{cyan|›} {cyan|1. Yes, proceed}",
     "  2. No, tell Codex what to do",
   ];
-  // The hero's panes, keyed by the ids in claude.html. `device` panes are a bare phone, no pane chrome.
+  // The hero's panes, keyed by the ids in index.html. `device` panes are a bare phone, no pane chrome.
   const HERO = {
     t1: { title: "Claude Code", sub: "checkout", icon: "claude", dot: "work", body: working(T0) },
     codex: { title: "Codex", sub: "promo tests", icon: "codex", dot: "work", body: codex(T2) },
@@ -455,21 +455,6 @@ const Scenes = (() => {
       placed({ x: 16, y: 16, w: 708, h: 528, title: "Files", sub: "harbor", icon: "folder", dot: null, body: files })),
   };
 
-  // --- the phone's loop: scroll down, press Place order, show the confirmation, start again ----------
-  function playCheckout(svg) {
-    const scroll = svg.querySelector("[data-scroll]"), btn = svg.querySelector("[data-btn]"), done = svg.querySelector("[data-done]");
-    const tl = gsap.timeline({ repeat: -1, repeatDelay: .6, paused: true })
-      .set(scroll, { y: 0 })
-      .to(scroll, { y: -230, duration: 1.8, ease: "power2.inOut" }, 1.2)
-      .to(btn, { scale: .96, svgOrigin: "201 803", duration: .14, ease: "power1.out" }, "+=.9")
-      .to(btn, { scale: 1, duration: .3, ease: "power2.out" })
-      .to(done, { opacity: 1, duration: .4, ease: "power1.out" }, "-=.15")
-      .to({}, { duration: 2.4 })
-      .to(done, { opacity: 0, duration: .35 })
-      .set(scroll, { y: 0 }, "<");
-    ScrollTrigger.create({ trigger: svg, onToggle: (s) => (s.isActive ? tl.play() : tl.pause()) });
-  }
-
   // Claude Code's spinner, as on the Ignsight site: the glyph breathes every 120ms, the verb changes, the
   // timer counts. It ticks only while its pane is on screen.
   const GLYPHS = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"], VERBS = ["Percolating", "Cogitating", "Noodling", "Discombobulating"];
@@ -500,9 +485,11 @@ const Scenes = (() => {
     el.innerHTML = `<svg class="sv" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" overflow="visible">${def.device ? phone(def.device, { drag: true })(w, h) : pane({ w, h, ...def })}</svg>`;
   }
   for (const el of document.querySelectorAll("[data-scene]")) el.innerHTML = SHOTS[el.dataset.scene]();
-  gsap.registerPlugin(ScrollTrigger);
   if (matchMedia("(prefers-reduced-motion: no-preference)").matches) {
-    document.querySelectorAll("[data-checkout]").forEach(playCheckout);
+    const checkout = new IntersectionObserver((entries) => {
+      for (const { target, isIntersecting } of entries) target.classList.toggle("checkout-playing", isIntersecting);
+    });
+    document.querySelectorAll("[data-checkout]").forEach((phone) => checkout.observe(phone));
     document.querySelectorAll("[data-working]").forEach(startWorking);
   } else document.querySelectorAll("[data-talk]").forEach((g) => g.remove());
 
