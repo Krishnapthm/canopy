@@ -1,12 +1,12 @@
-import { View, div, svg } from "gpui-kit";
+import { View, div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, agents, panes, theme, ui, run, window, keys } from "herdr";
+import { spaces, agents, panes, theme, ui, run, window, keys, openOverlay } from "herdr";
 
 const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 
 // The agents to show as chips: needs-you first, then most recently changed; the rest are counted.
-function chips(list, max = 6) {
-  const sorted = [...list].sort((a, b) => (RANK[b.status] ?? 0) - (RANK[a.status] ?? 0) || b.seq - a.seq);
+function chips(list, space, max = 6) {
+  const sorted = list.filter(a => space != null && a.space === space).sort((a, b) => (RANK[b.status] ?? 0) - (RANK[a.status] ?? 0) || b.seq - a.seq);
   return { shown: sorted.slice(0, max), more: Math.max(0, sorted.length - max) };
 }
 
@@ -25,18 +25,13 @@ export default class WorkspaceStatus extends View {
   render() {
     const t = theme();
     const space = spaces().find(s => s.active);
-    const { shown, more } = chips(agents());
+    const { shown, more } = chips(agents(), space?.id);
     const allPanes = panes();
     const tint = (color) => color?.startsWith("#") ? color : color ? t[`tint-${color}`] : undefined;
-    const spaceTint = tint(space?.color);
     const dot = { blocked: t.blocked, working: t.working, done: t.done ?? t.accent, idle: t.dim };
     const colorDot = (color) => div().size(6).rounded(3).flex_none().bg(color);
     const chip = (id) => h_flex().id(id).gap(6).items_center().px(6).h(18).rounded(ui.size.radiusSm).cursor_pointer().hover(s => s.bg(t.hover));
     return h_flex().size_full().px(12).gap(12).items_center().bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
-      .when(Boolean(space?.branch), el => el.child(h_flex().gap(6).items_center()
-        .child(svg("mods/workspace-chrome/branch.svg").size(13))
-        .when(Boolean(spaceTint), label => label.child(colorDot(spaceTint)))
-        .child(space.branch)))
       .children(shown.map(a => {
         const paneTint = tint(allPanes.find(p => p.pane === a.pane)?.color);
         return chip(`agent-${a.address}`)
@@ -45,7 +40,7 @@ export default class WorkspaceStatus extends View {
           .child(colorDot(paneTint ?? dot[a.status] ?? t.dim))
           .child(div().max_w(120).truncate().text_color(paneTint ?? (a.status === "blocked" ? t.blocked : t.muted)).child(a.program?.name || a.title || a.address));
       }))
-      .when(more > 0, el => el.child(chip("agents-more").on_click(() => run("mod.open", { name: "picker" })).child(`+${more}`)))
+      .when(more > 0, el => el.child(chip("agents-more").on_click(() => openOverlay({ mod: "picker", kind: "popup", width: 460, props: { agentSpace: space.id } })).child(`+${more}`)))
       .child(div().flex_1())
       .child(div().id("palette").text_color(t.dim).on_click(() => run("app.palette")).child(this.hint(t)));
   }

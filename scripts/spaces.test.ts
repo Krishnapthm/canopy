@@ -157,82 +157,6 @@ test("closing 75 quiet repos cancels each watch, preserving a shown worktree and
   expect(h.view.watching.size).toBe(0);
 });
 
-const machine = { name: "cloud", id: "old", target: "user@host", session: null, via: false };
-
-test("Connect removes then pairs the same SSH machine, ignoring repeat clicks", async () => {
-  const { view, calls, tasks, cx } = harness();
-  view.reconnect(machine, cx);
-  view.reconnect(machine, cx);
-  await Promise.all(tasks);
-  expect(calls).toEqual([
-    ["machine", "rm", "cloud", "--json"],
-    ["machine", "add", "user@host", "--name", "cloud", "--json"],
-  ]);
-  expect(view.reconnecting).toEqual({});
-  expect(view.folded.has("cloud")).toBe(false);
-});
-
-test("Connect preserves a via command and nondefault core session", async () => {
-  const { view, calls, tasks, cx } = harness();
-  view.reconnect({ ...machine, via: true, target: "ssh -p 2222 host", session: "work" }, cx);
-  await Promise.all(tasks);
-  expect(calls[1]).toEqual([
-    "machine", "add", "--via", "ssh -p 2222 host", "--name", "cloud", "--session", "work", "--json",
-  ]);
-});
-
-test("a failed removal never adds, and a failed add remains retryable without another removal", async () => {
-  const failure = { code: 1, stdout: "", stderr: '{"error":{"message":"no connection"}}' };
-  const removed = harness([failure]);
-  removed.view.reconnect(machine, removed.cx);
-  await Promise.all(removed.tasks);
-  expect(removed.calls).toHaveLength(1);
-  expect(removed.view.reconnecting.cloud.error).toBe("no connection");
-  expect(removed.view.reconnecting.cloud.removed).toBe(false);
-
-  const added = harness([{ code: 0 }, failure]);
-  added.view.reconnect(machine, added.cx);
-  await Promise.all(added.tasks);
-  expect(added.view.reconnecting.cloud.machine).toEqual(machine);
-  expect(added.view.reconnecting.cloud.busy).toBe(false);
-  added.view.reconnect(machine, added.cx);
-  await Promise.all(added.tasks);
-  expect(added.calls.map(c => c[1])).toEqual(["rm", "add", "add"]);
-  expect(added.view.reconnecting).toEqual({});
-});
-
-test("temporary reconnects remain temporary", async () => {
-  const { view, calls, tasks, cx } = harness();
-  view.reconnect({ ...machine, temporary: true }, cx);
-  await Promise.all(tasks);
-  expect(calls[1]).toContain("--temp");
-});
-
-test("failed pairing survives a sidebar restart and retries without removal", async () => {
-  const failed = harness([{ code: 0 }, { code: 1, stderr: "core too old" }]);
-  failed.view.reconnect(machine, failed.cx);
-  await Promise.all(failed.tasks);
-  const restarted = harness([], failed.storage);
-  restarted.view.init({}, restarted.cx);
-  expect(restarted.view.reconnecting.cloud.machine).toEqual(machine);
-  expect(restarted.view.reconnecting.cloud.error).toBe("core too old");
-  expect(restarted.view.reconnecting.cloud.busy).toBe(false);
-  restarted.view.reconnect(machine, restarted.cx);
-  await Promise.all(restarted.tasks);
-  expect(restarted.calls.map(c => c[1])).toEqual(["add"]);
-  const completed = harness([], failed.storage);
-  completed.view.init({}, completed.cx);
-  expect(completed.view.reconnecting).toEqual({});
-});
-
-test("unexpected transport failures clear the busy state", async () => {
-  const { view, tasks, cx } = harness([new Error("offline")]);
-  view.reconnect(machine, cx);
-  await Promise.all(tasks);
-  expect(view.reconnecting.cloud.busy).toBe(false);
-  expect(view.reconnecting.cloud.error).toBe("offline");
-});
-
 function orderedHarness(ids: string[]) {
   const h = harness([], new Map(), ids.map(id => ({ id, folder: "/" + id })));
   h.view.git = {};
@@ -318,23 +242,6 @@ test("dragging a main checkout moves the right id and its children follow", () =
   expect(h.moves).toEqual([]);
 });
 
-test("a machine becoming ready retries a previously rejected batch", () => {
-  const h = orderedHarness(["topic", "main"]);
-  h.git("main", "repo", false);
-  h.git("topic", "repo", true);
-  h.availability[0].layout = "unavailable";
-  h.rows();
-  h.moves.splice(0); // The unavailable machine rejected the moves.
-  h.rows();
-  expect(h.moves).toEqual([]);
-  h.availability[0].layout = "ready";
-  h.rows();
-  expect(h.moves).toEqual([{ id: "main", index: 1 }]);
-  h.flush();
-  h.rows();
-  expect(h.moves).toEqual([]);
-});
-
 test("a lost write retries after settling even without an intermediate ordered render", () => {
   const now = spyOn(Date, "now").mockReturnValue(10000);
   try {
@@ -363,27 +270,6 @@ test("a lost write retries after settling even without an intermediate ordered r
     h.rows();
     expect(h.moves).toEqual([]);
     expect(h.view.ordering).toBeNull();
-  } finally {
-    now.mockRestore();
-  }
-});
-
-test("settled retries wait for the affected machine to be ready", () => {
-  const now = spyOn(Date, "now").mockReturnValue(10000);
-  try {
-    const h = orderedHarness(["topic", "main"]);
-    h.git("main", "repo", false);
-    h.git("topic", "repo", true);
-    h.availability[0].layout = "unavailable";
-    h.rows();
-    h.moves.splice(0);
-    now.mockReturnValue(12000);
-    expect(h.view.orderingDue(Date.now())).toBe(false);
-    h.rows();
-    expect(h.moves).toEqual([]);
-    h.availability[0].layout = "ready";
-    h.rows();
-    expect(h.moves).toEqual([{ id: "main", index: 1 }]);
   } finally {
     now.mockRestore();
   }

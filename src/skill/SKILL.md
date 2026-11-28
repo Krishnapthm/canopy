@@ -111,6 +111,9 @@ app reloads on save. No Rust or app rebuild is involved. Read
 (`canopy check`, `canopy status`, `canopy shot`), working examples and the rules
 that keep a mod fast.
 
+The Files footer can switch the checkout to an existing local branch after editor drafts are saved.
+Remote machines and mobile access are paused. Local Simulator panes remain available.
+
 For settings, keys, layouts, agent flags or the project instruction block, read
 [references/customize.md](references/customize.md).
 

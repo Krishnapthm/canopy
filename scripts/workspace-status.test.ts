@@ -5,20 +5,20 @@ const source = (await readFile(new URL("../defaults/mods/workspace-status/main.j
   .replace(/^import .*;\n/gm, "").replace("export default class", "class");
 const chips = new Function("View", `${source}; return chips;`)(class {});
 
-const agent = (address: string, status: string, seq: number) => ({ address, status, seq });
+const agent = (address: string, status: string, seq: number) => ({ address, status, seq, space: "s1" });
 
 test("chips put blocked first, then done, working, idle, newest first within a status", () => {
   const { shown, more } = chips([
     agent("idle-new", "idle", 9), agent("work", "working", 5), agent("done", "done", 1),
     agent("block-old", "blocked", 2), agent("block-new", "blocked", 7), agent("idle-old", "idle", 3),
-  ]);
+  ], "s1");
   expect(shown.map((a: any) => a.address)).toEqual(["block-new", "block-old", "done", "work", "idle-new", "idle-old"]);
   expect(more).toBe(0);
 });
 
 test("chips cap at six and count the rest", () => {
   const list = Array.from({ length: 8 }, (_, i) => agent(`a${i}`, "idle", i));
-  const { shown, more } = chips(list);
+  const { shown, more } = chips([...list, { ...agent("outside", "blocked", 99), space: "s2" }], "s1");
   expect(shown).toHaveLength(6);
   expect(more).toBe(2);
 });
@@ -34,7 +34,7 @@ test("agent dots use effective pane colors, falling back to status", () => {
   const Status = new Function("View", "div", "svg", "h_flex", "theme", "spaces", "agents", "panes", "ui", "window", "keys", `${source}; return WorkspaceStatus;`)(
     class {}, node, node, node,
     () => ({ "tint-blue": "#abc", "tint-teal": "#def", blocked: "#123" }),
-    () => [{ active: true, branch: "main", color: "blue" }],
+    () => [{ id: "s1", active: true, color: "blue" }],
     () => [
       { ...agent("t1", "blocked", 4), pane: "p1" },
       { ...agent("t2", "blocked", 3), pane: "p2" },
@@ -48,7 +48,7 @@ test("agent dots use effective pane colors, falling back to status", () => {
     { size: { radiusSm: 4 } }, () => ({}), () => [],
   );
   new Status().render();
-  expect(colors.filter(color => JSON.stringify(color) === JSON.stringify(["bg", "#abc"]))).toHaveLength(2);
+  expect(colors.filter(color => JSON.stringify(color) === JSON.stringify(["bg", "#abc"]))).toHaveLength(1);
   expect(colors).toContainEqual(["bg", "#def"]);
   expect(colors).toContainEqual(["bg", "#aabbcc"]);
   expect(colors).toContainEqual(["bg", "#123"]);

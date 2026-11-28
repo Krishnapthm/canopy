@@ -3,11 +3,11 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar } from "gpui-base";
-import { spaces, run, theme, props, closeOverlay, setShared, shared, hc, appHome, readTextFile, writeTextFile, settings, layout, keys } from "herdr";
+import { spaces, run, theme, props, closeOverlay, setShared, shared, appHome, readTextFile, writeTextFile, settings, layout, keys } from "herdr";
 
 const I = (name) => `frame/welcome/${name}.svg`;
 const W = (name) => `mods/workspace-chrome/${name}.svg`;
-const PAGES = 4;
+const PAGES = 3;
 const ASK = "Read ~/.config/canopy/AGENTS.md, then tell me what you can change in Canopy.";
 const APPEARANCES = [
   [null, "System"],
@@ -39,7 +39,6 @@ function find(node, id) {
 export default class Welcome extends View {
   init(_props, cx) {
     this.page = 1;
-    this.machines = [];
     this.copied = null;
     this.appearance = null;
     this.handle = cx.focus_handle();
@@ -51,26 +50,8 @@ export default class Welcome extends View {
       try {
         this.appearance = JSON.parse((await readTextFile(`${appHome()}/settings.json`)) ?? "{}").appearance ?? null;
       } catch {}
-      await this.loadMachines();
       cx.notify();
     });
-    // Machines added meanwhile (the Add a machine dialog) appear.
-    cx.timer.every(3000, (cx) => {
-      if (this.page !== 2) return;
-      cx.spawn(async (cx) => {
-        await this.loadMachines();
-        cx.notify();
-      });
-    });
-  }
-
-  async loadMachines() {
-    const r = await hc(["machine", "ls", "--json"]).catch(() => null);
-    try {
-      this.machines = r?.code === 0 ? (JSON.parse(r.stdout).machines ?? []).filter((m) => !m.temporary) : [];
-    } catch {
-      this.machines = [];
-    }
   }
 
   done(outcome) {
@@ -266,61 +247,9 @@ export default class Welcome extends View {
       .child(this.title(t, "Canopy runs your terminals in the background", "The terminals and agents you open here don't live in this window. They run in herdr-core, a small background program on your computer. Close Canopy, update it, or let it crash, and your agents keep working. Open it again and everything is where you left it, as long as the computer is on."))
       .child(this.feature(t, "bot", "Agents tell you when they need you", "A ring while one works, \u201cNeeds you\u201d when it asks something, a sound when it finishes."))
       .child(this.feature(t, "messages", "Agents can start helpers", "They show up under the agent that started them. Click one to watch it."))
-      .child(this.feature(t, "layers", "Your other machines, in the same window", "A server or a Mac mini runs its own herdr-core, so its agents keep going even while this laptop sleeps."))
       .child(div().h(1).bg(t.border))
       .child(h_flex().gap(10).items_center().child(div().w(84).text_size(13).text_color(t.muted).child("Appearance")).child(this.segment(t, APPEARANCES, this.appearance, (v, cx) => this.setAppearance(v, cx))))
       .child(h_flex().gap(10).items_center().child(div().w(84).text_size(13).text_color(t.muted).child("Size")).child(this.sizeControl(t)));
-  }
-
-  machineRow(t, icon, name, note, ok) {
-    return h_flex()
-      .h(42)
-      .px(12)
-      .gap(10)
-      .items_center()
-      .border_b(1)
-      .border_color(t.border)
-      .child(svg(W(icon)).size(15).text_color(t.muted))
-      .child(div().flex_1().min_w(0).truncate().text_size(13).text_color(t.foreground).child(name))
-      .child(div().text_size(12).text_color(t.dim).child(note))
-      .child(div().w(8).h(8).rounded(4).bg(ok ? t.ansi2 : t.dim));
-  }
-
-  pageTwo(t) {
-    return v_flex()
-      .gap(18)
-      .child(this.title(t, "Add your other machines", "Pick a host from your ssh config. Install herdr-core there first. Canopy connects and lists that machine in the sidebar with its own spaces."))
-      .child(
-        v_flex()
-          .rounded(12)
-          .border_1()
-          .border_color(t.border)
-          .bg(t.background)
-          .overflow_hidden()
-          .child(this.machineRow(t, "monitor", "This computer", "here", true))
-          .children(this.machines.map((m) => v_flex()
-            .child(this.machineRow(t, "server", m.name, m.state === "connected" ? "connected" : (m.state ?? "offline").replace(/_/g, " "), m.state === "connected"))
-            .when(m.state === "needs_login", el => el.child(v_flex().p(12).gap(6)
-              .child(div().text_size(12).text_color(t.blocked).child("needs a login: run"))
-              .child(this.copyLine(t, `hc machine login ${m.name}`, `w-login-copy-${m.name}`))))))
-          .child(
-            h_flex()
-              .id("w-add-machine")
-              .h(42)
-              .px(12)
-              .gap(10)
-              .items_center()
-              .cursor_pointer()
-              .text_size(13)
-              .text_color(t.accent)
-              .hover((s) => s.bg(t.hover))
-              .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-              .on_click(() => run("mod.open", { name: "machine-add" }))
-              .child(svg(W("plus")).size(15))
-              .child("Add a machine"),
-          ),
-      )
-      .child(this.para(t, "Not now? Add machine is at the bottom of the sidebar too."));
   }
 
   panelCard(t, p) {
@@ -371,7 +300,7 @@ export default class Welcome extends View {
       );
   }
 
-  pageThree(t) {
+  pageTwo(t) {
     // The first look at this page asks: nothing is picked yet (skipping the
     // welcome leaves both on).
     if (shared("workspace.panels") === undefined || shared("workspace.panels") === null) setShared("workspace.panels", []);
@@ -390,7 +319,7 @@ export default class Welcome extends View {
       );
   }
 
-  pageFour(t) {
+  pageThree(t) {
     const pal = bound("app.palette");
     return v_flex()
       .gap(16)
@@ -503,7 +432,7 @@ export default class Welcome extends View {
               .overflow_y_scroll()
               // Padding inside, not on the scroll area: there it counts as
               // content and a page that fits still shows a bar.
-              .child(div().px(22).pt(22).pb(20).child([this.pageOne, this.pageTwo, this.pageThree, this.pageFour][this.page - 1].call(this, t))),
+              .child(div().px(22).pt(22).pb(20).child([this.pageOne, this.pageTwo, this.pageThree][this.page - 1].call(this, t))),
           )
           .child(Scrollbar.vertical("w-body").mode("always").absolute().inset_0()),
       )
@@ -522,7 +451,7 @@ export default class Welcome extends View {
           .when(this.page > 1, (el) => el.child(this.button(t, "w-back", "Back", false, (_e, cx) => go(this.page - 1, cx))))
           .child(
             this.page < PAGES
-              ? this.button(t, "w-next", this.page === 2 && !this.machines.length ? "Not now" : "Next", true, (_e, cx) => go(this.page + 1, cx), "arrow-right")
+              ? this.button(t, "w-next", "Next", true, (_e, cx) => go(this.page + 1, cx), "arrow-right")
               : this.button(t, "w-start", spaces().length ? "Done" : "Open a space", true, () => this.start(), "arrow-right"),
           ),
       );

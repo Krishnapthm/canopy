@@ -9,8 +9,7 @@ If you have not installed Canopy yet, run the one-line installer from the [READM
 Open Canopy from your applications, or run `canopy` in a terminal. The first time, a **Welcome to Canopy** dialog walks through four short pages:
 
 1. **Canopy runs your terminals in the background.** This is the one idea worth remembering now: your agents live in herdr-core, not in the window, so closing Canopy never stops them. You can also pick light or dark appearance here.
-2. **Add your other machines.** Canopy can show agents running on a server or another Mac. Skip this for now with **Not now** (or **Next** if Canopy found hosts in your SSH config). [Machines](Machines) covers it later.
-3. **Choose your panels** and 4. **Make it yours.** Click **Next** through both.
+2. **Choose your panels** and 3. **Make it yours.** Click **Next** through both.
 
 The last button, **Open a space**, takes you to the next step.
 

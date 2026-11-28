@@ -391,7 +391,7 @@ export interface OverlaySpec {
   width?: number;
   height?: number;
   /** "above": over the floating block under the pointer (the toolbar), its bottom 8 px above the block's top, left edge at the pointer minus 16 px. Pointer otherwise. */
-  at?: "pointer" | "above" | { x: number; y: number };
+  at?: "pointer" | "above" | { x: number; y: number; above?: boolean };
 }
 
 /** Shows a mod (or a layout) above everything. Returns its id. The mod gets `props().overlay` = that id. */

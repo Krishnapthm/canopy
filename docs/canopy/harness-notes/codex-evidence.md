@@ -270,3 +270,7 @@ Requests for depth, thoroughness, research, investigation, or detailed codebase 
 ```text
  ID not available, please re-run `codex login`Failed to send requestFailed to parse JSON responsesession_metapayloaddynamic_tools_updatedresponse_itemmetadatainter_agent_communicationinter_agent_communication_metadatacompactedturn_contexttoken_usage_recordworld_statesecurity_risk_scoreevent_msgrealtime_itemreplacement_historyreplacement_history_metadatamcp_resource_originswindow_numberfirst_window_idprevious_window_idwindow_idcompaction_response_idlatest_token_usage_recordresume_metadatatrigger_turnturn_idcall_idquestionsverified_answersincompleteuser_messagesuser_messages_incompleteassistant_
 ```
+
+## Quota probe, Codex 0.172.0 on macOS
+
+`codex app-server --help` lists `--stdio` as an alias for `--listen stdio://`. In the restricted development sandbox, the CLI exited with an operating system permission error before answering the initialization request. The live `account/rateLimits/read` response was unavailable there.

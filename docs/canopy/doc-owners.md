@@ -44,7 +44,7 @@ Guides tell the story and link to feature pages for each control.
 | File-and-Note-Panes, Images-and-PDFs, Browser-Pane, Simulator-Devices | Each pane kind: use, helper bar, limits. | their `canvas_view/*.rs` |
 | Files-Panel | The side panel: tree, previews, editing, Changes, transcripts. | `defaults/mods/files`, `changes` |
 | Go-To-and-Palette | Go to and the command palette. | `defaults/mods/picker`, `defaults/frame/palette` |
-| Machines | Remote machines over SSH. | `defaults/mods/machine-add`, `src/remote_shell.rs` |
+| Machines | Remote machine and mobile availability. | `src/hc.rs`, `src/window.rs` |
 | Agent-Setup | The `canopy` skill and the project instruction block. | `src/skill.rs`, `defaults/mods/project-setup` |
 | Agent-Pane-Commands | `canopy pane` verbs and the envelope. | `src/panes.rs`, `pane_commands.rs` |
 

@@ -71,6 +71,7 @@ pub(super) struct State {
     modes: HashMap<(FileHost, String), FileMode>,
     /// Canvas file panes (by id) with unsaved text. The panel's draft is `dirty`.
     card_drafts: HashSet<String>,
+    switching_branches: HashSet<std::path::PathBuf>,
     outline: bool,
     /// The Files editor reports transitions between saved and unsaved text.
     pub(super) dirty: Option<String>,
@@ -273,6 +274,7 @@ impl State {
             file,
             modes: HashMap::new(),
             card_drafts: HashSet::new(),
+            switching_branches: HashSet::new(),
             outline: false,
             dirty: None,
             dirty_generation: 0,
@@ -1413,6 +1415,86 @@ impl AppWindow {
         self.focus.focus(window, cx);
         self.sync(window, cx);
         cx.notify();
+    }
+
+    /// Switch a local checkout after checking both the panel and canvas editors.
+    pub(super) fn switch_files_branch(&mut self, args: &Value, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(root) = args["root"].as_str().filter(|root| Path::new(root).is_absolute()) else {
+            return self.fail("Choose an absolute checkout folder");
+        };
+        let Some(branch) = args["branch"].as_str().filter(|branch| !branch.is_empty() && !branch.starts_with('-')) else {
+            return self.fail("Choose a local branch");
+        };
+        let Ok(checkout) = Path::new(root).canonicalize() else { return self.fail("The checkout folder is unavailable"); };
+        let within = |path: &str| Path::new(path).starts_with(root)
+            || Path::new(path).canonicalize().is_ok_and(|path| path.starts_with(&checkout));
+        let state = &mut self.canvas_state;
+        let drafts = state.dirty.iter().map(String::as_str).chain(
+            state.doc.panes.iter().filter(|p| state.card_drafts.contains(&p.id)).filter_map(|p| p.file()),
+        );
+        if drafts.into_iter().any(within) { return self.fail("Save your edits in this checkout before switching branches"); }
+        if !state.switching_branches.insert(checkout.clone()) { return self.fail("A branch switch is already running in this checkout"); }
+        let (root, branch) = (root.to_owned(), branch.to_owned());
+        let reply = self.held_reply.take();
+        let task_checkout = checkout.clone();
+        let work = cx.background_executor().spawn(async move {
+            let git = |args: &[&str]| {
+                let args = args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+                let (code, out, error) = mods::run_blocking("git", &args, Some(root.clone()), std::time::Duration::from_secs(30))?;
+                if code == 0 { Ok(out) } else if error.trim().is_empty() { Err("Git could not switch branches".into()) } else { Err(error.trim().to_owned()) }
+            };
+            let actual = git(&["rev-parse", "--show-toplevel"])?;
+            if Path::new(actual.trim_end_matches(['\r', '\n'])).canonicalize().ok().as_ref() != Some(&task_checkout) {
+                return Err("Choose the checkout shown in Files".into());
+            }
+            git(&["show-ref", "--verify", "--", &format!("refs/heads/{branch}")])?;
+            git(&["switch", "--no-guess", "--", &branch])?;
+            Ok::<_, String>(root)
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = work.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.canvas_state.switching_branches.remove(&checkout);
+                match &result {
+                    Ok(root) => {
+                        let affected = |path: &str| {
+                            let path = Path::new(path);
+                            path.starts_with(root) || path.starts_with(&checkout)
+                                || path.parent().and_then(|p| p.canonicalize().ok()).is_some_and(|p| p.starts_with(&checkout))
+                        };
+                        let state = &mut this.canvas_state;
+                        let paths = state.doc.panes.iter().filter_map(|pane| pane.path())
+                            .chain(state.file_path().map(String::as_str))
+                            .filter(|path| affected(path)).map(str::to_owned).collect::<HashSet<_>>();
+                        mods::send_command("files", &json!({"name":"branch_changed","args":{"root":root,"paths":paths}}).to_string());
+                        for path in &paths {
+                            state.previews.remove(path);
+                            state.image_sizes.remove(path);
+                            state.image_errors.remove(path);
+                            if matches!(previewable(Path::new(path)), Some(Previewable::Svg))
+                                || canvas::file_kind(Path::new(path)) == "image"
+                            {
+                                super::invalidate_image(&gpui::Resource::Path(Path::new(path).into()), window, cx);
+                            }
+                        }
+                        for pane in &state.doc.panes {
+                            if pane.path().is_some_and(|path| paths.contains(path))
+                                && let Some(pdf) = state.pdfs.remove(&pane.id)
+                            {
+                                state.pdf_drops.push(pdf);
+                            }
+                        }
+                        this.release_pdf_drops(window, cx);
+                        this.load_previews(None, window, cx);
+                        cx.notify();
+                    }
+                    Err(error) => this.command_error("Switch branch", error, window, cx),
+                }
+            });
+            if let Some(reply) = reply {
+                let _ = reply.send(result.map_or_else(|e| json!({"error":e}), |_| json!({"ok":true})));
+            }
+        }).detach();
     }
 
     pub(super) fn panel_editor(&mut self, args: &Value, window: &mut Window, cx: &mut Context<Self>) {

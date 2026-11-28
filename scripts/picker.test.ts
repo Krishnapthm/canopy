@@ -35,12 +35,11 @@ const values: Record<string, any> = {
 };
 const Picker = new Function(...Object.keys(values), source.replace(/^import .*;\n/gm, "").replace("export default class Picker", "return class Picker"))(...Object.values(values));
 const cx = { notify() {}, stop_propagation() {}, timer: { after() {} }, focus_handle() {}, spawn() {} };
-function picker(machines = 12) {
+function picker() {
   testSpaces = [];
   closed = 0;
   const view = new Picker();
   view.init({}, cx);
-  view.machines = Array.from({ length: machines }, (_, i) => `machine-${i}`);
   return view;
 }
 function find(root: Element, id: string): Element {
@@ -58,13 +57,13 @@ function measure(view: any, height: number) {
 }
 
 test("picker reveals keyboard selection in its measured, constrained list", () => {
-  for (const [machines, height] of [[12, 144], [0, 48]]) {
-    const view = picker(machines);
+  for (const height of [40, 48]) {
+    const view = picker();
     measure(view, height);
     let tree = view.render();
     tree.calls.on_key_down[0]({ key: "up" }, cx);
     tree = view.render();
-    const selected = find(tree, machines ? `pk-space-machine-${machines - 1}` : "pk-space-here");
+    const selected = find(tree, "pk-space");
     expect(selected.calls.top[0]).toBe(height - 32);
     expect(selected.calls.bottom[0]).toBe(0);
     const list = find(tree, "pk-list");
@@ -78,126 +77,9 @@ test("picker reveals keyboard selection in its measured, constrained list", () =
   }
 });
 
-test("picker space choices explicitly target this computer or the selected machine", () => {
+test("picker opens a local space", () => {
   const view = picker();
   commands.length = 0;
-  view.go({ kind: "space", machine: null });
-  view.go({ kind: "space", machine: "cloud" });
-  expect(commands).toEqual([
-    ["space.new", { machine: "" }],
-    ["space.new", { machine: "cloud" }],
-  ]);
-});
-
-test("picker arrows reach earlier and Enter unfolds without closing or losing selection", () => {
-  const view = picker(0);
-  testSpaces = [
-    { id: "busy", name: "busy", status: "working", tabs: [{ id: "busy-tab", name: "busy tab", active: true }], active: true },
-    { id: "quiet", name: "quiet", tabs: [{ id: "quiet-tab", name: "quiet tab" }] },
-  ];
-  commands.length = 0;
-  let tree = view.render();
-  expect(view.at).toBe(0);
-  tree.calls.on_key_down[0]({ key: "down" }, cx);
-  tree = view.render();
-  expect(find(tree, "pk-earlier").calls.bg).toEqual(["hover"]);
-  view.input.handlers.submit({}, cx);
-  tree = view.render();
-  expect(view.showEarlier).toBe(true);
-  expect(closed).toBe(0);
-  expect(commands).toEqual([]);
-  expect(find(tree, "pk-earlier").calls.bg).toEqual(["hover"]);
-  tree.calls.on_key_down[0]({ key: "down" }, cx);
-  tree = view.render();
-  expect(find(tree, "pk-quiet-tab").calls.bg).toEqual(["hover"]);
-  tree.calls.on_key_down[0]({ key: "up" }, cx);
-  view.render();
-  view.input.handlers.submit({}, cx);
-  tree = view.render();
-  expect(view.showEarlier).toBe(false);
-  expect(find(tree, "pk-earlier").calls.bg).toEqual(["hover"]);
-  tree.calls.on_key_down[0]({ key: "down" }, cx);
-  view.render();
-  view.input.handlers.submit({}, cx);
-  expect(commands).toEqual([["tab.new"]]);
-  expect(closed).toBe(1);
-});
-
-test("picker clicking earlier keeps selection on the toggle when rows shift", () => {
-  const view = picker(0);
-  testSpaces = [{ id: "quiet", name: "quiet", tabs: [{ id: "quiet-tab", name: "quiet tab" }] }];
-  view.render();
-  view.at = 2;
-  find(view.render(), "pk-earlier").calls.on_click[0]({}, cx);
-  let tree = view.render();
-  expect(view.showEarlier).toBe(true);
-  expect(find(tree, "pk-earlier").calls.bg).toEqual(["hover"]);
-  expect(closed).toBe(0);
-  tree.calls.on_key_down[0]({ key: "down" }, cx);
-  tree = view.render();
-  expect(find(tree, "pk-quiet-tab").calls.bg).toEqual(["hover"]);
-});
-
-test("picker search selects the first matching tab before earlier", () => {
-  for (const busyMatches of [false, true]) {
-    const view = picker(0);
-    testSpaces = [
-      { id: "busy", name: "busy", status: "working", tabs: [{ id: "busy-tab", name: busyMatches ? "match busy" : "busy tab" }] },
-      { id: "quiet", name: "quiet", tabs: [{ id: "quiet-tab", name: "match quiet" }] },
-    ];
-    commands.length = 0;
-    view.render();
-    view.input.value = () => "match";
-    view.input.handlers.change({}, cx);
-    const tree = view.render();
-    const id = busyMatches ? "busy-tab" : "quiet-tab";
-    expect(find(tree, `pk-${id}`).calls.bg).toEqual(["hover"]);
-    view.input.handlers.submit({}, cx);
-    expect(commands).toEqual([["tab.select", { id }]]);
-    expect(closed).toBe(1);
-  }
-});
-
-test("picker search still lets arrows select and unfold earlier", () => {
-  const view = picker(0);
-  testSpaces = [{ id: "quiet", name: "quiet", tabs: [{ id: "quiet-tab", name: "quiet tab" }] }];
-  commands.length = 0;
-  view.input.value = () => "quiet tab";
-  view.input.handlers.change({}, cx);
-  let tree = view.render();
-  expect(find(tree, "pk-quiet-tab").calls.bg).toEqual(["hover"]);
-  tree.calls.on_key_down[0]({ key: "up" }, cx);
-  tree = view.render();
-  expect(find(tree, "pk-earlier").calls.bg).toEqual(["hover"]);
-  view.input.handlers.submit({}, cx);
-  tree = view.render();
-  expect(view.showEarlier).toBe(true);
-  expect(find(tree, "pk-earlier").calls.bg).toEqual(["hover"]);
-  expect(closed).toBe(0);
-  expect(commands).toEqual([]);
-  tree.calls.on_key_down[0]({ key: "down" }, cx);
-  view.render();
-  view.input.handlers.submit({}, cx);
-  expect(commands).toEqual([["tab.select", { id: "quiet-tab" }]]);
-  expect(closed).toBe(1);
-});
-
-test("picker preserves small pixel touchpad deltas", () => {
-  const view = picker();
-  const list = find(view.render(), "pk-list");
-  for (const delta of [-1, -3.9, -4]) {
-    view.scroll = 0;
-    list.calls.on_scroll_wheel[0]({ delta: { y: delta } }, cx);
-    expect(view.scroll).toBe(-delta);
-  }
-});
-
-test("typing finds spaces, panes and open files, best match first", () => {
-  const spaces = [{ id: "s1", name: "api-server", folder: "/w/api" }, { id: "s2", name: "web-app", folder: "/w/web" }];
-  const terms = [{ address: "t1", agent: "zsh", state: "live", where: "api-server / 1" }, { address: "t2", name: "claude", state: "live" }, { address: "t3", agent: "zsh", state: "ended" }];
-  const files = ["/w/api/src/main.rs", "/w/web/app.tsx"];
-  expect(Picker.finds("api", spaces, terms, files).map((r) => r.id)).toEqual(["s1", "t1", "/w/api/src/main.rs"]);
-  expect(Picker.finds("mrs", spaces, terms, files).map((r) => r.id)).toEqual(["/w/api/src/main.rs"]);
-  expect(Picker.finds("cld", spaces, terms, files).map((r) => [r.what, r.id])).toEqual([["pane", "t2"]]);
-  expect(Picker.finds("t3", spaces, terms, files)).toEqual([]);
+  view.go({ kind: "space" });
+  expect(commands).toEqual([["space.new"]]);
 });

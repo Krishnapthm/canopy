@@ -759,10 +759,10 @@ impl AppWindow {
                     }
                     // A stream that ended is subscribed to again, with a fresh snapshot.
                     if closed { sub = None; }
-                    let machines = if ask_machines || terminals { core.call("machine.list", json!({})).ok() } else { None };
+                    let machines = if crate::hc::REMOTE_ENABLED && (ask_machines || terminals) { core.call("machine.list", json!({})).ok() } else { None };
                     let machines_changed = machines.as_ref().is_some_and(|m| m != &known_machines);
                     if let Some(m) = &machines { known_machines = m.clone(); }
-                    let listed = (terminals || machines_changed).then(|| event_lines.live_for(&core.hello, &known_machines));
+                    let listed = (terminals || machines_changed).then(|| event_lines.local_live(&core.hello, &known_machines));
                     (sub, machines, refresh, listed, event_lines, known_machines)
                 }).await;
                 let watching = sub.is_some();
@@ -2530,8 +2530,9 @@ impl AppWindow {
         here.or_else(|| p.map(|p| p.folder.clone())).unwrap_or_else(home)
     }
 
-    /// The machine a space's terminals run on, None for this one.
+    /// Require an available layout before editing spaces or starting terminals.
     fn require_document(&self, machine: Option<&str>) -> Result<(), String> {
+        if !crate::hc::REMOTE_ENABLED && machine.is_some() { return Err(crate::hc::REMOTE_PAUSED.into()); }
         match self.documents.get(machine.unwrap_or("")) {
             Some(slot) if slot.available => Ok(()),
             Some(slot) => Err(slot.error.clone().unwrap_or_else(|| "This machine's layout is unavailable. Try again when it reconnects.".into())),
@@ -3029,6 +3030,12 @@ impl AppWindow {
         if let Err(error) = crate::commands::validate_args(command, &args) {
             return json!({ "error": error });
         }
+        if !crate::hc::REMOTE_ENABLED && (Self::arg(&args, "machine").is_some_and(|m| !m.is_empty())
+            || Self::arg(&args, "terminal").is_some_and(|id| id.contains('/'))
+            || (name == "mod.open" && Self::arg(&args, "name") == Some("machine-add")))
+        {
+            return json!({"error":crate::hc::REMOTE_PAUSED});
+        }
         // pane.go from a mod block starts at the block, not at the terminal block focused before it.
         if terminal_block(&self.chrome, self.focused_pane.as_deref()).is_some()
             && needs_model_pane(name, &args)
@@ -3190,6 +3197,7 @@ impl AppWindow {
                 }
             }
             "file.mode" => self.file_mode_command(a, window, cx),
+            "files.branch_switch" => self.switch_files_branch(a, window, cx),
             "files.auto_save" => match a["on"].as_bool() {
                 Some(on) => mods::set_shared("files.auto_save".into(), json!(on)),
                 None => self.fail("files.auto_save requires a boolean on"),
@@ -4009,7 +4017,7 @@ impl AppWindow {
             kind,
             slot,
             at,
-            above: above.is_some(),
+            above: above.is_some() || spec["at"]["above"] == true,
             size,
             expires: (kind == OverlayKind::Toast).then(|| { let t = Duration::from_millis(timeout as u64); (Instant::now() + t, t) }),
             focus,

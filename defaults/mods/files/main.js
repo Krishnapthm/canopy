@@ -1,8 +1,8 @@
 // Modified for Canopy.
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, nextCommand, shared, setShared, notify, ui } from "herdr";
+import { v_flex, h_flex, Editor, EditorState, Input, InputState, ScrollHandle } from "gpui-base";
+import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, nextCommand, closeOverlay, shared, setShared, notify, ui } from "herdr";
 
 const autoSave = () => shared("files.auto_save") !== false;
 
@@ -117,8 +117,79 @@ async function directory(path, on) {
   return out;
 }
 
+// Exact matches lead, followed by prefixes and other substrings.
+export function matchingBranches(branches, query) {
+  const q = query.trim().toLowerCase();
+  const score = name => name === q ? 0 : name.startsWith(q) ? 1 : name.includes(q) ? 2 : 3;
+  return branches.map(name => ({ name, score: score(name.toLowerCase()) }))
+    .filter(row => row.score < 3).sort((a, b) => a.score - b.score).map(row => row.name);
+}
+
 export default class Files extends View {
+  initBranches(cx) {
+    const { root, branch } = props();
+    this.branchInput = InputState.new({ placeholder: "Search branches" });
+    this.branchScroll = ScrollHandle.new();
+    this.branches = [];
+    this.branchRows = [];
+    this.branchIndex = 0;
+    this.branchInput.on("change", (_e, cx) => {
+      this.branchRows = matchingBranches(this.branches, this.branchInput.value());
+      this.branchIndex = 0;
+      this.branchScroll.scroll_to_item(0);
+      cx.notify();
+    });
+    this.branchInput.on("submit", () => this.selectBranch(this.branchRows[this.branchIndex]));
+    this.branchInput.focus();
+    cx.spawn(async cx => {
+      try {
+        const result = await exec("git", ["for-each-ref", "--sort=refname", "--format=%(refname:strip=2)", "refs/heads/"], { cwd: root });
+        if (result.code !== 0) throw new Error(result.stderr.trim() || "Git could not list branches");
+        this.branches = result.stdout.split("\n").filter(Boolean);
+        this.branchRows = matchingBranches(this.branches, this.branchInput.value());
+        this.branchIndex = this.branchInput.value().trim() ? 0 : Math.max(0, this.branchRows.indexOf(branch));
+        this.branchScroll.scroll_to_item(this.branchIndex);
+      } catch (e) {
+        this.branchError = String(e);
+        notify({ title: "Couldn't list branches", body: this.branchError, level: "error" });
+      }
+      this.branchesLoaded = true;
+      cx.notify();
+    });
+  }
+
+  selectBranch(branch) {
+    if (!this.branches.includes(branch)) return;
+    const { overlay, root, branch: current } = props();
+    closeOverlay(overlay);
+    if (branch !== current) run("files.branch_switch", { root, branch });
+  }
+
+  branchMenu(t) {
+    return v_flex().id("branch-menu").w_full().p(6).gap(4).bg(t.popover).text_color(t.foreground)
+      .on_key_down((e, cx) => {
+        if (e.key === "escape") closeOverlay(props().overlay);
+        else if (this.branchRows.length && (e.key === "up" || e.key === "down")) {
+          this.branchIndex = Math.max(0, Math.min(this.branchRows.length - 1, this.branchIndex + (e.key === "up" ? -1 : 1)));
+          this.branchScroll.scroll_to_item(this.branchIndex);
+          cx.notify();
+        } else return;
+        cx.stop_propagation();
+      })
+      .child(div().p(2).child(Input.new(this.branchInput).w_full().h(30).px(8).text_size(12).text_color(t.foreground)))
+      .child(v_flex().id("branch-list").max_h(216).min_h(0).overflow_y_scrollbar().track_scroll(this.branchScroll)
+        .when(!this.branchRows.length, el => el.child(div().p(8).text_size(12).text_color(t.dim)
+          .child(this.branchError ? "Couldn't list branches" : this.branchesLoaded ? "No matching branches" : "Loading branches")))
+        .children(this.branchRows.map((name, i) => h_flex().id(`branch-${name}`).h(27).flex_none().px(8).gap(8)
+          .items_center().cursor_pointer().rounded(ui.size.radiusSm).text_size(12)
+          .when(i === this.branchIndex, el => el.bg(t.raised)).hover(el => el.bg(t.hover))
+          .on_click(() => this.selectBranch(name))
+          .child(div().flex_1().min_w(0).truncate().child(name))
+          .when(name === props().branch, el => el.child(div().text_color(t.accent).child("Current"))))));
+  }
+
   init(_props, cx) {
+    if (props()?.canvas === "branches") return this.initBranches(cx);
     this.filter = parseFilter("");
     this.treeId = Math.random().toString(36);
     this.input = InputState.new({ placeholder: "Filter, or ? to search in files" });
@@ -127,7 +198,7 @@ export default class Files extends View {
       this.search(cx);
       cx.notify();
     });
-    if (props()?.canvas !== "viewer") cx.spawn(async cx => {
+    cx.spawn(async cx => {
       while (true) {
         const message = await nextCommand();
         try {
@@ -142,7 +213,19 @@ export default class Files extends View {
             cx.notify();
           } else if (name === "tree_action" && args.treeId === this.treeId && args.context === this.context?.key && this.current(this.context)) {
             this.treeAction(args, cx);
-          } else if (name === "file_changed" && !this.on) {
+          } else if (name === "branch_changed" && !this.on) {
+            const root = args.root.replaceAll("\\", "/");
+            const here = this.root?.replaceAll("\\", "/");
+            if (this.repo === args.root || here === root || here?.startsWith(root + "/") || args.paths?.includes(`${this.root}/${this.file}`)) {
+              if (props()?.canvas === "viewer") {
+                if (!this.saving && (!this.code || this.code.value() === this.original)) this.show(this.file, cx);
+              } else {
+                this.refreshAfterBranch = this.loading;
+                this.refresh(cx);
+                if (this.filter.kind === "content") this.search(cx);
+              }
+            }
+          } else if (name === "file_changed" && !this.on && props()?.canvas !== "viewer") {
             const clip = shared("files.clipboard");
             if (args.moved && clip?.op === "cut" && clip.paths.includes(args.moved)) {
               const paths = clip.paths.filter(path => path !== args.moved);
@@ -192,10 +275,13 @@ export default class Files extends View {
       const saved = this.saved.get(next);
       this.context = { key: next, cwd, on }; this.root = cwd; this.on = on; this.entries = new Map(); this.folders = new Set(saved?.folders);
       this.pending = new Set(); this.marks = {}; this.all = null; this.show(null); this.watched = null; this.error = null; this.limited = false;
-      this.loading = false;
+      this.loading = false; this.refreshAfterBranch = false; this.repo = null; this.branch = null;
       if (props()?.file || saved?.file) this.show(props()?.file || saved.file, cx);
     }
-    if (!cwd || this.loading) return;
+    if (!cwd || this.loading || props()?.canvas === "viewer") {
+      if (cwd && props()?.canvas === "viewer") this.watch(cwd, cx);
+      return;
+    }
     const context = this.context;
     this.loading = true;
     this.limited = false;
@@ -206,23 +292,33 @@ export default class Files extends View {
           await this.loadFolder(path, context);
         }
         const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on }).catch(() => null);
+        const repo = top?.code === 0 ? top.stdout.replace(/\r?\n$/, "") : null;
+        const ref = repo && !on ? await exec("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd }).catch(() => null) : null;
         const marks = {};
-        if (top?.code === 0) {
+        if (repo) {
           // Writes nothing under .git (index lock, fsmonitor cookie): the folder watch would refresh again.
           const status = await exec("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all"], { cwd, on }).catch(() => null);
           if (status?.code === 0) for (const entry of status.stdout.split("\0").filter(Boolean).slice(0, TOTAL)) {
             const xy = entry.slice(0, 2);
-            marks[`${top.stdout.trim()}/${entry.slice(3)}`] = xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
+            marks[`${repo}/${entry.slice(3)}`] = xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
           }
         }
         // Search covers every file, not just loaded folders; git lists them fast and honors .gitignore.
         const listed = top?.code === 0 ? await exec("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd, on }).catch(() => null) : null;
         if (!this.current(context)) return;
+        this.repo = on ? null : repo;
+        this.branch = ref?.code === 0 ? ref.stdout.trimEnd() : null;
         this.all = listed?.code === 0 ? listed.stdout.split("\0").filter(Boolean) : null;
         this.marks = marks; this.error = null; this.watch(cwd, cx);
 
       } catch (e) { if (this.current(context)) this.error = String(e); }
-      finally { if (this.context === context) this.loading = false; cx.notify(); }
+      finally {
+        if (this.context === context) {
+          this.loading = false;
+          if (this.refreshAfterBranch) { this.refreshAfterBranch = false; this.refresh(cx); }
+        }
+        cx.notify();
+      }
     });
   }
 
@@ -485,8 +581,9 @@ export default class Files extends View {
   }
 
   render(cx) {
-    if (key() !== this.context?.key) this.refresh(cx);
     const t = theme();
+    if (props()?.canvas === "branches") return this.branchMenu(t);
+    if (key() !== this.context?.key) this.refresh(cx);
     if (props()?.canvas === "viewer") {
       const dismissTip = (_e, cx) => { setShared("files.auto_save_tip", "seen"); cx.notify(); };
       return v_flex().relative().size_full().min_h(0).bg(t.canvas).text_color(t.foreground)
@@ -530,7 +627,19 @@ export default class Files extends View {
         .child(v_flex().id("canvas-files-tree").flex_1().min_h(0).overflow_y_scrollbar().px(6).pb(6).children(list)
           .when(this.filter.kind === "name" && Boolean(this.filter.query) && !list.length && Boolean(this.entries.get("")?.length), el => el.child(div().p(8).text_size(12).text_color(t.dim).child("No matching files")))
           .when(this.filter.kind === "name" && (Boolean(this.error) || !this.entries.get("")?.length), el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files" : this.root ? "No files" : "Click a space to see its files"))))
-          .when(this.limited, el => el.child(div().p(8).text_size(11).child("File list limited"))));
+          .when(this.limited, el => el.child(div().p(8).text_size(11).child("File list limited"))))
+        .when(Boolean(this.repo), el => el.child(h_flex().id("files-branch").h(30).flex_none().px(10).gap(7).items_center()
+          .border_t(1).border_color(t.border).text_size(12).text_color(t.foreground).cursor_pointer()
+          .hover(s => s.bg(t.hover)).tooltip("Switch branch")
+          .on_mouse_down("left", e => { this.branchAnchor = e.bounds; })
+          .on_click(() => {
+            const at = this.branchAnchor ? { x: this.branchAnchor.x, y: this.branchAnchor.y, above: true } : "pointer";
+            openOverlay({ mod: "files", kind: "popup", at, width: 270, props: { canvas: "branches", root: this.repo, branch: this.branch } });
+          })
+          .child(svg("mods/workspace-chrome/git-branch.svg").size(13).flex_none())
+          .child(div().flex_1().min_w(0).truncate().child(this.branch ?? "Detached HEAD"))
+          .child(svg("mods/files/chevron-down.svg").size(12).flex_none())));
+
     }
     return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)

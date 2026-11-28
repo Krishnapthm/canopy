@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const source = await readFile(new URL("../defaults/mods/files/main.js", import.meta.url), "utf8");
-const directorySource = source.slice(source.indexOf("async function directory("), source.indexOf("\nexport default class"));
+const directorySource = source.slice(source.indexOf("async function directory("), source.indexOf("\n// Exact matches lead"));
 const loadDirectory = (exec: Function, platform: string) => new Function("exec", "window", `${directorySource}; return directory;`)(exec, () => ({ platform }));
 const directory = loadDirectory(
   async (command: string, args: string[]) => {
@@ -349,4 +349,11 @@ test("Files debounces content search and parses numbered Git hits", async () => 
   expect(calls[1]).toEqual(["git", ["grep", "-nzIF", "--max-count=5", "-e", "literal + hit", "--", "."], { cwd: "/project", on: null }]);
   expect(files.hits).toEqual([{ path: "folder/a:1.txt", line: "12", text: "literal + hit" }]);
   expect(files.searching).toBe(false);
+});
+
+test("branch search ranks exact, prefix and substring matches and handles an empty result", () => {
+  const match = new Function(source.slice(source.indexOf("export function matchingBranches"), source.indexOf("export default class")).replace("export ", "") + "; return matchingBranches;")();
+  const branches = ["feature/fix", "fix-build", "fix", "main"];
+  expect(match(branches, " FIX ")).toEqual(["fix", "fix-build", "feature/fix"]);
+  expect(match(branches, "missing")).toEqual([]);
 });

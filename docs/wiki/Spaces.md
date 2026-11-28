@@ -15,7 +15,7 @@ Home shows all your spaces at once, so you can see where work is happening and j
 
 Leave out the name and the space takes the folder's name. Leave out the folder and the space opens in your home folder. Several spaces can share a folder, which is handy when you want two separate canvases for the same project.
 
-To create a space on another computer, see [Machines](Machines).
+See [Machines](Machines) for the status of remote access.
 
 ## Home and space cards
 
@@ -89,5 +89,5 @@ Select **Remove worktree** from a worktree space's menu and press `Enter` to con
 ## See also
 
 - [Canvas](Canvas): moving around inside a space.
-- [Machines](Machines): spaces on other computers.
+- [Machines](Machines): remote access status.
 - [Concepts](Concepts#spaces-and-home): how spaces fit with the rest of Canopy.

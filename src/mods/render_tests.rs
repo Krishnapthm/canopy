@@ -749,82 +749,6 @@ fn check_materializes_retained_elements_in_a_rendered_view(cx: &mut TestAppConte
     }
 }
 
-#[gpui::test]
-fn rebuilt_machine_offers_connect_only_for_identity_mismatch(cx: &mut TestAppContext) {
-    cx.update(gpui_shell::init);
-    let staged = Staged::new();
-    for (state, why, offered) in [
-        ("unreachable", "a different core answers there (\"new-id\")", true),
-        ("unreachable", "connection refused", false),
-        ("unreachable", "a different core answers there", false),
-        ("connected", "a different core answers there (\"new-id\")", false),
-    ] {
-        let setup = format!(
-            "this.machines = [{{name:'cloud', state:{}, why:{}, target:'host'}}]; this.folded.add('cloud');",
-            json!(state), json!(why)
-        );
-        let tree = describe(cx, &staged, "mods/spaces", false, props(), Some(&setup)).unwrap();
-        assert_eq!(tree.contains("machine-connect-cloud"), offered, "{state}/{why}: {tree}");
-        assert_eq!(tree.contains("rebuilt ·"), offered, "{tree}");
-        assert_eq!(tree.contains("This machine was rebuilt or replaced. Click to connect to the new one."), offered, "{tree}");
-        assert!(!tree.contains("machine-reconnect-"), "reconnect belongs in the machine row: {tree}");
-    }
-}
-
-#[gpui::test]
-fn machine_logout_warning_tracks_current_remote_state(cx: &mut TestAppContext) {
-    cx.update(gpui_shell::init);
-    let staged = Staged::new();
-    for state in ["false", "true", "null", "undefined"] {
-        let setup = format!("this.hosts = []; this.added = [{{name:'cloud', target:'host', keeps_running_after_logout:{state}, logout_linger_user:'-alice'}}];");
-        let tree = describe(cx, &staged, "mods/machine-add", false, props(), Some(&setup)).unwrap();
-        assert_eq!(tree.contains("Agents on cloud stop when you disconnect"), state == "false", "{tree}");
-        assert_eq!(tree.contains("ma-logout-copy-cloud"), state == "false", "{tree}");
-        if state == "false" { assert!(tree.contains("sudo loginctl enable-linger -- -alice"), "{tree}"); }
-        let setup = format!("this.machines = [{{name:'cloud', target:'host', state:'connected', keeps_running_after_logout:{state}}}];");
-        let tree = describe(cx, &staged, "mods/spaces", false, props(), Some(&setup)).unwrap();
-        assert_eq!(tree.contains("machine-logout-cloud"), state == "false", "{tree}");
-    }
-}
-
-#[gpui::test]
-fn machine_picker_keeps_long_lists_scrollable(cx: &mut TestAppContext) {
-    cx.update(gpui_shell::init);
-    let staged = Staged::new();
-    let tree = describe(
-        cx, &staged, "mods/machine-add", false, props(),
-        Some("this.hosts = Array.from({length: 30}, (_, i) => ({alias: `host-${i}`, aliases: []}));"),
-    ).unwrap();
-    let scroll = tree.lines().find(|line| line.contains("ma-hosts")).unwrap();
-    assert!(scroll.contains("overflow_y_scroll") && !scroll.contains("overflow_y_scrollbar"), "{tree}");
-    assert!(scroll.contains(".min_h[Number(0.0)]"), "{tree}");
-    assert!(tree.contains("ma-row-host-29"), "{tree}");
-    assert_eq!(tree.matches(".flex_none").count(), 60, "rows must not shrink into the viewport: {tree}");
-}
-
-#[gpui::test]
-fn machine_add_needing_input_keeps_the_picker_and_shows_instructions(cx: &mut TestAppContext) {
-    cx.update(gpui_shell::init);
-    let staged = Staged::new();
-    let calls = Rc::new(RefCell::new(Calls::default()));
-    let policy = Policy::new().with_host_module(module(fixture(false, props()), calls.clone())).unwrap();
-    let root = staged.wrapper("mods/machine-add", "this.typed = 'host'; this.add('host', cx);");
-    let window = cx.add_window(|_, _| Empty);
-    let mut session = window.update(cx, |_, window, cx| {
-        DescriptionSession::load(ShellRuntime::new_isolated().unwrap(), root, policy, window, cx).unwrap()
-    }).unwrap();
-    cx.run_until_parked();
-    window.update(cx, |_, window, cx| {
-        let tree = session.describe(window, cx).unwrap();
-        assert!(tree.contains("machine-add"), "{tree}");
-        assert!(tree.contains("ma-message-host"), "{tree}");
-        assert!(tree.contains("hc machine add host"), "{tree}");
-        window.remove_window();
-    }).unwrap();
-    let calls = calls.borrow();
-    assert!(calls.unexpected.is_empty(), "{:?}", calls.unexpected);
-    assert!(!calls.effects.iter().any(|(name, _)| name == "openOverlay" || name == "closeOverlay"), "the picker stays open without a setup dialog");
-}
 
 #[gpui::test]
 fn option_key_settings_are_only_shown_on_macos(cx: &mut TestAppContext) {
@@ -867,7 +791,12 @@ fn settings_sections(cx: &mut TestAppContext) {
     for section in ["look", "alerts", "keyboard", "shortcuts", "machines"] {
         let mut p = props();
         p["section"] = json!(section);
-        describe(cx, &staged, "frame/settings", true, p, None).unwrap();
+        let tree = describe(cx, &staged, "frame/settings", true, p, None).unwrap();
+        if section == "shortcuts" {
+            assert!(tree.contains("app.palette") && tree.contains("Reset all shortcuts"));
+        } else if section == "machines" {
+            assert!(tree.contains("Appearance")); // Old links open Look.
+        }
     }
     eprintln!("settings sections, each twice: {:?}", start.elapsed());
 }
@@ -963,7 +892,7 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
     cx.update(gpui_shell::init);
     let start = Instant::now();
     let staged = Staged::new();
-    for page in 1..=4 {
+    for page in 1..=3 {
         let tree = describe(
             cx,
             &staged,
@@ -973,7 +902,7 @@ fn local_state_and_overlay_initial_descriptions(cx: &mut TestAppContext) {
             Some(&format!("this.page = {page};")),
         )
         .unwrap();
-        let expected = ["Canopy runs your terminals in the background", "Add your other machines", "Choose your panels", "Make it yours"][page - 1];
+        let expected = ["Canopy runs your terminals in the background", "Choose your panels", "Make it yours"][page - 1];
         assert!(tree.contains(expected), "welcome page {page}: {tree}");
     }
     for query in ["settings", "no-such-command"] {

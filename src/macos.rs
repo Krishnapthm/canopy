@@ -3,13 +3,14 @@ use crate::keys::CommandBinding;
 use gpui::*;
 use gpui_shell::action::ShellAction;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, NSObject};
+use objc2::runtime::NSObject;
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSApplication, NSEventMask, NSFont, NSFontAttributeName, NSImage, NSMenu,
+    NSApplication, NSColor, NSEventMask, NSEventTrackingRunLoopMode, NSFont, NSImage, NSMenu,
+    NSMenuItem, NSProgressIndicator, NSProgressIndicatorStyle, NSTextField, NSView,
     NSStatusBar, NSStatusBarButton, NSStatusItem, NSVariableStatusItemLength,
 };
-use objc2_foundation::{NSAttributedString, NSData, NSDictionary, NSPoint, NSSize, NSString, ns_string};
+use objc2_foundation::{NSData, NSPoint, NSRect, NSRunLoop, NSSize, NSString, NSTimer, ns_string};
 
 actions!(herdr, [Quit, Hide, HideOthers, ShowAll, Settings, Minimize, Zoom, ToggleFullScreen]);
 
@@ -61,33 +62,21 @@ define_class!(
         fn status_click(&self, button: &NSStatusBarButton) {
             let mtm = self.mtm();
             let menu = NSMenu::new(mtm);
-            let programs = crate::mods::usage_programs();
-            for (key, name, executable, local) in &programs {
-                let rows = if key == "codex" && *local {
-                    crate::usage::codex(executable, false)
-                } else {
-                    vec!["Unavailable".into()]
-                };
-                unsafe {
-                    let label = if key == "codex" && *local { format!("{name} · Local CLI account") } else { name.clone() };
-                    menu.addItemWithTitle_action_keyEquivalent(&NSString::from_str(&label), None, ns_string!("")).setEnabled(false);
-                    let font = NSFont::monospacedSystemFontOfSize_weight(12., 0.);
-                    let attrs = NSDictionary::<NSString, AnyObject>::from_slices(&[NSFontAttributeName], &[&font]);
-                    for row in rows {
-                        let title = NSString::from_str(&row);
-                        let item = menu.addItemWithTitle_action_keyEquivalent(&title, None, ns_string!(""));
-                        item.setIndentationLevel(1);
-                        item.setAttributedTitle(Some(&NSAttributedString::initWithString_attributes(
-                            NSAttributedString::alloc(), &title, Some(&attrs),
-                        )));
-                        item.setEnabled(false);
-                    }
-                }
+            let mut pending = Vec::new();
+            let programs = crate::usage::programs();
+            for (provider, name, executable) in &programs {
+                crate::usage::request(*provider, executable, false);
+                let item = unsafe { menu.addItemWithTitle_action_keyEquivalent(&NSString::from_str(name), None, ns_string!("")) };
+                let reading = crate::usage::reading(*provider);
+                usage_section(&item, name, &reading, mtm);
+                if reading.pending { pending.push((item, *provider, name.clone())); }
+            }
+            if !programs.is_empty() {
+                menu.addItem(&NSMenuItem::separatorItem(mtm));
             }
             unsafe {
-                if programs.iter().any(|(key, _, _, local)| key == "codex" && *local) {
-                    menu.addItemWithTitle_action_keyEquivalent(ns_string!("Refresh Usage"), Some(sel!(refreshUsage:)), ns_string!("")).setTarget(Some(self));
-                }
+                let refresh = menu.addItemWithTitle_action_keyEquivalent(ns_string!("Refresh Usage"), Some(sel!(refreshUsage:)), ns_string!(""));
+                refresh.setTarget(Some(self));
                 menu.addItemWithTitle_action_keyEquivalent(
                     ns_string!("Show Canopy"), Some(sel!(showCanopy:)), ns_string!(""),
                 ).setTarget(Some(self));
@@ -95,15 +84,34 @@ define_class!(
                     ns_string!("Quit Canopy"), Some(sel!(quitCanopy:)), ns_string!(""),
                 ).setTarget(Some(self));
             }
+            let timer = if pending.is_empty() { None } else {
+                let pending = std::cell::RefCell::new(pending);
+                let update = block2::RcBlock::new(move |timer: std::ptr::NonNull<NSTimer>| {
+                    let Some(mtm) = MainThreadMarker::new() else { return };
+                    let mut pending = pending.borrow_mut();
+                    pending.retain(|(item, provider, name)| {
+                        let reading = crate::usage::reading(*provider);
+                        if !reading.pending { usage_section(item, name, &reading, mtm); }
+                        reading.pending
+                    });
+                    if pending.is_empty() {
+                        // AppKit owns the timer throughout this callback.
+                        unsafe { timer.as_ref() }.invalidate();
+                    }
+                });
+                // Menu tracking runs in its own AppKit run-loop mode.
+                let timer = unsafe { NSTimer::timerWithTimeInterval_repeats_block(0.1, true, &update) };
+                unsafe { NSRunLoop::mainRunLoop().addTimer_forMode(&timer, NSEventTrackingRunLoopMode); }
+                Some(timer)
+            };
             menu.popUpMenuPositioningItem_atLocation_inView(None, NSPoint::new(0.0, 0.0), Some(button));
+            if let Some(timer) = timer { timer.invalidate(); }
         }
 
         #[unsafe(method(refreshUsage:))]
         fn refresh_usage(&self, _: &NSObject) {
-            if let Some((_, _, executable, _)) = crate::mods::usage_programs().into_iter()
-                .find(|(key, _, _, local)| key == "codex" && *local)
-            {
-                crate::usage::codex(&executable, true);
+            for (provider, _, executable) in crate::usage::programs() {
+                crate::usage::request(provider, &executable, true);
             }
         }
 
@@ -118,6 +126,37 @@ define_class!(
         }
     }
 );
+
+/// A native menu section with readable labels and a remaining-quota bar for each window.
+fn usage_section(item: &NSMenuItem, name: &str, reading: &crate::usage::Reading, mtm: MainThreadMarker) {
+    const WIDTH: f64 = 244.;
+    let frame = |x, y, width, height| NSRect::new(NSPoint::new(x, y), NSSize::new(width, height));
+    let height = 28. + 45. * reading.quotas.len() as f64 + if reading.message.is_some() { 20. } else { 0. };
+    let view = NSView::initWithFrame(NSView::alloc(mtm), frame(0., 0., WIDTH, height));
+    let label = |text: &str, y, size, weight| {
+        let field = NSTextField::labelWithString(&NSString::from_str(text), mtm);
+        field.setFont(Some(&NSFont::systemFontOfSize_weight(size, weight)));
+        field.setTextColor(Some(&NSColor::labelColor()));
+        field.setFrame(frame(14., y, WIDTH - 28., 17.));
+        view.addSubview(&field);
+    };
+    let mut y = height - 23.;
+    label(name, y, 13., 0.3);
+    for quota in &reading.quotas {
+        label(&quota.label, y - 18., 12., 0.);
+        label(&quota.detail(), y - 33., 11., 0.);
+        let bar = NSProgressIndicator::initWithFrame(NSProgressIndicator::alloc(mtm), frame(14., y - 42., WIDTH - 28., 6.));
+        bar.setStyle(NSProgressIndicatorStyle::Bar);
+        bar.setIndeterminate(false);
+        bar.setMinValue(0.);
+        bar.setMaxValue(100.);
+        bar.setDoubleValue(f64::from(quota.remaining));
+        view.addSubview(&bar);
+        y -= 45.;
+    }
+    if let Some(message) = &reading.message { label(message, 5., 11., 0.); }
+    item.setView(Some(&view));
+}
 
 impl StatusTarget {
     fn show_canopy(&self) {
