@@ -463,6 +463,8 @@ fn scan_dir(root: &Path, prefix: &str) -> Vec<Found> {
 pub enum Request {
     Run { name: String, args: Value },
     OpenOverlay { id: String, spec: Value },
+    /// `{ tab, target?, at? }`, parsed into a `menu::MenuRequest` by the window.
+    OpenMenu { spec: Value },
     CloseOverlay { id: String },
     /// A toast stays until closed (its mod's reader expanded it).
     KeepOverlay { id: String },
@@ -1187,6 +1189,10 @@ fn module(inst: Instance, copy: u64) -> HostModule {
             let id = new_overlay_id();
             request(Request::OpenOverlay { id: id.clone(), spec });
             Ok(id.into())
+        })
+        .function("openMenu", |a| {
+            request(Request::OpenMenu { spec: from_host(a.value(0)?) });
+            Ok(HostValue::Null)
         })
         .function("closeOverlay", |a| {
             request(Request::CloseOverlay { id: a.string(0)?.to_owned() });

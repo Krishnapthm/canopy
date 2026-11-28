@@ -189,6 +189,9 @@ with `mod.json` `{"place": "none", "title": "Note", "pane": {"label": "Note", "i
 
 ## Example: a dialog
 
+Open a context menu with `openMenu({ tab, target })` (see `MenuTab` in `herdr.d.ts`); it sizes,
+flips and scrolls the menu and closes any other open one.
+
 Open any mod as a dialog, popup or floating window with `openOverlay`; it closes
 itself with `closeOverlay(props().overlay)`. The shipped `confirm` mod is a
 complete dialog built from `ui` pieces, so it looks like the app:

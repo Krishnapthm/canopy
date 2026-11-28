@@ -397,6 +397,20 @@ export interface OverlaySpec {
 /** Shows a mod (or a layout) above everything. Returns its id. The mod gets `props().overlay` = that id. */
 export function openOverlay(spec: OverlaySpec): string;
 
+/** A page of the `menu` mod (the layout's `terminal_menu` replaces the mod, not these names).
+ *  `primary` shows `target.items` as `[label, command, args?]` rows (`command: null` is a label
+ *  or note, `"sub:<tab>"` a submenu). The others build their own rows from `target`. */
+export type MenuTab =
+  | "primary" | "pane" | "tab" | "space"
+  | "canvas-card" | "canvas-colors" | "canvas-pane" | "canvas-space" | "canvas-editors"
+  | "canvas-agents" | "canvas-empty" | "canvas-arrange" | "canvas-wire";
+
+/** Opens a context menu at the pointer (or `at: "above"`: over the floating block under it, as
+ *  the toolbar's agent menu does). The one way to open a menu: it sizes the frame, flips it at the
+ *  window edge, scrolls it when it is taller than the window, and closes any other open menu.
+ *  An unknown `tab` shows an error toast. Esc, a click outside, a resize or a canvas zoom or pan close it. */
+export function openMenu(spec: { tab: MenuTab; target?: Record<string, unknown>; at?: "pointer" | "above" }): null;
+
 /** Closes an overlay (mods close themselves with closeOverlay(props().overlay)). Esc closes the top
  *  dialog or popup. A kept window closed this way stays closed. */
 export function closeOverlay(id: string): null;

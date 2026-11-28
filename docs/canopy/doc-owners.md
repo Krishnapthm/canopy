@@ -55,7 +55,7 @@ Guides tell the story and link to feature pages for each control.
 | Settings-and-Themes | The Settings window, `settings.json`, themes, settings errors, quitting and the background Dock tile. |
 | Linux-Desktop | Main Menu, window controls, and launcher identity on Linux. |
 | Keys-and-Mouse | Every default key and gesture, changing keys, `keys.json`. |
-| Layouts-and-Mods | Built-in layouts, changing a layout, writing mods, mod panes. |
+| Layouts-and-Mods | Built-in layouts, changing a layout, writing mods, mod panes, `openMenu` and the menu tabs. |
 | Classic-Layout | The Classic layout's sidebar, tabs and status bar. |
 | Other-Layouts | The Terminals layout. |
 

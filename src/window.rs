@@ -18,6 +18,7 @@ pub(crate) mod titlebar;
 use crate::layout::{Axis, Background as Paint, Content, Fit, HeaderContent, Kind, Line, Node, PaneFrame, Size as Span};
 use crate::model::{self, Tab, Model};
 use crate::mods::{self, Found, Instance, Request};
+use crate::menu::{MenuAt, MenuRequest, MenuTab};
 use crate::settings;
 use crate::layout_sync;
 use crate::terminal::{TerminalEvent, TerminalView, scroll_target};
@@ -621,10 +622,17 @@ impl AppWindow {
         }));
         w._focus_lost = Some(cx.on_focus_lost(window, |this, window, cx| this.restore_focus(window, cx)));
         w._place = Some(cx.observe_window_bounds(window, |this, window, cx| {
+            // A menu is anchored to window pixels, so a resize would leave it in the wrong place.
+            this.close_menus(window, cx);
             if let Some(t) = crate::place::changed(window, cx) {
                 this.place_write = Some(t);
             }
         }));
+        cx.observe_window_activation(window, |this, window, cx| {
+            if !window.is_window_active() {
+                this.close_menus(window, cx);
+            }
+        }).detach();
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         window.observe_button_layout_changed(|window, _| window.refresh()).detach();
         let closing = cx.weak_entity();
@@ -2130,7 +2138,7 @@ impl AppWindow {
                 this.open_card_menu(&addr, *at, window, cx)
             }
             TerminalEvent::ContextMenu(at) => {
-                this.open_menu("pane", json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
+                this.open_menu(MenuTab::Pane, json!({ "pane": block.trim_end_matches(SWAP), "terminal": addr }), Some(*at), window, cx)
             }
         })
     }
@@ -3161,7 +3169,7 @@ impl AppWindow {
                 let anchor = self.main_menu_anchor();
                 #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
                 let anchor = None;
-                self.open_menu("primary", target, anchor, window, cx);
+                self.open_menu(MenuTab::Primary, target, anchor, window, cx);
             }
             "quote.menu" | "quote.send" => self.quote_command(name, a, person, window, cx),
             "panel.open" => {
@@ -3877,9 +3885,12 @@ impl AppWindow {
         self.open_overlay(mods::new_overlay_id(), spec, window, cx);
     }
 
+    /// The one way a menu opens. Any other open menu closes first, so two never stack; opening
+    /// a `toggles()` tab while it is open closes it instead.
     #[allow(clippy::too_many_arguments)]
-    fn open_menu(&mut self, tab: &str, target: Value, at: Option<Point<Pixels>>, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(p) = at {
+    pub(crate) fn open_menu(&mut self, tab: MenuTab, target: Value, at: impl Into<MenuAt>, window: &mut Window, cx: &mut Context<Self>) {
+        let at = at.into();
+        if let MenuAt::At(p) = at {
             self.pointer = p;
         }
         let requested = self.chrome.terminal_menu.as_deref().unwrap_or("menu");
@@ -3892,29 +3903,49 @@ impl AppWindow {
         let defaults = self.folders.get(name).map(|f| mod_overlay(&f.dir)).unwrap_or_else(|| json!({}));
         let home = target["group"].is_null();
         let mut spec = terminal_menu_spec(name, &defaults, tab, target);
+        if name == "menu" {
+            spec["width"] = json!(tab.width(spec["width"].as_f64().unwrap_or(f64::from(MENU_BOX)) as f32));
+        }
         // A menu opens a submenu beside itself (the frame is two boxes wide). Near the right edge the
         // frame moves left so its first box stays under the pointer and the submenu opens on the left.
         let frame = settings::z(spec["width"].as_f64().unwrap_or(220.0) as f32);
-        if tab != "primary" && let Some(x) = menu_flip(self.pointer.x, frame, settings::z(MENU_BOX), window.viewport_size().width) {
+        if at != MenuAt::Above && tab.has_submenus() && let Some(x) = menu_flip(self.pointer.x, frame, settings::z(MENU_BOX), window.viewport_size().width) {
             spec["at"] = json!({"x": f32::from(x), "y": f32::from(self.pointer.y)});
             spec["props"]["flip"] = json!(true);
         }
-        let id = if tab == "primary" {
-            const ID: &str = "main-menu";
-            if name == "menu" {
-                spec["width"] = json!(220);
-            }
-            if self.overlays.iter().any(|o| o.id == ID) {
-                self.close_overlay(ID, window, cx);
-                if home {
-                    return;
-                }
-            }
-            ID.into()
-        } else {
-            mods::new_overlay_id()
-        };
+        if at == MenuAt::Above {
+            spec["at"] = json!("above");
+        }
+        const MAIN: &str = "main-menu";
+        let was_open = self.overlays.iter().any(|o| o.id == MAIN);
+        self.close_menus(window, cx);
+        if tab.toggles() && was_open && home {
+            return;
+        }
+        let id = if tab.toggles() { MAIN.into() } else { mods::new_overlay_id() };
         self.open_overlay(id, spec, window, cx);
+    }
+
+    /// Closes every open menu popup (stock or replacement `menu` mod: they are told a `tab`).
+    fn close_menus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids: Vec<String> = self.overlays.iter()
+            .filter(|o| o.kind == OverlayKind::Popup && self.copies.get(&o.slot).is_some_and(|c| c.inst.props["tab"].is_string()))
+            .map(|o| o.id.clone())
+            .collect();
+        for id in ids {
+            self.close_overlay(&id, window, cx);
+        }
+    }
+
+    /// A mod's `openMenu`: parse once here, a bad request is a toast.
+    fn open_menu_for_mod(&mut self, spec: Value, window: &mut Window, cx: &mut Context<Self>) {
+        match serde_json::from_value::<MenuRequest>(spec) {
+            Ok(r) => {
+                let target = if r.target.is_null() { json!({}) } else { r.target };
+                self.open_menu(r.tab, target, MenuAt::from(r.at), window, cx);
+            }
+            Err(e) => self.command_error("openMenu", &e.to_string(), window, cx),
+        }
     }
 
     /// The layout's notification mod (`"toast"` on the root), else the shipped `toast`.
@@ -4163,6 +4194,7 @@ impl AppWindow {
         match req {
             Request::Run { name, args } => self.run(&name, args, window, cx),
             Request::OpenOverlay { id, spec } => self.open_overlay(id, spec, window, cx),
+            Request::OpenMenu { spec } => self.open_menu_for_mod(spec, window, cx),
             Request::CloseOverlay { id } => self.close_overlay(&id, window, cx),
             Request::KeepOverlay { id } => if let Some(o) = self.overlays.iter_mut().find(|o| o.id == id) { o.expires = None },
             Request::Refresh => self.refresh_mods(cx),
@@ -4776,6 +4808,8 @@ impl AppWindow {
                 .when(sized(o.size.height), |d| if o.fit { d.max_h(h) } else { d.h(h) })
                 .when(!o.bare, |d| d.bg(c("popover")).border_1().border_color(c("border")).rounded(settings::z(8.0)).shadow_lg())
                 .overflow_hidden()
+                // A menu taller than the window scrolls instead of being cut off.
+                .when(o.kind == OverlayKind::Popup, |d| d.overflow_y_scroll())
                 .flex()
                 // Scroll, hover and cursor stop here, not on the pane behind.
                 .occlude()
@@ -5040,7 +5074,7 @@ fn mod_overlay(dir: &std::path::Path) -> Value {
 }
 
 /// The width of one menu box in defaults/mods/menu/main.js (WIDTH there).
-const MENU_BOX: f32 = 220.0;
+pub(crate) const MENU_BOX: f32 = 220.0;
 
 /// Where a menu frame (`frame` wide, its first box `one` wide) starts when it would run past the
 /// right edge at `x`: moved left so the first box stays under the pointer. None when it fits or has no submenu room.
@@ -5048,12 +5082,12 @@ fn menu_flip(x: Pixels, frame: Pixels, one: Pixels, viewport: Pixels) -> Option<
     (frame > one && x + frame + px(8.) > viewport).then(|| (x - (frame - one)).max(px(8.)))
 }
 
-fn terminal_menu_spec(name: &str, defaults: &Value, tab: &str, target: Value) -> Value {
+fn terminal_menu_spec(name: &str, defaults: &Value, tab: MenuTab, target: Value) -> Value {
     json!({ "mod": name, "kind": "popup",
         "width": defaults.get("width").and_then(Value::as_f64).unwrap_or(220.0),
         "height": defaults.get("height").and_then(Value::as_f64).unwrap_or(260.0),
         "frame": defaults.get("frame").cloned().unwrap_or(Value::Null),
-        "props": { "tab": tab, "target": target } })
+        "props": { "tab": tab.name(), "target": target } })
 }
 
 fn num_in(v: &Value, k: &str) -> f32 {
@@ -5427,6 +5461,7 @@ fn changed_asset_paths(home: &std::path::Path, changed: &[std::path::PathBuf]) -
 mod tests {
     use gpui::{div, point, px, size, Context, IntoElement, Render, TestAppContext, Window};
     use gpui::prelude::*;
+    use crate::menu::MenuTab;
 
     #[test]
     fn toasts_become_overlay_specs() {
@@ -6911,7 +6946,7 @@ export default class SystemToast extends View {
                 }), window, cx);
                 assert_eq!(this.copies[&format!("overlay:{id}")].inst.name, "chosen");
                 this.close_overlay(&id, window, cx);
-                this.open_menu("tab", json!({}), None, window, cx);
+                this.open_menu(MenuTab::Tab, json!({}), None, window, cx);
                 let id = this.overlays.last().unwrap().id.clone();
                 assert_eq!(this.copies[&format!("overlay:{id}")].inst.name, "chosen");
                 this.close_overlay(&id, window, cx);
@@ -6952,17 +6987,17 @@ export default class SystemToast extends View {
     fn terminal_menu_preserves_clicked_target_and_uses_mod_dimensions() {
         use serde_json::json;
         let target = json!({ "pane": "p2", "terminal": "t8" });
-        let stock = super::terminal_menu_spec("menu", &json!({}), "pane", target.clone());
+        let stock = super::terminal_menu_spec("menu", &json!({}), MenuTab::Pane, target.clone());
         assert_eq!(stock["width"], 220.0);
         assert_eq!(stock["height"], 260.0);
-        assert_eq!(super::terminal_menu_spec("menu", &json!({"frame": "none"}), "pane", json!({}))["frame"], "none");
-        let custom = super::terminal_menu_spec("personal-menu", &json!({"kind": "dialog", "width": 310, "height": 120}), "pane", target.clone());
+        assert_eq!(super::terminal_menu_spec("menu", &json!({"frame": "none"}), MenuTab::Pane, json!({}))["frame"], "none");
+        let custom = super::terminal_menu_spec("personal-menu", &json!({"kind": "dialog", "width": 310, "height": 120}), MenuTab::Pane, target.clone());
         assert_eq!(custom["mod"], "personal-menu");
         assert_eq!(custom["kind"], "popup");
         assert_eq!(custom["width"], 310.0);
         assert_eq!(custom["height"], 120.0);
         assert_eq!(custom["props"], json!({"tab": "pane", "target": target}));
-        let partial = super::terminal_menu_spec("personal-menu", &json!({"width": 0.4}), "pane", json!({}));
+        let partial = super::terminal_menu_spec("personal-menu", &json!({"width": 0.4}), MenuTab::Pane, json!({}));
         assert_eq!(partial["width"], 0.4);
         assert_eq!(partial["height"], 260.0);
     }

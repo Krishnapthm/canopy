@@ -1,6 +1,7 @@
 //! Wire on the canvas: drawing, selecting and removing edges. The edge model is
 //! `crate::wire`; docs/wiki/Wiring.md describes both.
 use super::*;
+use crate::menu::MenuTab;
 use crate::wire;
 
 /// Diameter of the round "+" shown at the middle of each side of a hovered cell.
@@ -199,7 +200,7 @@ impl AppWindow {
     pub(in crate::window) fn wire_menu(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(edge) = self.wire_edge_at(position) else { return false };
         self.canvas_state.wire.selected = Some(edge.key.clone());
-        if !edge.born { self.open_menu("canvas-wire", json!({"a":edge.key.0,"b":edge.key.1}), Some(position), window, cx); }
+        if !edge.born { self.open_menu(MenuTab::CanvasWire, json!({"a":edge.key.0,"b":edge.key.1}), Some(position), window, cx); }
         cx.notify();
         true
     }

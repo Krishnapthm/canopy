@@ -1,7 +1,7 @@
 // The canvas's floating bottom toolbar: tools and new panes. Mouse first; docs/wiki/Toolbar-and-Helper-Bar.md.
 import { View, div } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { run, theme, ui, paneKinds, openOverlay, spaces, shared, setShared, readTextFile, home, window, keys, placement } from "herdr";
+import { run, theme, ui, paneKinds, openOverlay, openMenu, spaces, shared, setShared, readTextFile, home, window, keys, placement } from "herdr";
 
 // Object bindings are serialized by serde_json with sorted field names.
 function key(action, args) {
@@ -56,7 +56,7 @@ export default class Toolbar extends View {
       .child(tool("hand", "mods/toolbar/hand.svg", "Hand (pan)"))
       .child(divider())
       .child(button("terminal", "icons/square-terminal.svg", "Terminal", () => run("canvas.new"), key("canvas.new")))
-      .child(button("agent", "icons/bot.svg", "Agent", () => openOverlay({ mod: "menu", kind: "popup", at: "above", width: 220, props: { tab: "canvas-agents", target: { ...(space ? { space: space.id } : {}), ...(space?.machine ? { machine: space.machine } : {}) } } }), key("canvas.agents")))
+      .child(button("agent", "icons/bot.svg", "Agent", () => openMenu({ tab: "canvas-agents", at: "above", target: { ...(space ? { space: space.id } : {}), ...(space?.machine ? { machine: space.machine } : {}) } }), key("canvas.agents")))
       .child(button("file", "mods/toolbar/file-plus.svg", "Open file", () => run("preview.open", { place: "canvas" }), key("preview.open", { place: "canvas" })))
       .children(this.kinds.map(p => button(p.kind, p.icon, p.label, () => run("canvas.pane_new", { kind: p.kind }), key("canvas.pane_new", { kind: p.kind }))))
       .child(divider())

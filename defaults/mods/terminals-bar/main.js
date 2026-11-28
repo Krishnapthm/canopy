@@ -3,7 +3,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, run, theme, home, openOverlay, window as win } from "herdr";
+import { spaces, panes, run, theme, home, openOverlay, openMenu, window as win } from "herdr";
 
 const C = {
   tray: "#1d1f22",
@@ -121,7 +121,7 @@ export default class TerminalsBar extends View {
         .when(!c.active, (el) => el.border_color("#00000000").hover((s) => s.bg(C.hover)))
         .on_click(() => run("tab.select", { id: c.id }))
         .on_mouse_down("right", () =>
-          openOverlay({ mod: "menu", kind: "popup", width: 444, frame: "none", props: { tab: "tab", target: { id: c.id, space: space.id } } }),
+          openMenu({ tab: "tab", target: { id: c.id, space: space.id } }),
         )
         .child(tile(t, p))
         .child(
