@@ -683,36 +683,6 @@ pub fn publish_spaces(v: Value) -> bool {
     publish("spaces", |s| (std::mem::replace(&mut s.spaces, v.clone()), v))
 }
 /// Distinct installed agent programs with panes across spaces.
-#[cfg(target_os = "macos")]
-pub fn usage_programs() -> Vec<(String, String, std::path::PathBuf, bool)> {
-    use std::collections::BTreeMap;
-    let programs = SNAPSHOT.with_borrow(|snapshot| usage_programs_from(&snapshot.agents, &snapshot.spaces));
-    let installed: BTreeMap<_, _> = crate::programs::startable().into_iter().filter_map(|program| {
-        let command = program.pointer("/run/0")?.as_str()?;
-        Some((program["key"].as_str()?.to_owned(), crate::usage::executable(command)?))
-    }).collect();
-    programs.into_iter().filter_map(|(key, (name, local))| {
-        Some((key.clone(), name, installed.get(&key)?.clone(), local))
-    }).collect()
-}
-
-#[cfg(target_os = "macos")]
-fn usage_programs_from(agents: &Value, spaces: &Value) -> std::collections::BTreeMap<String, (String, bool)> {
-    let mut programs = std::collections::BTreeMap::new();
-    for agent in agents.as_array().into_iter().flatten() {
-        let program = &agent["program"];
-        if let (Some(key), Some(name), Some(space)) =
-            (program["key"].as_str(), program["name"].as_str(), agent["space"].as_str())
-        {
-            let local = spaces.as_array().into_iter().flatten()
-                .any(|entry| entry["id"] == space && entry["machine"].is_null());
-            let entry = programs.entry(key.to_owned()).or_insert_with(|| (name.to_owned(), false));
-            entry.1 |= local;
-        }
-    }
-    programs
-}
-
 pub fn publish_agents(v: Value) -> bool {
     publish("agents", |s| (std::mem::replace(&mut s.agents, v.clone()), v))
 }
@@ -926,6 +896,7 @@ pub fn run_remote(machine: &str, command: &str, args: &[String], cwd: Option<Str
 }
 
 fn run_remote_with_limit(machine: &str, command: &str, args: &[String], cwd: Option<String>, limit: Duration) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+    if !crate::hc::REMOTE_ENABLED { return Err(crate::hc::REMOTE_PAUSED.into()); }
     use base64::Engine;
     let mut hc_args: Vec<String> = vec!["exec".into(), "--json".into(), "--on".into(), machine.into(), "--timeout".into(), limit.as_secs_f64().to_string()];
     if let Some(c) = cwd {
@@ -952,6 +923,7 @@ fn run_remote_with_limit(machine: &str, command: &str, args: &[String], cwd: Opt
 /// once and re-checks in the background (the check runs a login shell: seconds);
 /// only the first ask for a machine, or after programs.json changes, waits for it.
 fn known_agents(on: Option<String>, list: Vec<Value>) -> Result<Value, String> {
+    if !crate::hc::REMOTE_ENABLED && on.is_some() { return Err(crate::hc::REMOTE_PAUSED.into()); }
     known_agents_with(on, list, crate::programs::installed)
 }
 
@@ -1057,6 +1029,28 @@ fn exec_future(command: String, args: Vec<String>, cwd: Option<String>, on: Opti
     }
 }
 
+/// Stop explicit machine operations through the mod's core CLI shortcut.
+fn remote_hc(args: &[String]) -> bool {
+    let mut args = args.iter().filter(|a| !matches!(a.as_str(), "--json" | "--text"));
+    let Some(command) = args.next() else { return false };
+    if command == "machine" { return true; }
+    if matches!(command.as_str(), "run" | "exec" | "file") {
+        return args.take_while(|a| a.as_str() != "--").any(|a| a == "--on" || a.starts_with("--on="));
+    }
+    if !matches!(command.as_str(), "get" | "attach" | "read" | "kill" | "rm" | "label" | "keep" | "send" | "keys" | "interrupt" | "wait" | "put") {
+        return false;
+    }
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--children" | "--output" | "--timeout" | "--history" | "--lines" | "--if" => { args.next(); }
+            "--" => return args.next().is_some_and(|target| target.contains('/')),
+            option if option.starts_with('-') => {}
+            target => return target.contains('/'),
+        }
+    }
+    false
+}
+
 fn module(inst: Instance, copy: u64) -> HostModule {
     let reads = Rc::new(RefCell::new(LiveReads::default()));
     LIVE_READS.with_borrow_mut(|copies| {
@@ -1088,7 +1082,11 @@ fn module(inst: Instance, copy: u64) -> HostModule {
             let expected = a.get(2).and_then(|v| match v { HostValue::Str(s) => Some(s.clone()), _ => None });
             Ok(crate::mod_files::write_text(a.string(0)?.to_owned(), a.string(1)?.to_owned(), expected))
         })
-        .async_function("hc", |a| Ok(exec_future(crate::core_bin::path().to_string_lossy().into_owned(), strings(a.get(0)), None, None, EXEC_LIMIT)))
+        .async_function("hc", |a| {
+            let args = strings(a.get(0));
+            if !crate::hc::REMOTE_ENABLED && remote_hc(&args) { return Err(HostError::new(crate::hc::REMOTE_PAUSED)); }
+            Ok(exec_future(crate::core_bin::path().to_string_lossy().into_owned(), args, None, None, EXEC_LIMIT))
+        })
         .function("home", |_| Ok(home().to_string_lossy().into_owned().into()))
         .function("appHome", |_| Ok(app_dir().to_string_lossy().into_owned().into()))
         .function("fonts", |_| Ok(to_host(&json!(*FONTS.lock().unwrap()))))
@@ -1340,6 +1338,16 @@ mod tests {
     }
 
     #[test]
+    fn core_cli_rejects_explicit_remote_targets_with_options() {
+        let remote = |args: &[&str]| remote_hc(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        assert!(remote(&["wait", "--timeout", "2", "host/t7"]));
+        assert!(remote(&["send", "--if", "idle", "host/t7", "hello"]));
+        assert!(remote(&["exec", "--on=host", "--", "pwd"]));
+        assert!(!remote(&["wait", "--output", "host/t7", "t7"]));
+        assert!(!remote(&["send", "t7", "--", "host/t7"]));
+    }
+
+    #[test]
     fn exec_timeout_defaults_caps_and_rejects_invalid_values() {
         assert_eq!(exec_limit(None).unwrap(), EXEC_LIMIT);
         assert_eq!(exec_limit(Some(&HostObject::new().field("timeout", HostValue::Null).into())).unwrap(), EXEC_LIMIT);
@@ -1372,20 +1380,6 @@ mod tests {
         assert!(exec_future("herdr_test_missing_command_638".into(), vec![], None, None, EXEC_LIMIT).await.is_err());
         let error = exec_future("sh".into(), vec!["-c".into(), "sleep 0.15; printf late".into()], None, None, Duration::from_millis(30)).await.unwrap_err();
         assert!(error.to_string().contains("0.03 s"), "{error}");
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn usage_programs_deduplicate_agents_across_spaces() {
-        let agents = json!([
-            {"space":"a", "program":{"key":"codex", "name":"Codex"}},
-            {"space":"b", "program":{"key":"codex", "name":"Codex"}},
-            {"space":"b", "program":{"key":"claude", "name":"Claude Code"}},
-            {"space":"c", "program":null}
-        ]);
-        let spaces = json!([{"id":"a","machine":null}, {"id":"b","machine":"remote"}]);
-        assert_eq!(usage_programs_from(&agents, &spaces).into_iter().collect::<Vec<_>>(),
-            [("claude".into(), ("Claude Code".into(), false)), ("codex".into(), ("Codex".into(), true))]);
     }
 
     #[test]

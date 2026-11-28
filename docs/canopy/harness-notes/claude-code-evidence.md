@@ -398,3 +398,9 @@ rt{dirname as z,join as B}from"path";var H=p(()=>u({customTitle:o()}));function 
 ```text
 nt-replacement":"accumulate","api-request-shape":"boundary-cleared","api-request-blob":"boundary-cleared","api-request":"boundary-cleared","fork-context-ref":"accumulate","frame-link":"accumulate",summary:"last-wins","custom-title":"last-wins","ended-by-model":"last-wins","ai-title":"last-wins",tag:"last-wins",relocated:"last-wins","agent-name":"last-wins","agent-color":"last-wins","agent-setting":"last-wins","pr-link":"last-wins","artifact-comment-monitor":"accumulate","artifact-autoreact-ledger":"last-wins","bridge-session":"last-wins","history-suppression":"last-wins","attribution-snapshot":"last-wins",mode:"last-wins","permission-mode":"l
 ```
+
+## Quota probe, Claude Code 2.1.332 on macOS
+
+In a fresh empty temporary directory, `--safe-mode --tools "" --setting-sources ""` accepted the process-local hook and Remote Control settings alongside `--strict-mcp-config` with an empty MCP map. The interactive trust dialog initially selected **No, exit**. Sending the application-cursor Down key moved the selection to **Yes, I trust this folder**. After confirmation, the built-in `/usage` opened the Usage tab and displayed **Loading usage data** followed by **Couldn't load usage data** in this environment. No model prompt was sent. This verifies the command and its failure display. Numeric live quota values were unavailable in this run.
+
+The CLI rejects `--no-session-persistence` in interactive mode.

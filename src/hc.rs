@@ -54,6 +54,14 @@ pub struct Pushed {
     pub terminals: bool,
 }
 
+/// Canopy's remote UI is paused. Keep the core protocol available for reactivation.
+pub const REMOTE_PAUSED: &str = "Remote machines and mobile access are paused in Canopy.";
+pub const REMOTE_ENABLED: bool = false;
+
+fn local_terminal(record: &Value) -> bool {
+    record["address"].as_str().is_some_and(|address| !address.contains('/'))
+}
+
 impl EventLines {
     /// From `events.subscribe`'s reply: its `seq` and `terminals`.
     pub fn new(snapshot: &Value) -> Self {
@@ -106,6 +114,14 @@ impl EventLines {
         live
     }
 
+    pub fn local_live(&self, hello: &Value, machines: &Value) -> Value {
+        let mut live = self.live_for(hello, machines);
+        if !REMOTE_ENABLED && let Some(terminals) = live["terminals"].as_array_mut() {
+            terminals.retain(local_terminal);
+        }
+        live
+    }
+
     pub fn push(&mut self, bytes: &[u8]) -> Pushed {
         self.pending.extend_from_slice(bytes);
         let mut consumed = 0;
@@ -135,8 +151,8 @@ impl EventLines {
                 Some("event") if p["seq"].as_u64().is_none_or(|s| s > self.seq) => {
                     self.seq = p["seq"].as_u64().unwrap_or(self.seq);
                     if p["type"] == "doc" {
-                        pushed.docs = true;
-                    } else {
+                        pushed.docs |= REMOTE_ENABLED || p["machine"].is_null();
+                    } else if REMOTE_ENABLED || p["terminal"].as_str().is_none_or(|a| !a.contains('/')) {
                         pushed.terminals |= self.apply(p);
                     }
                 }
@@ -650,6 +666,16 @@ mod tests {
         assert_eq!(lines.take_seen(), (HashMap::new(), false));
         lines.push(format!("{}\n", json!({"method": "missed", "params": {"seq": 9, "terminals": []}})).as_bytes());
         assert!(lines.take_seen().1, "missed: can't tell");
+    }
+
+    #[test]
+    fn paused_remote_terminals_stay_out_of_the_live_list() {
+        let mut lines = EventLines::new(&json!({"terminals": [
+            {"address":"t1","state":"live"},
+            {"address":"server/t2","state":"live"}
+        ]}));
+        assert!(!lines.push(b"{\"method\":\"event\",\"params\":{\"type\":\"title\",\"terminal\":\"server/t2\"}}\n").terminals);
+        assert_eq!(lines.local_live(&Value::Null, &Value::Null)["terminals"], json!([{"address":"t1","state":"live"}]));
     }
 
     #[test]

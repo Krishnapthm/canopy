@@ -447,6 +447,9 @@ export default class extends View { render() { return div(); } }
             this.canvas_state.file = Some(draft.clone());
             this.canvas_state.modes.insert((FileHost::Panel, draft_path.clone()), FileMode::Source);
             this.canvas_state.dirty = Some(draft_path.clone());
+            let target = json!({"root":path.parent().unwrap(),"branch":"topic"});
+            assert_eq!(this.run_as("files.branch_switch", target, false, window, cx)["error"],
+                "Save your edits in this checkout before switching branches");
             assert_eq!(this.pane_dock(&did, Some(true), window, cx), Ok(true));
             assert!(this.canvas_state.doc.docked(&did));
             assert_eq!(this.canvas_state.file.as_ref(), Some(&draft));

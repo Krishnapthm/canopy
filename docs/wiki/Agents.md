@@ -2,6 +2,9 @@
 
 An agent is a coding agent CLI, such as Claude Code or Codex, running in a terminal pane. Canopy runs the same CLI you would run in any terminal, in your space's folder, with your own login and settings. What Canopy adds is around it: you can see at a glance which agents are working, which are done and which are waiting for you, and agents can talk to each other and to the panes on your canvas.
 
+
+The bottom strip shows agents across the active space's tabs. Click a chip to enter its pane. Click **+N** to search the agents in that space when more chips are available.
+
 ## Start an agent
 
 1. Click **Agent** on the toolbar, or press `Shift+N` in canvas mode.

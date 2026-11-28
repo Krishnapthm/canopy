@@ -723,6 +723,45 @@ impl Default for Document {
     }
 }
 
+/// Canvas records owned by paused remote spaces. The live layout never sees them.
+pub struct PausedRemote {
+    spaces: Vec<Space>,
+    panes: Vec<Pane>,
+    wires: Vec<Wire>,
+    cameras: std::collections::HashMap<String, Camera>,
+    tabs: Vec<PanelTab>,
+}
+
+impl PausedRemote {
+    pub fn take(doc: &mut Document) -> Self {
+        let remote = |id: &str| id.contains('/');
+        if doc.room.as_deref().is_some_and(remote) { doc.go(None); }
+        if doc.panel.space.as_deref().is_some_and(remote) { doc.panel.space = None; }
+        let spaces = doc.spaces.extract_if(.., |s| remote(&s.space)).collect();
+        let panes: Vec<_> = doc.panes.extract_if(.., |p| {
+            p.space.as_deref().is_some_and(remote) || p.terminal().is_some_and(remote)
+                || matches!(&p.kind, Kind::Sub { parent, .. } if remote(parent))
+        }).collect();
+        let hidden: std::collections::HashSet<_> = panes.iter().map(|p| p.id.as_str()).collect();
+        let wires = doc.wires.extract_if(.., |w| hidden.contains(w.a.as_str()) || hidden.contains(w.b.as_str())).collect();
+        let tabs = doc.panel.tabs.extract_if(.., |t| t.pane().is_some_and(|id| hidden.contains(id.as_str()))).collect();
+        let cameras = doc.cameras.extract_if(|id, _| remote(id)).collect();
+        // Queued remote panes retain their ids even if an older file omitted the watermark.
+        doc.file_ids = doc.file_ids.max(hidden.iter().filter_map(|id| id.strip_prefix('p')?.parse::<u64>().ok()).max().unwrap_or(0));
+        Self { spaces, panes, wires, cameras, tabs }
+    }
+
+    /// Save local changes alongside the dormant records using the released format.
+    pub fn restore_into(&self, doc: &mut Document) {
+        doc.spaces.extend(self.spaces.iter().cloned());
+        doc.panes.extend(self.panes.iter().cloned());
+        doc.wires.extend(self.wires.iter().cloned());
+        doc.cameras.extend(self.cameras.iter().map(|(id, camera)| (id.clone(), *camera)));
+        doc.panel.tabs.extend(self.tabs.iter().cloned());
+        doc.prune_wires();
+    }
+}
+
 /// An undirected Wire edge between two cells, addressed by `Pane::id`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Wire {
@@ -1030,6 +1069,35 @@ mod tests {
 
     /// The gap the layout tests leave between panes.
     const GAP: f32 = 24.;
+
+    #[test]
+    fn paused_remote_room_survives_a_local_canvas_save() {
+        let mut doc = Document::default();
+        let room = "host/s1".to_owned();
+        doc.spaces.push(Space { space: room.clone(), rect: [0., 0., 60., 50.], color: Hue::Blue, frame: true });
+        doc.place("host/t1", [0., 0.], [220., 36.]);
+        doc.panes[0].space = Some(room.clone());
+        let mut note = doc.panes[0].clone();
+        note.id = "p12".into();
+        note.kind = Kind::File { path: "/example.md".into() };
+        doc.panes.push(note);
+        doc.dock("p12");
+        assert!(doc.connect("host/t1", "p12"));
+        doc.go(Some(room.clone()));
+        let camera = Camera::new(12., 20., 1.);
+        doc.camera = camera;
+
+        let paused = PausedRemote::take(&mut doc);
+        assert!(doc.room.is_none() && doc.panes.is_empty() && doc.spaces.is_empty());
+        assert!(doc.wires.is_empty() && doc.panel.tabs.is_empty() && doc.cameras.is_empty());
+        assert_eq!(doc.next_file_id(), "p13");
+
+        paused.restore_into(&mut doc);
+        assert_eq!(doc.spaces[0].space, room);
+        assert_eq!(doc.panes.len(), 2);
+        assert!(doc.docked("p12") && doc.wires[0].joins("host/t1", "p12"));
+        assert_eq!(doc.cameras[&room], camera);
+    }
 
     #[test]
     fn browser_panes_have_the_taller_header() {

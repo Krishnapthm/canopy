@@ -38,7 +38,9 @@ to stop the core and every terminal and agent in it, open the background tile's 
 
 while Canopy is open, **Run in Background** shows its menu bar icon. choose **Show Canopy** to bring the window forward or **Quit Canopy** to exit the app.
 
-the menu also lists the agent programs in your open spaces. for the local Codex CLI account, it shows used percentages and time until reset when the CLI provides them. open the menu again after **Refresh Usage** to see the latest result. cached results are rechecked when they are over a minute old and you open the menu. other programs show **Unavailable** when Canopy cannot read their usage.
+Open the Canopy menu bar icon to see remaining quota for installed Codex and Claude Code accounts. Each reported window shows a bar, the percentage left and a reset time when the CLI supplies one. The menu opens with cached readings, then refreshes missing or minute-old readings while the menu is open. Choose **Refresh Usage** to request fresh readings for both installed CLIs.
+
+If a refresh fails, the menu gives the reason and keeps the last reading with its age. Canopy asks the local CLIs for quotas without starting a model turn.
 
 turn off **Run in Background** in **Settings** > **Look** > **App**, or set `run_in_background` to `false` in `settings.json`, to remove the menu bar icon and skip the Dock tile after Quit.
 

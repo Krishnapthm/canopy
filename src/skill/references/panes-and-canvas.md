@@ -60,12 +60,11 @@ canopy do space.new --name api --folder /path/to/api
 canopy do tab.new --name "fix login" --argv '["claude"]' --task "Look at the login bug"
 canopy do pane.split --direction right --pane p12
 canopy do agent.focus --terminal t7        # on the canvas: also enters that pane
-canopy do space.new --name "remote api" --machine vps --folder /srv/api
+
 ```
 
-A remote space's folder is on that machine, and its tabs and splits stay there.
-`hc machine ls` lists machines. Use `hc run --on vps ...`, `hc exec --on vps ...`
-and `hc file ... --on vps ...` for remote work, not your local file tools.
+Remote machines and mobile access are paused. Local macOS Simulator panes remain available.
+
 
 A terminal you start with `hc` shows in the window only with the label
 `herdr.space=<id>` (and optionally `herdr.tab=<id>`). Leave background workers

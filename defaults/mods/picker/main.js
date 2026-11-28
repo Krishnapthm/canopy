@@ -3,12 +3,11 @@
 // Go to a tab. Drops from the Terminals layout's space chip (popup, at: "top"). Spaces with
 // something that needs you come first, quiet spaces (no agent running)
 // fold into "earlier". Type to filter, ↑/↓ and Enter to go, ctrl+d to close
-// a tab, Esc to leave. Last rows: new work (a tab here, a space on this
-// computer or on each connected machine).
+// a tab, Esc to leave. Last rows: new work (a tab here, a space on this computer).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { agents, spaces, terminals, run, hc, theme, settings, props, closeOverlay, openOverlay, shared, setShared, ui } from "herdr";
+import { agents, spaces, terminals, run, theme, settings, props, closeOverlay, openOverlay, shared, setShared, ui } from "herdr";
 
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 
@@ -66,10 +65,10 @@ export default class Picker extends View {
   static finds = finds;
   init(_props, cx) {
     this.filter = "";
-    this.input = InputState.new({ placeholder: "Go to a space, pane, file or tab" });
+    this.input = InputState.new({ placeholder: props()?.agentSpace ? "Search agents" : "Go to a space, pane, file or tab" });
     this.input.on("change", (_e, cx) => {
       this.filter = this.input.value();
-      this.at = this.filter ? Math.max(0, this.rows().filter(r => r.kind !== "head").findIndex(r => r.kind === "find" || r.kind === "ctx")) : 0;
+      this.at = this.filter ? Math.max(0, this.rows().filter(r => r.kind !== "head").findIndex(r => r.kind === "find" || r.kind === "ctx" || r.kind === "agent")) : 0;
       cx.notify();
     });
     this.input.on("submit", (_e, cx) => this.go(this.rows().filter(r => r.kind !== "head")[this.at], cx));
@@ -78,15 +77,7 @@ export default class Picker extends View {
     this.at = null;
     this.scroll = 0;
     this.showEarlier = false;
-    this.machines = [];
     this.handle = cx.focus_handle();
-    cx.spawn(async (cx) => {
-      try {
-        const r = await hc(["machine", "ls", "--json"]);
-        if (r.code === 0) this.machines = (JSON.parse(r.stdout).machines ?? []).filter((m) => m.state === "connected" && !m.temporary).map((m) => m.name);
-      } catch {}
-      cx.notify();
-    });
   }
 
   close() {
@@ -96,6 +87,12 @@ export default class Picker extends View {
   rows() {
     const f = this.filter.toLowerCase();
     const all = agents();
+    const space = props()?.agentSpace;
+    if (space) return all.filter(a => a.space === space).flatMap(a => {
+      const label = a.program?.name || a.title || a.address;
+      const sub = a.tab_name ?? "";
+      return `${label} ${sub}`.toLowerCase().includes(f) ? [{ kind: "agent", label, sub, a }] : [];
+    });
     const live = terminals().filter((x) => x.state === "live");
     const teamOf = (addrs) => {
       let n = 0;
@@ -126,8 +123,7 @@ export default class Picker extends View {
       if (this.showEarlier || f) quiet.forEach(add);
     }
     out.push({ kind: "new" });
-    out.push({ kind: "space", machine: null });
-    for (const m of this.machines) out.push({ kind: "space", machine: m });
+    out.push({ kind: "space" });
     return out;
   }
 
@@ -147,9 +143,10 @@ export default class Picker extends View {
       else run("preview.open", { path: r.id });
       return;
     }
-    if (r.kind === "ctx") run("tab.select", { id: r.ctx.id });
+    if (r.kind === "agent") run("agent.focus", { terminal: r.a.address });
+    else if (r.kind === "ctx") run("tab.select", { id: r.ctx.id });
     else if (r.kind === "new") run("tab.new");
-    else if (r.kind === "space") run("space.new", { machine: r.machine ?? "" });
+    else if (r.kind === "space") run("space.new");
   }
 
   glyph(t, st) {
@@ -163,7 +160,7 @@ export default class Picker extends View {
     const pickable = rows.filter((r) => r.kind !== "head");
     // Opens on where you are.
     if (this.at === null) this.at = Math.max(0, pickable.findIndex((r) => r.kind === "ctx" && r.w.active && r.ctx.active));
-    this.at = Math.min(this.at, pickable.length - 1);
+    this.at = Math.max(0, Math.min(this.at, pickable.length - 1));
     const sel = pickable[this.at];
     // One continuous strip: each row (and the group title before it) at a fixed
     // y. Scrolling moves the strip only as far as it takes to keep the selected
@@ -219,6 +216,11 @@ export default class Picker extends View {
           .child(`earlier: ${r.count} quiet space${r.count > 1 ? "s" : ""} ${this.showEarlier ? "▴" : "▾"}`);
       }
       const on = r === sel;
+      if (r.kind === "agent") return h_flex().id(`picker-agent-${r.a.address}`).h(32).px(10).gap(8)
+        .items_center().cursor_pointer().rounded(ui.size.radiusSm).when(on, el => el.bg(t.hover))
+        .hover(s => s.bg(t.hover)).on_click(() => this.go(r))
+        .child(this.glyph(t, r.a.status)).child(div().flex_1().truncate().text_color(t.foreground).child(r.label))
+        .child(div().max_w(150).truncate().text_color(t.dim).child(r.sub));
       if (r.kind === "find") {
         const icon = { space: "mods/files/folder.svg", pane: "mods/workspace-chrome/terminal.svg", file: "mods/files/file.svg" }[r.what];
         return h_flex()
@@ -232,9 +234,9 @@ export default class Picker extends View {
           .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(r.sub));
       }
       if (r.kind === "new" || r.kind === "space") {
-        const label = r.kind === "new" ? "new tab" : r.machine ? `open space on ${r.machine}` : "open space";
+        const label = r.kind === "new" ? "new tab" : "open space";
         return h_flex()
-          .id(r.kind === "new" ? "pk-new" : `pk-space-${r.machine ?? "here"}`)
+          .id(r.kind === "new" ? "pk-new" : "pk-space")
           .mx(4)
           .when(r.kind === "new", (el) => el.mt(4))
           .px(10)
@@ -283,6 +285,7 @@ export default class Picker extends View {
       .on_key_down((e, cx) => {
         const k = e.key;
         if (k === "escape") return this.close();
+        if (!pickable.length) return;
         if (k === "down") this.at = (this.at + 1) % pickable.length;
         else if (k === "up") this.at = (this.at + pickable.length - 1) % pickable.length;
         else if (k === "d" && e.modifiers.control) {
@@ -294,12 +297,13 @@ export default class Picker extends View {
         cx.stop_propagation();
         cx.notify();
       })
-      .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child("Go to")).child(div().id("picker-esc").px(6).py(2).rounded(ui.size.radiusSm).text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => this.close()).child("Esc")))
+      .child(h_flex().items_center().child(div().flex_1().text_size(15).font_semibold().text_color(t.foreground).child(props()?.agentSpace ? "Agents in this space" : "Go to")).child(div().id("picker-esc").px(6).py(2).rounded(ui.size.radiusSm).text_size(11).text_color(t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => this.close()).child("Esc")))
       .child(
         h_flex().h(ui.size.control).flex_none().px(10).gap(8).items_center().rounded(ui.size.radius).border_1().border_color(t.accent).bg(t.background)
           .child(svg("mods/workspace-chrome/search.svg").size(15).text_color(t.dim))
           .child(Input.new(this.input).flex_1().h_full().text_size(ui.size.text).text_color(t.foreground)),
       )
+      .when(!rows.length, el => el.child(div().text_color(t.dim).child("No matching agents")))
       .child(
         v_flex()
           .id("pk-list")

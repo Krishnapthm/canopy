@@ -642,22 +642,10 @@ The main ones:
   `layout.reset {name?}` (reset a shipped layout and its clicks),
   `layout.clone {name, as?}` (duplicate, then switch; default `<name>-copy`).
 - App: `mod.clone {name, as?}` (duplicate; default `<name>-copy`), `mod.open {name}` (again: closes it), `overlay.close {id?}`, `app.help` (again: closes it), `app.palette` (again: closes it), `app.settings {section?}`
-  (sections: `look`, `keyboard`, `shortcuts`, `machines`, `alerts`; Shortcuts searches and edits app-home keys.json, records one combination and resets defaults; Machines lists, updates, renames and removes ssh machines; settings edit the same files you do).
-  `app.theme {name}`, `app.zoom_in`, `app.zoom_out`, `app.zoom_reset`,
-  Add machine lists all named ssh-config hosts in a scrollable list. Machines
-  that need a password, a new host key or herdr-core installed show what to run
-  in your own terminal; the picker updates once it is added. Other machines are
-  added quietly. If a Linux server reports that programs stop at logout, its
-  added card warns that agents stop when you disconnect and offers the administrator's
-  `sudo loginctl enable-linger -- <user>` command with Copy. A warning mark in
-  Settings > Machines and the sidebar opens that card; it clears automatically
-  after the administrator enables lingering. Older cores show no warning.
-  Login guidance includes Copy. A machine that needs a login shows
-  `hc machine login <name>` with Copy in Settings > Machines, its sidebar group,
-  the welcome screen and the failed Open space toast. If a remote machine was rebuilt
-  or replaced and a different core answers there, its sidebar offers Connect:
-  explicitly forget the old identity and pair again with the same name and target.
-  Other unreachable machines don't offer this.
+  (sections: `look`, `keyboard` on macOS, `shortcuts`, `alerts`; Shortcuts searches and edits app-home keys.json, records one combination and resets defaults).
+  `app.theme {name}`, `app.zoom_in`, `app.zoom_out`, `app.zoom_reset`.
+  Remote machines and mobile access are paused. Local Simulator panes remain available.
+- Files: the branch button below the tree searches local branches. `files.branch_switch {root, branch}` switches the local checkout. Save Canopy editor drafts before switching.
 - Window: `window.minimize`, `window.maximize` (or back), `window.close`.
 - `app.quit` exits Canopy while the core keeps terminals and agents running.
 - macOS also has `app.hide`, `app.hide_others`, and `app.show_all`.

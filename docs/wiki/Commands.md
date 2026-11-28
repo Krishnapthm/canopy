@@ -753,6 +753,15 @@ Show a file as its source or its preview. mode is source or preview; pane is the
 | `mode` | yes |
 | `pane` | no |
 
+## `files.branch_switch`
+
+Switch a checkout to an existing local branch. Refuses when a Canopy editor in the checkout has unsaved changes.
+
+| Argument | Required |
+|---|---|
+| `root` | yes |
+| `branch` | yes |
+
 ## `files.auto_save`
 
 Turn automatic saving of edited files on or off.
@@ -802,7 +811,7 @@ Bring a popped terminal back.
 
 ## `space.new`
 
-Make a space: its name (default: none, so it's called after where its first terminal is), the folder its terminals start in (default: the focused terminal's), its first tab's name (default: none, so it's called by its number), optionally an agent (argv) and its first message (task), and the machine it lives on (`hc machine ls`; default the focused space's machine for keys and clicks, this computer for scripts; empty string: this computer; its terminals start in that machine's home unless folder).
+Make a space: its name (default: none, so it's called after where its first terminal is), the folder its terminals start in (default: the focused terminal's), its first tab's name (default: none, so it's called by its number), optionally an agent (argv) and its first message (task), on this computer. Remote machines are paused.
 
 | Argument | Required |
 |---|---|
@@ -1240,7 +1249,7 @@ No arguments.
 
 ## `app.settings`
 
-Open the settings (section: look, keyboard, shortcuts, machines, alerts).
+Open the settings (section: look, keyboard, shortcuts, alerts).
 
 | Argument | Required |
 |---|---|

@@ -3,7 +3,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, Scrollbar, InputState, Input, Popup } from "gpui-base";
-import { commands, keys, nextCommand, openOverlay, setShared, notify, hc, run, theme, themes, fonts, settings, exec, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, ui } from "herdr";
+import { commands, keys, nextCommand, openOverlay, setShared, notify, run, theme, themes, fonts, settings, exec, layouts, shared, appHome, readTextFile, writeTextFile, playSound, props, closeOverlay, window, ui } from "herdr";
 
 const I = (name) => `frame/settings/${name}.svg`;
 
@@ -11,7 +11,6 @@ const SECTIONS = [
   { id: "look", title: "Look", icon: "palette" },
   ...(window()?.platform === "macos" ? [{ id: "keyboard", title: "Keyboard", icon: "keyboard" }] : []),
   { id: "shortcuts", title: "Shortcuts", icon: "keyboard" },
-  { id: "machines", title: "Machines", icon: "server" },
   { id: "alerts", title: "Alerts", icon: "bell" },
 ];
 
@@ -35,18 +34,25 @@ function commandName(action) {
   return typeof action === "string" ? action.split(":")[0] : action.command;
 }
 
-function normalizedKey(key) {
+function normalizedKey(key, secondary) {
   return key.trim().split(/\s+/).map(chord => {
     const parts = chord.split("-");
     const key = parts.pop();
     if (/^[A-Z]$/.test(key)) parts.push("shift");
-    const modifiers = parts.map(p => ({ super: "cmd", win: "cmd", secondary: window()?.platform === "macos" ? "cmd" : "ctrl" })[p.toLowerCase()] ?? p.toLowerCase());
+    const modifiers = parts.map(p => ({ super: "cmd", win: "cmd", secondary })[p.toLowerCase()] ?? p.toLowerCase());
     return [...new Set(modifiers)].sort().concat(key.toLowerCase()).join("-");
   }).join(" ");
 }
 
-function conflicts(bindings, key, action) {
-  return Object.entries(bindings).filter(([k, a]) => normalizedKey(k) === normalizedKey(key) && actionName(a) !== actionName(action)).map(([, a]) => actionName(a));
+function shortcutIndex(bindings, secondary) {
+  const keys = new Map(), actions = new Map();
+  for (const [key, action] of Object.entries(bindings)) {
+    const normalized = normalizedKey(key, secondary);
+    keys.set(key, normalized);
+    if (!actions.has(normalized)) actions.set(normalized, []);
+    actions.get(normalized).push(actionName(action));
+  }
+  return { keys, actions };
 }
 
 function parseShortcuts(raw) {
@@ -63,23 +69,25 @@ function matchesShortcut(row, query) {
 }
 
 // Replace only this action; a collision never takes another action's key away.
-function bindShortcut(current, row, nextKeys) {
+function bindShortcut(current, row, nextKeys, secondary) {
   const bindings = current[row.section] ?? (current[row.section] = {});
   for (const [key, action] of Object.entries(bindings)) {
     if (actionName(action) === row.name) delete bindings[key];
   }
+  const { actions } = shortcutIndex(bindings, secondary);
   for (const key of nextKeys) {
-    if (normalizedKey(key) === normalizedKey("ctrl-alt-shift-escape")) throw new Error("Ctrl+Alt+Shift+Esc is reserved for restoring Canopy.");
-    const other = conflicts(bindings, key, row.action);
+    const normalized = normalizedKey(key, secondary);
+    if (normalized === "alt-ctrl-shift-escape") throw new Error("Ctrl+Alt+Shift+Esc is reserved for restoring Canopy.");
+    const other = actions.get(normalized) ?? [];
     if (other.length) throw new Error(`${row.section}: ${key} already binds ${other.join(", ")}. Clear that binding first.`);
     bindings[key] = row.action;
   }
 }
 
-function resetShortcuts(current, defaults, catalog, row = null) {
+function resetShortcuts(current, defaults, catalog, secondary, row = null) {
   if (row) {
     const keys = Object.entries(defaults[row.section] ?? {}).filter(([, action]) => actionName(action) === row.name).map(([key]) => key);
-    bindShortcut(current, row, keys);
+    bindShortcut(current, row, keys, secondary);
     return;
   }
   const known = new Set(catalog.map(c => c.name));
@@ -89,24 +97,34 @@ function resetShortcuts(current, defaults, catalog, row = null) {
       if (known.has(commandName(action)) || shipped.has(actionName(action))) delete bindings[key];
     }
   }
-  for (const row of shortcutRows({}, defaults, [])) bindShortcut(current, row, row.defaults);
+  for (const row of shortcutRows({}, defaults, [])) bindShortcut(current, row, row.defaults, secondary);
 }
 
-function shortcutRows(current, defaults, catalog) {
+// Prepare descriptions and collision warnings once per revision.
+function shortcutRows(current, defaults, catalog, secondary) {
+  const about = new Map(catalog.map(c => [c.name, c.about]));
+  const represented = new Set();
+  const indexes = new Map(Object.entries(current).map(([section, bindings]) => [section, shortcutIndex(bindings, secondary)]));
   const rows = new Map();
   for (const [source, field] of [[current, "current"], [defaults, "defaults"]]) {
     for (const [section, bindings] of Object.entries(source)) {
       for (const [key, action] of Object.entries(bindings)) {
         const id = JSON.stringify([section, actionName(action)]);
-        if (!rows.has(id)) rows.set(id, { id, section, action, name: actionName(action), about: catalog.find(c => c.name === commandName(action))?.about ?? "Custom key action", current: [], defaults: [] });
-        rows.get(id)[field].push(key);
+        represented.add(commandName(action));
+        if (!rows.has(id)) rows.set(id, { id, section, action, name: actionName(action), about: about.get(commandName(action)) ?? "Custom key action", current: [], defaults: [], warnings: [] });
+        const row = rows.get(id);
+        row[field].push(key);
+        if (field === "current") {
+          const { keys, actions } = indexes.get(section);
+          for (const other of actions.get(keys.get(key))) if (other !== row.name) row.warnings.push(`${key} also binds ${other}`);
+        }
       }
     }
   }
   for (const c of catalog) {
-    if ([...rows.values()].some(row => commandName(row.action) === c.name)) continue;
+    if (represented.has(c.name)) continue;
     const id = JSON.stringify(["global", c.name]);
-    rows.set(id, { id, section: "global", action: c.name, name: c.name, about: c.about, current: [], defaults: [] });
+    rows.set(id, { id, section: "global", action: c.name, name: c.name, about: c.about, current: [], defaults: [], warnings: [] });
   }
   return [...rows.values()].sort((a, b) => a.section.localeCompare(b.section) || a.name.localeCompare(b.name));
 }
@@ -121,14 +139,7 @@ export default class Settings extends View {
     this.fontInput.on("change", (_e, cx) => { this.filter = this.fontInput.value(); cx.notify(); });
     this.canvasColorInput = InputState.new({ placeholder: "#1E1E1E" });
     this.canvasColorInput.on("change", (_e, cx) => { const color = this.canvasColorInput.value(); if (/^#[0-9a-f]{6}([0-9a-f]{2})?$/i.test(color)) this.change((q) => { q.canvas_color = color; }, cx); });
-    this.renameInput = InputState.new();
-    this.renameInput.on("focus", (_e, cx) => { this.renameFocused = true; cx.notify(); });
-    this.renameInput.on("blur", (_e, cx) => { this.renameFocused = false; cx.notify(); });
-    this.renameInput.on("change", (_e, cx) => { if (this.machineEdit?.action === "rename") this.machineEdit.name = this.renameInput.value(); cx.notify(); });
-    this.renameInput.on("submit", (_e, cx) => {
-      const edit = this.machineEdit;
-      if (edit?.action === "rename") this.machineAction(edit.machine, "rename", cx, edit.name);
-    });
+    this.secondary = window()?.platform === "macos" ? "cmd" : "ctrl";
     this.shortcutQuery = "";
     this.shortcutInput = InputState.new({ placeholder: "Search actions, descriptions or keys" });
     this.shortcutInput.on("change", (_e, cx) => { this.shortcutQuery = this.shortcutInput.value(); cx.notify(); });
@@ -136,43 +147,28 @@ export default class Settings extends View {
     this.recording = null;
     this.shortcutBusy = false;
     this.shortcutRevision = null;
-    this.shortcutKeys = null;
+    this.preparedShortcuts = null;
     this.shortcutDefaults = {};
     this.shortcutError = null;
     this.person = {};
     this.raw = null;
     this.previews = {}; // layout name -> its "preview" picture
     this.previewsOf = "";
-    this.machineList = null;
-    this.machineLoading = false;
-    this.machineError = null;
-    this.machineBusy = {};
-    this.machineResults = {};
-    this.machineEdit = null;
-    this.machineNotice = null;
     this.handle = cx.focus_handle();
     this.handle.focus();
     this.cancelShortcut();
     cx.spawn(async (cx) => {
       await this.load();
       if (this.section === "shortcuts") await this.loadShortcuts();
-      if (this.section === "machines") await this.loadMachines();
       cx.notify();
     });
     cx.spawn(async (cx) => {
       for (;;) {
         const command = await nextCommand();
-        if (command === "reset_shortcuts") this.saveShortcuts(current => resetShortcuts(current, this.shortcutDefaults, commands()), cx);
+        if (command === "reset_shortcuts") this.saveShortcuts(current => resetShortcuts(current, this.shortcutDefaults, commands(), this.secondary), cx);
         else if (command === "focus" && this.section === "shortcuts") { await this.loadShortcuts(); cx.notify(); }
         else if (command.startsWith('{"shortcut":')) this.captureShortcut(JSON.parse(command).shortcut, cx);
       }
-    });
-    cx.timer.every(3000, (cx) => {
-      if (this.section !== "machines") return;
-      cx.spawn(async (cx) => {
-        await this.loadMachines();
-        cx.notify();
-      });
     });
   }
 
@@ -658,19 +654,23 @@ export default class Settings extends View {
 
   async loadShortcuts() {
     try {
-      const name = window()?.platform === "macos" ? "keys.macos.json" : "keys.json";
+      const name = this.secondary === "cmd" ? "keys.macos.json" : "keys.json";
       const shipped = await readTextFile(`${appHome()}/frame/settings/${name}`);
       if (shipped === null) throw new Error("Shipped shortcuts are missing. Restart Canopy to install them.");
       this.shortcutDefaults = parseShortcuts(shipped);
       const raw = await readTextFile(`${appHome()}/keys.json`);
-      this.shortcutKeys = parseShortcuts(raw ?? shipped);
+      this.prepareShortcuts(parseShortcuts(raw ?? shipped));
       this.shortcutRevision = JSON.stringify(keys());
       this.shortcutError = null;
     } catch (e) {
-      this.shortcutKeys = null;
+      this.preparedShortcuts = null;
       this.shortcutError = String(e);
       notify({ title: "Couldn't read shortcuts", body: String(e), level: "error" });
     }
+  }
+
+  prepareShortcuts(current) {
+    this.preparedShortcuts = shortcutRows(current, this.shortcutDefaults, commands(), this.secondary);
   }
 
   cancelShortcut() {
@@ -681,7 +681,7 @@ export default class Settings extends View {
   captureShortcut(key, cx) {
     const row = this.recording;
     this.cancelShortcut();
-    if (row && key !== "escape") this.saveShortcuts(current => bindShortcut(current, row, key === "backspace" ? [] : [key]), cx);
+    if (row && key !== "escape") this.saveShortcuts(current => bindShortcut(current, row, key === "backspace" ? [] : [key], this.secondary), cx);
     cx.notify();
   }
 
@@ -700,7 +700,7 @@ export default class Settings extends View {
           edit(current);
           try {
             await writeTextFile(file, JSON.stringify(current, null, 2) + "\n", raw);
-            this.shortcutKeys = current;
+            this.prepareShortcuts(current);
             this.shortcutRevision = JSON.stringify(keys());
             break;
           } catch (e) {
@@ -727,8 +727,8 @@ export default class Settings extends View {
     const page = v_flex().w_full().gap(8)
       .child(Input.new(this.shortcutInput).h(32).text_color(t.foreground))
       .child(this.heading(t, "Shortcuts"));
-    if (!this.shortcutKeys) return page.child(div().text_color(t.dim).child(this.shortcutError ?? "Reading shortcuts"));
-    const rows = shortcutRows(this.shortcutKeys, this.shortcutDefaults, commands()).filter(row => matchesShortcut(row, this.shortcutQuery));
+    if (!this.preparedShortcuts) return page.child(div().text_color(t.dim).child(this.shortcutError ?? "Reading shortcuts"));
+    const rows = this.preparedShortcuts.filter(row => matchesShortcut(row, this.shortcutQuery));
     return page
       .child(this.button(t, "st-shortcuts-reset-all", this.shortcutBusy ? "Saving shortcuts" : "Reset all shortcuts", () => {
         if (this.shortcutBusy) return;
@@ -742,7 +742,6 @@ export default class Settings extends View {
       .when(Boolean(this.shortcutError), el => el.child(div().text_size(12).text_color(t.blocked).child(this.shortcutError)))
       .when(rows.length === 0, el => el.child(div().text_color(t.dim).child("No matching shortcuts")))
       .children(rows.map((row, i) => {
-        const warnings = row.current.flatMap(key => conflicts(this.shortcutKeys[row.section], key, row.action).map(other => `${key} also binds ${other}`));
         return this.row(t, row.name, `${row.section}: ${row.about}`,
           v_flex().w(210).gap(4)
             .child(this.button(t, `st-shortcut-key-${i}`, this.recording?.id === row.id ? "Press a key (Esc cancels)" : row.current.join(", ") || "Unbound", (_e, cx) => {
@@ -753,8 +752,8 @@ export default class Settings extends View {
               cx.notify();
             }))
             .child(div().text_size(12).text_color(t.dim).child(`Default: ${row.defaults.join(", ") || "Unbound"}`))
-            .child(this.button(t, `st-shortcut-reset-${i}`, "Reset to default", (_e, cx) => this.saveShortcuts(current => resetShortcuts(current, this.shortcutDefaults, commands(), row), cx)))
-            .when(warnings.length > 0, el => el.child(div().text_size(12).text_color(t.blocked).child(warnings.join("; ")))));
+            .child(this.button(t, `st-shortcut-reset-${i}`, "Reset to default", (_e, cx) => this.saveShortcuts(current => resetShortcuts(current, this.shortcutDefaults, commands(), this.secondary, row), cx)))
+            .when(row.warnings.length > 0, el => el.child(div().text_size(12).text_color(t.blocked).child(row.warnings.join("; ")))));
       }));
   }
 
@@ -788,124 +787,6 @@ export default class Settings extends View {
   }
 
   // Machines -------------------------------------------------------------
-
-  async loadMachines() {
-    if (this.machineLoading) return;
-    this.machineLoading = true;
-    try {
-      const r = await hc(["machine", "ls", "--json"]);
-      if (r.code !== 0) throw new Error(r.stderr || r.stdout || "Couldn't read machines.");
-      const list = JSON.parse(r.stdout).machines;
-      if (!Array.isArray(list)) throw new Error("Couldn't read machines.");
-      this.machineList = list.filter((m) => !m.temporary);
-      this.machineError = null;
-    } catch (e) {
-      this.machineError = String(e);
-    } finally {
-      this.machineLoading = false;
-    }
-  }
-
-  machineAction(machine, action, cx, name) {
-    if (this.machineBusy[machine]) return;
-    if (action === "rename" && (!name?.trim() || name.trim() === machine)) return;
-    this.machineBusy[machine] = action;
-    delete this.machineResults[machine];
-    this.machineEdit = null;
-    this.handle.focus();
-    cx.notify();
-    cx.spawn(async (cx) => {
-      try {
-        const args = ["machine", action, machine];
-        if (action === "rename") args.push(name.trim());
-        const r = await hc(args);
-        let payload = null;
-        try { payload = JSON.parse(r.stdout || r.stderr); } catch {}
-        if (r.code !== 0) throw new Error(payload?.error?.message || (r.stderr || r.stdout || "It didn't work.").trim());
-        this.machineNotice = action === "rename" ? `Renamed ${machine} to ${name.trim()}.` : `Removed ${machine}; its terminals keep running there.`;
-      } catch (e) {
-        this.machineResults[machine] = { message: String(e), ok: false };
-      } finally {
-        delete this.machineBusy[machine];
-      }
-      await this.loadMachines();
-      cx.notify();
-    });
-  }
-
-  machineRow(t, m) {
-    const busy = this.machineBusy[m.name];
-    const edit = this.machineEdit?.machine === m.name ? this.machineEdit : null;
-    const state = String(m.state ?? "unknown").replace(/[_-]/g, " ");
-    const color = ["connected", "online"].includes(m.state) ? t.ansi2 : ["connecting", "reconnecting"].includes(m.state) ? t.working : t.blocked;
-    const result = this.machineResults[m.name];
-    const controls = h_flex().gap(6).items_center();
-    if (busy) controls.child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12).text_color(t.muted).child(busy === "rename" ? "Renaming" : "Removing"));
-    else {
-      for (const [action, label] of [["rename", "Rename"], ["rm", "Remove"]]) {
-        controls.child(this.button(t, `st-m-${action}-${m.name}`, label, (_e, cx) => {
-          this.machineEdit = { machine: m.name, action, name: m.name };
-          if (action === "rename") {
-            this.renameInput.set_value(m.name);
-            this.renameInput.set_selected_range({ start: 0, end: encodeURIComponent(m.name).replace(/%[0-9A-F]{2}/g, "_").length });
-            this.renameFocused = true;
-            this.renameInput.focus();
-          }
-          cx.notify();
-        }));
-      }
-    }
-    const row = v_flex().w_full().py(12).gap(8).border_b(1).border_color(t.border)
-      .child(h_flex().gap(10).items_center()
-        .child(div().w(7).h(7).flex_none().rounded(4).bg(color))
-        .child(v_flex().flex_1().min_w(0).gap(3)
-          .child(div().text_size(14).text_color(t.foreground).child(m.name))
-          .child(div().text_size(12.5).text_color(t.dim).child(`${m.target ?? ""} · ${state} · ${m.version ? `hc ${m.version}` : "hc version unknown"}`)))
-        .when(m.keeps_running_after_logout === false, el => el.child(div().id(`st-m-logout-${m.name}`)
-          .text_color(t.blocked).cursor_pointer().tooltip("Agents stop when you disconnect. Click for the fix.")
-          .on_click(() => run("mod.open", { name: "machine-add" })).child("⚠")))
-        .child(controls.flex_none()));
-    if (m.state === "needs_login") {
-      const command = `hc machine login ${m.name}`;
-      row.child(v_flex().gap(5)
-        .child(div().text_size(12.5).text_color(t.blocked).child("needs a login: run"))
-        .child(h_flex().gap(8).items_center()
-          .child(div().flex_1().min_w(0).text_size(12.5).text_color(t.foreground).child(command))
-          .child(this.button(t, `st-m-login-copy-${m.name}`, this.copiedLogin === command ? "Copied" : "Copy", (_e, cx) => {
-            cx.write_to_clipboard(command);
-            this.copiedLogin = command;
-            cx.notify();
-          }))));
-    }
-    if (edit && !busy) {
-      const cancel = this.button(t, `st-m-cancel-${m.name}`, "Cancel", (_e, cx) => { this.machineEdit = null; this.handle.focus(); cx.notify(); });
-      if (edit.action === "rm") row.child(v_flex().gap(8)
-        .child(div().text_size(12.5).text_color(t.muted).child(`Remove ${m.name}? Its terminals keep running there.`))
-        .child(h_flex().gap(6).child(cancel).child(this.button(t, `st-m-confirm-${m.name}`, "Remove machine", (_e, cx) => this.machineAction(m.name, "rm", cx)))));
-      else row.child(v_flex().gap(6)
-        .child(div().text_size(12).text_color(t.dim).child("New name (addresses using the old name stop working)"))
-        .child(h_flex().gap(6).items_center()
-          .child(Input.new(this.renameInput).flex_1().min_w(0).h(32).px(10).rounded(ui.size.radiusSm).border_1().border_color(this.renameFocused ? t.accent : t.input).bg(t.background).text_size(13).text_color(t.foreground))
-          .child(cancel).child(this.button(t, `st-m-save-${m.name}`, "Save", (_e, cx) => this.machineAction(m.name, "rename", cx, edit.name)))));
-    }
-    if (result) row.child(div().text_size(12.5).text_color(result.ok ? t.ansi2 : t.blocked).child(result.message));
-    return row;
-  }
-
-  machines(t) {
-    return v_flex().w_full()
-      .child(this.heading(t, "Machines"))
-      .child(div().pb(8).text_size(12.5).line_height("18px").text_color(t.dim).child("Your computers, reached over ssh. Their terminals keep running when you disconnect."))
-      .child(this.row(t, "This computer", "Connected", div().w(7).h(7).rounded(4).bg(t.ansi2)))
-      .children((this.machineList ?? []).map((m) => this.machineRow(t, m)))
-      .when(this.machineList === null && !this.machineError, (el) => el.child(h_flex().py(14).gap(8).items_center().child(svg("mods/workspace-chrome/spinner.svg").size(12).text_color(t.working).spin(900)).child(div().text_size(12.5).text_color(t.dim).child("Reading machines"))))
-      .when(this.machineList?.length === 0, (el) => el.child(div().py(14).text_size(12.5).text_color(t.dim).child("No other machines yet.")))
-      .when(Boolean(this.machineError), (el) => el.child(div().py(10).text_size(12.5).text_color(t.blocked).child(this.machineError)))
-      .when(Boolean(this.machineNotice), (el) => el.child(div().py(10).text_size(12.5).text_color(t.ansi2).child(this.machineNotice)))
-      .child(h_flex().pt(16).child(this.button(t, "st-m-add", "Add a machine", () => run("mod.open", { name: "machine-add" }))));
-  }
-
-  // Alerts ---------------------------------------------------------------
 
   alerts(t) {
     const sounds = this.person.sounds ?? {};
@@ -973,10 +854,8 @@ export default class Settings extends View {
               this.cancelShortcut();
               this.section = s.id;
               this.picking = null;
-              this.machineEdit = null;
               this.handle.focus();
               if (s.id === "shortcuts") cx.spawn(async (cx) => { await this.loadShortcuts(); cx.notify(); });
-              if (s.id === "machines") cx.spawn(async (cx) => { await this.loadMachines(); cx.notify(); });
               cx.notify();
             })
             .child(svg(I(s.icon)).size(15).text_color(on ? t.accent : t.dim))
@@ -999,14 +878,6 @@ export default class Settings extends View {
       .on_key_down((e, cx) => {
         if (this.recording) { cx.stop_propagation(); return; }
         const k = e.key;
-        if (this.machineEdit) {
-          if (k === "escape") this.machineEdit = null;
-          else return;
-          this.handle.focus();
-          cx.stop_propagation();
-          cx.notify();
-          return;
-        }
         if (k === "escape") {
           if (this.picking) this.picking = null;
           else return this.close();
@@ -1042,8 +913,6 @@ export default class Settings extends View {
                         ? this.shortcuts(t, cx)
                       : this.section === "keyboard"
                         ? this.keyboard(t)
-                      : this.section === "machines"
-                        ? this.machines(t)
                       : this.section === "alerts"
                         ? this.alerts(t)
                         : this.look(t, cx),
