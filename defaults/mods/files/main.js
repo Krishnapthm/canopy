@@ -119,10 +119,14 @@ async function directory(path, on) {
 
 // Exact matches lead, followed by prefixes and other substrings.
 export function matchingBranches(branches, query) {
-  const q = query.trim().toLowerCase();
-  const score = name => name === q ? 0 : name.startsWith(q) ? 1 : name.includes(q) ? 2 : 3;
-  return branches.map(name => ({ name, score: score(name.toLowerCase()) }))
-    .filter(row => row.score < 3).sort((a, b) => a.score - b.score).map(row => row.name);
+  const literal = query.trim(), q = literal.toLowerCase();
+  const score = name => {
+    if (name === literal) return 0;
+    const folded = name.toLowerCase();
+    return folded === q ? 1 : folded.startsWith(q) ? 2 : folded.includes(q) ? 3 : 4;
+  };
+  return branches.map(name => ({ name, score: score(name) }))
+    .filter(row => row.score < 4).sort((a, b) => a.score - b.score).map(row => row.name);
 }
 
 export default class Files extends View {
@@ -287,13 +291,26 @@ export default class Files extends View {
     this.limited = false;
     cx.spawn(async cx => {
       try {
-        for (const path of ["", ...this.folders]) {
-          if (!this.current(context)) return;
-          await this.loadFolder(path, context);
-        }
         const top = await exec("git", ["rev-parse", "--show-toplevel"], { cwd, on }).catch(() => null);
         const repo = top?.code === 0 ? top.stdout.replace(/\r?\n$/, "") : null;
-        const ref = repo && !on ? await exec("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], { cwd }).catch(() => null) : null;
+        const ref = repo && !on ? await exec("git", ["symbolic-ref", "--quiet", "HEAD"], { cwd }).catch(() => null) : null;
+        if (!this.current(context)) return;
+        this.repo = on ? null : repo;
+        this.branch = ref?.code === 0 ? ref.stdout.trimEnd().replace(/^refs\/heads\//, "") : null;
+        cx.notify();
+        await this.loadFolder("", context);
+        for (const path of this.folders) {
+          if (!this.current(context)) return;
+          const cut = path.lastIndexOf("/");
+          const parent = cut < 0 ? "" : path.slice(0, cut);
+          const name = path.slice(cut + 1);
+          if (!this.entries.get(parent)?.some(entry => entry.dir && entry.name === name)) {
+            this.folders.delete(path);
+            this.entries.delete(path);
+            continue;
+          }
+          await this.loadFolder(path, context);
+        }
         const marks = {};
         if (repo) {
           // Writes nothing under .git (index lock, fsmonitor cookie): the folder watch would refresh again.
@@ -306,8 +323,6 @@ export default class Files extends View {
         // Search covers every file, not just loaded folders; git lists them fast and honors .gitignore.
         const listed = top?.code === 0 ? await exec("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], { cwd, on }).catch(() => null) : null;
         if (!this.current(context)) return;
-        this.repo = on ? null : repo;
-        this.branch = ref?.code === 0 ? ref.stdout.trimEnd() : null;
         this.all = listed?.code === 0 ? listed.stdout.split("\0").filter(Boolean) : null;
         this.marks = marks; this.error = null; this.watch(cwd, cx);
 
@@ -494,13 +509,14 @@ export default class Files extends View {
   }
 
   search(cx) {
+    const request = this.searchRequest = {};
     this.searchTimer?.cancel();
     const filter = this.filter, context = this.searchContext = this.context;
     this.hits = [];
     this.searching = filter.kind === "content" && filter.query.length >= 2 && Boolean(context?.cwd);
     if (!this.searching) return;
     this.searchTimer = cx.timer.after(300, cx => cx.spawn(async cx => {
-      const current = () => this.filter === filter && this.current(context);
+      const current = () => this.searchRequest === request && this.filter === filter && this.current(context);
       if (!current()) return;
       const { cwd, on } = context;
       try {

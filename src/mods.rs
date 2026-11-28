@@ -1037,8 +1037,18 @@ fn remote_hc(args: &[String]) -> bool {
     if matches!(command.as_str(), "run" | "exec" | "file") {
         return args.take_while(|a| a.as_str() != "--").any(|a| a == "--on" || a.starts_with("--on="));
     }
-    matches!(command.as_str(), "get" | "attach" | "read" | "kill" | "rm" | "label" | "keep" | "send" | "keys" | "interrupt" | "wait" | "put")
-        && args.next().is_some_and(|a| a.contains('/'))
+    if !matches!(command.as_str(), "get" | "attach" | "read" | "kill" | "rm" | "label" | "keep" | "send" | "keys" | "interrupt" | "wait" | "put") {
+        return false;
+    }
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--children" | "--output" | "--timeout" | "--history" | "--lines" => { args.next(); }
+            "--" => return args.next().is_some_and(|target| target.contains('/')),
+            option if option.starts_with('-') => {}
+            target => return target.contains('/'),
+        }
+    }
+    false
 }
 
 fn module(inst: Instance, copy: u64) -> HostModule {
@@ -1325,6 +1335,15 @@ mod tests {
             assert_eq!(invalid.shape, None, "{fields}");
             assert_eq!(invalid.shape.unwrap_or_default(), defaults);
         }
+    }
+
+    #[test]
+    fn core_cli_rejects_explicit_remote_targets_with_options() {
+        let remote = |args: &[&str]| remote_hc(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
+        assert!(remote(&["wait", "--timeout", "2", "host/t7"]));
+        assert!(remote(&["exec", "--on=host", "--", "pwd"]));
+        assert!(!remote(&["wait", "--output", "host/t7", "t7"]));
+        assert!(!remote(&["send", "t7", "--", "host/t7"]));
     }
 
     #[test]

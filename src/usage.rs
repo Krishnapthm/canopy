@@ -2,7 +2,7 @@
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::os::unix::{fs::PermissionsExt, process::CommandExt};
+use std::os::unix::{fs::{DirBuilderExt, PermissionsExt}, process::CommandExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Mutex, mpsc};
@@ -162,9 +162,9 @@ fn read_codex(executable: &Path) -> Result<Value, String> {
         .current_dir(crate::mods::app_dir())
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
         .spawn().map_err(|e| e.to_string())?;
-    let stdout = child.stdout.take().ok_or("missing stdout")?;
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let stdout = child.stdout.take().expect("piped Codex stdout");
+    let (tx, rx) = mpsc::sync_channel(16);
+    let reader = std::thread::spawn(move || {
         let mut lines = BufReader::new(stdout.take(1024 * 1024)).lines();
         while let Some(Ok(line)) = lines.next() {
             if let Ok(value) = serde_json::from_str::<Value>(&line) && tx.send(value).is_err() { break; }
@@ -193,8 +193,9 @@ fn read_codex(executable: &Path) -> Result<Value, String> {
             Err("no usage limits".into())
         }
     })();
-    let _ = child.kill();
-    let _ = child.wait();
+    drop(rx);
+    reap(child);
+    let _ = reader.join();
     result
 }
 
@@ -261,13 +262,13 @@ fn claude_windows(screen: &str) -> Vec<Quota> {
 /// A bounded PTY which sends only the built-in usage command to an empty workspace.
 fn read_claude(executable: &Path) -> Result<Vec<Quota>, String> {
     let cwd = std::env::temp_dir().join(format!("canopy-usage-{}", objc2_foundation::NSUUID::UUID().UUIDString()));
-    std::fs::create_dir(&cwd).map_err(|e| e.to_string())?;
-    let result = claude_pty(executable, &cwd);
+    std::fs::DirBuilder::new().mode(0o700).create(&cwd).map_err(|e| e.to_string())?;
+    let result = claude_pty(executable, &cwd, Duration::from_secs(15));
     let _ = std::fs::remove_dir(&cwd);
     result
 }
 
-fn claude_pty(executable: &Path, cwd: &Path) -> Result<Vec<Quota>, String> {
+fn claude_pty(executable: &Path, cwd: &Path, limit: Duration) -> Result<Vec<Quota>, String> {
     use std::fs::File;
     const COLS: u16 = 160;
     const ROWS: u16 = 100;
@@ -303,22 +304,25 @@ fn claude_pty(executable: &Path, cwd: &Path) -> Result<Vec<Quota>, String> {
             Ok(())
         });
     }
-    let mut child = command.spawn().map_err(|e| e.to_string())?;
+    let child = command.spawn().map_err(|e| e.to_string())?;
     drop(command); // Close the parent's slave fds so child exit ends the stream.
     let result = (|| {
         let mut vt = crate::vt::Vt::new(COLS, ROWS);
-        let deadline = Instant::now() + Duration::from_secs(15);
+        let deadline = Instant::now() + limit;
         let mut asked = false;
         let mut confirmed = false;
         let mut moved = false;
         let mut submitted = false;
+        let mut settled = None;
         let mut bytes = 0;
         let mut buf = [0; 8192];
         while Instant::now() < deadline {
             let wait = deadline.saturating_duration_since(Instant::now()).as_millis() as i32;
+            // A PTY read can end midway through a redraw, before later windows arrive.
+            let wait = if settled.is_some() { wait.min(180) } else { wait };
             let mut poll = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
             match unsafe { libc::poll(&mut poll, 1, wait) } {
-                0 => break,
+                0 => return settled.ok_or_else(|| "CLI usage request timed out".into()),
                 -1 if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted => continue,
                 -1 => return Err(std::io::Error::last_os_error().to_string()),
                 _ => {}
@@ -349,7 +353,7 @@ fn claude_pty(executable: &Path, cwd: &Path) -> Result<Vec<Quota>, String> {
             }
             if submitted {
                 let rows = claude_windows(&screen);
-                if !rows.is_empty() && !screen.contains("Refreshing") && !screen.contains("Loading") { return Ok(rows); }
+                settled = (!rows.is_empty() && !screen.contains("Refreshing") && !screen.contains("Loading")).then_some(rows);
                 let lower = screen.to_ascii_lowercase();
                 if lower.contains("failed to load usage") || lower.contains("error loading usage") || lower.contains("couldn't load usage") {
                     return Err("Claude Code could not load usage".into());
@@ -362,14 +366,37 @@ fn claude_pty(executable: &Path, cwd: &Path) -> Result<Vec<Quota>, String> {
         }
         Err("CLI usage request timed out".into())
     })();
-    let _ = child.kill();
-    let _ = child.wait();
+    reap(child);
     result
+}
+
+fn reap(mut child: std::process::Child) {
+    // Both probes start their own process group. End any helper commands too.
+    if unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL) } != 0 { let _ = child.kill(); }
+    let _ = child.wait();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pty_submits_only_usage_and_bounds_a_stalled_cli() {
+        let dir = std::env::temp_dir().join(format!("canopy-usage-test-{}", objc2_foundation::NSUUID::UUID().UUIDString()));
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let executable = dir.join("usage-cli");
+        let script = "#!/bin/sh\nprintf '❯ '\nIFS= read -r cmd\n[ \"$cmd\" = /usage ] || exit 2\nprintf 'Current session\\n████ 87%% used\\n'\n/bin/sleep 0.05\nprintf 'Resets 2pm (UTC)\\nCurrent week (all models)\\n████ 0%% used\\n'\n/bin/sleep 30 & wait\n";
+        std::fs::write(&executable, script).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let quotas = claude_pty(&executable, &dir, Duration::from_secs(3));
+        std::fs::write(&executable, "#!/bin/sh\n/bin/sleep 30 & wait\n").unwrap();
+        let stalled = claude_pty(&executable, &dir, Duration::from_millis(100));
+        std::fs::remove_dir_all(&dir).unwrap();
+        let quotas = quotas.unwrap();
+        assert_eq!(quotas.iter().map(|q| q.remaining).collect::<Vec<_>>(), [13, 100]);
+        assert!(matches!(&quotas[0].reset, Some(Reset::Reported(_))));
+        assert_eq!(stalled.unwrap_err(), "CLI usage request timed out");
+    }
 
     #[test]
     fn quota_windows_keep_extremes_and_omit_missing_data() {

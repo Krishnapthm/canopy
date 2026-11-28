@@ -3031,7 +3031,9 @@ impl AppWindow {
             return json!({ "error": error });
         }
         if !crate::hc::REMOTE_ENABLED && (Self::arg(&args, "machine").is_some_and(|m| !m.is_empty())
-            || Self::arg(&args, "terminal").is_some_and(|id| id.contains('/'))
+            || ["terminal", "space", "pane"].into_iter().any(|key| Self::arg(&args, key).is_some_and(|id| id.contains('/')))
+            || (["space.", "tab.", "pane."].into_iter().any(|prefix| name.starts_with(prefix))
+                && Self::arg(&args, "id").is_some_and(|id| id.contains('/')))
             || (name == "mod.open" && Self::arg(&args, "name") == Some("machine-add")))
         {
             return json!({"error":crate::hc::REMOTE_PAUSED});

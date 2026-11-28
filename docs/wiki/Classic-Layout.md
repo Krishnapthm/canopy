@@ -20,7 +20,7 @@ See [Agents](Agents#the-agents-list) for the agents list.
 - Right-click a space for its menu. [Spaces](Spaces#worktree-spaces) describes worktrees.
 - Once you add a machine, a header per machine groups its spaces. **This computer** comes first.
 - Click a machine header to fold its spaces. Click **+** on the header to create a space on that machine.
-- Click **Add machine** at the bottom to add a machine. See [Machines](Machines). **Settings** is above it.
+- Click **Settings** at the bottom to change the appearance, shortcuts and alerts.
 
 - Press `Cmd+B` (`Ctrl+Shift+B` on Linux and Windows) to hide or show the sidebar.
 - Click the sidebar button in the top row to narrow the sidebar to a rail. Click it again to widen it.

@@ -35,6 +35,7 @@ pub(super) enum Rename {
 
 pub(super) struct State {
     pub doc: Document,
+    paused_remote: Option<canvas::PausedRemote>,
     /// The canvas size and its uncovered part, measured each frame (`sync_viewport`); every
     /// canvas rule reads this one value.
     pub(super) viewport: canophy::Viewport,
@@ -240,12 +241,14 @@ impl State {
             ),
         };
         let mut doc = doc;
+        let paused_remote = (!crate::hc::REMOTE_ENABLED).then(|| canvas::PausedRemote::take(&mut doc));
         let panes: Vec<_> = doc.panes.iter().map(|p| p.id.clone()).collect();
         doc.panel.tabs.retain(|t| t.pane().is_none_or(|id| panes.contains(id)));
         // A docked pane lives only in the panel, so the panel opens on it.
         let file = doc.panel.tabs.iter().find(|t| t.pane().is_some()).cloned();
         Self {
             doc,
+            paused_remote,
             // The first render measures the real one (`sync_viewport`).
             viewport: canophy::Viewport::whole([1200., 800.]),
             // The canvas has the keyboard until a cell is entered (double-click or Enter).
@@ -435,6 +438,12 @@ impl State {
         self.resizing = false;
         changed
     }
+    fn document_to_save(&self) -> Document {
+        let mut doc = self.doc.clone();
+        if let Some(paused) = &self.paused_remote { paused.restore_into(&mut doc); }
+        doc
+    }
+
     pub fn flush(&mut self) {
         self.save_task = None;
         self.save.pending = false;
@@ -443,7 +452,7 @@ impl State {
             self.save.dirty = true;
         }
         if self.save.dirty && self.writable {
-            match self.doc.save(&file("canvas.json")) {
+            match self.document_to_save().save(&file("canvas.json")) {
                 Ok(()) => {
                     self.save.dirty = false;
                 }
@@ -1443,53 +1452,56 @@ impl AppWindow {
                 let (code, out, error) = mods::run_blocking("git", &args, Some(root.clone()), std::time::Duration::from_secs(30))?;
                 if code == 0 { Ok(out) } else if error.trim().is_empty() { Err("Git could not switch branches".into()) } else { Err(error.trim().to_owned()) }
             };
-            let actual = git(&["rev-parse", "--show-toplevel"])?;
-            if Path::new(actual.trim_end_matches(['\r', '\n'])).canonicalize().ok().as_ref() != Some(&task_checkout) {
-                return Err("Choose the checkout shown in Files".into());
-            }
-            git(&["show-ref", "--verify", "--", &format!("refs/heads/{branch}")])?;
-            git(&["switch", "--no-guess", "--", &branch])?;
-            Ok::<_, String>(root)
+            let mut attempted = false;
+            let result = (|| {
+                let actual = git(&["rev-parse", "--show-toplevel"])?;
+                if Path::new(actual.trim_end_matches(['\r', '\n'])).canonicalize().ok().as_ref() != Some(&task_checkout) {
+                    return Err("Choose the checkout shown in Files".into());
+                }
+                git(&["show-ref", "--verify", "--", &format!("refs/heads/{branch}")])?;
+                attempted = true;
+                git(&["switch", "--no-guess", "--", &branch]).map(|_| ())
+            })();
+            (result, attempted.then_some(root))
         });
         cx.spawn_in(window, async move |this, cx| {
-            let result = work.await;
+            let (result, refresh_root) = work.await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.canvas_state.switching_branches.remove(&checkout);
-                match &result {
-                    Ok(root) => {
-                        let affected = |path: &str| {
-                            let path = Path::new(path);
-                            path.starts_with(root) || path.starts_with(&checkout)
-                                || path.parent().and_then(|p| p.canonicalize().ok()).is_some_and(|p| p.starts_with(&checkout))
-                        };
-                        let state = &mut this.canvas_state;
-                        let paths = state.doc.panes.iter().filter_map(|pane| pane.path())
-                            .chain(state.file_path().map(String::as_str))
-                            .filter(|path| affected(path)).map(str::to_owned).collect::<HashSet<_>>();
-                        mods::send_command("files", &json!({"name":"branch_changed","args":{"root":root,"paths":paths}}).to_string());
-                        for path in &paths {
-                            state.previews.remove(path);
-                            state.image_sizes.remove(path);
-                            state.image_errors.remove(path);
-                            if matches!(previewable(Path::new(path)), Some(Previewable::Svg))
-                                || canvas::file_kind(Path::new(path)) == "image"
-                            {
-                                super::invalidate_image(&gpui::Resource::Path(Path::new(path).into()), window, cx);
-                            }
+                // A post-checkout hook can fail after Git changed HEAD and the working tree.
+                if let Some(root) = refresh_root {
+                    let affected = |path: &str| {
+                        let path = Path::new(path);
+                        path.starts_with(&root) || path.starts_with(&checkout)
+                            || path.parent().and_then(|p| p.canonicalize().ok()).is_some_and(|p| p.starts_with(&checkout))
+                    };
+                    let state = &mut this.canvas_state;
+                    let paths = state.doc.panes.iter().filter_map(|pane| pane.path())
+                        .chain(state.file_path().map(String::as_str))
+                        .filter(|path| affected(path)).map(str::to_owned).collect::<HashSet<_>>();
+                    mods::send_command("files", &json!({"name":"branch_changed","args":{"root":root,"paths":paths}}).to_string());
+                    for path in &paths {
+                        state.previews.remove(path);
+                        state.image_sizes.remove(path);
+                        state.image_errors.remove(path);
+                        if matches!(previewable(Path::new(path)), Some(Previewable::Svg))
+                            || canvas::file_kind(Path::new(path)) == "image"
+                        {
+                            super::invalidate_image(&gpui::Resource::Path(Path::new(path).into()), window, cx);
                         }
-                        for pane in &state.doc.panes {
-                            if pane.path().is_some_and(|path| paths.contains(path))
-                                && let Some(pdf) = state.pdfs.remove(&pane.id)
-                            {
-                                state.pdf_drops.push(pdf);
-                            }
-                        }
-                        this.release_pdf_drops(window, cx);
-                        this.load_previews(None, window, cx);
-                        cx.notify();
                     }
-                    Err(error) => this.command_error("Switch branch", error, window, cx),
+                    for pane in &state.doc.panes {
+                        if pane.path().is_some_and(|path| paths.contains(path))
+                            && let Some(pdf) = state.pdfs.remove(&pane.id)
+                        {
+                            state.pdf_drops.push(pdf);
+                        }
+                    }
+                    this.release_pdf_drops(window, cx);
+                    this.load_previews(None, window, cx);
+                    cx.notify();
                 }
+                if let Err(error) = &result { this.command_error("Switch branch", error, window, cx); }
             });
             if let Some(reply) = reply {
                 let _ = reply.send(result.map_or_else(|e| json!({"error":e}), |_| json!({"ok":true})));
@@ -2503,7 +2515,7 @@ impl AppWindow {
                 let (tx, rx) = std::sync::mpsc::channel();
                 this.canvas_state.write_result = Some(rx);
                 this.canvas_state.save.dirty = false;
-                (this.canvas_state.doc.clone(), file("canvas.json"), tx)
+                (this.canvas_state.document_to_save(), file("canvas.json"), tx)
             }) else {
                 return;
             };

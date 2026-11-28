@@ -132,7 +132,13 @@ fn usage_section(item: &NSMenuItem, name: &str, reading: &crate::usage::Reading,
     const WIDTH: f64 = 244.;
     let frame = |x, y, width, height| NSRect::new(NSPoint::new(x, y), NSSize::new(width, height));
     let height = 28. + 45. * reading.quotas.len() as f64 + if reading.message.is_some() { 20. } else { 0. };
-    let view = NSView::initWithFrame(NSView::alloc(mtm), frame(0., 0., WIDTH, height));
+    let view = item.view().unwrap_or_else(|| {
+        let view = NSView::initWithFrame(NSView::alloc(mtm), frame(0., 0., WIDTH, height));
+        item.setView(Some(&view));
+        view
+    });
+    for child in view.subviews().iter() { child.removeFromSuperview(); }
+    view.setFrameSize(NSSize::new(WIDTH, height));
     let label = |text: &str, y, size, weight| {
         let field = NSTextField::labelWithString(&NSString::from_str(text), mtm);
         field.setFont(Some(&NSFont::systemFontOfSize_weight(size, weight)));
@@ -155,7 +161,6 @@ fn usage_section(item: &NSMenuItem, name: &str, reading: &crate::usage::Reading,
         y -= 45.;
     }
     if let Some(message) = &reading.message { label(message, 5., 11., 0.); }
-    item.setView(Some(&view));
 }
 
 impl StatusTarget {
