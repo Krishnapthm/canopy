@@ -1,11 +1,11 @@
 //! Read account usage through the installed CLI, without starting an agent turn.
 use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::{fs::{DirBuilderExt, PermissionsExt}, process::CommandExt};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Mutex, mpsc};
+use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const FRESH: Duration = Duration::from_secs(60);
@@ -160,43 +160,66 @@ fn read_codex(executable: &Path) -> Result<Value, String> {
         "-s", "read-only", "-a", "never", "app-server", "--stdio", "-c", "analytics.enabled=false",
     ])
         .current_dir(crate::mods::app_dir())
+        .process_group(0)
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null())
         .spawn().map_err(|e| e.to_string())?;
-    let stdout = child.stdout.take().expect("piped Codex stdout");
-    let (tx, rx) = mpsc::sync_channel(16);
-    let reader = std::thread::spawn(move || {
-        let mut lines = BufReader::new(stdout.take(1024 * 1024)).lines();
-        while let Some(Ok(line)) = lines.next() {
-            if let Ok(value) = serde_json::from_str::<Value>(&line) && tx.send(value).is_err() { break; }
-        }
-    });
     let result = (|| {
-        let input = child.stdin.as_mut().ok_or("missing stdin")?;
+        let input = child.stdin.as_mut().expect("piped Codex stdin");
+        let mut stdout = child.stdout.take().expect("piped Codex stdout");
+        let fd = stdout.as_raw_fd();
+        if unsafe { libc::fcntl(fd, libc::F_SETFL, libc::O_NONBLOCK) } == -1 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
         writeln!(input, "{}", json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"canopy","version":env!("CARGO_PKG_VERSION")}}})).map_err(|e| e.to_string())?;
         let deadline = Instant::now() + Duration::from_secs(8);
-        let response = |id, rx: &mpsc::Receiver<Value>| -> Result<Value, String> {
+        let mut pending = Vec::new();
+        let mut bytes = 0;
+        let mut response = |id| -> Result<Value, String> {
+            let mut buf = [0; 8192];
             loop {
-                let wait = deadline.saturating_duration_since(Instant::now());
-                let value = rx.recv_timeout(wait).map_err(|e| match e {
-                    mpsc::RecvTimeoutError::Timeout => "CLI usage request timed out",
-                    mpsc::RecvTimeoutError::Disconnected => "CLI exited before reporting usage",
-                })?;
-                if value["id"] == id { return value.get("result").cloned().ok_or("request failed".into()); }
+                while let Some(end) = pending.iter().position(|&byte| byte == b'\n') {
+                    let value = serde_json::from_slice::<Value>(&pending[..end]);
+                    pending.drain(..=end);
+                    if let Ok(value) = value && value["id"] == id {
+                        return value.get("result").cloned().ok_or_else(|| {
+                            let message = value.pointer("/error/message").and_then(Value::as_str).unwrap_or("");
+                            if message.to_ascii_lowercase().contains("log in") { "Sign in to Codex first".into() }
+                            else { "Codex could not read account quotas".into() }
+                        });
+                    }
+                }
+                if !readable(fd, deadline.saturating_duration_since(Instant::now()))? {
+                    return Err("CLI usage request timed out".into());
+                }
+                let n = stdout.read(&mut buf).map_err(|e| e.to_string())?;
+                if n == 0 { return Err("CLI exited before reporting usage".into()); }
+                bytes += n;
+                if bytes > 1024 * 1024 { return Err("CLI usage output was too large".into()); }
+                pending.extend_from_slice(&buf[..n]);
             }
         };
-        response(1, &rx)?;
+        response(1)?;
         writeln!(input, "{}\n{}", json!({"jsonrpc":"2.0","method":"initialized"}), json!({"jsonrpc":"2.0","id":2,"method":"account/rateLimits/read"})).map_err(|e| e.to_string())?;
-        let value = response(2, &rx)?;
-        if value.get("rateLimits").is_some_and(Value::is_object) {
-            Ok(value)
-        } else {
-            Err("no usage limits".into())
-        }
+        response(2)
     })();
-    drop(rx);
     reap(child);
-    let _ = reader.join();
     result
+}
+
+/// Wait for output or stream closure without leaving a blocking reader behind.
+fn readable(fd: std::os::fd::RawFd, timeout: Duration) -> Result<bool, String> {
+    let deadline = Instant::now() + timeout;
+    let mut poll = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    while Instant::now() < deadline {
+        let wait = deadline.saturating_duration_since(Instant::now()).as_millis() as i32;
+        match unsafe { libc::poll(&mut poll, 1, wait) } {
+            0 => return Ok(false),
+            -1 if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted => continue,
+            -1 => return Err(std::io::Error::last_os_error().to_string()),
+            _ => return Ok(true),
+        }
+    }
+    Ok(false)
 }
 
 fn codex_windows(limits: &Value) -> Vec<Quota> {
@@ -317,18 +340,17 @@ fn claude_pty(executable: &Path, cwd: &Path, limit: Duration) -> Result<Vec<Quot
         let mut bytes = 0;
         let mut buf = [0; 8192];
         while Instant::now() < deadline {
-            let wait = deadline.saturating_duration_since(Instant::now()).as_millis() as i32;
+            let wait = deadline.saturating_duration_since(Instant::now());
             // A PTY read can end midway through a redraw, before later windows arrive.
-            let wait = if settled.is_some() { wait.min(180) } else { wait };
-            let mut poll = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
-            match unsafe { libc::poll(&mut poll, 1, wait) } {
-                0 => return settled.ok_or_else(|| "CLI usage request timed out".into()),
-                -1 if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted => continue,
-                -1 => return Err(std::io::Error::last_os_error().to_string()),
-                _ => {}
-            }
-            let n = master.read(&mut buf).map_err(|_| "CLI exited before reporting usage")?;
-            if n == 0 { return Err("CLI exited before reporting usage".into()); }
+            let wait = if settled.is_some() { wait.min(Duration::from_millis(180)) } else { wait };
+            if !readable(fd, wait)? { return settled.ok_or_else(|| "CLI usage request timed out".into()); }
+            let mut ended = || settled.take().ok_or_else(|| "CLI exited before reporting usage".into());
+            let n = match master.read(&mut buf) {
+                Ok(0) => return ended(),
+                Err(error) if error.raw_os_error() == Some(libc::EIO) => return ended(),
+                Err(error) => return Err(error.to_string()),
+                Ok(n) => n,
+            };
             bytes += n;
             if bytes > 1024 * 1024 { return Err("CLI usage output was too large".into()); }
             vt.write(&buf[..n]);
@@ -385,7 +407,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("canopy-usage-test-{}", objc2_foundation::NSUUID::UUID().UUIDString()));
         std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
         let executable = dir.join("usage-cli");
-        let script = "#!/bin/sh\nprintf '❯ '\nIFS= read -r cmd\n[ \"$cmd\" = /usage ] || exit 2\nprintf 'Current session\\n████ 87%% used\\n'\n/bin/sleep 0.05\nprintf 'Resets 2pm (UTC)\\nCurrent week (all models)\\n████ 0%% used\\n'\n/bin/sleep 30 & wait\n";
+        let script = "#!/bin/sh\nprintf '❯ '\nIFS= read -r cmd\n[ \"$cmd\" = /usage ] || exit 2\nprintf 'Current session\\n████ 87%% used\\n'\n/bin/sleep 0.05\nprintf 'Resets 2pm (UTC)\\nCurrent week (all models)\\n████ 0%% used\\n'\n";
         std::fs::write(&executable, script).unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
         let quotas = claude_pty(&executable, &dir, Duration::from_secs(3));

@@ -1042,7 +1042,7 @@ fn remote_hc(args: &[String]) -> bool {
     }
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--children" | "--output" | "--timeout" | "--history" | "--lines" => { args.next(); }
+            "--children" | "--output" | "--timeout" | "--history" | "--lines" | "--if" => { args.next(); }
             "--" => return args.next().is_some_and(|target| target.contains('/')),
             option if option.starts_with('-') => {}
             target => return target.contains('/'),
@@ -1341,6 +1341,7 @@ mod tests {
     fn core_cli_rejects_explicit_remote_targets_with_options() {
         let remote = |args: &[&str]| remote_hc(&args.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>());
         assert!(remote(&["wait", "--timeout", "2", "host/t7"]));
+        assert!(remote(&["send", "--if", "idle", "host/t7", "hello"]));
         assert!(remote(&["exec", "--on=host", "--", "pwd"]));
         assert!(!remote(&["wait", "--output", "host/t7", "t7"]));
         assert!(!remote(&["send", "t7", "--", "host/t7"]));
