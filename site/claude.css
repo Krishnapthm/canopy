@@ -16,6 +16,7 @@
   --paper: #f6f5f1;
   --ink: #1b1a17;
   --quiet: #1b1a1799;
+  --quieter: #1b1a1766;
   --stage: #e9e7e1;
   --font: Inter, system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -61,6 +62,7 @@ svg { display: block; }
 .t-body { font-size: var(--t-body); line-height: 1.5; letter-spacing: -0.012em; text-wrap: pretty; }
 .t-ui { font-size: var(--t-ui); line-height: 1.5; }
 .quiet { color: var(--quiet); }
+.quieter { color: var(--quieter); }
 .link {
   text-decoration-line: underline;
   text-decoration-thickness: 1px;
@@ -212,6 +214,7 @@ svg { display: block; }
 .feature:nth-child(even) .feature-text { order: 2; }
 .feature-text {
   --quiet: #ffffffb3;
+  --quieter: #ffffff80;
   padding: clamp(1.25rem, 3.5vw, 3rem);
   color: #fff;
   background: linear-gradient(#5e5e5e, #565656 45%, #1b1b1b);
@@ -288,6 +291,7 @@ svg { display: block; }
 /* Footer: the embossed cobalt sheet, with one line on the left and two links on the right. */
 #footer {
   --quiet: #e3ebff;
+  --quieter: #f3f7ff;
   color: white;
   min-height: max(34rem, 100dvh);
   position: relative;
