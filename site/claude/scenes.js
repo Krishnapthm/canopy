@@ -62,16 +62,15 @@ const Scenes = (() => {
   const termBottom = (rows, w, h, pad = 8) => term(rows, { y: h - pad - rows.length * ROW, w });
 
   // Claude Code: the transcript, then its prompt box and mode line pinned to the bottom.
-  const claude = (rows, mode = "accept edits on", tail = "· Opus 5.5") => (w, h) => {
+  const claude = (rows, mode = "accept edits on") => (w, h) => {
     const rule = `{rule|${"─".repeat(Math.floor((w - 32) / CH))}}`;
     return term(rows, { w }) + termBottom([rule, "{hi|❯} {@caret}", rule,
-      `  {@play.violet}{@play.violet}{violet| ${mode}} {dim|${tail}}`], w, h);
+      `  {@play.violet}{@play.violet}{violet| ${mode}} {dim|· Opus 5.5}`], w, h);
   };
-  // Claude Code at work: the transcript, then its spinner line, animated by startWorking below. Auto mode
-  // is on, as in the app's own mode line.
+  // Claude Code at work: the transcript, then its spinner line, animated by startWorking below.
   const working = (rows) => (w, h) => {
     const y = 10 + rows.length * ROW;
-    return claude(rows, "auto mode on", "(shift+tab to cycle) · PR #70 · esc to interrupt")(w, h) + `<g data-working class="sv-mono">
+    return claude(rows)(w, h) + `<g data-working class="sv-mono">
       <text class="c-clawd" x="16" y="${y + 13}" data-spin>✻</text>
       <text x="39" y="${y + 13}" xml:space="preserve"><tspan class="c-clawd c-shimmer" data-verb>Percolating…</tspan><tspan class="c-dim"> (<tspan data-secs>12</tspan>s · esc to interrupt)</tspan></text></g>`;
   };
@@ -301,7 +300,7 @@ const Scenes = (() => {
     "",
   ];
   const T2 = [
-    { t: "{dim|Claude Code sent: add tests for the promo code rules}" },
+    { t: "{b|›} add tests for the promo code rules", bg: "umsg" },
     "",
     "{green|•} {b|Explored}",
     "  {dim|└ Read src/lib/promo.ts, promo.test.ts}",

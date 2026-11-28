@@ -79,7 +79,7 @@
       let list, caretRow;
       if (kind === "claude") {
         const rule = `{rule|${"─".repeat(width)}}`;
-        list = [rule, ...lines.map((l, i) => `${i ? "  " : "{hi|❯} "}${l}`), rule, "  {@play.violet}{@play.violet}{violet| accept edits on} {dim|· Opus 5.5}"];
+        list = [rule, ...lines.map((l, i) => `${i ? "  " : "{hi|❯} "}${l}`), rule, "  {@play.violet}{@play.violet}{violet| auto mode on} {dim|(shift+tab to cycle)}"];
         caretRow = lines.length;
       } else {
         const pad = { t: "", bg: "umsg" }; // the shaded box has a row of padding above and below
@@ -112,11 +112,13 @@
     return {
       feed,
       outline: box.querySelector("[data-outline]"),
-      reset() {
+      // Starts the pane with the rows it already has, so no agent begins on a blank screen.
+      reset(prior = []) {
         feed.replaceChildren(spin);
         rows = 0;
         spinner(false);
         gsap.set(feed, { y: 0 });
+        prior.forEach(print);
         compose();
         state("idle");
       },
@@ -218,23 +220,21 @@
     const [claude, codex] = [...svg.querySelectorAll("[data-term]")].map(terminal);
     const feeds = [claude.feed, codex.feed];
 
-    // Both agents start on their own work. The wire carries each message to the other agent only: the
-    // sender's transcript says it is sending, the receiver's shows the message itself.
-    play(el, () => { claude.reset(); codex.reset(); gsap.set(msg, { opacity: 0 }); }, (tl) => {
+    // Codex is already working when the run starts, and only you type, into Claude Code. The wire carries each
+    // message to the other agent only: the sender's transcript says it is sending, the receiver's shows the message.
+    const CLAUDE_PRIOR = ["{@rec.green} {b|Read} src/api/orders.ts", "  {@elbow.dim}  {dim|34 lines · the merge order is still open}"];
+    const CODEX_PRIOR = ["{green|•} {b|Edited} bag.tsx {green|+18} {red|-6}", "{green|•} {b|Ran} npm test -- bag", "  {dim|└} {green|7 passed}"];
+    play(el, () => { claude.reset(CLAUDE_PRIOR); codex.reset(CODEX_PRIOR); gsap.set(msg, { opacity: 0 }); }, (tl) => {
       open(tl, feeds);
       let c = claude.type(tl, .6, "ship the orders api, then agree merge order with the web codex");
-      let x = codex.type(tl, 1.1, "add the promo field to the bag page");
+      let x = codex.busy(tl, 0, 1.2);
       c = claude.say(tl, c, "", 0);
       c = claude.busy(tl, c, 1.4);
       c = claude.say(tl, c, "{@rec.green} {b|Update}(src/api/orders.ts)", .3);
       c = claude.say(tl, c, "  {@elbow.dim}  {dim|Added} {b|34} {dim|lines}", .7);
       c = claude.say(tl, c, "{@rec.green} {b|Bash}(npm test -- orders)", .9);
       c = claude.say(tl, c, "  {@elbow.dim}  {dim|12 passed}", .6);
-      x = codex.say(tl, x, "", 0);
-      x = codex.busy(tl, x, 1.2);
-      x = codex.say(tl, x, "{green|•} {b|Edited} bag.tsx {green|+18} {red|-6}", .8);
-      x = codex.say(tl, x, "{green|•} {b|Ran} npm test -- bag", .8);
-      x = codex.say(tl, x, "  {dim|└} {green|7 passed}", .6);
+      x = codex.say(tl, x, "{green|•} Promo field is in. Next, the cart tests.", 1.6);
 
       c = claude.say(tl, c, "{@rec} Sending t4 a message about", 0);
       c = claude.say(tl, c, "  which PR merges first.", .3);
