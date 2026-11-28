@@ -85,6 +85,27 @@ impl Cache {
     const fn new() -> Self {
         Self { executable: None, attempted: None, reading: None, error: None, pending: false }
     }
+
+    fn should_refresh(&self, force: bool) -> bool {
+        !self.pending && (force || self.attempted.is_none_or(|at| at.elapsed() >= FRESH))
+    }
+
+    fn snapshot(&self) -> Reading {
+        let (quotas, message) = if let Some((at, quotas)) = &self.reading {
+            let message = if let Some(error) = &self.error {
+                Some(format!("Updated {}m ago · {error}", at.elapsed().as_secs() / 60))
+            } else if at.elapsed() >= FRESH {
+                Some(format!("Updated {}m ago", at.elapsed().as_secs() / 60))
+            } else { None };
+            (quotas.clone(), message)
+        } else {
+            let message = if self.pending { "Loading usage…".into() }
+                else if let Some(error) = &self.error { format!("Unavailable · {error}") }
+                else { "Unavailable".into() };
+            (vec![], Some(message))
+        };
+        Reading { quotas, message, pending: self.pending }
+    }
 }
 
 pub struct Reading {
@@ -113,7 +134,7 @@ pub fn request(provider: Provider, executable: &Path, refresh: bool) {
         let pending = cache.pending;
         *cache = Cache { executable: Some(executable.to_owned()), pending, ..Cache::new() };
     }
-    if cache.pending || (!refresh && cache.attempted.is_some_and(|at| at.elapsed() < FRESH)) { return; }
+    if !cache.should_refresh(refresh) { return; }
     cache.pending = true;
     let executable = executable.to_owned();
     std::thread::spawn(move || {
@@ -138,21 +159,7 @@ pub fn request(provider: Provider, executable: &Path, refresh: bool) {
 }
 
 pub fn reading(provider: Provider) -> Reading {
-    let cache = provider.cache().lock().unwrap_or_else(|e| e.into_inner());
-    let (quotas, message) = if let Some((at, quotas)) = &cache.reading {
-        let message = if let Some(error) = &cache.error {
-            Some(format!("Updated {}m ago · {error}", at.elapsed().as_secs() / 60))
-        } else if at.elapsed() >= FRESH {
-            Some(format!("Updated {}m ago", at.elapsed().as_secs() / 60))
-        } else { None };
-        (quotas.clone(), message)
-    } else {
-        let message = if cache.pending { "Loading usage…".into() }
-            else if let Some(error) = &cache.error { format!("Unavailable · {error}") }
-            else { "Unavailable".into() };
-        (vec![], Some(message))
-    };
-    Reading { quotas, message, pending: cache.pending }
+    provider.cache().lock().unwrap_or_else(|e| e.into_inner()).snapshot()
 }
 
 fn read_codex(executable: &Path) -> Result<Value, String> {
@@ -401,6 +408,27 @@ fn reap(mut child: std::process::Child) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refresh_uses_cached_readings_deduplicates_and_keeps_stale_success() {
+        let mut cache = Cache::new();
+        assert!(cache.should_refresh(false));
+        cache.attempted = Some(Instant::now());
+        assert!(!cache.should_refresh(false));
+        assert!(cache.should_refresh(true));
+        cache.pending = true;
+        assert!(!cache.should_refresh(true));
+        cache.pending = false;
+        let stale = Instant::now() - Duration::from_secs(125);
+        cache.attempted = Some(stale);
+        let quota = Quota { label: "Weekly".into(), remaining: 13, reset: None };
+        cache.reading = Some((stale, vec![quota.clone()]));
+        cache.error = Some("CLI usage request timed out".into());
+        assert!(cache.should_refresh(false));
+        let snapshot = cache.snapshot();
+        assert_eq!(snapshot.quotas, [quota]);
+        assert!(snapshot.message.unwrap().starts_with("Updated 2m ago"));
+    }
 
     #[test]
     fn pty_submits_only_usage_and_bounds_a_stalled_cli() {
