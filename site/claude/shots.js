@@ -282,14 +282,14 @@
     const codex = terminal(svg.querySelector("[data-term]"));
     const screen = svg.querySelector("[data-screen]");
 
-    // Drawn over the screen, in points: a simulator touch, canopy's rectangle mark with its pin and note, and
+    // Drawn over the screen, in points: a simulator touch, canopy's oval mark with its pin and note, and
     // your pointer.
     const NOTE = "price first, then the radio";
     screen.insertAdjacentHTML("beforeend", `
       <circle data-touch r="14" fill="#000" fill-opacity=".16" stroke="#000" stroke-opacity=".22" stroke-width="2" opacity="0"/>
       <g data-mark opacity="0">
-        <path data-pen d="M276 346H388V462H276Z" fill="none" stroke="${PIN}" stroke-width="4" stroke-linejoin="miter"/>
-        <g data-pin><circle cx="276" cy="346" r="15" fill="${PIN}"/>${tx(276, 351.5, "1", { size: 15, weight: 650, fill: "#fff", anchor: "middle" })}</g>
+        <path data-pen d="M332 346A56 58 0 1 1 332 462A56 58 0 1 1 332 346Z" fill="none" stroke="${PIN}" stroke-width="4"/>
+        <g data-pin><circle cx="332" cy="346" r="15" fill="${PIN}"/>${tx(332, 351.5, "1", { size: 15, weight: 650, fill: "#fff", anchor: "middle" })}</g>
         <g data-note opacity="0">
           <rect x="14" y="286" width="288" height="46" rx="12" fill="#1b1b1b" stroke="#fff" stroke-opacity=".14"/>
           <text class="sv-ui" data-note-text x="30" y="314" style="font-size:15px"></text>
