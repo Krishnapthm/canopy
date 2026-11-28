@@ -215,7 +215,6 @@
         </filter>
       </defs>
       <rect width="100%" height="100%" fill="url(#footer-cobalt)"/>
-      <rect class="footer-grain" width="100%" height="100%" filter="url(#footer-grain)"/>
     </svg>
     <div class="footer-relief" aria-hidden="true">
       <div class="brand footer-brand">
@@ -229,6 +228,8 @@
         <a href="https://github.com/Krishnapthm/canopy/wiki" target="_blank" rel="noopener">docs</a>
       </nav>
     </div>
+    <!-- The grain lies over the links so they read as printed on the sheet. It ignores the pointer. -->
+    <svg class="footer-surface footer-grain" aria-hidden="true"><rect width="100%" height="100%" filter="url(#footer-grain)"/></svg>
   </footer>
 </body>
 </html>
