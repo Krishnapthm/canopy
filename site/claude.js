@@ -45,19 +45,19 @@ const paint = () => {
 };
 // Turn the short way round: pick the equivalent angle nearest the current one.
 const near = (deg) => deg + 360 * Math.round((light.azimuth - deg) / 360);
-const turnTo = (deg, duration) => gsap.to(light, { azimuth: near(deg), duration, ease: "power3.out", overwrite: true, onUpdate: paint });
+const turnTo = (deg, duration) => gsap.to(light, { azimuth: near(deg), duration, ease: "power2.out", overwrite: true, onUpdate: paint });
 if (!calm) {
   footer.addEventListener("pointermove", (e) => {
     if (e.pointerType !== "mouse") return;
     const box = brand.getBoundingClientRect(); // aim from the artwork's centre
-    turnTo(Math.atan2(e.clientY - (box.top + box.height / 2), e.clientX - (box.left + box.width / 2)) * 180 / Math.PI, .5);
+    turnTo(Math.atan2(e.clientY - (box.top + box.height / 2), e.clientX - (box.left + box.width / 2)) * 180 / Math.PI, 1.8);
   });
-  footer.addEventListener("pointerleave", () => turnTo(225, 1));
+  footer.addEventListener("pointerleave", () => turnTo(225, 2.4));
 }
 
 function footerLight() {
   // The filter's numbers, from #footer-emboss.
-  const BLUR = 6.5, SCALE = 12.48, ELEVATION = 35, DIFFUSE = .872, SPECULAR = .58, SHINE = 24, FALLOFF = 12;
+  const BLUR = 6.5, SCALE = 12.48, ELEVATION = 35, DIFFUSE = .872, SPECULAR = .14, SHINE = 10, FALLOFF = 12;
   const canvas = document.createElement("canvas");
   canvas.className = "footer-gl";
   canvas.setAttribute("aria-hidden", "true");

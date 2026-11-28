@@ -307,7 +307,6 @@ svg { display: block; }
   pointer-events: none;
   display: grid;
   place-items: center;
-  padding-bottom: min(22%, 24dvh);
 }
 .footer-brand {
   gap: 0.49em;
@@ -342,7 +341,6 @@ svg { display: block; }
   .install { gap: 1rem; }
   .command code { white-space: normal; overflow-wrap: anywhere; }
   #footer { min-height: max(37rem, 100dvh); }
-  .footer-relief { padding-bottom: 32%; }
   .links { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {

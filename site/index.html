@@ -200,14 +200,14 @@
         <radialGradient id="footer-cobalt" cx=".32" cy=".15" r=".94">
           <stop stop-color="#5482e7"/><stop offset=".5" stop-color="#315bc5"/><stop offset="1" stop-color="#112b73"/>
         </radialGradient>
-        <!-- Light the sheet's grain once so pointer movement only redraws the wordmark bevel. -->
+        <!-- Fine, even stipple of injection-moulded plastic. Lit once; pointer movement only redraws the wordmark bevel. -->
         <filter id="footer-grain" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
-          <feTurbulence type="fractalNoise" baseFrequency=".072" numOctaves="2" seed="22" stitchTiles="stitch"/>
-          <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  .006 0 0 0 0" result="grain"/>
-          <feDiffuseLighting in="grain" surfaceScale="13" diffuseConstant=".872" result="diffuse">
+          <feTurbulence type="fractalNoise" baseFrequency="1.15" numOctaves="1" seed="22" stitchTiles="stitch" result="pebbles"/>
+          <feColorMatrix in="pebbles" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  .04 0 0 0 0" result="grain"/>
+          <feDiffuseLighting in="grain" surfaceScale="16" diffuseConstant=".84" result="diffuse">
             <feDistantLight azimuth="225" elevation="35"/>
           </feDiffuseLighting>
-          <feSpecularLighting in="grain" surfaceScale="13" specularConstant=".58" specularExponent="24" result="gloss">
+          <feSpecularLighting in="grain" surfaceScale="16" specularConstant=".05" specularExponent="6" result="gloss">
             <feDistantLight azimuth="225" elevation="35"/>
           </feSpecularLighting>
           <feComposite in="diffuse" in2="gloss" operator="arithmetic" k2="1" k3="1"/>
@@ -223,7 +223,7 @@
           <feDiffuseLighting in="bevel" surfaceScale="12.48" diffuseConstant=".872" result="diffuse">
             <feDistantLight data-light azimuth="225" elevation="35"/>
           </feDiffuseLighting>
-          <feSpecularLighting in="bevel" surfaceScale="12.48" specularConstant=".58" specularExponent="24" result="gloss">
+          <feSpecularLighting in="bevel" surfaceScale="12.48" specularConstant=".14" specularExponent="10" result="gloss">
             <feDistantLight data-light azimuth="225" elevation="35"/>
           </feSpecularLighting>
           <feComposite in="diffuse" in2="gloss" operator="arithmetic" k2="1" k3="1"/>
