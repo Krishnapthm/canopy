@@ -1,4 +1,4 @@
-/* canopy marketing page (claude.html). Type follows ignsight.com: one weight (450), three sizes,
+/* Canopy landing page. Type follows ignsight.com: one weight (450), three sizes,
    tracking that tightens as size grows. No rules or borders on the page: space carries the hierarchy.
    The canopy canvas in the stage is the exception: it copies the app's own dark chrome. */
 @font-face {
@@ -31,6 +31,10 @@
 * { box-sizing: border-box; scrollbar-width: none; }
 *::-webkit-scrollbar { display: none; }
 html { overscroll-behavior-y: none; scroll-behavior: smooth; }
+/* Lenis (claude.js) scrolls the page itself; these are its required rules. */
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-stopped { overflow: clip; }
 body {
   margin: 0;
   background: var(--paper);
@@ -151,6 +155,7 @@ svg { display: block; }
 .c-red { fill: #e5534b; }
 .c-cyan { color: #8fc8d6; fill: #8fc8d6; }
 .c-violet { color: #b1b9f9; fill: #b1b9f9; }
+.c-yellow { color: #f5c542; fill: #f5c542; }
 .c-clawd { color: #d77757; fill: #d77757; }
 .c-kw { fill: #be98b7; }
 .c-fn { fill: #8fa8c8; }
@@ -164,6 +169,32 @@ svg { display: block; }
 .dot.wait { fill: #f59e2b; }
 .dot.done { fill: #4eba65; }
 @keyframes pulse { 50% { opacity: 0.35; } }
+
+/* Checkout: the phone scrolls, taps Place order and shows the confirmation on the same clock. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-checkout] [data-scroll] { animation: checkout-scroll 8s ease-in-out infinite; }
+  [data-checkout] [data-btn] {
+    animation: checkout-press 8s ease-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  [data-checkout] [data-done] { animation: checkout-confirm 8s ease-out infinite; }
+  [data-checkout]:not(.checkout-playing) :is([data-scroll], [data-btn], [data-done]) {
+    animation-play-state: paused;
+  }
+}
+@keyframes checkout-scroll {
+  0%, 15%, 89%, 100% { transform: translateY(0); }
+  37.5%, 88% { transform: translateY(-230px); }
+}
+@keyframes checkout-press {
+  0%, 49%, 54.5%, 100% { transform: scale(1); }
+  51% { transform: scale(0.96); }
+}
+@keyframes checkout-confirm {
+  0%, 52.5%, 93%, 100% { opacity: 0; }
+  57.5%, 88% { opacity: 1; }
+}
 
 /* ---------------------------------------------------------------------------------------------------
    Features: one rounded rectangle split in two with no seam, alternating sides. One half is a gradient holding the heading and its
@@ -188,8 +219,27 @@ svg { display: block; }
 /* The shot keeps its 740:560 picture whole; the frame is never taller than the screen less the
    scroll margin above it, so "features" lands on a whole frame. */
 .shot { display: grid; place-items: center; background: #111; }
+/* The file frame is interactive: a drag selects lines, so the browser must not select text under it. */
+.shot[data-scene="files"] { -webkit-user-select: none; user-select: none; }
 .shot .sv { width: 100%; max-height: calc(100svh - 2 * var(--frame-gap)); }
 #features { scroll-margin-top: var(--frame-gap); }
+
+/* The Files panel shot (claude/shots.js) answers the pointer: files in the tree, tabs and the quote
+   button are clickable, like the app's docked panel. */
+.shot [data-open], .shot [data-tab], .shot [data-plus], .shot [data-item] { cursor: pointer; }
+.shot .tree-hit { fill: #fff; fill-opacity: 0; transition: fill-opacity 120ms ease; }
+.shot .tab-bg { fill: #fff; fill-opacity: 0; transition: fill-opacity 120ms ease; }
+.shot .dock-tab.on .tab-bg { fill: #1f1f1f; fill-opacity: 1; }
+.shot .tab-close { opacity: 0; transition: opacity 120ms ease; }
+.shot .tab-close rect { fill: #fff; fill-opacity: 0; }
+.shot .tab-close path { fill: none; stroke: #9a9a9a; stroke-width: 1.3; stroke-linecap: round; }
+.shot .dock-tab.on .tab-close { opacity: 1; }
+@media (hover: hover) {
+  .shot .tree-hit:hover { fill-opacity: .04; }
+  .shot .dock-tab:not(.on):hover .tab-bg { fill-opacity: .04; }
+  .shot .dock-tab:hover .tab-close { opacity: 1; }
+  .shot .tab-close:hover rect { fill-opacity: .1; }
+}
 
 /* Questions */
 .faq {
@@ -245,6 +295,7 @@ svg { display: block; }
   background: #315bc5;
 }
 .footer-surface { position: absolute; inset: 0; width: 100%; height: 100%; }
+.footer-grain { mix-blend-mode: hard-light; }
 .footer-relief {
   position: absolute;
   inset: 0;
@@ -252,11 +303,17 @@ svg { display: block; }
   display: grid;
   place-items: center;
   padding-bottom: min(22%, 24dvh);
+}
+.footer-brand {
+  gap: 0.49em;
+  font-size: min(16vw, 27dvh);
   filter: url(#footer-emboss);
   mix-blend-mode: hard-light;
 }
-.footer-brand { gap: 0.49em; font-size: min(16vw, 27dvh); }
 .footer-brand span { font-size: 1.2em; }
+/* With WebGL, claude.js draws the lit artwork on this canvas and the filtered brand is not painted. */
+.footer-gl { position: absolute; pointer-events: none; mix-blend-mode: hard-light; }
+#footer.gl .footer-brand { visibility: hidden; }
 .footer-brand svg { width: 1.22em; height: 1.22em; flex: none; }
 .links {
   position: relative;

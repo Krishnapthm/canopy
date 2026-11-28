@@ -1,5 +1,5 @@
-// The canopy canvas in claude.html's hero: its panes (drawn by scenes.js) that move by their headers
-// and nothing else (no pan, no zoom), and wires that follow them. Uses scenes.js for wire geometry.
+// The canopy canvas in the landing page's hero: its panes (drawn by scenes.js) that move by their headers
+// and nothing else (no pan, no zoom), and wires that follow them. Needs gsap and scenes.js.
 
 const stage = document.querySelector("[data-stage]");
 const app = stage.querySelector("[data-app]");
@@ -70,14 +70,16 @@ const links = LINKS.filter((pair) => pair.every((id) => byId[id])).map(([a, b]) 
   return { a: byId[a], b: byId[b], path, ends };
 });
 
-// The pane's drawn position, so wires follow panes while they glide.
-function paintPane(p, x, y) {
-  p.drawn = { x, y, w: p.w, h: p.h };
-  p.el.style.transform = `translate(${x}px, ${y}px)`;
+// The pane's drawn position, which GSAP tweens while it glides, so wires follow it.
+function paintPane(p) {
+  p.el.style.transform = `translate(${p.drawn.x}px, ${p.drawn.y}px)`;
 }
 function place(p) {
-  stopAnimation(p);
-  paintPane(p, p.x, p.y);
+  p.drawn ??= { w: p.w, h: p.h };
+  gsap.killTweensOf(p.drawn);
+  p.drawn.x = p.x;
+  p.drawn.y = p.y;
+  paintPane(p);
 }
 function drawLinks() {
   for (const { a, b, path, ends } of links) {
@@ -137,12 +139,7 @@ function makeRoom(dragged, home) {
   return true;
 }
 function glide(p) {
-  const { x: fromX, y: fromY } = p.drawn;
-  const { x, y } = p;
-  animate(p, 500, (progress) => {
-    paintPane(p, fromX + (x - fromX) * progress, fromY + (y - fromY) * progress);
-    drawLinks();
-  });
+  gsap.to(p.drawn, { x: p.x, y: p.y, duration: .32, ease: "power3.out", overwrite: true, onUpdate: () => { paintPane(p); drawLinks(); } });
 }
 
 // --- dragging a pane by its header ----------------------------------------------------------
@@ -157,16 +154,20 @@ app.addEventListener("pointerdown", (event) => {
   let good = home, fits = true; // the last layout with room for everything, and whether this one has room
   head.setPointerCapture(event.pointerId);
   pane.el.classList.add("lifted");
-  stopAnimation(pane);
+  gsap.killTweensOf(pane.drawn);
   const move = (e) => {
     pane.x = ox + (e.clientX - sx) / k; pane.y = oy + (e.clientY - sy) / k;
     clamp(pane);
+    const previous = panes.map((p) => [p.x, p.y]);
     fits = makeRoom(pane, home);
     // With no room here the pane floats above the others, which hold the last layout that fitted.
     if (fits) good = new Map(panes.map((p) => [p, [p.x, p.y]]));
     else for (const p of panes) if (p !== pane) [p.x, p.y] = good.get(p);
     place(pane);
-    for (const p of panes) if (p !== pane) glide(p);
+    panes.forEach((p, i) => {
+      const [x, y] = previous[i];
+      if (p !== pane && (p.x !== x || p.y !== y)) glide(p);
+    });
     drawLinks();
   };
   const end = () => {
