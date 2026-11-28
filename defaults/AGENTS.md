@@ -645,7 +645,7 @@ The main ones:
   (sections: `look`, `keyboard` on macOS, `shortcuts`, `alerts`; Shortcuts searches and edits app-home keys.json, records one combination and resets defaults).
   `app.theme {name}`, `app.zoom_in`, `app.zoom_out`, `app.zoom_reset`.
   Remote machines and mobile access are paused. Local Simulator panes remain available.
-- Files: the branch button below the tree searches local branches. Save Canopy editor drafts before switching.
+- Files: the branch button below the tree searches local branches. `files.branch_switch {root, branch}` switches the local checkout. Save Canopy editor drafts before switching.
 - Window: `window.minimize`, `window.maximize` (or back), `window.close`.
 - `app.quit` exits Canopy while the core keeps terminals and agents running.
 - macOS also has `app.hide`, `app.hide_others`, and `app.show_all`.

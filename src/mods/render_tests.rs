@@ -791,9 +791,14 @@ fn settings_sections(cx: &mut TestAppContext) {
     for section in ["look", "alerts", "keyboard", "shortcuts", "machines"] {
         let mut p = props();
         p["section"] = json!(section);
-        let tree = describe(cx, &staged, "frame/settings", true, p, None).unwrap();
+        let setup = (section == "shortcuts").then(|| {
+            let keys = include_str!("../../defaults/keys.macos.json");
+            format!("this.secondary = 'cmd'; this.shortcutDefaults = {keys}; this.prepareShortcuts(this.shortcutDefaults);")
+        });
+        let tree = describe(cx, &staged, "frame/settings", true, p, setup.as_deref()).unwrap();
         if section == "shortcuts" {
-            assert!(tree.contains("app.palette") && tree.contains("Reset all shortcuts"));
+            assert!(tree.contains("app.palette") && tree.contains("Reset all shortcuts"), "{tree}");
+            assert!(tree.matches("st-shortcut-reset-").count() > 100, "render the full shortcut catalog");
         } else if section == "machines" {
             assert!(tree.contains("Appearance")); // Old links open Look.
         }
