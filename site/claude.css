@@ -96,7 +96,6 @@ svg { display: block; }
 /* Hero */
 .hero { padding-top: clamp(3rem, 9vw, 7.5rem); padding-bottom: clamp(3rem, 6vw, 5rem); }
 .hero .t-display { max-width: 24em; }
-.hero .t-body { max-width: 39em; margin-top: 0.65rem; }
 .actions { display: flex; gap: 0.6rem; margin-top: 2rem; }
 
 /* ---------------------------------------------------------------------------------------------------
@@ -206,13 +205,12 @@ svg { display: block; }
 .feature:nth-child(even) { grid-template-columns: minmax(0, 5fr) minmax(0, 3fr); }
 .feature:nth-child(even) .feature-text { order: 2; }
 .feature-text {
-  --quiet: #ffffffcc;
+  --quiet: #ffffffb3;
   padding: clamp(1.25rem, 3.5vw, 3rem);
   color: #fff;
   background: linear-gradient(#5e5e5e, #565656 45%, #1b1b1b);
   text-wrap: pretty;
 }
-.feature-text p { margin-top: 0.75rem; }
 /* The shot keeps its 740:560 picture whole; the frame is never taller than the screen less the
    scroll margin above it, so "features" lands on a whole frame. */
 .shot { display: grid; place-items: center; background: #111; }
