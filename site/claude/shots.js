@@ -229,8 +229,8 @@
     // message to the other agent only: the sender's transcript says it is sending, the receiver's shows the message.
     const CLAUDE_PRIOR = ["{@rec.green} {b|Read} src/api/orders.ts", "  {@elbow.dim}  {dim|34 lines · the merge order is still open}"];
     const CODEX_PRIOR = ["{green|•} {b|Edited} bag.tsx {green|+18} {red|-6}", "{green|•} {b|Ran} npm test -- bag", "  {dim|└} {green|7 passed}"];
-    play(el, () => { claude.reset(CLAUDE_PRIOR); codex.reset(CODEX_PRIOR); gsap.set(msg, { opacity: 0 }); }, (tl) => {
-      open(tl, feeds);
+    // Both transcripts are visible from the first frame: they already hold their rows, so nothing fades them in.
+    play(el, () => { claude.reset(CLAUDE_PRIOR); codex.reset(CODEX_PRIOR); gsap.set(feeds, { opacity: 1 }); gsap.set(msg, { opacity: 0 }); }, (tl) => {
       let c = claude.type(tl, .6, "ship the orders api, then agree merge order with the web codex");
       let x = codex.busy(tl, 0, 1.2);
       c = claude.say(tl, c, "", 0);
