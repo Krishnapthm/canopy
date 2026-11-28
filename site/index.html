@@ -15,9 +15,11 @@
   <link rel="preload" href="claude/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="claude/JetBrainsMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="claude.css">
-  <script src="claude/animate.js" defer></script>
+  <script src="claude/gsap.min.js" defer></script>
+  <script src="claude/lenis.min.js" defer></script>
   <script src="claude/scenes.js" defer></script>
   <script src="claude/canvas.js" defer></script>
+  <script src="claude/shots.js" defer></script>
   <script src="claude.js" defer></script>
 </head>
 <body id="top">
@@ -64,14 +66,14 @@
   </svg>
 
   <header class="header gutter">
-    <a class="brand" href="#top" aria-label="Canopy home" target="_blank" rel="noopener">
+    <a class="brand" href="#top" aria-label="Canopy home">
       <svg width="20" height="20" aria-hidden="true"><use href="#mark"/></svg>canopy
     </a>
     <nav aria-label="Main">
-      <a href="#features" target="_blank" rel="noopener">features</a>
+      <a href="#features">features</a>
       <a href="https://github.com/Krishnapthm/canopy/wiki" target="_blank" rel="noopener">docs</a>
       <a href="https://github.com/Krishnapthm/canopy" target="_blank" rel="noopener">github</a>
-      <a class="pill dark" href="#install" target="_blank" rel="noopener">get canopy</a>
+      <a class="pill dark" href="#install">get canopy</a>
     </nav>
   </header>
 
@@ -80,7 +82,7 @@
       <h1 id="hero-title" class="t-display">a desktop workspace for your coding agents</h1>
       <p class="t-display quiet">run your agents and terminals on a canvas alongside your files, a browser and an ios simulator, so you can see what they’re working on and when they need you.</p>
       <div class="actions">
-        <a class="pill dark" href="#install" target="_blank" rel="noopener">get canopy</a>
+        <a class="pill dark" href="#install">get canopy</a>
         <a class="pill" href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start" target="_blank" rel="noopener">quick start</a>
       </div>
     </section>

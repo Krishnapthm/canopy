@@ -31,6 +31,10 @@
 * { box-sizing: border-box; scrollbar-width: none; }
 *::-webkit-scrollbar { display: none; }
 html { overscroll-behavior-y: none; scroll-behavior: smooth; }
+/* Lenis (claude.js) scrolls the page itself; these are its required rules. */
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+.lenis.lenis-stopped { overflow: clip; }
 body {
   margin: 0;
   background: var(--paper);
@@ -217,6 +221,23 @@ svg { display: block; }
 .shot .sv { width: 100%; max-height: calc(100svh - 2 * var(--frame-gap)); }
 #features { scroll-margin-top: var(--frame-gap); }
 
+/* The Files panel shot (claude/shots.js) answers the pointer: files in the tree, tabs and the quote
+   button are clickable, like the app's docked panel. */
+.shot [data-open], .shot [data-tab], .shot [data-plus], .shot [data-item] { cursor: pointer; }
+.shot .tree-hit { fill: #fff; fill-opacity: 0; transition: fill-opacity 120ms ease; }
+.shot .tab-bg { fill: #fff; fill-opacity: 0; transition: fill-opacity 120ms ease; }
+.shot .dock-tab.on .tab-bg { fill: #1f1f1f; fill-opacity: 1; }
+.shot .tab-close { opacity: 0; transition: opacity 120ms ease; }
+.shot .tab-close rect { fill: #fff; fill-opacity: 0; }
+.shot .tab-close path { fill: none; stroke: #9a9a9a; stroke-width: 1.3; stroke-linecap: round; }
+.shot .dock-tab.on .tab-close { opacity: 1; }
+@media (hover: hover) {
+  .shot .tree-hit:hover { fill-opacity: .04; }
+  .shot .dock-tab:not(.on):hover .tab-bg { fill-opacity: .04; }
+  .shot .dock-tab:hover .tab-close { opacity: 1; }
+  .shot .tab-close:hover rect { fill-opacity: .1; }
+}
+
 /* Questions */
 .faq {
   display: grid;
@@ -287,6 +308,9 @@ svg { display: block; }
   mix-blend-mode: hard-light;
 }
 .footer-brand span { font-size: 1.2em; }
+/* With WebGL, claude.js draws the lit artwork on this canvas and the filtered brand is not painted. */
+.footer-gl { position: absolute; pointer-events: none; mix-blend-mode: hard-light; }
+#footer.gl .footer-brand { visibility: hidden; }
 .footer-brand svg { width: 1.22em; height: 1.22em; flex: none; }
 .links {
   position: relative;
