@@ -1,6 +1,6 @@
 // The three feature shots on index.html, drawn from Scenes' parts:
-// - wire: Claude Code and Codex are each at work on their own task; Claude Code messages the Codex it is
-//   wired to, and Codex replies. A message shows in full only in the agent that receives it.
+// - wire: Claude Code adds promo codes to the orders api while Codex builds the bag page; Claude Code messages
+//   the Codex it is wired to, and Codex replies. A message shows in full only in the agent that receives it.
 // - sim: you ask Codex to test checkout on the iPhone; it taps through, you mark the delivery rows, it
 //   fixes them.
 // - files: the docked Files panel. Open bag.tsx, checkout.tsx or index.tsx from the tree; hover the code
@@ -52,7 +52,8 @@
       ? `<text class="c-clawd" x="16" y="13" data-glyph>✻</text><text x="39" y="13" xml:space="preserve"><tspan class="c-clawd c-shimmer" data-verb>Percolating…</tspan><tspan class="c-dim"> (<tspan data-secs>0</tspan>s · esc to interrupt)</tspan></text>`
       : `<text x="16" y="13" xml:space="preserve"><tspan class="c-dim">•</tspan> <tspan class="c-shimmer">Working</tspan><tspan class="c-dim"> (<tspan data-secs>0</tspan>s • esc to interrupt)</tspan></text>`;
     return `<g data-term="${kind}" data-w="${w}" data-h="${h}">
-      <svg data-view width="${w}" height="${h}" overflow="hidden"><g data-feed><g class="sv-mono" data-spin opacity="0">${spin}</g></g></svg>
+      <svg data-view width="${w}" height="${h}" overflow="hidden"><g data-feed></g></svg>
+      <g class="sv-mono" data-spin opacity="0">${spin}</g>
       <g data-composer></g></g>`;
   };
 
@@ -67,10 +68,14 @@
     const width = Math.floor((w - 32) / CH), cols = width - 2; // a row's columns, and the prompt's after "❯ "
     let rows = 0, spinning = false, top = h;
 
-    // Keeps the newest row in view, the way a terminal follows its output.
+    // Keeps the newest row in view, the way a terminal follows its output. The working line sits on the
+    // row right above the composer, so the transcript ends one row higher while it shows. "auto" overwrite
+    // only replaces an earlier scroll, not the story's fade of the feed.
     function follow() {
-      const bottom = 10 + (rows + (spinning ? 1 : 0)) * ROW + 6;
-      gsap.to(feed, { y: Math.min(0, top - 4 - bottom), duration: calm ? 0 : .3, ease: "power2.out", overwrite: true });
+      const room = top - 4 - (spinning ? ROW : 0);
+      view.setAttribute("height", Math.max(0, room));
+      spin.setAttribute("transform", `translate(0 ${top - ROW - 2})`);
+      gsap.to(feed, { y: Math.min(0, room - (10 + rows * ROW + 6)), duration: calm ? 0 : .3, ease: "power2.out", overwrite: "auto" });
     }
     // The composer: Claude Code's prompt between two rules over its mode line, or Codex's shaded prompt
     // over its model line. It grows a row for each wrapped line of input.
@@ -90,7 +95,6 @@
       const caret = typing || kind === "claude"
         ? `<rect class="caret" x="${16 + (2 + [...lines.at(-1)].length) * CH}" y="${top + caretRow * ROW + 1}" width="${CH}" height="16" fill="#ececec" fill-opacity=".85"/>` : "";
       composer.innerHTML = term(list, { y: top, w }) + caret;
-      view.setAttribute("height", Math.max(0, top - 4));
       follow();
     }
     function print(r) {
@@ -98,12 +102,10 @@
       el.setAttribute("transform", `translate(0 ${10 + rows * ROW})`);
       el.innerHTML = term([r], { x: 16, y: 0, w });
       rows++;
-      spin.setAttribute("transform", `translate(0 ${10 + rows * ROW})`);
       follow();
     }
     function spinner(on) {
       spinning = on;
-      spin.setAttribute("transform", `translate(0 ${10 + rows * ROW})`);
       gsap.set(spin, { opacity: on ? 1 : 0 });
       follow();
     }
@@ -114,7 +116,7 @@
       outline: box.querySelector("[data-outline]"),
       // Starts the pane with the rows it already has, so no agent begins on a blank screen.
       reset(prior = []) {
-        feed.replaceChildren(spin);
+        feed.replaceChildren();
         rows = 0;
         spinner(false);
         gsap.set(feed, { y: 0 });
@@ -213,10 +215,10 @@
   const close = (tl, t, targets) => { if (!calm) tl.to(targets, { opacity: 0, duration: .4, ease: "power1.in" }, t + 3.4); };
   const open = (tl, targets) => tl.fromTo(targets, { opacity: 0 }, { opacity: 1, duration: calm ? 0 : .4, ease: "power1.out" }, 0);
 
-  // --- wire: Claude Code and Codex agree a merge order ------------------------------------------------
+  // --- wire: Claude Code builds the api, Codex builds the page that shows it ------------------------------------------------
   function wireShot(el) {
     const a = { x: 16, y: 16, w: 320, h: 420 }, b = { x: 420, y: 124, w: 304, h: 420 };
-    el.innerHTML = frame("Claude Code and Codex wired together, agreeing which pull request merges first",
+    el.innerHTML = frame("Claude Code and Codex wired together: one adds promo codes to the orders api, the other shows them on the bag page",
       wire(a, b) +
       pane({ ...a, title: "Claude Code", sub: "orders api", icon: "claude", body: liveTerm("claude") }) +
       pane({ ...b, title: "Codex", sub: "bag page", icon: "codex", body: liveTerm("codex") }) +
@@ -227,48 +229,68 @@
 
     // Codex is already working when the run starts, and only you type, into Claude Code. The wire carries each
     // message to the other agent only: the sender's transcript says it is sending, the receiver's shows the message.
-    const CLAUDE_PRIOR = ["{@rec.green} {b|Read} src/api/orders.ts", "  {@elbow.dim}  {dim|34 lines · the merge order is still open}"];
-    const CODEX_PRIOR = ["{green|•} {b|Edited} bag.tsx {green|+18} {red|-6}", "{green|•} {b|Ran} npm test -- bag", "  {dim|└} {green|7 passed}"];
+    const CLAUDE_PRIOR = [
+      { t: "{dim|❯} add promo codes to the orders api", bg: "umsg" },
+      "{@rec.green} {b|Read} src/api/orders.ts",
+      "  {@elbow.dim}  {dim|34 lines}",
+      "{@rec.green} {b|Update}(src/api/promo.ts)",
+      "  {@elbow.dim}  {dim|Added} {b|21} {dim|lines}",
+      "{@rec.green} {b|Bash}(npm test -- promo)",
+      "  {@elbow.dim}  {dim|4 passed}",
+      "{@rec} Promo codes validate. Orders",
+      "  still need to return them.",
+    ];
+    const CODEX_PRIOR = [
+      { t: "{b|›} add a promo line to the bag", bg: "umsg" },
+      "{green|•} {b|Read} src/lib/cart.ts",
+      "  {dim|└} 58 lines",
+      "{green|•} {b|Edited} bag.tsx {green|+18} {red|-6}",
+      "{green|•} {b|Ran} npm test -- bag",
+      "  {dim|└} {green|7 passed}",
+      "{green|•} Promo row is drafted with a",
+      "  placeholder discount.",
+    ];
     // Both transcripts are visible from the first frame: they already hold their rows, so nothing fades them in.
     play(el, () => { claude.reset(CLAUDE_PRIOR); codex.reset(CODEX_PRIOR); gsap.set(feeds, { opacity: 1 }); gsap.set(msg, { opacity: 0 }); }, (tl) => {
-      let c = claude.type(tl, .6, "ship the orders api, then agree merge order with the web codex");
-      let x = codex.busy(tl, 0, 1.2);
+      let c = claude.type(tl, .6, "orders should return the promo too. then tell the bag codex to show it");
+      let x = codex.busy(tl, 0, 3);
       c = claude.say(tl, c, "", 0);
       c = claude.busy(tl, c, 1.4);
       c = claude.say(tl, c, "{@rec.green} {b|Update}(src/api/orders.ts)", .3);
-      c = claude.say(tl, c, "  {@elbow.dim}  {dim|Added} {b|34} {dim|lines}", .7);
+      c = claude.say(tl, c, "  {@elbow.dim}  {dim|Added} {b|6} {dim|lines}", .7);
       c = claude.say(tl, c, "{@rec.green} {b|Bash}(npm test -- orders)", .9);
       c = claude.say(tl, c, "  {@elbow.dim}  {dim|12 passed}", .6);
-      x = codex.say(tl, x, "{green|•} Promo field is in. Next, the cart tests.", 1.6);
+      x = codex.say(tl, x, "{green|•} {b|Edited} bag.tsx {green|+4} {red|-0}", .8);
 
-      c = claude.say(tl, c, "{@rec} Sending t4 a message about", 0);
-      c = claude.say(tl, c, "  which PR merges first.", .3);
+      c = claude.say(tl, c, "{@rec} Telling the bag codex about", 0);
+      c = claude.say(tl, c, "  the new promo field.", .3);
       let t = carry(tl, Math.max(c, x), msg, path, false, codex.outline);
 
       t = codex.trace(tl, t, [
         "{dim|⎿ from Claude Code}",
-        "  {dim|#41 hits cart.ts. yours?}",
+        "  {dim|orders returns a promo code and}",
+        "  {dim|discount. show it on the bag.}",
       ]);
       t = codex.say(tl, t, "", 0);
       t = codex.busy(tl, t, 1.3);
-      t = codex.say(tl, t, "{green|•} {b|Ran} git diff --stat main", .4);
-      t = codex.say(tl, t, "  {dim|└ src/lib/cart.ts | 9} {green|+++++}{red|----}", .7);
-      t = codex.say(tl, t, "{green|•} #42 renames cart.total, so #41", 0);
-      t = codex.say(tl, t, "  should land first.", .6);
-      t = codex.say(tl, t, "{green|•} Sending t1 a message about the", 0);
-      t = codex.say(tl, t, "  merge order.", .3);
+      t = codex.say(tl, t, "{green|•} {b|Edited} bag.tsx {green|+9} {red|-1}", .4);
+      t = codex.say(tl, t, "{green|•} {b|Ran} npm test -- bag", .6);
+      t = codex.say(tl, t, "  {dim|└} {green|9 passed}", .6);
+      t = codex.say(tl, t, "{green|•} Bag shows the promo discount.", 0);
+      t = codex.say(tl, t, "{green|•} Telling Claude Code it is", 0);
+      t = codex.say(tl, t, "  done.", .3);
       t = codex.state(tl, t, "done");
       t = carry(tl, t, msg, path, true, claude.outline);
 
       t = claude.say(tl, t, "", 0);
       t = claude.trace(tl, t, [
         "{dim|⎿ from Codex}",
-        "  {dim|#42 renames cart.total. Merge #41 first,}",
-        "  {dim|I'll rebase on top.}",
+        "  {dim|Bag page shows the promo line,}",
+        "  {dim|9 tests pass.}",
       ]);
       t = claude.say(tl, t, "", 0);
       t = claude.busy(tl, t, 1);
-      t = claude.say(tl, t, "{@rec} Merging {b|#41} now, then {b|#42}.", .2);
+      t = claude.say(tl, t, "{@rec} Promo codes work end to end.", .2);
       t = claude.state(tl, t, "done");
       close(tl, t, feeds);
     });
