@@ -1,64 +1,62 @@
-// The canopy canvas in the landing page's hero: its panes (drawn by scenes.js) that move by their headers
-// and nothing else (no pan, no zoom), and wires that follow them. Needs gsap and scenes.js.
-
+// Pan across the hero workspace. Groups repeat horizontally and carry their own panes and wires.
 const stage = document.querySelector("[data-stage]");
 const app = stage.querySelector("[data-app]");
-const world = stage.querySelector("[data-world]");
-const edgesSvg = stage.querySelector("[data-edges]");
+const PAD = 16;
+const GAP = 24;
+const LINKS = [["t1", "browser"], ["t1", "sim"], ["subscription-agent", "subscriptions"],
+  ["subscription-agent", "subscription-review"], ["inventory", "inventory-tests"]];
 
-const PAD = 16; // world units kept clear around the panes
-const GAP = 24; // clear space panes keep between each other
-// Who talks to whom: Claude drives the browser and the phone. Codex works alone, wired to nothing.
-const LINKS = [["t1", "browser"], ["t1", "sim"]];
-
-
-// --- panes ------------------------------------------------------------------------------
-const panes = [...stage.querySelectorAll("[data-pane]")].map((el) => ({
-  el, id: el.dataset.pane, x: +el.dataset.x, y: +el.dataset.y, w: el.offsetWidth, h: el.offsetHeight,
+const groups = [...stage.querySelectorAll("[data-world]")].map((el) => ({
+  el,
+  edges: el.querySelector("[data-edges]"),
+  panes: [...el.querySelectorAll("[data-pane]")].map((pane) => ({
+    el: pane, id: pane.dataset.pane, x: +pane.dataset.x, y: +pane.dataset.y,
+    w: pane.offsetWidth, h: pane.offsetHeight,
+  })),
 }));
+const panes = groups.flatMap((group) => group.panes);
 const byId = Object.fromEntries(panes.map((p) => [p.id, p]));
-// The panes' bounding box, in world units. The stage takes its shape from it, so the world always fits the width.
-const WORLD = { w: Math.max(...panes.map((p) => p.x + p.w)), h: Math.max(...panes.map((p) => p.y + p.h)) };
-stage.style.aspectRatio = `${WORLD.w + 2 * PAD} / ${WORLD.h + 2 * PAD}`;
+const WORLD = {
+  w: Math.max(...panes.map((p) => p.x + p.w)),
+  h: Math.max(...panes.map((p) => p.y + p.h)),
+};
+const span = WORLD.w + 2 * PAD;
+const period = span * groups.length;
+const bounds = { x0: -PAD, x1: WORLD.w + PAD, y0: -PAD, y1: WORLD.h + PAD };
+stage.style.aspectRatio = `${span} / ${WORLD.h + 2 * PAD}`;
 for (const p of panes) place(p);
 
-// --- view: the world is scaled to fit the frame and centred; the user cannot pan it ------------
-const view = { k: 1, x: 0, y: 0 };
+const view = { k: 1, x: 0, y: 0, panX: 0, panY: 0 };
+const wrap = (x) => ((x + period / 2) % period + period) % period - period / 2;
+function paintView() {
+  for (const [i, group] of groups.entries()) {
+    const x = view.x + wrap(i * span + view.panX) * view.k;
+    const y = view.y + view.panY * view.k;
+    group.el.style.transform = `translate(${x}px, ${y}px) scale(${view.k})`;
+  }
+}
 function fit() {
   const W = app.offsetWidth, H = app.offsetHeight;
-  view.k = Math.min(W / (WORLD.w + 2 * PAD), H / (WORLD.h + 2 * PAD));
+  // Keep a group offscreen when it wraps, even in a very wide, short window.
+  view.k = Math.max(W / (period - span - 2 * PAD), Math.min(W / span, H / (WORLD.h + 2 * PAD)));
   view.x = (W - WORLD.w * view.k) / 2;
   view.y = (H - WORLD.h * view.k) / 2;
-  world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`;
+  paintView();
 }
-new ResizeObserver(() => { fit(); keepInside(); }).observe(app);
-
-// The visible canvas in world units, less a 12px margin. There is no panning, so panes stay inside it.
-function bounds() {
-  const pad = 12 / view.k;
-  return {
-    x0: -view.x / view.k + pad, x1: (app.offsetWidth - view.x) / view.k - pad,
-    y0: -view.y / view.k + pad, y1: (app.offsetHeight - view.y) / view.k - pad,
-  };
+function pan(x, y) {
+  view.panX = wrap(x);
+  view.panY = Math.max(-96, Math.min(96, y));
+  paintView();
 }
-function clamp(p, b = bounds()) {
-  p.x = Math.min(Math.max(p.x, b.x0), Math.max(b.x0, b.x1 - p.w));
-  p.y = Math.min(Math.max(p.y, b.y0), Math.max(b.y0, b.y1 - p.h));
-}
-// After a resize: pull panes back onto the canvas, or, if that would stack them, back to the starting
-// layout, which always fits.
-function keepInside() {
-  for (const p of panes) clamp(p);
-  if (panes.some((a) => panes.some((b) => a !== b && touching(a, b)))) {
-    for (const p of panes) { p.x = +p.el.dataset.x; p.y = +p.el.dataset.y; }
-  }
-  for (const p of panes) place(p);
-  drawLinks();
+function clamp(p) {
+  p.x = Math.min(Math.max(p.x, bounds.x0), bounds.x1 - p.w);
+  p.y = Math.min(Math.max(p.y, bounds.y0), bounds.y1 - p.h);
 }
 
 // --- wires: the curve from scenes.js, with a dot at each end like the app draws -------------
 const NS = "http://www.w3.org/2000/svg";
 const links = LINKS.filter((pair) => pair.every((id) => byId[id])).map(([a, b]) => {
+  const { edges: edgesSvg } = groups.find((group) => group.panes.includes(byId[a]));
   const path = edgesSvg.appendChild(document.createElementNS(NS, "path"));
   path.setAttribute("class", "wire");
   const ends = [0, 1].map(() => {
@@ -113,19 +111,18 @@ function nearestFree(p, x, y, settled, b) {
 const orders = (list) => list.length < 2 ? [list] :
   list.flatMap((p, i) => orders([...list.slice(0, i), ...list.slice(i + 1)]).map((rest) => [p, ...rest]));
 
-// Lays the other panes out around `dragged`, each starting from its spot in `home`. Every order of the
-// other panes is tried (four panes, so six orders) and the one that moves them least wins. Returns
+// Lays the other panes in this group out around `dragged`, starting from `home`. Try every order
+// within the group (at most three neighbours), so the arrangement that moves them least wins. Returns
 // false, changing nothing, when no order leaves every pane clear: the dragged pane is over a spot with no
 // room for the rest.
-function makeRoom(dragged, home) {
-  const b = bounds();
+function makeRoom(panes, dragged, home) {
   let best = null;
   for (const order of orders(panes.filter((p) => p !== dragged))) {
     const settled = [dragged], spots = [];
     let cost = 0;
     for (const p of order) {
       const [hx, hy] = home.get(p);
-      const spot = nearestFree(p, hx, hy, settled, b);
+      const spot = nearestFree(p, hx, hy, settled, bounds);
       if (!spot) { cost = Infinity; break; }
       cost += Math.hypot(spot[0] - hx, spot[1] - hy);
       if (cost >= (best?.cost ?? Infinity)) break; // already worse than the best order
@@ -139,48 +136,97 @@ function makeRoom(dragged, home) {
   return true;
 }
 function glide(p) {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) { place(p); drawLinks(); return; }
   gsap.to(p.drawn, { x: p.x, y: p.y, duration: .32, ease: "power3.out", overwrite: true, onUpdate: () => { paintPane(p); drawLinks(); } });
 }
 
-// --- dragging a pane by its header ----------------------------------------------------------
+// Primary drag moves a pane by its handle or pans from the canvas. The middle button pans anywhere.
+let active = false;
 app.addEventListener("pointerdown", (event) => {
+  if (active || !event.isPrimary || (event.button !== 0 && event.button !== 1)) return;
   const head = event.button === 0 && event.target.closest(".pane-head");
-  if (!head) return; // everywhere else the pointer does nothing, and the wheel scrolls the page
+  const { clientX: sx, clientY: sy, pointerId } = event;
+  const k = view.k * app.getBoundingClientRect().width / app.offsetWidth;
+  const move = head ? dragPane(head, sx, sy, k) : dragCanvas(sx, sy, k);
+  if (event.button === 1) event.preventDefault();
+  active = true;
+  app.setPointerCapture(pointerId);
+  const update = (e) => { if (e.pointerId === pointerId) move.update(e); };
+  const end = (e) => {
+    if (e.pointerId !== pointerId) return;
+    move.end();
+    active = false;
+    app.removeEventListener("pointermove", update);
+    app.removeEventListener("lostpointercapture", end);
+  };
+  app.addEventListener("pointermove", update);
+  app.addEventListener("lostpointercapture", end);
+});
+app.addEventListener("mousedown", (event) => { if (event.button === 1) event.preventDefault(); });
+app.addEventListener("auxclick", (event) => { if (event.button === 1) event.preventDefault(); });
+
+function dragCanvas(sx, sy, k) {
+  const { panX, panY } = view;
+  app.classList.add("panning");
+  return {
+    update: (e) => pan(panX + (e.clientX - sx) / k, panY + (e.clientY - sy) / k),
+    end: () => app.classList.remove("panning"),
+  };
+}
+
+function dragPane(head, sx, sy, k) {
+  const { panes } = groups.find(({ el }) => el.contains(head));
   const pane = panes.find((p) => p.el.contains(head));
-  const k = view.k * (app.getBoundingClientRect().width / app.offsetWidth); // screen px per world unit
-  const sx = event.clientX, sy = event.clientY, ox = pane.x, oy = pane.y;
-  // Every move lays the others out from where they were when the drag began, so panes you pass come back.
+  const { x: ox, y: oy } = pane.drawn;
+  // Each move starts from the original layout, so neighbours return as the dragged pane moves on.
   const home = new Map(panes.map((p) => [p, [p.x, p.y]]));
-  let good = home, fits = true; // the last layout with room for everything, and whether this one has room
-  head.setPointerCapture(event.pointerId);
+  let good = home, fits = true;
   pane.el.classList.add("lifted");
   gsap.killTweensOf(pane.drawn);
-  const move = (e) => {
-    pane.x = ox + (e.clientX - sx) / k; pane.y = oy + (e.clientY - sy) / k;
-    clamp(pane);
-    const previous = panes.map((p) => [p.x, p.y]);
-    fits = makeRoom(pane, home);
-    // With no room here the pane floats above the others, which hold the last layout that fitted.
-    if (fits) good = new Map(panes.map((p) => [p, [p.x, p.y]]));
-    else for (const p of panes) if (p !== pane) [p.x, p.y] = good.get(p);
-    place(pane);
-    panes.forEach((p, i) => {
-      const [x, y] = previous[i];
-      if (p !== pane && (p.x !== x || p.y !== y)) glide(p);
-    });
-    drawLinks();
+  return {
+    update(e) {
+      pane.x = ox + (e.clientX - sx) / k;
+      pane.y = oy + (e.clientY - sy) / k;
+      clamp(pane);
+      const previous = panes.map((p) => [p.x, p.y]);
+      fits = makeRoom(panes, pane, home);
+      if (fits) good = new Map(panes.map((p) => [p, [p.x, p.y]]));
+      else for (const p of panes) if (p !== pane) [p.x, p.y] = good.get(p);
+      place(pane);
+      panes.forEach((p, i) => {
+        const [x, y] = previous[i];
+        if (p !== pane && (p.x !== x || p.y !== y)) glide(p);
+      });
+      drawLinks();
+    },
+    end() {
+      if (!fits) { [pane.x, pane.y] = good.get(pane); glide(pane); }
+      pane.el.classList.remove("lifted");
+    },
   };
-  const end = () => {
-    if (!fits) { [pane.x, pane.y] = good.get(pane); glide(pane); } // dropped with no room: back it goes
-    pane.el.classList.remove("lifted");
-    head.removeEventListener("pointermove", move);
-    head.removeEventListener("pointerup", end);
-    head.removeEventListener("pointercancel", end);
-  };
-  head.addEventListener("pointermove", move);
-  head.addEventListener("pointerup", end);
-  head.addEventListener("pointercancel", end);
+}
+
+// Horizontal trackpad and Shift-scroll pan. Plain vertical scroll stays with the page.
+app.addEventListener("wheel", (event) => {
+  const { deltaX, deltaY, deltaMode, shiftKey, ctrlKey, metaKey } = event;
+  if (active || ctrlKey || metaKey || (!shiftKey && Math.abs(deltaX) <= Math.abs(deltaY))) return;
+  const dx = deltaX || deltaY;
+  if (!dx) return;
+  event.preventDefault();
+  event.stopPropagation(); // keep diagonal trackpad gestures away from the page's Lenis handler
+  const units = deltaMode === 1 ? 16 : deltaMode === 2 ? app.offsetWidth : 1;
+  pan(view.panX - dx * units / view.k, view.panY);
+}, { passive: false });
+
+app.addEventListener("keydown", (event) => {
+  const offset = {
+    ArrowLeft: [120, 0], ArrowRight: [-120, 0], ArrowUp: [0, 48], ArrowDown: [0, -48],
+  }[event.key];
+  if (!offset || active || event.ctrlKey || event.metaKey || event.altKey) return;
+  event.preventDefault();
+  pan(view.panX + offset[0], view.panY + offset[1]);
 });
 
+new ResizeObserver(fit).observe(app);
 fit();
 drawLinks();

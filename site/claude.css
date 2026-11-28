@@ -103,9 +103,7 @@ svg { display: block; }
 .actions { display: flex; gap: 0.6rem; margin-top: 2rem; }
 
 /* ---------------------------------------------------------------------------------------------------
-   Stage: the canopy canvas itself, as wide as the page column. canvas.js sets its aspect ratio from the
-   panes, and the height is capped at one screen: the panes scale down to fit, and are centred if the
-   canvas ends up wider than they are. */
+   Stage: a viewport onto Harbor's workspace. canvas.js fits the opening layout to the frame. */
 .stage { position: relative; overflow: hidden; border-radius: 12px; aspect-ratio: 4 / 3; width: 100%; max-height: calc(100svh - 2rem); }
 .caption { padding-top: 1.25rem; font-size: 1.0625rem; line-height: 1.5; }
 
@@ -120,8 +118,11 @@ svg { display: block; }
   background: #111;
   -webkit-user-select: none;
   user-select: none;
-  touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
+  cursor: grab;
 }
+.app:focus-visible { outline: 2px solid #8fc8d6; outline-offset: -3px; }
+.app.panning, .app.panning .pane-head { cursor: grabbing; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .edges { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .pane { position: absolute; left: 0; top: 0; will-change: transform; }

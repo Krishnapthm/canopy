@@ -152,15 +152,17 @@ const Scenes = (() => {
   // canopy's annotation marks: a numbered pin at (x, y).
   const pin = (x, y, k) => `<circle cx="${x}" cy="${y}" r="12" fill="${PIN}"/>${tx(x, y + 4.5, k, { size: 12.5, weight: 650, fill: "#fff", anchor: "middle" })}`;
 
-  // The bag page on the web, 760 wide, with the two annotations canopy draws over it.
-  function harborWeb() {
-    let s = `<rect width="760" height="900" fill="#fff"/>
+  const harborHeader = (subscriptions = false) => `<rect width="760" height="900" fill="#fff"/>
       <use href="#harbor-mark" x="28" y="19" width="19" height="19" fill="none" stroke="${BLUE}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
       ${tx(53, 34, "Harbor", { size: 16, weight: 650 })}
-      ${tx(140, 33, "Shop", { size: 13.5, fill: GREY })}${tx(190, 33, "Subscriptions", { size: 13.5, fill: GREY })}${tx(296, 33, "Journal", { size: 13.5, fill: GREY })}
+      ${tx(140, 33, "Shop", { size: 13.5, fill: GREY })}${tx(190, 33, "Subscriptions", { size: 13.5, weight: subscriptions ? 650 : 400, fill: subscriptions ? BLUE : GREY })}${tx(296, 33, "Journal", { size: 13.5, fill: GREY })}
       <path d="M697 22h16l-1.4 14h-13.2z M701 22a4 4 0 0 1 8 0" fill="none" stroke="#17171a" stroke-width="1.6" stroke-linejoin="round"/>
       <circle cx="716" cy="21" r="7.5" fill="${BLUE}"/>${tx(716, 25, "2", { size: 10.5, weight: 650, fill: "#fff", anchor: "middle" })}
-      <rect y="55.5" width="760" height="1" fill="#ececf0"/>
+      <rect y="55.5" width="760" height="1" fill="#ececf0"/>`;
+
+  // The bag page on the web, 760 wide, with the two annotations canopy draws over it.
+  function harborWeb() {
+    let s = `${harborHeader()}
       ${tx(28, 100, "Your bag", { size: 27, weight: 680, cls: "tight" })}
       ${tx(28, 123, "2 items · ships Monday from Portland", { size: 14, fill: GREY })}`;
     ITEMS.forEach((it, i) => {
@@ -194,6 +196,26 @@ const Scenes = (() => {
       <path d="M24 402c-6-26 70-30 210-27 140 2 238 2 236 30 1 34-90 58-236 57C90 461 34 452 26 420c-1-10 6-18 22-21" fill="none" stroke="${PIN}" stroke-width="2.6" stroke-linecap="round"/>
       ${pin(sx + 15, 279, 1)}${pin(24, 386, 2)}`;
     return s;
+  }
+
+  // A full desktop preview of Harbor's other route, using the same storefront header and product art.
+  function harborSubscriptions() {
+    return `${harborHeader(true)}
+      <rect x="28" y="76" width="704" height="168" rx="14" fill="#f3eee6"/>
+      ${tx(53, 116, "Harbor Coffee Club", { size: 13, weight: 650, fill: GREY })}
+      ${tx(53, 158, "Good coffee, on repeat.", { size: 30, weight: 700, cls: "tight" })}
+      ${tx(53, 186, "Freshly roasted in Portland. Pause or skip anytime.", { size: 14, fill: GREY })}
+      ${bag(524, 97, 118, ITEMS[0].label)}${bag(600, 122, 103, ITEMS[1].label)}
+      ${tx(28, 280, "Choose your plan", { size: 19, weight: 650 })}
+      ${[["Roaster’s Choice", "A rotating single origin", "$18 / delivery"], ["Espresso Club", "Our house espresso blend", "$22 / delivery"]].map(([name, note, price], i) => {
+        const x = 28 + i * 360;
+        return `<rect x="${x}" y="298" width="344" height="146" rx="12" fill="#fff" stroke="#dcdce2"/>
+          ${tx(x + 18, 328, name, { size: 16, weight: 650 })}
+          ${tx(x + 18, 351, note, { size: 13, fill: GREY })}
+          ${tx(x + 18, 406, price, { size: 14, weight: 650 })}
+          <rect x="${x + 213}" y="381" width="114" height="38" rx="8" fill="${BLUE}"/>
+          ${tx(x + 270, 405, "Choose plan", { size: 13, weight: 600, fill: "#fff", anchor: "middle" })}`;
+      }).join("")}`;
   }
 
   // Liquid glass, as iOS 26 draws its floating controls: a tinted body, a sheen across the top half and
@@ -253,16 +275,16 @@ const Scenes = (() => {
   }
 
   // --- browser and phone ---------------------------------------------------------------
-  const browser = (url, page) => (w, h) => {
+  const browser = (url, page, annotations = true) => (w, h) => {
     const [host, path] = url.split(/(?=\/)/);
-    const urlW = w - 80 - 92 - 74;
+    const urlW = w - 90 - (annotations ? 156 : 0);
     const vbH = (h - 38) * 760 / w; // the page is laid out at 760 wide and scaled to the pane
     return `<g class="sv-ic"><use href="#i-back" x="12" y="9" width="16" height="16"/><use href="#i-fwd" x="34" y="9" width="16" height="16" opacity=".35"/><use href="#i-reload" x="56" y="9" width="16" height="16"/></g>
       <rect x="80" y="4" width="${urlW}" height="26" rx="7" fill="#1c1c1c"/>
       <text class="sv-ui" x="90" y="21"><tspan class="c-dim">${esc(host)}</tspan>${esc(path)}</text>
-      <rect x="${w - 170}" y="4" width="84" height="26" rx="7" fill="#2a2a2a"/>
+      ${annotations ? `<rect x="${w - 170}" y="4" width="84" height="26" rx="7" fill="#2a2a2a"/>
       <use class="sv-ic" href="#i-pen" x="${w - 162}" y="10.5" width="13" height="13"/><text class="sv-ui" x="${w - 145}" y="21">Annotate</text>
-      <rect x="${w - 80}" y="4" width="70" height="26" rx="7" fill="${PIN}"/><text class="sv-ui" x="${w - 45}" y="21" text-anchor="middle">Send (2)</text>
+      <rect x="${w - 80}" y="4" width="70" height="26" rx="7" fill="${PIN}"/><text class="sv-ui" x="${w - 45}" y="21" text-anchor="middle">Send (2)</text>` : ""}
       <svg y="38" width="${w}" height="${h - 38}" viewBox="0 0 760 ${vbH}" preserveAspectRatio="xMinYMin slice">${page}</svg>`;
   };
 
@@ -285,8 +307,8 @@ const Scenes = (() => {
   };
 
   // --- the session ----------------------------------------------------------------------------------
-  // Agents on one project, Harbor. In the hero Claude Code drives the web bag page and the iPhone while
-  // a Codex on its own writes tests. The feature shots (shots.js) continue the same session.
+  // Harbor has checkout, subscriptions, and inventory work in flight on the same canvas.
+  // The feature shots (shots.js) use the original checkout session.
   const T0 = [
     { t: "{dim|❯} make checkout match on the web and the iPhone", bg: "umsg" },
     "",
@@ -318,6 +340,44 @@ const Scenes = (() => {
     codex: { title: "Codex", sub: "promo tests", icon: "codex", dot: "work", body: codex(T2) },
     browser: { title: "Harbor · Your bag", icon: "globe", body: browser("localhost:5173/bag", harborWeb()) },
     sim: { device: harborCheckout() },
+    subscriptions: { title: "Harbor · Subscriptions", icon: "globe", dot: null,
+      body: browser("localhost:5173/subscriptions", harborSubscriptions(), false) },
+    "subscription-agent": { title: "Claude Code", sub: "subscriptions", icon: "claude", dot: "work", body: working([
+      { t: "{dim|❯} add the coffee club plans to /subscriptions", bg: "umsg" },
+      "",
+      "{@rec.green} {b|Update}(src/routes/subscriptions.tsx)",
+      "  {@elbow.dim} Reuses the shop header and product tiles.",
+      '{@rec.green} {b|Bash}(hc send review "Check plan pricing.")',
+      "  {@elbow.dim} Sent to the reviewer.",
+      "{@rec} Checking the preview at desktop width.",
+    ]) },
+    "subscription-review": { title: "Codex", sub: "plan review", icon: "codex", dot: "wait", body: codex([
+      { t: "{b|›} check plan pricing before checkout", bg: "umsg" },
+      "",
+      "{green|•} Read src/routes/subscriptions.tsx",
+      "{green|•} The prices match the checkout totals.",
+      "  Shipping is calculated at checkout.",
+      "{b|?} Should the plan page say that too?",
+    ], { waiting: true }) },
+    inventory: { title: "Claude Code", sub: "inventory", icon: "claude", dot: "work", body: working([
+      { t: "{dim|❯} show when a roast has sold out", bg: "umsg" },
+      "",
+      "{@rec.green} {b|Read}(src/lib/inventory.ts)",
+      "  {@elbow.dim} A roast can sell out by bag size.",
+      "{@rec.green} {b|Update}(src/components/ProductTile.tsx)",
+      "  {@elbow.dim} Disable purchase for the sold-out size.",
+      "{@rec} Checking the 500 g Night Shift fixture.",
+    ]) },
+    "inventory-tests": { title: "Terminal", sub: "inventory tests", icon: "folder", dot: "done", body: (w) => term([
+      "{green|❯} npm test -- inventory",
+      "",
+      " {green|✓} rejects sold-out variants",
+      " {green|✓} leaves other sizes available",
+      " {green|✓} restores the button on restock",
+      "",
+      " Test Files  {green|1 passed} (1)",
+      "      Tests  {green|3 passed} (3)",
+    ], { w }) },
   };
 
   // Claude Code's spinner, as on the Ignsight site: the glyph breathes every 120ms, the verb changes, the

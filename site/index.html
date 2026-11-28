@@ -84,23 +84,32 @@
       </div>
     </section>
 
-    <!-- The canvas: a canopy canvas as wide as the page column. scenes.js draws each pane from
-         its id; canvas.js fits them to the frame, wires them and lets you drag them by their headers. -->
-    <section class="stage-wrap gutter" aria-label="Interactive Canopy canvas with Claude Code wired to a browser and iPhone, and a separate Codex pane">
+    <section class="stage-wrap gutter" aria-label="Canopy workspace for the Harbor coffee shop">
       <div class="stage" data-stage>
-        <div class="app" data-app>
+        <div class="app" data-app tabindex="0" role="region" aria-label="Interactive canvas" aria-describedby="canvas-help">
           <div class="world" data-world>
             <svg class="edges" data-edges aria-hidden="true"></svg>
             <!-- data-narrow is the phone layout, "x y w h", picked once at load: one column, and no Codex.
                  The sim is the bare device, 432:904, so its box is the phone. -->
-            <article class="pane" data-pane="t1" data-x="0" data-y="0" data-narrow="0 340 460 440" style="width:460px;height:420px"></article>
-            <article class="pane" data-pane="codex" data-x="64" data-y="460" data-narrow="hide" style="width:460px;height:400px"></article>
-            <article class="pane" data-pane="browser" data-x="700" data-y="0" data-narrow="0 0 460 280" style="width:600px;height:360px"></article>
-            <article class="pane" data-pane="sim" data-x="900" data-y="380" data-narrow="100 880 260 544" style="width:260px;height:544px"></article>
+            <article class="pane" data-pane="t1" data-x="0" data-y="34" data-narrow="0 340 460 440" style="width:460px;height:420px"></article>
+            <article class="pane" data-pane="codex" data-x="65" data-y="490" data-narrow="hide" style="width:460px;height:400px"></article>
+            <article class="pane" data-pane="browser" data-x="700" data-y="8" data-narrow="0 0 460 280" style="width:600px;height:360px"></article>
+            <article class="pane" data-pane="sim" data-x="900" data-y="400" data-narrow="100 880 260 544" style="width:260px;height:544px"></article>
+          </div>
+          <div class="world" data-world>
+            <svg class="edges" data-edges aria-hidden="true"></svg>
+            <article class="pane" data-pane="subscriptions" data-x="525" data-y="96" data-narrow="0 96 460 340" style="width:740px;height:510px"></article>
+            <article class="pane" data-pane="subscription-agent" data-x="20" data-y="36" data-narrow="0 495 460 330" style="width:450px;height:350px"></article>
+            <article class="pane" data-pane="subscription-review" data-x="52" data-y="536" data-narrow="0 930 460 310" style="width:440px;height:310px"></article>
+          </div>
+          <div class="world" data-world>
+            <svg class="edges" data-edges aria-hidden="true"></svg>
+            <article class="pane" data-pane="inventory" data-x="130" data-y="90" data-narrow="0 210 460 400" style="width:500px;height:400px"></article>
+            <article class="pane" data-pane="inventory-tests" data-x="752" data-y="414" data-narrow="0 720 460 348" style="width:500px;height:348px"></article>
           </div>
         </div>
       </div>
-      <p class="caption">try the canvas <span class="quiet">by dragging a pane by its header or grabbing the phone.</span></p>
+      <p class="caption" id="canvas-help">drag the canvas to explore Harbor. <span class="quiet">use the background, middle mouse button, or arrow keys to pan. drag a header or the phone to move a pane.</span></p>
     </section>
 
     <script>
