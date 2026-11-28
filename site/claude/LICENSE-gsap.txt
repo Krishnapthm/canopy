@@ -1,0 +1,7 @@
+gsap.min.js is GSAP 3.15.1 by GreenSock, unmodified.
+
+It is used under the GSAP Standard "No Charge" License:
+https://gsap.com/standard-license
+
+That license is not an open source license, so gsap.min.js is not covered by
+this repository's Apache 2.0 license.
