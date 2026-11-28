@@ -139,6 +139,11 @@
         tl.call(() => { compose(); shown.forEach(print); state("work"); }, null, t);
         return t + .35;
       },
+      // A message from another agent: a trace line in the transcript. The input box is only for the user.
+      trace(tl, t, shown) {
+        tl.call(() => { shown.forEach(print); state("work"); }, null, t);
+        return t + .35;
+      },
       say(tl, t, r, pause = .42) {
         tl.call(print, [r], t);
         return t + pause;
@@ -240,9 +245,9 @@
       c = claude.say(tl, c, "  which PR merges first.", .3);
       let t = carry(tl, Math.max(c, x), msg, path, false, codex.outline);
 
-      t = codex.paste(tl, t, "<hc from=\"t1 claude\">#41 hits cart.ts. yours?</hc>", [
-        { t: "{dim|<hc from=\"t1 claude\">}#41 hits", bg: "umsg" },
-        { t: "  cart.ts. yours?{dim|</hc>}", bg: "umsg" },
+      t = codex.trace(tl, t, [
+        "{dim|⎿ from Claude Code}",
+        "  {dim|#41 hits cart.ts. yours?}",
       ]);
       t = codex.say(tl, t, "", 0);
       t = codex.busy(tl, t, 1.3);
@@ -256,10 +261,10 @@
       t = carry(tl, t, msg, path, true, claude.outline);
 
       t = claude.say(tl, t, "", 0);
-      t = claude.paste(tl, t, "<hc from=\"t4 codex\">#42 renames cart.total. Merge #41 first, I'll rebase on top.</hc>", [
-        { t: "{dim|<hc from=\"t4 codex\">}#42 renames", bg: "umsg" },
-        { t: "  cart.total. Merge #41 first,", bg: "umsg" },
-        { t: "  I'll rebase on top.{dim|</hc>}", bg: "umsg" },
+      t = claude.trace(tl, t, [
+        "{dim|⎿ from Codex}",
+        "  {dim|#42 renames cart.total. Merge #41 first,}",
+        "  {dim|I'll rebase on top.}",
       ]);
       t = claude.say(tl, t, "", 0);
       t = claude.busy(tl, t, 1);
