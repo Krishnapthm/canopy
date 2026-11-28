@@ -3,6 +3,7 @@
 //! a simctl screenshot, taken when the pane opens, on Refresh and on `canopy pane open`, is the
 //! resting and fallback picture. Nothing polls. See docs/wiki/Simulator-Devices.md.
 use super::*;
+use crate::menu::MenuTab;
 use crate::sim::{self, Device, Target};
 use std::sync::mpsc::Sender;
 #[cfg(target_os = "macos")]
@@ -620,7 +621,7 @@ impl AppWindow {
             items.push(json!([format!("{mark}{} · {}{state}", d.name, d.runtime), "canvas.pane_open", {"pane":id,"target":d.udid}]));
         }
         items.push(json!(["Open Device Hub", "canvas.sim_hub", {}]));
-        self.open_menu("primary", json!({"items":items}), None, window, cx);
+        self.open_menu(MenuTab::Primary, json!({"items":items}), None, window, cx);
         self.answer(Ok(json!({})));
     }
 

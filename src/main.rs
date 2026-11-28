@@ -16,6 +16,7 @@ mod canvas;
 mod layout;
 mod layout_sync;
 mod links;
+mod menu;
 mod model;
 mod mirror;
 mod mirror_sync;

@@ -2,7 +2,7 @@
 // A lazy file browser for the focused pane's folder, with bounded read-only previews.
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, Input, InputState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, nextCommand, shared, setShared, notify, ui } from "herdr";
+import { spaces, panes, focused, exec, readTextFile, writeTextFile, watchFolder, theme, settings, window, props, run, openOverlay, openMenu, nextCommand, shared, setShared, notify, ui } from "herdr";
 
 const autoSave = () => shared("files.auto_save") !== false;
 
@@ -473,8 +473,7 @@ export default class Files extends View {
         const actions = menuItems({ kind, path: filePath, on: this.on, canvas: Boolean(props()?.canvas) }, shared("files.clipboard"), window()?.platform)
           .map(item => item ? [item.label, "files.tree_action", { id: item.id, path: filePath, kind, treeId: this.treeId, context: this.context.key }] : ["", null, { label: true }]);
         cx.stop_propagation();
-        openOverlay({ mod: "menu", kind: "popup", width: 230, frame: "none",
-          props: { tab: "primary", target: { items: actions } } });
+        openMenu({ tab: "primary", target: { items: actions } });
       })
       .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : props()?.canvas && !this.on ? (this.selected = filePath, run("preview.open", { path: filePath }), cx.notify()) : this.show(path, cx))
       .child(entry.dir ? svg(`mods/files/chevron-${open ? "down" : "right"}.svg`).size(12).flex_none().text_color(t.dim) : div().w(12).flex_none())

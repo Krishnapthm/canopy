@@ -126,6 +126,8 @@ impl AppWindow {
         let menu_frames: Vec<String> = self.overlays.iter()
             .filter(|o| self.copies.get(&o.slot).is_some_and(|copy| copy.inst.name == "menu"))
             .map(|o| format!("cover:overlay:{}", o.id)).collect();
+        // An open popup takes every click from the page, so the click reaches its backdrop and closes it.
+        let popup_open = self.overlays.iter().any(|o| o.kind == crate::window::OverlayKind::Popup);
         let controls = state.chrome.clone();
         let last = state.browsers.last_masks.clone();
         let this = cx.entity().downgrade();
@@ -138,8 +140,11 @@ impl AppWindow {
                     overlays.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
                     let (frames, overlays): (Vec<_>, Vec<_>) = overlays.into_iter().partition(|(k, _)| menu_frames.contains(k));
                     let mut overlays: Vec<_> = overlays.into_iter().map(|(_, bounds)| rect(*bounds)).collect();
-                    overlays.extend(gpui_shell::menu_covers().into_iter().map(rect));
-                    let frames: Vec<_> = frames.into_iter().map(|(_, bounds)| rect(*bounds)).collect();
+                    // A menu scrolls inside its frame: only what the frame shows is painted, so only that hides the page.
+                    let frames: Vec<_> = frames.into_iter().map(|(_, bounds)| *bounds).collect();
+                    overlays.extend(gpui_shell::menu_covers().into_iter()
+                        .map(|c| rect(frames.iter().find(|f| f.intersects(&c)).map_or(c, |f| f.intersect(&c)))));
+                    let frames: Vec<_> = frames.into_iter().map(rect).collect();
                     let controls = controls.borrow();
                     for (key, id, view, expanded, docked, above, grips) in pages {
                         let host = if docked && !expanded {
@@ -164,7 +169,10 @@ impl AppWindow {
                         let grips = to_window(grips);
                         above.extend_from_slice(&frames);
                         above.extend_from_slice(&grips);
-                        let hits = if frames.is_empty() && grips.is_empty() { pieces.clone() } else { visible_in_host(frame, clip.map(rect), &above) };
+                        if popup_open {
+                            above.push([0., 0., f32::MAX / 4., f32::MAX / 4.]);
+                        }
+                        let hits = if frames.is_empty() && grips.is_empty() && !popup_open { pieces.clone() } else { visible_in_host(frame, clip.map(rect), &above) };
                         // Translation alone can reuse the mask. Resizing also changes its layer frame.
                         let local = (pieces != [frame] || hits != [frame])
                             .then(|| ([frame[2], frame[3]], local_rects(frame, &pieces), local_rects(frame, &hits)));

@@ -1,5 +1,6 @@
 // Modified for Canopy.
 use super::*;
+use crate::menu::MenuTab;
 use crate::canophy;
 use crate::canvas::{self, Document, PILL_WIDTH};
 use gpui::AnimationExt as _;
@@ -500,7 +501,7 @@ impl AppWindow {
         let target = json!({"terminal":addr,"id":tab,"popped":self.canvas_state.popped.contains_key(addr),"toolbar":toolbar,
             "expanded":self.canvas_state.doc.panes.iter().any(|c| c.id == addr && c.size().is_some()),
             "finished":self.canvas_state.subs.get(addr).is_some_and(|subs| subs.iter().any(|s| s.done))});
-        self.open_menu("canvas-card", target, Some(at), window, cx);
+        self.open_menu(MenuTab::CanvasCard, target, Some(at), window, cx);
     }
 
     fn begin_layout(&mut self) {
@@ -889,7 +890,7 @@ impl AppWindow {
     ) {
         if args["picker"] == true {
             self.open_menu(
-                "canvas-arrange",
+                MenuTab::CanvasArrange,
                 json!({"space":args["space"]}),
                 None,
                 window,
@@ -2104,6 +2105,7 @@ impl AppWindow {
 
     /// One wheel or trackpad event on the canvas: Cmd (Ctrl) zooms at the pointer, else it pans.
     fn canvas_wheel(&mut self, e: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_menus(window, cx);
         let zoom = wheel_zooms(e.modifiers);
         let delta = e.delta.pixel_delta(px(20.));
         if zoom && delta.y != px(0.) {
@@ -2141,6 +2143,7 @@ impl AppWindow {
 
     /// Pinch uses the same pointer-anchored zoom as a modified wheel on every platform.
     fn canvas_pinch(&mut self, e: &PinchEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_menus(window, cx);
         self.canvas_state.wheel_zoom = None;
         let anchor = self.wire_local(e.position);
         if e.delta != 0. {
@@ -3094,7 +3097,7 @@ impl AppWindow {
             .tooltip(strip_tooltip("Pane color".into(), None))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
-                this.open_menu("canvas-colors", json!({"pane":id,"color":value,"palette":palette}), Some(e.position()), window, cx);
+                this.open_menu(MenuTab::CanvasColors, json!({"pane":id,"color":value,"palette":palette}), Some(e.position()), window, cx);
             }))
     }
 
@@ -3142,7 +3145,7 @@ impl AppWindow {
                         }
                         this.canvas_state.selected = vec![pane_menu.clone()];
                         this.canvas_state.wire.selected = None;
-                        this.open_menu("canvas-pane", json!({"pane":pane_menu,"items":items}), Some(e.position), window, cx);
+                        this.open_menu(MenuTab::CanvasPane, json!({"pane":pane_menu,"items":items}), Some(e.position), window, cx);
                         cx.stop_propagation();
                     })))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
@@ -3160,7 +3163,7 @@ impl AppWindow {
         let card_element = card_element
                 .when(layout.header > 0., |d| d.child(Self::pane_header().debug_selector(|| "pane-header".into()).h(wpx(canvas::header_height(&card.kind))).flex_none().border_b_1().border_color(c("border"))
                     .when(browser, |head| head.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                        this.open_menu("canvas-colors", json!({"pane":color_menu}), Some(e.position), window, cx);
+                        this.open_menu(MenuTab::CanvasColors, json!({"pane":color_menu}), Some(e.position), window, cx);
                         cx.stop_propagation();
                     })))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
@@ -3478,7 +3481,7 @@ impl AppWindow {
                         .and_then(|s| this.model.space(s))
                         .and_then(|s| s.machine.clone());
                     this.open_menu(
-                        "canvas-empty",
+                        MenuTab::CanvasEmpty,
                         json!({"point":point,"space":space,"machine":machine}),
                         Some(e.position),
                         window,
@@ -3673,7 +3676,7 @@ impl AppWindow {
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                            this.open_menu("canvas-space", json!({"id":menu_id}), Some(e.position), window, cx);
+                            this.open_menu(MenuTab::CanvasSpace, json!({"id":menu_id}), Some(e.position), window, cx);
                             cx.stop_propagation();
                         }),
                     ),
@@ -3798,7 +3801,7 @@ impl AppWindow {
                 cx.stop_propagation();
             }));
             pill = pill.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, window, cx| {
-                this.open_menu("canvas-colors", json!({"pane":color_menu}), Some(e.position), window, cx);
+                this.open_menu(MenuTab::CanvasColors, json!({"pane":color_menu}), Some(e.position), window, cx);
                 cx.stop_propagation();
             }));
             pills.push((paint_order(&card), ScaledPane::new(layout.scale, pill).into_any_element()));
@@ -4318,7 +4321,7 @@ impl AppWindow {
                         .on_click(cx.listener(|this, _, window, cx| {
                             let on = mods::shared("files.auto_save").and_then(|v| v.as_bool()).unwrap_or(true);
                             let label = if on { "✓ Auto save" } else { "Auto save" };
-                            this.open_menu("primary", json!({"items":[[label,"files.auto_save",{"on":!on}]]}), None, window, cx);
+                            this.open_menu(MenuTab::Primary, json!({"items":[[label,"files.auto_save",{"on":!on}]]}), None, window, cx);
                         })))
                     // An agent transcript is read, not edited.
                     .when(state.file_path().is_some_and(|f| previewable(Path::new(f)) != Some(Previewable::Jsonl)), |d| {
@@ -4342,7 +4345,7 @@ impl AppWindow {
                                 .border_l_1().border_color(c("border")).cursor_pointer().hover(|s| s.bg(c("hover")))
                                 .on_click(cx.listener(move |this, _, window, cx| {
                                     let editors: Vec<Value> = this.panel_editors().iter().map(|e| json!({"key":e.key,"name":e.name,"icon":e.icon,"tint":e.tint})).collect();
-                                    this.open_menu("canvas-editors", json!({"path":menu_path,"editors":editors}), None, window, cx);
+                                    this.open_menu(MenuTab::CanvasEditors, json!({"path":menu_path,"editors":editors}), None, window, cx);
                                     this.check_editors(window, cx);
                                 }))
                                 .child(svg().path("mods/files/chevron-down.svg").size(px(12.)).text_color(c("muted-foreground")))))

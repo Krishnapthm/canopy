@@ -16,6 +16,7 @@
 //! website store per Canopy home (see `store_id`), no downloads, and bundled react-grab with its
 //! update check and font import removed.
 use super::*;
+use crate::menu::MenuTab;
 
 /// react-grab 0.2.0 (MIT, vendor/react-grab), never fetched.
 const REACT_GRAB: &str = include_str!("../../../vendor/react-grab/index.global.js");
@@ -915,7 +916,7 @@ impl AppWindow {
             self.canvas_state.browsers.panes.entry(id.to_owned()).or_default().pop_menu = Some((window.mouse_position(), items));
             return cx.notify();
         }
-        self.open_menu("primary", json!({"items": items}), Some(window.mouse_position()), window, cx);
+        self.open_menu(MenuTab::Primary, json!({"items": items}), Some(window.mouse_position()), window, cx);
     }
 
     #[cfg(target_os = "macos")]

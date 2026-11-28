@@ -1,5 +1,6 @@
 //! Canvas mode owns the keyboard until the person leaves it. No timer or key sequences.
 use super::*;
+use crate::menu::MenuTab;
 
 fn direction(value: &str) -> Option<canophy::Point> {
     match value {
@@ -219,7 +220,7 @@ impl AppWindow {
                     if let Some(machine) = at["space"].as_str().and_then(|id| self.model.space(id)).and_then(|s| s.machine.as_ref()) {
                         at["machine"] = json!(machine);
                     }
-                    self.open_menu("canvas-agents", at, None, window, cx);
+                    self.open_menu(MenuTab::CanvasAgents, at, None, window, cx);
                 } else {
                     // `like`: start what the selected cell runs (in its space, so its folder), else a plain terminal.
                     if args["like"] == true {
