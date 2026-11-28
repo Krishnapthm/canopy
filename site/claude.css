@@ -218,6 +218,8 @@ svg { display: block; }
 /* The shot keeps its 740:560 picture whole; the frame is never taller than the screen less the
    scroll margin above it, so "features" lands on a whole frame. */
 .shot { display: grid; place-items: center; background: #111; }
+/* The file frame is interactive: a drag selects lines, so the browser must not select text under it. */
+.shot[data-scene="files"] { -webkit-user-select: none; user-select: none; }
 .shot .sv { width: 100%; max-height: calc(100svh - 2 * var(--frame-gap)); }
 #features { scroll-margin-top: var(--frame-gap); }
 

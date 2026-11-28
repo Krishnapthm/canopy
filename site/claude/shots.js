@@ -607,7 +607,7 @@
       show(name === file ? tabbed[Math.min(i, tabbed.length - 1)] ?? null : file);
     }
 
-    // The quote menu under the selected lines: a note to add, then send to Claude Code (wired to it),
+    // The quote menu under the selected lines: a required note, then send to Claude Code (wired to it),
     // Codex, or a new agent. Typing writes the note; return sends to the highlighted agent.
     const POP_X = 200;
     function openQuote() {
@@ -635,7 +635,7 @@
     function drawComment() {
       const text = pop.querySelector("[data-comment]");
       if (!text) return;
-      text.textContent = comment || "Add a note (optional)";
+      text.textContent = comment || "describe it or ask to explain";
       text.classList.toggle("c-dim", !comment);
       pop.querySelector("[data-comment-caret]").setAttribute("x", POP_X + 22 + (comment ? text.getComputedTextLength() + 1 : 0));
     }
@@ -644,8 +644,9 @@
       quoting = false;
       gsap.to(pop, { autoAlpha: 0, duration: .12 });
     }
-    // Sends the quote: the menu closes and the selection flashes.
+    // Sends the quote: the menu closes and the selection flashes. The note is required, so an empty one stays open.
     function sendQuote() {
+      if (!comment.trim()) return;
       closeQuote();
       gsap.fromTo(hl, { fill: "#3b4d78" }, { fill: BG.sel, duration: .6, ease: "power2.out" });
     }
