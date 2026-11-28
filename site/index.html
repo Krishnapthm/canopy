@@ -70,37 +70,47 @@
       <a href="#features">features</a>
       <a href="https://github.com/Krishnapthm/canopy/wiki" target="_blank" rel="noopener">docs</a>
       <a href="https://github.com/Krishnapthm/canopy" target="_blank" rel="noopener">github</a>
-      <a class="pill dark" href="#install">get canopy</a>
     </nav>
   </header>
 
   <main>
     <section class="hero gutter" aria-labelledby="hero-title">
-      <h1 id="hero-title" class="t-display">a desktop workspace for your coding agents</h1>
-      <p class="t-display quiet">run your agents and terminals on a canvas alongside your files, a browser and an ios simulator, so you can see what they’re working on and when they need you.</p>
+      <h1 id="hero-title" class="t-display">open canvas for your coding agents</h1>
+      <!-- <p class="t-display quiet">run your agents and terminals on a canvas alongside your files, a browser and an mobile simulator, so you can see what they’re working on and when they need you.</p> -->
+      <p class="t-display quiet">run coding agents, terminals, simulators, browsers and project files on a single canvas. </p>
+      <p class="t-display quieter">built with rust, open source</p>
       <div class="actions">
         <a class="pill dark" href="#install">get canopy</a>
         <a class="pill" href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start" target="_blank" rel="noopener">quick start</a>
       </div>
     </section>
 
-    <!-- The canvas: a canopy canvas as wide as the page column. scenes.js draws each pane from
-         its id; canvas.js fits them to the frame, wires them and lets you drag them by their headers. -->
-    <section class="stage-wrap gutter" aria-label="Interactive Canopy canvas with Claude Code wired to a browser and iPhone, and a separate Codex pane">
+    <section class="stage-wrap gutter" aria-label="Canopy workspace for the Harbor coffee shop">
       <div class="stage" data-stage>
-        <div class="app" data-app>
+        <div class="app" data-app tabindex="0" role="region" aria-label="Interactive canvas" aria-describedby="canvas-help">
           <div class="world" data-world>
             <svg class="edges" data-edges aria-hidden="true"></svg>
             <!-- data-narrow is the phone layout, "x y w h", picked once at load: one column, and no Codex.
                  The sim is the bare device, 432:904, so its box is the phone. -->
-            <article class="pane" data-pane="t1" data-x="0" data-y="0" data-narrow="0 340 460 440" style="width:460px;height:420px"></article>
-            <article class="pane" data-pane="codex" data-x="64" data-y="460" data-narrow="hide" style="width:460px;height:400px"></article>
-            <article class="pane" data-pane="browser" data-x="700" data-y="0" data-narrow="0 0 460 280" style="width:600px;height:360px"></article>
-            <article class="pane" data-pane="sim" data-x="900" data-y="380" data-narrow="100 880 260 544" style="width:260px;height:544px"></article>
+            <article class="pane" data-pane="t1" data-x="0" data-y="34" data-narrow="0 340 460 440" style="width:460px;height:420px"></article>
+            <article class="pane" data-pane="codex" data-x="65" data-y="490" data-narrow="hide" style="width:460px;height:400px"></article>
+            <article class="pane" data-pane="browser" data-x="700" data-y="8" data-narrow="0 0 460 280" style="width:600px;height:360px"></article>
+            <article class="pane" data-pane="sim" data-x="900" data-y="400" data-narrow="100 880 260 544" style="width:260px;height:544px"></article>
+          </div>
+          <div class="world" data-world>
+            <svg class="edges" data-edges aria-hidden="true"></svg>
+            <article class="pane" data-pane="subscriptions" data-x="525" data-y="96" data-narrow="0 96 460 340" style="width:740px;height:510px"></article>
+            <article class="pane" data-pane="subscription-agent" data-x="20" data-y="36" data-narrow="0 495 460 330" style="width:450px;height:350px"></article>
+            <article class="pane" data-pane="subscription-review" data-x="52" data-y="536" data-narrow="0 930 460 310" style="width:440px;height:310px"></article>
+          </div>
+          <div class="world" data-world>
+            <svg class="edges" data-edges aria-hidden="true"></svg>
+            <article class="pane" data-pane="inventory" data-x="130" data-y="90" data-narrow="0 210 460 400" style="width:500px;height:400px"></article>
+            <article class="pane" data-pane="inventory-tests" data-x="752" data-y="414" data-narrow="0 720 460 348" style="width:500px;height:348px"></article>
           </div>
         </div>
       </div>
-      <p class="caption">try the canvas <span class="quiet">by dragging a pane by its header or grabbing the phone.</span></p>
+      <p class="caption" id="canvas-help">move things around. <span class="quiet">arrange your agents terminals and tools on the canvas however you like, without being confined to tabs or split panes.</span></p>
     </section>
 
     <script>
@@ -114,57 +124,40 @@
 
     <div id="features">
       <section class="feature">
-        <h2 class="t-display feature-text">connect your agents. <span class="quiet">draw a wire between two agent panes so they can find and message each other. you can ask one agent to review a diff and send its feedback directly to the agent that wrote it.</span></h2>
+        <h2 class="t-display feature-text">let your agents work together <span class="quiet">draw a wire between two agent panes so they can find and message each other. you can ask one agent to review a diff and send its feedback directly to the agent that wrote it.</span></h2>
         <figure class="shot" data-scene="wire"></figure>
       </section>
       <section class="feature">
-        <h2 class="t-display feature-text">test your ios app. <span class="quiet">on macos, keep the ios simulator next to your agent while it taps and scrolls through your app. if you spot a bug, mark it on the screen and send the annotated screenshot to the agent.</span></h2>
+        <h2 class="t-display feature-text">test and debug your app <span class="quiet"> open a simulator right next to your agent while it taps and scrolls through your app. if you spot a bug, mark it on the screen and send the annotated screenshot to the agent.</span> <span class="quieter"> iOS only, android coming soon.</span> </h2>
         <figure class="shot" data-scene="sim"></figure>
       </section>
       <section class="feature">
-        <h2 class="t-display feature-text">work with project files. <span class="quiet">browse and edit your project files from the files panel, or open one beside an agent. select a few lines to quote them in its prompt with the file path and line numbers.</span></h2>
+        <h2 class="t-display feature-text">work with project files <span class="quiet">browse and edit your project files from the files panel, or open one beside an agent. select a few lines to quote them in its prompt with the file path and line numbers.</span></h2>
         <figure class="shot" data-scene="files"></figure>
       </section>
     </div>
 
     <section class="faq gutter" aria-labelledby="faq-title">
       <h2 id="faq-title" class="t-display">questions</h2>
-      <div class="faq-list">
-        <details>
-          <summary>what is canopy?</summary>
-          <p>each project gets a canvas for its agents, terminals and files. on macos, you can also open your dev server in a browser pane, mark up what you see and share that context with the agent working on it.</p>
-        </details>
-        <details>
-          <summary>what inspired canopy?</summary>
-          <p>i wanted the freedom to arrange my tools the way i arrange things in figma, with the agent workflows i like in claude code and the claude desktop app. canopy started as a fork of <a class="link" href="https://github.com/herdrdev/herdr-app" target="_blank" rel="noopener">herdr-app</a>.</p>
-        </details>
+      <div class="faq-list ">
         <details>
           <summary>which coding agents can i use?</summary>
-          <p>if an agent runs in your terminal, you can run it in canopy using your existing login. canopy detects installed clis such as claude code and codex and lets you launch them in your project folder.</p>
+          <p>any coding agent that runs in your terminal.</p>
         </details>
+        
         <details>
-          <summary>how is canopy built?</summary>
-          <p>canopy is a native rust app that uses gpui, the gpu-accelerated ui framework behind zed.</p>
+          <summary>what happens when i close canopy?</summary>
+          <p>your agents and terminals continue running in the background, even if canopy crashes. reopen canopy and pick up where you left off.</p>
         </details>
+        
         <details>
-          <summary>what happens when i quit canopy?</summary>
-          <p>your agents and terminals keep running in herdr core even if you quit canopy or the window crashes. when you reopen canopy, you can pick up the same sessions.</p>
+          <summary>which platforms are supported?</summary>
+          <p>macOS and Linux. iOS simulators on macOS is supported for now. android simulator and windows support otw.</p>
         </details>
+        
         <details>
           <summary>how is canopy related to herdr?</summary>
-          <p><a class="link" href="https://github.com/herdrdev/herdr-core" target="_blank" rel="noopener">herdr core</a> is the runtime for your terminal sessions and coding agents. canopy connects to it and shows those sessions on the canvas. <a class="link" href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> uses the same runtime.</p>
-        </details>
-        <details>
-          <summary>which operating systems does canopy support?</summary>
-          <p>canopy runs on apple silicon macs and linux. the built-in browser and ios simulator panes are available on macos.</p>
-        </details>
-        <details>
-          <summary>where does my code go?</summary>
-          <p>canopy works with your project files locally and has no telemetry. the agents you run in it use their own providers and follow those providers’ data policies.</p>
-        </details>
-        <details>
-          <summary>is canopy free?</summary>
-          <p>canopy is free and open source under the apache 2.0 license. any coding agent subscriptions you use are separate.</p>
+          <p>canopy is a fork of <a class="link" href="https://herdr.dev" target="_blank" rel="noopener">herdr</a>. it uses <a class="link" href="https://github.com/herdrdev/herdr-core" target="_blank" rel="noopener">herdr-core</a> under the hood for the terminal sessions and coding agents.</p>
         </details>
       </div>
     </section>
@@ -172,7 +165,7 @@
     <section class="install gutter" id="install" aria-labelledby="install-title">
       <div>
         <h2 id="install-title" class="t-display">get canopy</h2>
-        <p class="t-display quiet">macos and linux</p>
+        <p class="t-display quiet">macOS and Linux</p>
       </div>
       <div class="install-body">
         <div class="command">
@@ -180,7 +173,7 @@
           <button class="pill dark copy-button" type="button" hidden>copy</button>
         </div>
         <p id="copy-status" class="sr-only" role="status"></p>
-        <p class="t-ui quiet">the installer sets up the <a class="link" href="https://github.com/herdrdev/herdr-core" target="_blank" rel="noopener">herdr core</a> runtime if you need it. once canopy opens, the <a class="link" href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start" target="_blank" rel="noopener">quick start</a> walks you through your first project.</p>
+        <p class="t-ui quiet">the installer sets up the <a class="link" href="https://github.com/herdrdev/herdr-core" target="_blank" rel="noopener">herdr-core</a> runtime if you need it. once canopy opens, the <a class="link" href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start" target="_blank" rel="noopener">quick start</a> walks you through your first project.</p>
       </div>
     </section>
   </main>
@@ -191,14 +184,14 @@
         <radialGradient id="footer-cobalt" cx=".32" cy=".15" r=".94">
           <stop stop-color="#5482e7"/><stop offset=".5" stop-color="#315bc5"/><stop offset="1" stop-color="#112b73"/>
         </radialGradient>
-        <!-- Light the sheet's grain once so pointer movement only redraws the wordmark bevel. -->
+        <!-- Fine, even stipple of injection-moulded plastic. Lit once; pointer movement only redraws the wordmark bevel. -->
         <filter id="footer-grain" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">
-          <feTurbulence type="fractalNoise" baseFrequency=".072" numOctaves="2" seed="22" stitchTiles="stitch"/>
-          <feColorMatrix values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  .006 0 0 0 0" result="grain"/>
-          <feDiffuseLighting in="grain" surfaceScale="13" diffuseConstant=".872" result="diffuse">
+          <feTurbulence type="fractalNoise" baseFrequency="1.15" numOctaves="1" seed="22" stitchTiles="stitch" result="pebbles"/>
+          <feColorMatrix in="pebbles" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  .04 0 0 0 0" result="grain"/>
+          <feDiffuseLighting in="grain" surfaceScale="16" diffuseConstant=".84" result="diffuse">
             <feDistantLight azimuth="225" elevation="35"/>
           </feDiffuseLighting>
-          <feSpecularLighting in="grain" surfaceScale="13" specularConstant=".58" specularExponent="24" result="gloss">
+          <feSpecularLighting in="grain" surfaceScale="16" specularConstant=".05" specularExponent="6" result="gloss">
             <feDistantLight azimuth="225" elevation="35"/>
           </feSpecularLighting>
           <feComposite in="diffuse" in2="gloss" operator="arithmetic" k2="1" k3="1"/>
@@ -214,7 +207,7 @@
           <feDiffuseLighting in="bevel" surfaceScale="12.48" diffuseConstant=".872" result="diffuse">
             <feDistantLight data-light azimuth="225" elevation="35"/>
           </feDiffuseLighting>
-          <feSpecularLighting in="bevel" surfaceScale="12.48" specularConstant=".58" specularExponent="24" result="gloss">
+          <feSpecularLighting in="bevel" surfaceScale="12.48" specularConstant=".14" specularExponent="10" result="gloss">
             <feDistantLight data-light azimuth="225" elevation="35"/>
           </feSpecularLighting>
           <feComposite in="diffuse" in2="gloss" operator="arithmetic" k2="1" k3="1"/>
@@ -222,7 +215,6 @@
         </filter>
       </defs>
       <rect width="100%" height="100%" fill="url(#footer-cobalt)"/>
-      <rect class="footer-grain" width="100%" height="100%" filter="url(#footer-grain)"/>
     </svg>
     <div class="footer-relief" aria-hidden="true">
       <div class="brand footer-brand">
@@ -230,12 +222,14 @@
       </div>
     </div>
     <div class="links gutter">
-      <p>an open-source workspace for coding agents</p>
+      <p>open canvas for your coding agents</p>
       <nav aria-label="Project">
         <a href="https://github.com/Krishnapthm/canopy" target="_blank" rel="noopener">github</a>
         <a href="https://github.com/Krishnapthm/canopy/wiki" target="_blank" rel="noopener">docs</a>
       </nav>
     </div>
+    <!-- The grain lies over the links so they read as printed on the sheet. It ignores the pointer. -->
+    <svg class="footer-surface footer-grain" aria-hidden="true"><rect width="100%" height="100%" filter="url(#footer-grain)"/></svg>
   </footer>
 </body>
 </html>

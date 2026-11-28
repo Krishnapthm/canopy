@@ -125,3 +125,7 @@ output at turn completion or a permission prompt still needs a session.
 ## Usage help, 2026-11-24 (2.1.322)
 
 `claude --help` does not document a read-only non-interactive `/usage` interface. Its `--bare` mode explicitly excludes OAuth and keychain reads. No session or authenticated request was started, so a safe isolated way to read usage remains unverified.
+
+## Auto mode, 2026-11-28
+
+Claude Code 2.1.332 lists `auto` as a `--permission-mode` choice in CLI help.

@@ -100,3 +100,8 @@ output and this version's automatic method selection were not exercised.
 `codex app-server generate-json-schema --out <scratch>` generated the local protocol schema without starting an app server. It describes `account/rateLimits/read` with a `rateLimits` response containing optional `primary` and `secondary` windows. Each window has `usedPercent`, optional `windowDurationMins`, and optional integer `resetsAt`. The schema also describes optional `rateLimitsByLimitId` buckets. No authenticated request was made, so available accounts and actual response values remain unverified.
 
 An isolated `codex app-server --stdio` with empty `HOME` and `CODEX_HOME` accepted `initialize` and returned an error to `account/rateLimits/read` without sign-in. No agent turn or authenticated request was made.
+
+## Automatic approval review, 2026-11-28
+
+Codex CLI 0.172.0 documents `--approve-for-me` in CLI help. It routes approval
+requests through automatic review with the workspace-write sandbox.

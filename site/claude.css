@@ -16,6 +16,7 @@
   --paper: #f6f5f1;
   --ink: #1b1a17;
   --quiet: #1b1a1799;
+  --quieter: #1b1a1766;
   --stage: #e9e7e1;
   --font: Inter, system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
@@ -61,6 +62,7 @@ svg { display: block; }
 .t-body { font-size: var(--t-body); line-height: 1.5; letter-spacing: -0.012em; text-wrap: pretty; }
 .t-ui { font-size: var(--t-ui); line-height: 1.5; }
 .quiet { color: var(--quiet); }
+.quieter { color: var(--quieter); }
 .link {
   text-decoration-line: underline;
   text-decoration-thickness: 1px;
@@ -103,9 +105,7 @@ svg { display: block; }
 .actions { display: flex; gap: 0.6rem; margin-top: 2rem; }
 
 /* ---------------------------------------------------------------------------------------------------
-   Stage: the canopy canvas itself, as wide as the page column. canvas.js sets its aspect ratio from the
-   panes, and the height is capped at one screen: the panes scale down to fit, and are centred if the
-   canvas ends up wider than they are. */
+   Stage: a viewport onto Harbor's workspace. canvas.js fits the opening layout to the frame. */
 .stage { position: relative; overflow: hidden; border-radius: 12px; aspect-ratio: 4 / 3; width: 100%; max-height: calc(100svh - 2rem); }
 .caption { padding-top: 1.25rem; font-size: 1.0625rem; line-height: 1.5; }
 
@@ -120,8 +120,11 @@ svg { display: block; }
   background: #111;
   -webkit-user-select: none;
   user-select: none;
-  touch-action: pan-y;
+  touch-action: pan-y pinch-zoom;
+  cursor: grab;
 }
+.app:focus-visible { outline: 2px solid #8fc8d6; outline-offset: -3px; }
+.app.panning, .app.panning .pane-head { cursor: grabbing; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 .edges { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .pane { position: absolute; left: 0; top: 0; will-change: transform; }
@@ -211,6 +214,7 @@ svg { display: block; }
 .feature:nth-child(even) .feature-text { order: 2; }
 .feature-text {
   --quiet: #ffffffb3;
+  --quieter: #ffffff80;
   padding: clamp(1.25rem, 3.5vw, 3rem);
   color: #fff;
   background: linear-gradient(#5e5e5e, #565656 45%, #1b1b1b);
@@ -287,6 +291,7 @@ svg { display: block; }
 /* Footer: the embossed cobalt sheet, with one line on the left and two links on the right. */
 #footer {
   --quiet: #e3ebff;
+  --quieter: #f3f7ff;
   color: white;
   min-height: max(34rem, 100dvh);
   position: relative;
@@ -295,14 +300,13 @@ svg { display: block; }
   background: #315bc5;
 }
 .footer-surface { position: absolute; inset: 0; width: 100%; height: 100%; }
-.footer-grain { mix-blend-mode: hard-light; }
+.footer-grain { mix-blend-mode: hard-light; pointer-events: none; }
 .footer-relief {
   position: absolute;
   inset: 0;
   pointer-events: none;
   display: grid;
   place-items: center;
-  padding-bottom: min(22%, 24dvh);
 }
 .footer-brand {
   gap: 0.49em;
@@ -323,7 +327,7 @@ svg { display: block; }
   align-items: baseline;
   gap: 1rem 2rem;
   padding-block: 2rem 2.5rem;
-  font-size: clamp(1rem, 1.15vw, 1.125rem);
+  font-size: clamp(calc(1rem + 2px), calc(1.15vw + 2px), calc(1.125rem + 2px));
 }
 .links nav { display: flex; gap: 1.75rem; }
 .links a { transition: opacity 150ms ease; }
@@ -337,7 +341,6 @@ svg { display: block; }
   .install { gap: 1rem; }
   .command code { white-space: normal; overflow-wrap: anywhere; }
   #footer { min-height: max(37rem, 100dvh); }
-  .footer-relief { padding-bottom: 32%; }
   .links { flex-direction: column; }
 }
 @media (prefers-reduced-motion: reduce) {
