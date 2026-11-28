@@ -70,14 +70,15 @@
       <a href="#features">features</a>
       <a href="https://github.com/Krishnapthm/canopy/wiki" target="_blank" rel="noopener">docs</a>
       <a href="https://github.com/Krishnapthm/canopy" target="_blank" rel="noopener">github</a>
-      <a class="pill dark" href="#install">get canopy</a>
     </nav>
   </header>
 
   <main>
     <section class="hero gutter" aria-labelledby="hero-title">
       <h1 id="hero-title" class="t-display">open canvas for your coding agents</h1>
-      <p class="t-display quiet">run your agents and terminals on a canvas alongside your files, a browser and an mobile simulator, so you can see what they’re working on and when they need you.</p>
+      <!-- <p class="t-display quiet">run your agents and terminals on a canvas alongside your files, a browser and an mobile simulator, so you can see what they’re working on and when they need you.</p> -->
+      <p class="t-display quiet">run coding agents, terminals, simulators, browsers and project files on a single canvas. </p>
+      <p class="t-display quieter">built with rust, open source</p>
       <div class="actions">
         <a class="pill dark" href="#install">get canopy</a>
         <a class="pill" href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start" target="_blank" rel="noopener">quick start</a>
@@ -109,7 +110,7 @@
           </div>
         </div>
       </div>
-      <p class="caption" id="canvas-help">drag the canvas to explore Harbor. <span class="quiet">use the background, middle mouse button, or arrow keys to pan. drag a header or the phone to move a pane.</span></p>
+      <p class="caption" id="canvas-help">move things around. <span class="quiet">arrange your agents terminals and tools on the canvas however you like, without being confined to tabs or split panes.</span></p>
     </section>
 
     <script>
@@ -123,57 +124,40 @@
 
     <div id="features">
       <section class="feature">
-        <h2 class="t-display feature-text">connect your agents. <span class="quiet">draw a wire between two agent panes so they can find and message each other. you can ask one agent to review a diff and send its feedback directly to the agent that wrote it.</span></h2>
+        <h2 class="t-display feature-text">let your agents work together <span class="quiet">draw a wire between two agent panes so they can find and message each other. you can ask one agent to review a diff and send its feedback directly to the agent that wrote it.</span></h2>
         <figure class="shot" data-scene="wire"></figure>
       </section>
       <section class="feature">
-        <h2 class="t-display feature-text">test your app. <span class="quiet"> open a simulator right next to your agent while it taps and scrolls through your app. if you spot a bug, mark it on the screen and send the annotated screenshot to the agent.</span> <span class="quieter"> only on macOS.</span> </h2>
+        <h2 class="t-display feature-text">test and debug your app <span class="quiet"> open a simulator right next to your agent while it taps and scrolls through your app. if you spot a bug, mark it on the screen and send the annotated screenshot to the agent.</span> <span class="quieter"> iOS only, android coming soon.</span> </h2>
         <figure class="shot" data-scene="sim"></figure>
       </section>
       <section class="feature">
-        <h2 class="t-display feature-text">work with project files. <span class="quiet">browse and edit your project files from the files panel, or open one beside an agent. select a few lines to quote them in its prompt with the file path and line numbers.</span></h2>
+        <h2 class="t-display feature-text">work with project files <span class="quiet">browse and edit your project files from the files panel, or open one beside an agent. select a few lines to quote them in its prompt with the file path and line numbers.</span></h2>
         <figure class="shot" data-scene="files"></figure>
       </section>
     </div>
 
     <section class="faq gutter" aria-labelledby="faq-title">
       <h2 id="faq-title" class="t-display">questions</h2>
-      <div class="faq-list">
-        <details>
-          <summary>what is canopy?</summary>
-          <p>each project gets a canvas for its agents, terminals and files. on macos, you can also open your dev server in a browser pane, mark up what you see and share that context with the agent working on it.</p>
-        </details>
-        <details>
-          <summary>what inspired canopy?</summary>
-          <p>i wanted the freedom to arrange my tools the way i arrange things in figma, with the agent workflows i like in claude code and the claude desktop app. canopy started as a fork of <a class="link" href="https://github.com/herdrdev/herdr-app" target="_blank" rel="noopener">herdr-app</a>.</p>
-        </details>
+      <div class="faq-list ">
         <details>
           <summary>which coding agents can i use?</summary>
-          <p>if an agent runs in your terminal, you can run it in canopy using your existing login. canopy detects installed clis such as claude code and codex and lets you launch them in your project folder.</p>
+          <p>any coding agent that runs in your terminal.</p>
         </details>
+        
         <details>
-          <summary>how is canopy built?</summary>
-          <p>canopy is a native rust app that uses gpui, the gpu-accelerated ui framework behind zed.</p>
+          <summary>what happens when i close canopy?</summary>
+          <p>your agents and terminals continue running in the background, even if canopy crashes. reopen canopy and pick up where you left off.</p>
         </details>
+        
         <details>
-          <summary>what happens when i quit canopy?</summary>
-          <p>your agents and terminals keep running in herdr core even if you quit canopy or the window crashes. when you reopen canopy, you can pick up the same sessions.</p>
+          <summary>which platforms are supported?</summary>
+          <p>macOS and Linux. iOS simulators on macOS is supported for now. android simulator and windows support otw.</p>
         </details>
+        
         <details>
           <summary>how is canopy related to herdr?</summary>
-          <p><a class="link" href="https://github.com/herdrdev/herdr-core" target="_blank" rel="noopener">herdr core</a> is the runtime for your terminal sessions and coding agents. canopy connects to it and shows those sessions on the canvas. <a class="link" href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> uses the same runtime.</p>
-        </details>
-        <details>
-          <summary>which operating systems does canopy support?</summary>
-          <p>canopy runs on apple silicon macs and linux. the built-in browser and ios simulator panes are available on macos.</p>
-        </details>
-        <details>
-          <summary>where does my code go?</summary>
-          <p>canopy works with your project files locally and has no telemetry. the agents you run in it use their own providers and follow those providers’ data policies.</p>
-        </details>
-        <details>
-          <summary>is canopy free?</summary>
-          <p>canopy is free and open source under the apache 2.0 license. any coding agent subscriptions you use are separate.</p>
+          <p>canopy is a fork of <a class="link" href="https://herdr.dev" target="_blank" rel="noopener">herdr</a>. it uses <a class="link" href="https://github.com/herdrdev/herdr-core" target="_blank" rel="noopener">herdr-core</a> under the hood for the terminal sessions and coding agents.</p>
         </details>
       </div>
     </section>
@@ -181,7 +165,7 @@
     <section class="install gutter" id="install" aria-labelledby="install-title">
       <div>
         <h2 id="install-title" class="t-display">get canopy</h2>
-        <p class="t-display quiet">macos and linux</p>
+        <p class="t-display quiet">macOS and Linux</p>
       </div>
       <div class="install-body">
         <div class="command">
@@ -189,7 +173,7 @@
           <button class="pill dark copy-button" type="button" hidden>copy</button>
         </div>
         <p id="copy-status" class="sr-only" role="status"></p>
-        <p class="t-ui quiet">the installer sets up the <a class="link" href="https://github.com/herdrdev/herdr-core" target="_blank" rel="noopener">herdr core</a> runtime if you need it. once canopy opens, the <a class="link" href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start" target="_blank" rel="noopener">quick start</a> walks you through your first project.</p>
+        <p class="t-ui quiet">the installer sets up the <a class="link" href="https://github.com/herdrdev/herdr-core" target="_blank" rel="noopener">herdr-core</a> runtime if you need it. once canopy opens, the <a class="link" href="https://github.com/Krishnapthm/canopy/wiki/Quick-Start" target="_blank" rel="noopener">quick start</a> walks you through your first project.</p>
       </div>
     </section>
   </main>
