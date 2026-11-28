@@ -61,25 +61,22 @@ const Scenes = (() => {
   // Rows that sit at the bottom of a pane, like a prompt.
   const termBottom = (rows, w, h, pad = 8) => term(rows, { y: h - pad - rows.length * ROW, w });
 
-  // Claude Code: the transcript, then its prompt box and mode line pinned to the bottom.
-  const claude = (rows, mode = "accept edits on") => (w, h) => {
-    const rule = `{rule|${"─".repeat(Math.floor((w - 32) / CH))}}`;
-    return term(rows, { w }) + termBottom([rule, "{hi|❯} {@caret}", rule,
-      `  {@play.violet}{@play.violet}{violet| ${mode}} {dim|· Opus 5.5}`], w, h);
-  };
-  // Claude Code at work: the transcript, then its spinner line, animated by startWorking below.
-  const working = (rows) => (w, h) => {
-    const y = 10 + rows.length * ROW;
-    return claude(rows)(w, h) + `<g data-working class="sv-mono">
-      <text class="c-clawd" x="16" y="${y + 13}" data-spin>✻</text>
-      <text x="39" y="${y + 13}" xml:space="preserve"><tspan class="c-clawd c-shimmer" data-verb>Percolating…</tspan><tspan class="c-dim"> (<tspan data-secs>12</tspan>s · esc to interrupt)</tspan></text></g>`;
-  };
-  // Codex: the transcript, then its composer and model line, unless it is waiting on an approval.
-  // The shaded composer is padded a row above and below its prompt, like Codex's.
-  const PAD = { t: "", bg: "umsg" };
-  const composer = (w, h) => termBottom([PAD, { t: "{b|›} {dim|Ask Codex to do anything}", bg: "umsg" }, PAD, "", "  {dim|gpt-6.2-sol medium · ~/harbor}"], w, h);
-  const codex = (rows, { waiting = false } = {}) => (w, h) => term(rows, { w }) + (waiting ? "" : composer(w, h));
+  // The status line shows the current step immediately and advances while the pane is visible.
+  const activity = (steps, rows, color) => `<g data-working class="sv-mono">
+      ${steps.map((step) => `<desc data-step>${esc(step)}</desc>`).join("")}
+      <text class="c-${color}" x="16" y="${23 + rows.length * ROW}" data-spin>✻</text>
+      <text x="39" y="${23 + rows.length * ROW}" xml:space="preserve"><tspan class="c-${color}" data-verb>${esc(steps[0])}</tspan><tspan class="c-dim"> (<tspan data-secs>12</tspan>s)</tspan></text></g>`;
 
+  const working = (rows, steps) => (w, h) => {
+    const rule = `{rule|${"─".repeat(Math.floor((w - 32) / CH))}}`;
+    return term(rows, { w }) + activity(steps, rows, "clawd") + termBottom([rule, "{hi|❯} {@caret}", rule,
+      "  {@play.yellow}{@play.yellow}{yellow| auto mode on} {dim|(shift+tab to cycle)}"], w, h);
+  };
+
+  const PAD = { t: "", bg: "umsg" };
+  const codex = (rows, steps) => (w, h) => term(rows, { w }) + activity(steps, rows, "cyan") +
+    termBottom([PAD, { t: "{b|›} {dim|Ask Codex to do anything}", bg: "umsg" }, PAD,
+      "  {dim|Approval: automatic review}", "  {dim|gpt-6.2-sol medium · ~/harbor}"], w, h);
 
   // --- pane ---------------------------------------------------------------------------------------
   // The app's pane: #0c0c0c body, a 30px header with icon, title and state dot. `dot` is idle, work,
@@ -309,88 +306,116 @@ const Scenes = (() => {
   // --- the session ----------------------------------------------------------------------------------
   // Harbor has checkout, subscriptions, and inventory work in flight on the same canvas.
   // The feature shots (shots.js) use the original checkout session.
-  const T0 = [
-    { t: "{dim|❯} make checkout match on the web and the iPhone", bg: "umsg" },
+  const CHECKOUT = [
+    { t: "{dim|❯} sync checkout on the web and iPhone", bg: "umsg" },
     "",
     "{@rec.green} {b|Read} 2 annotations on localhost:5173/bag",
-    "  {@elbow.dim}  {dim|promo field: \"move it above the total\"}",
+    "  {@elbow.dim} Promo field: move it above the total.",
+    "  {@elbow.dim} Shipping bar: count discounts first.",
     "{@rec.green} {b|Update}(src/routes/bag.tsx)",
-    "  {@elbow.dim}  {dim|Added} {b|18} {dim|lines, removed} {b|6} {dim|lines}",
-    "{@rec.green} {b|Bash}(canopy pane read sim)",
-    "  {@elbow.dim}  {dim|iPhone 17 Pro · Harbor 1.4 (dev)}",
-    "{@rec} Tapping Place order on the iPhone.",
+    "  {@elbow.dim} Added 18 lines, removed 6 lines.",
+    "{@rec.green} {b|Update}(CheckoutSummary.swift)",
+    "  {@elbow.dim} Free shipping now uses the net subtotal.",
+    "{@rec.green} {b|Bash}(canopy pane devices)",
+    "  {@elbow.dim} iPhone 17 Pro · Booted",
+    "{@rec.green} {b|Bash}(npm test -- checkout)",
+    "  {@elbow.dim} 8 passed, including the $50 threshold.",
     "",
   ];
-  const T2 = [
-    { t: "{b|›} add tests for the promo code rules", bg: "umsg" },
+  const PROMO = [
+    { t: "{b|›} add regression tests for promo codes", bg: "umsg" },
     "",
     "{green|•} {b|Explored}",
     "  {dim|└ Read src/lib/promo.ts, promo.test.ts}",
     "{green|•} Expired and stacked codes are untested.",
-    "  Adding cases for both, plus the 10% cap.",
+    "  The API caps each discount at 10%.",
     "{green|•} {b|Edited} src/lib/promo.test.ts {green|+42}",
+    "  {dim|└ Fixed the test clock at midnight UTC.}",
     "{green|•} {b|Ran} npm test -- promo",
     "  {dim|└} {green|9 passed} {dim|(380ms)}",
+    "{green|•} {b|Edited} tests/checkout.spec.ts {green|+16}",
+    "  {dim|└ Covers a valid code after a rejected one.}",
     "",
-    "{dim|•} {shimmer|Working} {dim|(18s • esc to interrupt)}",
   ];
-  // The hero's panes, keyed by the ids in index.html. `device` panes are a bare phone, no pane chrome.
+  // The hero's panes, keyed by the ids in index.html. A device renders without pane chrome.
   const HERO = {
-    t1: { title: "Claude Code", sub: "checkout", icon: "claude", dot: "work", body: working(T0) },
-    codex: { title: "Codex", sub: "promo tests", icon: "codex", dot: "work", body: codex(T2) },
+    t1: { title: "Claude Code", sub: "checkout", icon: "claude", dot: "work",
+      body: working(CHECKOUT, ["Testing iPhone checkout", "Checking the discount in Safari", "Comparing shipping totals"]) },
+    codex: { title: "Codex", sub: "promo tests", icon: "codex", dot: "work",
+      body: codex(PROMO, ["Running the browser regression", "Checking the test trace", "Verifying the expiry boundary"]) },
     browser: { title: "Harbor · Your bag", icon: "globe", body: browser("localhost:5173/bag", harborWeb()) },
     sim: { device: harborCheckout() },
     subscriptions: { title: "Harbor · Subscriptions", icon: "globe", dot: null,
       body: browser("localhost:5173/subscriptions", harborSubscriptions(), false) },
     "subscription-agent": { title: "Claude Code", sub: "subscriptions", icon: "claude", dot: "work", body: working([
-      { t: "{dim|❯} add the coffee club plans to /subscriptions", bg: "umsg" },
+      { t: "{dim|❯} Build the coffee club plans page", bg: "umsg" },
       "",
+      "{@rec.green} {b|Read}(src/lib/plans.ts)",
+      "  {@elbow.dim} Two plans, billed per delivery.",
       "{@rec.green} {b|Update}(src/routes/subscriptions.tsx)",
-      "  {@elbow.dim} Reuses the shop header and product tiles.",
+      "  {@elbow.dim} Reused the shop header and product tiles.",
       '{@rec.green} {b|Bash}(hc send review "Check plan pricing.")',
       "  {@elbow.dim} Sent to the reviewer.",
-      "{@rec} Checking the preview at desktop width.",
-    ]) },
-    "subscription-review": { title: "Codex", sub: "plan review", icon: "codex", dot: "wait", body: codex([
-      { t: "{b|›} check plan pricing before checkout", bg: "umsg" },
+      "{@rec.green} {b|Bash}(npm test -- subscriptions)",
+      "  {@elbow.dim} 4 passed, including the pause flow.",
+    ], ["Checking the desktop preview", "Testing the plan buttons", "Comparing the mobile layout"]) },
+    "subscription-review": { title: "Codex", sub: "plan review", icon: "codex", dot: "work", body: codex([
+      { t: "{b|›} Check plan pricing before checkout", bg: "umsg" },
       "",
-      "{green|•} Read src/routes/subscriptions.tsx",
-      "{green|•} The prices match the checkout totals.",
-      "  Shipping is calculated at checkout.",
-      "{b|?} Should the plan page say that too?",
-    ], { waiting: true }) },
+      "{green|•} {b|Explored} src/lib/plans.ts",
+      "  {dim|└ $18 single origin, $22 espresso.}",
+      "{green|•} {b|Compared} the card and checkout prices.",
+      "  Both match. Shipping is added at checkout.",
+      "{green|•} {b|Edited} subscriptions.spec.ts {green|+24}",
+      "  {dim|└ Assert price survives plan selection.}",
+    ], ["Running the pricing check", "Checking both plan fixtures", "Preparing feedback for Claude"]) },
     inventory: { title: "Claude Code", sub: "inventory", icon: "claude", dot: "work", body: working([
       { t: "{dim|❯} show when a roast has sold out", bg: "umsg" },
       "",
       "{@rec.green} {b|Read}(src/lib/inventory.ts)",
-      "  {@elbow.dim} A roast can sell out by bag size.",
+      "  {@elbow.dim} Stock is tracked per bag size.",
+      "{@rec.green} {b|Read}(src/components/ProductTile.tsx)",
+      "  {@elbow.dim} The buy button ignores the selected size.",
       "{@rec.green} {b|Update}(src/components/ProductTile.tsx)",
       "  {@elbow.dim} Disable purchase for the sold-out size.",
-      "{@rec} Checking the 500 g Night Shift fixture.",
-    ]) },
-    "inventory-tests": { title: "Terminal", sub: "inventory tests", icon: "folder", dot: "done", body: (w) => term([
-      "{green|❯} npm test -- inventory",
-      "",
-      " {green|✓} rejects sold-out variants",
-      " {green|✓} leaves other sizes available",
-      " {green|✓} restores the button on restock",
-      "",
-      " Test Files  {green|1 passed} (1)",
-      "      Tests  {green|3 passed} (3)",
-    ], { w }) },
+      "{@rec.green} {b|Update}(tests/fixtures/inventory.json)",
+      "  {@elbow.dim} Night Shift 500 g is sold out.",
+      "  {@elbow.dim} Keep the 250 g variant in stock.",
+      "{@rec.green} {b|Bash}(npm test -- inventory)",
+      "  {@elbow.dim} Stock and restock cases pass.",
+    ], ["Testing the sold-out fixture", "Checking keyboard navigation", "Trying the restock flow"]) },
+    "inventory-tests": { title: "Terminal", sub: "inventory tests", icon: "folder", dot: "work", body: (w) => {
+      const rows = [
+        "{green|❯} npm test -- inventory",
+        "",
+        " {dim|RUN  src/lib/inventory.test.ts}",
+        " {green|✓} rejects sold-out variants",
+        " {green|✓} leaves other sizes available",
+        " {green|✓} restores checkout on restock",
+        "",
+        " Test Files  {green|1 passed} (1)",
+        "      Tests  {green|3 passed} (3)",
+        "",
+        "{green|❯} npx playwright test inventory",
+        "",
+        " Running 2 tests using 1 worker",
+        " {green|✓} 1. sold-out size is unavailable (1.2s)",
+      ];
+      return term(rows, { w }) + activity(["Testing restock in Chromium", "Waiting for the stock update"], rows, "green");
+    } },
   };
 
-  // Claude Code's spinner, as on the Ignsight site: the glyph breathes every 120ms, the verb changes, the
-  // timer counts. It ticks only while its pane is on screen.
-  const GLYPHS = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"], VERBS = ["Percolating", "Cogitating", "Noodling", "Discombobulating"];
+  // Each visible pane updates its own status. Offscreen panes keep their last frame.
+  const GLYPHS = ["·", "✢", "✳", "✶", "✻", "✶", "✳", "✢"];
   function startWorking(svg) {
     const spin = svg.querySelector("[data-spin]"), verb = svg.querySelector("[data-verb]"), secs = svg.querySelector("[data-secs]");
+    const steps = [...svg.querySelectorAll("[data-step]")].map((step) => step.textContent);
     let frame = 0, timer;
     const tick = () => {
       frame++;
       spin.textContent = GLYPHS[frame % GLYPHS.length];
-      if (frame % 8 === 0) secs.textContent = 12 + frame / 8 | 0;
-      if (frame % 28 === 0) verb.textContent = VERBS[(frame / 28) % VERBS.length] + "…";
+      if (frame % 8 === 0) secs.textContent = 12 + (frame / 8 | 0);
+      if (frame % 32 === 0) verb.textContent = steps[(frame / 32) % steps.length];
     };
     new IntersectionObserver(([e]) => { clearInterval(timer); if (e.isIntersecting) timer = setInterval(tick, 120); }).observe(svg);
   }
