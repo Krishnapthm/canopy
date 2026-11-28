@@ -327,7 +327,7 @@ svg { display: block; }
   align-items: baseline;
   gap: 1rem 2rem;
   padding-block: 2rem 2.5rem;
-  font-size: clamp(1rem, 1.15vw, 1.125rem);
+  font-size: clamp(calc(1rem + 2px), calc(1.15vw + 2px), calc(1.125rem + 2px));
 }
 .links nav { display: flex; gap: 1.75rem; }
 .links a { transition: opacity 150ms ease; }
