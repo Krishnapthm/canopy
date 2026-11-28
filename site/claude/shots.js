@@ -28,6 +28,39 @@
     }
     return lines;
   }
+  // Word-wraps one transcript row written in the row markup ({cls|text}, {@glyph}) to `cols` columns, like a
+  // terminal wrapping its output. Styles carry across a break, and continuation lines are indented under the
+  // text (past a leading bullet), the way agent CLIs hang their output.
+  function wrapRow(src, cols) {
+    const atoms = []; // one visible column each: { src: its markup, ch }
+    for (const m of src.matchAll(/\{(@[^}]+)\}|\{([^|}]+)\|([^}]*)\}|([^{]+)/g)) {
+      if (m[1]) atoms.push({ glyph: `{${m[1]}}`, ch: "x" });
+      else for (const ch of m[3] ?? m[4]) atoms.push({ cls: m[2], ch });
+    }
+    const lead = /^\s*/.exec(atoms.map((a) => a.ch).join(""))[0].length;
+    const bullet = atoms[lead]?.glyph || /[•❯›]/.test(atoms[lead]?.ch) ? 2 : 0;
+    const indent = " ".repeat(lead + bullet);
+    const render = (line) => line.map((a, i) => {
+      if (a.glyph) return a.glyph;
+      if (!a.cls) return a.ch;
+      return (line[i - 1]?.cls === a.cls && !line[i - 1].glyph ? "" : `{${a.cls}|`) + a.ch + (line[i + 1]?.cls === a.cls ? "" : "}");
+    }).join("");
+    const lines = [];
+    let line = [];
+    while (atoms.length) {
+      const room = cols - (lines.length ? indent.length : 0);
+      if (line.length + 0 >= 0 && atoms.length <= room - line.length) { line.push(...atoms.splice(0)); break; }
+      let cut = room;
+      for (let i = room; i > lead + bullet; i--) if (atoms[i]?.ch === " ") { cut = i; break; }
+      line = atoms.splice(0, cut);
+      if (atoms[0]?.ch === " ") atoms.shift();
+      lines.push(render(line));
+      line = [];
+      atoms.unshift(...[...indent].map((ch) => ({ ch })));
+    }
+    lines.push(render(line));
+    return lines;
+  }
   // When each keystroke lands, as [characters typed, seconds]: a person types in bursts of one or two
   // characters, and pauses after a comma or a full stop.
   function keystrokes(text) {
@@ -98,10 +131,13 @@
       follow();
     }
     function print(r) {
-      const el = feed.appendChild(document.createElementNS(NS, "g"));
-      el.setAttribute("transform", `translate(0 ${10 + rows * ROW})`);
-      el.innerHTML = term([r], { x: 16, y: 0, w });
-      rows++;
+      const row = typeof r === "string" ? { t: r } : r;
+      for (const t of wrapRow(row.t, width)) {
+        const el = feed.appendChild(document.createElementNS(NS, "g"));
+        el.setAttribute("transform", `translate(0 ${10 + rows * ROW})`);
+        el.innerHTML = term([{ ...row, t }], { x: 16, y: 0, w });
+        rows++;
+      }
       follow();
     }
     function spinner(on) {
