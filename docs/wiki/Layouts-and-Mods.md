@@ -85,6 +85,19 @@ Sizes are in canvas pixels, the size at 100% zoom; the pane and its header scale
 
 Each entry in `actions` declares `{icon, label, command, args}` and runs an app command with the pane selected. The shared helper bar shows these actions before **Connect** and **Close**.
 
+## Context menus
+
+A mod opens a context menu with `openMenu({ tab, target })`. Every menu in Canopy opens this way, so they all behave alike: the frame is sized for its rows, moves left at the right window edge so a submenu still fits, scrolls when it is taller than the window, and replaces any other open menu. Escape, a click outside it (even over a web page), resizing the window, or panning or zooming the canvas closes it.
+
+```js
+import { openMenu } from "herdr";
+
+// A right-click menu with your own rows: [label, command, args].
+openMenu({ tab: "primary", target: { items: [["Reload", "canvas.browser_reload", { pane: "p3" }]] } });
+```
+
+`tab` picks a page of the shipped `menu` mod. The names are the `MenuTab` type in `herdr.d.ts`. `primary` shows the rows you give in `target.items`; the others, such as `tab` or `canvas-agents`, build their rows from the ids in `target`. An unknown `tab` shows an error toast. Use `at: "above"` to open the menu over the floating block under the pointer, as the toolbar's agent button does.
+
 ## Check a mod
 
 Run this command after each change:

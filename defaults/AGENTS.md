@@ -1023,6 +1023,10 @@ All of it is in `herdr.d.ts`. In short:
   Each returns an ordinary element: keep chaining (`.on_click(...)`).
 - Floating: `placement()` (null unless this copy floats).
 - Act: `run(command, args)`.
+- Menus: `openMenu({ tab, target?, at? })` opens a context menu of the shipped `menu` mod (tabs are the
+  `MenuTab` names in `herdr.d.ts`; `primary` shows `target.items`). It sizes and flips the menu at
+  the window edge, scrolls it when it is taller than the window, closes any other open menu, and
+  shows a toast for an unknown tab. Use it instead of `openOverlay({ mod: "menu" })`.
 - Overlays: `openOverlay({ mod, props, kind: "dialog" | "popup" | "window", width, height, at, frame })`
   returns an id; the mod gets `props().overlay` and closes itself with
   `closeOverlay(id)`; Esc closes the top dialog or popup. `frame: "none"`

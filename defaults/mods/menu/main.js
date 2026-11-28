@@ -1,6 +1,6 @@
 // Modified for Canopy.
-// Context menus (Canopy's items). Opened as a popup with
-// props { tab: "pane" | "tab" | "space" | "global", target }.
+// Context menus (Canopy's items). Opened with openMenu({ tab, target }) (MenuTab in herdr.d.ts,
+// src/menu.rs), which makes it a popup with props { tab, target }; the host sizes, flips and scrolls it.
 // ↑/↓ move, Enter runs, → opens a submenu, ← or Esc closes. An item is
 // [label, command, args, program?]; a command "worktree" opens the worktree
 // dialog instead, and "sub:<tab>" is a submenu of that tab with args as its

@@ -113,6 +113,8 @@ Drag the pane by the empty part of row 1. A docked browser shows its web tabs al
 
 ### The ⋯ menu
 
+The menu is as tall as its rows, up to the window. In a short window it scrolls instead of cutting rows off, and it stays over the page while you scroll it. A click outside it, Escape, resizing the window or panning or zooming the canvas closes it, even when the click lands on the page.
+
 | Item | What it does |
 |---|---|
 | **Open in** *your browser* | Opens the current address in your system browser (the app that opens `https` links, or **Open in default browser** if Canopy cannot tell). |
