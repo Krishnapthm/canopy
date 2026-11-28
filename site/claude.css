@@ -155,6 +155,7 @@ svg { display: block; }
 .c-red { fill: #e5534b; }
 .c-cyan { color: #8fc8d6; fill: #8fc8d6; }
 .c-violet { color: #b1b9f9; fill: #b1b9f9; }
+.c-yellow { color: #f5c542; fill: #f5c542; }
 .c-clawd { color: #d77757; fill: #d77757; }
 .c-kw { fill: #be98b7; }
 .c-fn { fill: #8fa8c8; }

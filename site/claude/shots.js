@@ -79,7 +79,7 @@
       let list, caretRow;
       if (kind === "claude") {
         const rule = `{rule|${"─".repeat(width)}}`;
-        list = [rule, ...lines.map((l, i) => `${i ? "  " : "{hi|❯} "}${l}`), rule, "  {@play.violet}{@play.violet}{violet| auto mode on} {dim|(shift+tab to cycle)}"];
+        list = [rule, ...lines.map((l, i) => `${i ? "  " : "{hi|❯} "}${l}`), rule, "  {@play.yellow}{@play.yellow}{yellow| auto mode on} {dim|(shift+tab to cycle)}"];
         caretRow = lines.length;
       } else {
         const pad = { t: "", bg: "umsg" }; // the shaded box has a row of padding above and below
