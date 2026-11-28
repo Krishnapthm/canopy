@@ -75,7 +75,9 @@ const Scenes = (() => {
       <text x="39" y="${y + 13}" xml:space="preserve"><tspan class="c-clawd c-shimmer" data-verb>Percolating…</tspan><tspan class="c-dim"> (<tspan data-secs>12</tspan>s · esc to interrupt)</tspan></text></g>`;
   };
   // Codex: the transcript, then its composer and model line, unless it is waiting on an approval.
-  const composer = (w, h) => termBottom([{ t: "{b|›} {dim|Ask Codex to do anything}", bg: "umsg" }, "", "  {dim|gpt-6.2-sol medium · ~/harbor}"], w, h);
+  // The shaded composer is padded a row above and below its prompt, like Codex's.
+  const PAD = { t: "", bg: "umsg" };
+  const composer = (w, h) => termBottom([PAD, { t: "{b|›} {dim|Ask Codex to do anything}", bg: "umsg" }, PAD, "", "  {dim|gpt-6.2-sol medium · ~/harbor}"], w, h);
   const codex = (rows, { waiting = false } = {}) => (w, h) => term(rows, { w }) + (waiting ? "" : composer(w, h));
 
 
