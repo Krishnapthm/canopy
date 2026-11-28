@@ -1,9 +1,11 @@
 // The three feature shots on index.html, drawn from Scenes' parts:
-// - wire: you type to Claude Code; it messages the Codex it is wired to, and Codex replies along the wire.
+// - wire: Claude Code and Codex are each at work on their own task; Claude Code messages the Codex it is
+//   wired to, and Codex replies. A message shows in full only in the agent that receives it.
 // - sim: you ask Codex to test checkout on the iPhone; it taps through, you mark the delivery rows, it
 //   fixes them.
 // - files: the docked Files panel. Open bag.tsx, checkout.tsx or index.tsx from the tree; hover the code
-//   to move the quote button, click it to quote that line to an agent.
+//   to move the quote button, or drag across lines to select a range, click the button to quote them to an
+//   agent, with a note if you like. Each file has Git changes in the tree and in the gutter.
 // The two stories are GSAP timelines, built fresh for every run so each starts from a clean slate. They
 // play only while their shot is on screen. Needs gsap and scenes.js.
 
@@ -80,8 +82,9 @@
         list = [rule, ...lines.map((l, i) => `${i ? "  " : "{hi|❯} "}${l}`), rule, "  {@play.violet}{@play.violet}{violet| accept edits on} {dim|· Opus 5.5}"];
         caretRow = lines.length;
       } else {
-        list = [...lines.map((l, i) => ({ t: i ? `  ${l}` : `{b|›} ${l || "{dim|Ask Codex to do anything}"}`, bg: "umsg" })), "", "  {dim|gpt-6.2-sol medium · ~/harbor}"];
-        caretRow = lines.length - 1;
+        const pad = { t: "", bg: "umsg" }; // the shaded box has a row of padding above and below
+        list = [pad, ...lines.map((l, i) => ({ t: i ? `  ${l}` : `{b|›} ${l || "{dim|Ask Codex to do anything}"}`, bg: "umsg" })), pad, "", "  {dim|gpt-6.2-sol medium · ~/harbor}"];
+        caretRow = lines.length;
       }
       top = h - 8 - list.length * ROW;
       const caret = typing || kind === "claude"
@@ -215,21 +218,30 @@
     const [claude, codex] = [...svg.querySelectorAll("[data-term]")].map(terminal);
     const feeds = [claude.feed, codex.feed];
 
+    // Both agents start on their own work. The wire carries each message to the other agent only: the
+    // sender's transcript says it is sending, the receiver's shows the message itself.
     play(el, () => { claude.reset(); codex.reset(); gsap.set(msg, { opacity: 0 }); }, (tl) => {
       open(tl, feeds);
-      let t = claude.type(tl, .6, "ship the orders api, then agree merge order with the web codex");
-      t = claude.say(tl, t, "", 0);
-      t = claude.busy(tl, t, 1.6);
-      t = claude.say(tl, t, "{@rec.green} {b|Update}(src/api/orders.ts)", .3);
-      t = claude.say(tl, t, "  {@elbow.dim}  {dim|Added} {b|34} {dim|lines}", .7);
-      t = claude.say(tl, t, "{@rec.green} {b|Bash}(npm test -- orders)", .9);
-      t = claude.say(tl, t, "  {@elbow.dim}  {dim|12 passed}", .6);
-      t = claude.say(tl, t, "{@rec.green} {b|Bash}(hc send t4 \"#41 hits", 0);
-      t = claude.say(tl, t, "  cart.ts. yours?\")", .3);
-      t = carry(tl, t, msg, path, false, codex.outline);
+      let c = claude.type(tl, .6, "ship the orders api, then agree merge order with the web codex");
+      let x = codex.type(tl, 1.1, "add the promo field to the bag page");
+      c = claude.say(tl, c, "", 0);
+      c = claude.busy(tl, c, 1.4);
+      c = claude.say(tl, c, "{@rec.green} {b|Update}(src/api/orders.ts)", .3);
+      c = claude.say(tl, c, "  {@elbow.dim}  {dim|Added} {b|34} {dim|lines}", .7);
+      c = claude.say(tl, c, "{@rec.green} {b|Bash}(npm test -- orders)", .9);
+      c = claude.say(tl, c, "  {@elbow.dim}  {dim|12 passed}", .6);
+      x = codex.say(tl, x, "", 0);
+      x = codex.busy(tl, x, 1.2);
+      x = codex.say(tl, x, "{green|•} {b|Edited} bag.tsx {green|+18} {red|-6}", .8);
+      x = codex.say(tl, x, "{green|•} {b|Ran} npm test -- bag", .8);
+      x = codex.say(tl, x, "  {dim|└} {green|7 passed}", .6);
+
+      c = claude.say(tl, c, "{@rec} Sending t4 a message about", 0);
+      c = claude.say(tl, c, "  which PR merges first.", .3);
+      let t = carry(tl, Math.max(c, x), msg, path, false, codex.outline);
 
       t = codex.paste(tl, t, "<hc from=\"t1 claude\">#41 hits cart.ts. yours?</hc>", [
-        { t: "{b|›} {dim|<hc from=\"t1 claude\">}#41 hits", bg: "umsg" },
+        { t: "{dim|<hc from=\"t1 claude\">}#41 hits", bg: "umsg" },
         { t: "  cart.ts. yours?{dim|</hc>}", bg: "umsg" },
       ]);
       t = codex.say(tl, t, "", 0);
@@ -238,8 +250,8 @@
       t = codex.say(tl, t, "  {dim|└ src/lib/cart.ts | 9} {green|+++++}{red|----}", .7);
       t = codex.say(tl, t, "{green|•} #42 renames cart.total, so #41", 0);
       t = codex.say(tl, t, "  should land first.", .6);
-      t = codex.say(tl, t, "{green|•} {b|Ran} hc send t1 \"Merge #41 first,", 0);
-      t = codex.say(tl, t, "  I'll rebase on top.\"", .3);
+      t = codex.say(tl, t, "{green|•} Sending t1 a message about the", 0);
+      t = codex.say(tl, t, "  merge order.", .3);
       t = codex.state(tl, t, "done");
       t = carry(tl, t, msg, path, true, claude.outline);
 
@@ -270,14 +282,14 @@
     const codex = terminal(svg.querySelector("[data-term]"));
     const screen = svg.querySelector("[data-screen]");
 
-    // Drawn over the screen, in points: a simulator touch, canopy's pen mark with its pin and note, and
+    // Drawn over the screen, in points: a simulator touch, canopy's rectangle mark with its pin and note, and
     // your pointer.
     const NOTE = "price first, then the radio";
     screen.insertAdjacentHTML("beforeend", `
       <circle data-touch r="14" fill="#000" fill-opacity=".16" stroke="#000" stroke-opacity=".22" stroke-width="2" opacity="0"/>
       <g data-mark opacity="0">
-        <path data-pen d="M292 350C318 344 368 343 380 356C390 368 388 438 380 452C370 466 306 466 288 458C274 450 274 372 280 360C284 352 290 349 300 348" fill="none" stroke="${PIN}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-        <g data-pin><circle cx="280" cy="352" r="15" fill="${PIN}"/>${tx(280, 357.5, "1", { size: 15, weight: 650, fill: "#fff", anchor: "middle" })}</g>
+        <path data-pen d="M276 346H388V462H276Z" fill="none" stroke="${PIN}" stroke-width="4" stroke-linejoin="miter"/>
+        <g data-pin><circle cx="276" cy="346" r="15" fill="${PIN}"/>${tx(276, 351.5, "1", { size: 15, weight: 650, fill: "#fff", anchor: "middle" })}</g>
         <g data-note opacity="0">
           <rect x="14" y="286" width="288" height="46" rx="12" fill="#1b1b1b" stroke="#fff" stroke-opacity=".14"/>
           <text class="sv-ui" data-note-text x="30" y="314" style="font-size:15px"></text>
@@ -346,7 +358,7 @@
       t = codex.say(tl, t, "  the total.", .2);
       t = codex.state(tl, t, "done") + .7;
 
-      // You circle the delivery prices, pin a note and send it.
+      // You box the delivery prices, pin a note and send it.
       const start = pen.getPointAtLength(0);
       tl.set(mark, { opacity: 1 }, t);
       tl.fromTo(cursor, { opacity: 0, x: 210, y: 640 }, { opacity: 1, duration: .25, immediateRender: false }, t);
@@ -391,8 +403,8 @@
 
   // --- files: the docked Files panel ------------------------------------------------------------------
   // Each file's lines from `from`, in the row markup of Scenes.term, with an optional Git mark: "add"
-  // (green bar) or "edit" (blue bar, the line you are editing). `rest` is the line the quote button
-  // waits on before you hover.
+  // (green bar) or "edit" (blue bar, the line you are editing). `rest` is the line number the quote
+  // button waits on before you hover.
   const FILES = {
     "bag.tsx": { from: 24, rest: 32, lines: [
       ["{kw|export function} {fn|Summary}({ bag }: { bag: {type|Bag} }) {"],
@@ -410,7 +422,7 @@
       ["  );"],
       ["}"],
     ] },
-    "checkout.tsx": { from: 1, lines: [
+    "checkout.tsx": { from: 1, rest: 13, lines: [
       ["{kw|import} { Button, Card, Radio, Row } {kw|from} {amber|\"../ui\"};"],
       ["{kw|import} { placeOrder, useBag } {kw|from} {amber|\"../lib/bag\"};"],
       ["{kw|import} { useState } {kw|from} {amber|\"react\"};"],
@@ -422,8 +434,8 @@
       [""],
       ["{kw|export function} {fn|Checkout}() {"],
       ["  {kw|const} bag = {fn|useBag}();"],
-      ["  {kw|const} [pick, setPick] = {fn|useState}({amber|\"standard\"});"],
-      ["  {kw|const} ship = DELIVERY.{fn|find}((d) => d.id === pick);"],
+      ["  {kw|const} [pick, setPick] = {fn|useState}({amber|\"standard\"});", "add"],
+      ["  {kw|const} ship = DELIVERY.{fn|find}((d) => d.id === pick);", "add"],
       [""],
       ["  {kw|return} ("],
       ["    <{fn|Card} {type|title}={amber|\"Delivery\"}>"],
@@ -433,12 +445,12 @@
       ["          {type|onPress}={() => {fn|setPick}(d.id)} />"],
       ["      ))}"],
       ["      <{fn|Button} {type|label}={amber|\"Place order\"}"],
-      ["        {type|onClick}={() => {fn|placeOrder}(bag, ship)} />"],
+      ["        {type|onClick}={() => {fn|placeOrder}(bag, ship)} />", "edit"],
       ["    </{fn|Card}>"],
       ["  );"],
       ["}"],
     ] },
-    "index.tsx": { from: 1, lines: [
+    "index.tsx": { from: 1, rest: 12, lines: [
       ["{kw|import} { Link } {kw|from} {amber|\"react-router\"};"],
       ["{kw|import} { Grid, ProductCard } {kw|from} {amber|\"../ui\"};"],
       ["{kw|import} { coffeeUrl, useProducts } {kw|from} {amber|\"../lib/products\"};"],
@@ -448,12 +460,12 @@
       [""],
       ["  {kw|return} ("],
       ["    <{fn|main}>"],
-      ["      <{fn|h1}>Fresh from the roaster</{fn|h1}>"],
-      ["      <{fn|p}>Small batches, shipped Monday from Portland.</{fn|p}>"],
+      ["      <{fn|h1}>Fresh from the roaster</{fn|h1}>", "add"],
+      ["      <{fn|p}>Small batches, shipped Monday from Portland.</{fn|p}>", "add"],
       ["      <{fn|Grid}>"],
       ["        {products.{fn|map}((p) => ("],
       ["          <{fn|Link} {type|key}={p.id} {type|to}={{fn|coffeeUrl}(p)}>"],
-      ["            <{fn|ProductCard}"],
+      ["            <{fn|ProductCard}", "edit"],
       ["              {type|name}={p.name}"],
       ["              {type|note}={p.roast}"],
       ["              {type|price}={p.price}"],
@@ -469,12 +481,12 @@
   // The tree: depth, name, and "open"/"shut" for folders or "M" for a changed file.
   const TREE = [
     [0, "harbor", "open"], [1, "ios", "shut"], [1, "src", "open"], [2, "api", "shut"], [2, "lib", "shut"], [2, "routes", "open"],
-    [3, "bag.tsx", "M"], [3, "checkout.tsx"], [3, "index.tsx"], [1, ".env"], [1, ".gitignore"], [1, "package.json"], [1, "README.md"],
+    [3, "bag.tsx", "M"], [3, "checkout.tsx", "M"], [3, "index.tsx", "M"], [1, ".env"], [1, ".gitignore"], [1, "package.json"], [1, "README.md"],
   ];
-  const AGENTS = [["#i-claude", "Claude Code", "wired"], ["#i-codex", "Codex", ""], [null, "New agent with this", ""]];
+  const AGENTS = [["#i-claude", "Claude Code", "wired"], ["#i-codex", "Codex", ""], ["#i-cursor", "Cursor", ""], ["#i-gemini", "Gemini CLI", ""], [null, "New agent with this", ""]];
 
   function filesShot(el) {
-    const pw = 708, ph = 528, tw = 196, ew = pw - tw; // panel, tree and editor widths
+    const pw = 708, ph = 528, tw = 216, ew = pw - tw; // panel, tree and editor widths
     const STRIP = 36, TOP = 42, ROW_H = 28;          // tab strip height, first code row, tree row height
     const ui = (x, y, s, cls = "", attrs = "") => `<text class="sv-ui ${cls}" x="${x}" y="${y}"${attrs}>${esc(s)}</text>`;
     const fileIcon = (x, y) => `<path d="M${x + 3} ${y + 1.5}h5.5l3.5 3.5v8.5h-9z" fill="none" stroke="#8d8d8d" stroke-width="1.2" stroke-linejoin="round"/>`;
@@ -524,7 +536,9 @@
     const rowY = (i) => TOP + i * ROW;
     const plain = (src) => [...src.replace(/\{[\w ]+\|([^}]*)\}/g, "$1")]; // a row's characters, without its markup
 
-    let tabbed = ["bag.tsx"], file = "bag.tsx", line = null, quoting = false;
+    let tabbed = ["bag.tsx"], file = "bag.tsx", quoting = false;
+    let range = null, anchor = null; // the selected lines [first, last] as indices into the file, and where a drag began
+    let comment = "", pick = 0;      // the quote menu: the note being typed, and the agent highlighted
 
     // The tab strip: one tab per open file, the active one raised, each with its close button.
     function drawTabs() {
@@ -557,13 +571,22 @@
     }
     // Puts the quote button and its highlight on line `i` (an index into the file), or hides them.
     function hover(i, instant = false) {
-      line = i;
-      const on = i !== null;
-      gsap.to([hl, plus], { opacity: on ? 1 : 0, duration: .15, overwrite: "auto" });
-      if (!on) return;
+      range = i === null ? null : [i, i];
+      gsap.to([hl, plus], { opacity: range ? 1 : 0, duration: .15, overwrite: "auto" });
+      hl.setAttribute("height", ROW);
+      if (!range) return;
       if (instant) gsap.set([hl, plus], { y: rowY(i) });
       else { moveHl(rowY(i)); movePlus(rowY(i)); }
     }
+    // Selects lines `a` to `b`, as when you drag across them: the highlight covers them all and the
+    // quote button sits on the first.
+    function select(a, b) {
+      range = [Math.min(a, b), Math.max(a, b)];
+      hl.setAttribute("height", (range[1] - range[0] + 1) * ROW);
+      gsap.killTweensOf([hl, plus]);
+      gsap.set([hl, plus], { y: rowY(range[0]), opacity: 1 });
+    }
+    const multi = () => range && range[0] !== range[1];
     const rest = () => (FILES[file]?.rest ? FILES[file].rest - FILES[file].from : null);
 
     function show(name) {
@@ -584,41 +607,75 @@
       show(name === file ? tabbed[Math.min(i, tabbed.length - 1)] ?? null : file);
     }
 
-    // The quote menu under line `line`: send the line to Claude Code (wired to it), Codex, or a new agent.
+    // The quote menu under the selected lines: a note to add, then send to Claude Code (wired to it),
+    // Codex, or a new agent. Typing writes the note; return sends to the highlighted agent.
+    const POP_X = 200;
     function openQuote() {
-      const f = FILES[file], n = f.from + line;
-      const px = 200, w = 250, h = 128;
-      let py = rowY(line) + ROW + 6;
-      if (py + h > ph - 8) py = rowY(line) - h - 6;
+      const f = FILES[file], [a, b] = range, w = 250, h = 82 + AGENTS.length * 28, px = POP_X;
+      const lines = a === b ? `${f.from + a}` : `${f.from + a}-${f.from + b}`;
+      let py = rowY(b) + ROW + 6;
+      if (py + h > ph - 8) py = Math.max(STRIP + 4, rowY(a) - h - 6);
+      comment = ""; pick = 0;
       pop.innerHTML = `<g filter="url(#pop-shadow)"><rect x="${px}" y="${py}" width="${w}" height="${h}" rx="10" fill="#1b1b1b" stroke="#ffffff1f"/></g>
-        ${ui(px + 16, py + 24, `Quote ${file}:${n} to`, "c-dim")}
-        <rect data-item-hl x="${px + 6}" y="${py + 33}" width="${w - 12}" height="28" rx="6" fill="#2c2c2c"/>
+        ${ui(px + 16, py + 24, `Quote ${file}:${lines} to`, "c-dim")}
+        <rect x="${px + 12}" y="${py + 34}" width="${w - 24}" height="28" rx="7" fill="#111" stroke="#fff" stroke-opacity=".14"/>
+        ${ui(px + 22, py + 53, "", "", " data-comment")}<rect class="caret" data-comment-caret x="${px + 22}" y="${py + 40}" width="1.6" height="16" fill="#ececec"/>
+        <rect data-item-hl x="${px + 6}" y="${py + 71}" width="${w - 12}" height="28" rx="6" fill="#2c2c2c"/>
         ${AGENTS.map(([icon, name, note], i) => {
-          const y = py + 50 + i * 28;
+          const y = py + 88 + i * 28;
           return `<g data-item="${i}"><rect x="${px + 6}" y="${y - 17}" width="${w - 12}" height="28" fill="transparent"/>
             ${icon ? `<use href="${icon}" x="${px + 16}" y="${y - 10}" width="14" height="14"/>` : `<path d="M${px + 23} ${y - 9}v10M${px + 18} ${y - 4}h10" stroke="#cfcfcf" stroke-width="1.6" stroke-linecap="round"/>`}
             ${ui(px + 40, y + 1.5, name)}${note ? ui(px + w - 16, y + 1.5, note, "c-dim", ` text-anchor="end"`) : ""}</g>`;
         }).join("")}`;
+      drawComment();
       quoting = true;
       gsap.fromTo(pop, { autoAlpha: 0, y: -4 }, { autoAlpha: 1, y: 0, duration: .16, ease: "power2.out" });
+    }
+    // The note field: what you typed, or its hint, with the caret after it.
+    function drawComment() {
+      const text = pop.querySelector("[data-comment]");
+      if (!text) return;
+      text.textContent = comment || "Add a note (optional)";
+      text.classList.toggle("c-dim", !comment);
+      pop.querySelector("[data-comment-caret]").setAttribute("x", POP_X + 22 + (comment ? text.getComputedTextLength() + 1 : 0));
     }
     function closeQuote() {
       if (!quoting) return;
       quoting = false;
       gsap.to(pop, { autoAlpha: 0, duration: .12 });
     }
+    // Sends the quote: the menu closes and the selection flashes.
+    function sendQuote() {
+      closeQuote();
+      gsap.fromTo(hl, { fill: "#3b4d78" }, { fill: BG.sel, duration: .6, ease: "power2.out" });
+    }
 
-    // Pointer: hovering the code moves the quote button line by line; the tree and tabs open files.
+    // Pointer: hovering the code moves the quote button line by line, dragging selects lines; the tree
+    // and tabs open files.
     const local = (e) => new DOMPoint(e.clientX, e.clientY).matrixTransform(dock.getScreenCTM().inverse());
+    const lineAt = (e) => Math.floor((local(e).y - TOP) / ROW);
+    const last = () => FILES[file].lines.length - 1;
+    editor.addEventListener("pointerdown", (e) => {
+      if (quoting || !FILES[file] || e.target.closest("[data-plus]")) return;
+      const i = lineAt(e);
+      if (i < 0 || i > last()) return;
+      anchor = i;
+      select(i, i);
+      editor.setPointerCapture(e.pointerId);
+    });
     editor.addEventListener("pointermove", (e) => {
       if (quoting || !FILES[file]) return;
-      const i = Math.floor((local(e).y - TOP) / ROW);
-      if (i >= 0 && i < FILES[file].lines.length && i !== line) hover(i);
+      const i = lineAt(e);
+      if (anchor !== null) select(anchor, Math.min(Math.max(i, 0), last()));
+      else if (!multi() && i >= 0 && i <= last() && i !== range?.[0]) hover(i);
     });
-    editor.addEventListener("pointerleave", () => { if (!quoting) hover(rest()); });
+    editor.addEventListener("pointerup", () => { anchor = null; });
+    editor.addEventListener("pointerleave", () => { if (!quoting && anchor === null && !multi()) hover(rest()); });
     pop.addEventListener("pointermove", (e) => {
       const item = e.target.closest("[data-item]");
-      if (item) gsap.to(pop.querySelector("[data-item-hl]"), { y: +item.dataset.item * 28, duration: .14, ease: "power3.out" });
+      if (!item) return;
+      pick = +item.dataset.item;
+      gsap.to(pop.querySelector("[data-item-hl]"), { y: pick * 28, duration: .14, ease: "power3.out" });
     });
     dock.addEventListener("click", (e) => {
       const target = e.target.closest("[data-close], [data-tab], [data-open], [data-plus], [data-item]");
@@ -627,13 +684,21 @@
       if (closing) shut(closing);
       else if (tab) show(tab);
       else if (name) show(name);
-      else if (item !== undefined) {
-        closeQuote();
-        gsap.fromTo(hl, { fill: "#3b4d78" }, { fill: BG.sel, duration: .6, ease: "power2.out" });
-      } else if (quoting) closeQuote();
-      else if (line !== null) openQuote();
+      else if (item !== undefined) sendQuote();
+      else if (quoting) closeQuote();
+      else if (range) openQuote();
     });
-    addEventListener("keydown", (e) => { if (e.key === "Escape") closeQuote(); });
+    // With the menu open, typing writes the note and return sends; escape closes the menu, then the selection.
+    addEventListener("keydown", (e) => {
+      if (e.key === "Escape") return quoting ? closeQuote() : multi() && hover(rest());
+      if (!quoting) return;
+      if (e.key === "Enter") sendQuote();
+      else if (e.key === "Backspace") comment = comment.slice(0, -1);
+      else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && comment.length < 28) comment += e.key;
+      else return;
+      e.preventDefault();
+      drawComment();
+    });
 
     show("bag.tsx");
     document.fonts.ready.then(drawTabs); // tab widths are measured in Geist, which may still be loading
